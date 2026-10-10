@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
+const SYNC_WINDOW_SECONDS_DEFAULT = 300;
+
 // ============================================================
 // Types (mirroring snapshot.yaml SnapshotMeta)
 // ============================================================
@@ -279,7 +281,7 @@ export function StaleBanner({ freshness, onDismiss, dismissible = true }: StaleB
       aria-live="polite"
     >
       <span style={{ color: '#f39c12', fontWeight: 500 }}>●</span>
-      <span>Data is {ageStr} old (sync window: {syncWindowSeconds}s)</span>
+      <span>Data is {ageStr} old (sync window: {SYNC_WINDOW_SECONDS_DEFAULT}s)</span>
       {dismissible && (
         <button
           onClick={onDismiss}
@@ -301,5 +303,3 @@ export function StaleBanner({ freshness, onDismiss, dismissible = true }: StaleB
   );
 }
 
-// Need to import syncWindowSeconds for the component
-const syncWindowSeconds = 300;

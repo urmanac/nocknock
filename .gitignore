@@ -1,0 +1,9 @@
+.DS_Store
+*.local
+.env
+*.log
+target/
+node_modules/
+dist/
+build/
+*.wasm

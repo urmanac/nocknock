@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   AreaChart,
@@ -14,12 +14,7 @@ import {
   Bar,
   Cell,
   ComposedChart,
-  RadarChart,
-  PolarGrid,
-  Radar,
   Legend,
-  ScatterChart,
-  Scatter,
 } from 'recharts';
 import { api } from './api/client';
 import { useFreshness, StaleBanner, type SnapshotEnvelope } from './hooks/useFreshness.tsx';
@@ -57,71 +52,60 @@ function Dashboard() {
   const metrics = snapshot?.data;
   const global = metrics?.global_status;
 
-  // Transform time-series data for charts
-  const assetSeries = useMemo(() => {
-    const m = metrics?.asset_aggregation_series;
-    if (!m || !m.time_points?.length) return [];
-    return m.time_points.map((t, i) => ({
-      time: new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      safeHaven: parseFloat(m.safe_haven_series[i] || '0'),
-      activeProtocol: parseFloat(m.active_protocol_series[i] || '0'),
-    }));
-  }, [metrics?.asset_aggregation_series]);
+  // Transform all chart data inline (single pass, no useMemo order issues)
+  const assetTimePoints = metrics?.asset_aggregation_series?.time_points || [];
+  const assetSafeHaven = metrics?.asset_aggregation_series?.safe_haven_series || [];
+  const assetActiveProtocol = metrics?.asset_aggregation_series?.active_protocol_series || [];
+  const assetSeries = assetTimePoints.map((t, i) => ({
+    time: new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    safeHaven: parseFloat(assetSafeHaven[i] || '0'),
+    activeProtocol: parseFloat(assetActiveProtocol[i] || '0'),
+  }));
 
-  const valueVsBaseline = useMemo(() => {
-    const m = metrics?.total_value_vs_baseline;
-    if (!m || !m.time_points?.length) return [];
-    return m.time_points.map((t, i) => ({
-      time: new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      portfolio: parseFloat(m.portfolio_value_series[i] || '0'),
-      tokenPrice: parseFloat(m.token_price_series[i] || '0'),
-      highWaterMark: parseFloat(m.high_water_mark_series[i] || '0'),
-    }));
-  }, [metrics?.total_value_vs_baseline]);
+  const valueTimePoints = metrics?.total_value_vs_baseline?.time_points || [];
+  const valuePortfolio = metrics?.total_value_vs_baseline?.portfolio_value_series || [];
+  const valueTokenPrice = metrics?.total_value_vs_baseline?.token_price_series || [];
+  const valueHighWaterMark = metrics?.total_value_vs_baseline?.high_water_mark_series || [];
+  const valueVsBaseline = valueTimePoints.map((t, i) => ({
+    time: new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    portfolio: parseFloat(valuePortfolio[i] || '0'),
+    tokenPrice: parseFloat(valueTokenPrice[i] || '0'),
+    highWaterMark: parseFloat(valueHighWaterMark[i] || '0'),
+  }));
 
-  const counterfactual = useMemo(() => {
-    const m = metrics?.strategy_counterfactual;
-    if (!m || !m.time_points?.length) return [];
-    return m.time_points.map((t, i) => ({
-      time: new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      active: parseFloat(m.active_portfolio_series[i] || '0'),
-      passive: parseFloat(m.passive_baseline_series[i] || '0'),
-    }));
-  }, [metrics?.strategy_counterfactual]);
+  const counterTimePoints = metrics?.strategy_counterfactual?.time_points || [];
+  const counterActive = metrics?.strategy_counterfactual?.active_portfolio_series || [];
+  const counterPassive = metrics?.strategy_counterfactual?.passive_baseline_series || [];
+  const counterfactual = counterTimePoints.map((t, i) => ({
+    time: new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    active: parseFloat(counterActive[i] || '0'),
+    passive: parseFloat(counterPassive[i] || '0'),
+  }));
 
-  const deviationData = useMemo(() => {
-    const allocs = metrics?.portfolio_deviation_matrix?.allocations || [];
-    return allocs.map(a => ({
-      name: a.bucket_name,
-      target: a.target_weight_bps / 100,
-      actual: a.actual_weight_bps / 100,
-      deviation: a.deviation_bps / 100,
-      status: a.status,
-    }));
-  }, [metrics?.portfolio_deviation_matrix?.allocations]);
+  const deviationData = (metrics?.portfolio_deviation_matrix?.allocations || []).map(a => ({
+    name: a.bucket_name,
+    target: a.target_weight_bps / 100,
+    actual: a.actual_weight_bps / 100,
+    deviation: a.deviation_bps / 100,
+    status: a.status,
+  }));
 
-  const tickData = useMemo(() => {
-    const brackets = metrics?.tick_bracket_hypervisor?.brackets || [];
-    return brackets.map((b, i) => ({
-      name: `Range ${i + 1}`,
-      lower: parseFloat(b.lower_price),
-      upper: parseFloat(b.upper_price),
-      liquidity: parseFloat(b.liquidity_usd),
-      inRange: b.in_range,
-      distance: b.distance_bps / 100,
-    }));
-  }, [metrics?.tick_bracket_hypervisor?.brackets]);
+  const tickData = (metrics?.tick_bracket_hypervisor?.brackets || []).map((b, i) => ({
+    name: `Range ${i + 1}`,
+    lower: parseFloat(b.lower_price),
+    upper: parseFloat(b.upper_price),
+    liquidity: parseFloat(b.liquidity_usd),
+    inRange: b.in_range,
+    distance: b.distance_bps / 100,
+  }));
 
-  const gasData = useMemo(() => {
-    const contracts = metrics?.velocity_gas_sandbox?.contracts || [];
-    return contracts.map(c => ({
-      name: c.contract_name,
-      claimable: parseFloat(c.claimable_usd),
-      gasBreakEven: parseFloat(c.gas_break_even_usd),
-      ratio: c.efficiency_ratio,
-      action: c.recommended_action,
-    }));
-  }, [metrics?.velocity_gas_sandbox?.contracts]);
+  const gasData = (metrics?.velocity_gas_sandbox?.contracts || []).map(c => ({
+    name: c.contract_name,
+    claimable: parseFloat(c.claimable_usd),
+    gasBreakEven: parseFloat(c.gas_break_even_usd),
+    ratio: c.efficiency_ratio,
+    action: c.recommended_action,
+  }));
 
   return (
     <div style={styles.container}>
@@ -243,7 +227,7 @@ function Dashboard() {
         <CanvasPanel title="Structural Channels (Regression)">
           {metrics?.structural_channels?.channels?.length > 0 ? (
             <ResponsiveContainer width="100%" height={250}>
-              <LineChart data={metrics.structural_channels.channels.flatMap(c => c.center_line.map(p => ({ time: new Date(p.time).toLocaleTimeString(), value: parseFloat(p.value), channel: c.start_time }))} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+              <LineChart data={metrics.structural_channels.channels.flatMap(c => c.center_line.map(p => ({ time: new Date(p.time).toLocaleTimeString(), value: parseFloat(p.value), channel: c.start_time })))} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                 <XAxis dataKey="time" stroke="#555" fontSize={11} tickLine={false} />
                 <YAxis stroke="#555" fontSize={11} tickFormatter={v => '$' + v.toLocaleString()} />
                 <CartesianGrid strokeDasharray="3 3" stroke="#222" />
