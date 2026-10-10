@@ -1,0 +1,651 @@
+openapi: 3.0.3
+info:
+  title: NockNock Snapshot Data Model
+  version: 1.0.0
+  description: Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
+  license:
+    name: ISC
+servers:
+  - url: https://api.nocknock.xyz/v1
+    description: Production (components only)
+paths: {}
+
+components:
+  schemas:
+    # ============================================================
+    # TOP-LEVEL ENVELOPE (every API response wraps this)
+    # ============================================================
+    SnapshotEnvelope:
+      type: object
+      required: [meta, data]
+      properties:
+        meta:
+          $ref: '#/components/schemas/SnapshotMeta'
+        data:
+          $ref: '#/components/schemas/SnapshotData'
+
+    SnapshotMeta:
+      type: object
+      required: [generated_at, state_hash, version, snapshot_id]
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+          description: UTC timestamp when this snapshot was computed
+          example: "2026-10-09T17:23:29.123Z"
+        state_hash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: SHA-256 hash of the canonicalized SnapshotData (deterministic ordering)
+          example: "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456"
+        version:
+          type: string
+          pattern: '^\d+\.\d+\.\d+$'
+          description: Schema version of the data payload
+          example: "1.0.0"
+        snapshot_id:
+          type: string
+          format: uuid
+          description: Unique identifier for this snapshot (ULID or UUIDv7 preferred)
+          example: "01arz3ndekt4rrffq69g5fav-0000"  # ULID with dashes to satisfy uuid format
+
+    # ============================================================
+    # CORE SNAPSHOT DATA — what the frontend consumes
+    # ============================================================
+    SnapshotData:
+      type: object
+      required:
+        - wallet_balances
+        - pool_mechanics
+        - concentrated_liquidity
+        - contract_fees
+        - derived_metrics
+      properties:
+        wallet_balances:
+          type: array
+          items:
+            $ref: '#/components/schemas/WalletBalance'
+          description: Liquid wallet balances (native tokens, stablecoins)
+        pool_mechanics:
+          type: array
+          items:
+            $ref: '#/components/schemas/PoolMechanic'
+          description: AMM pool mechanics (Aerodrome volatile pools, etc.)
+        concentrated_liquidity:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConcentratedLiquidity'
+          description: Uniswap v4 range allocations and tick data
+        contract_fees:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContractFee'
+          description: Unclaimed processing fees sitting in contracts
+        derived_metrics:
+          $ref: '#/components/schemas/DerivedMetrics'
+
+    # ============================================================
+    # RAW ON-CHAIN TRACKING COMPONENTS
+    # ============================================================
+    WalletBalance:
+      type: object
+      required: [wallet_address, token_symbol, token_address, amount, amount_usd]
+      properties:
+        wallet_address:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{40}$'
+          example: "0x742d35Cc6634C0532925a3b844Bc9e7595f8fEb5"
+        token_symbol:
+          type: string
+          example: "NOCK"
+        token_address:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{40}$'
+          description: Contract address (zero address for native token)
+          example: "0x0000000000000000000000000000000000000000"
+        amount:
+          type: string
+          description: Raw amount as decimal string (no floating point)
+          example: "1250000000000000000000"
+        amount_usd:
+          type: string
+          description: USD value at snapshot time (decimal string)
+          example: "12345.67"
+        updated_at:
+          type: string
+          format: date-time
+          description: When this balance was last observed on-chain
+
+    PoolMechanic:
+      type: object
+      required: [pool_id, platform, pool_type, volatile_assets, liquidity_usd, fee_accrued_usd, fee_tier_bps]
+      properties:
+        pool_id:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{40}$'
+          example: "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
+        platform:
+          type: string
+          enum: [Aerodrome, UniswapV4, Velodrome, Other]
+          example: "Aerodrome"
+        pool_type:
+          type: string
+          enum: [volatile, stable, concentrated]
+          example: "volatile"
+        volatile_assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/PoolAsset'
+          description: The two assets in this volatile pool
+        liquidity_usd:
+          type: string
+          description: Total liquidity in USD (decimal string)
+          example: "500000.00"
+        fee_accrued_usd:
+          type: string
+          description: Unclaimed fees in USD (decimal string)
+          example: "123.45"
+        fee_tier_bps:
+          type: integer
+          description: Fee tier in basis points
+          example: 30
+        tick_current:
+          type: integer
+          description: Current tick (for concentrated pools)
+          nullable: true
+        sqrt_price_x96:
+          type: string
+          description: Current sqrt price (for Uniswap V3/V4)
+          nullable: true
+
+    PoolAsset:
+      type: object
+      required: [token_address, token_symbol, reserve_amount, reserve_usd]
+      properties:
+        token_address:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{40}$'
+        token_symbol:
+          type: string
+        reserve_amount:
+          type: string
+          description: Raw reserve amount (decimal string)
+        reserve_usd:
+          type: string
+          description: USD value of reserve (decimal string)
+
+    ConcentratedLiquidity:
+      type: object
+      required:
+        - range_id
+        - pool_id
+        - lower_tick
+        - upper_tick
+        - lower_price
+        - upper_price
+        - liquidity_amount
+        - tokens_owed_0
+        - tokens_owed_1
+      properties:
+        range_id:
+          type: string
+          description: Unique identifier for this range position
+          example: "0x1234...5678-100-200"
+        pool_id:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{40}$'
+        lower_tick:
+          type: integer
+          example: -198000
+        upper_tick:
+          type: integer
+          example: -197000
+        lower_price:
+          type: string
+          description: Lower price bound (decimal string, token1/token0)
+          example: "0.00123"
+        upper_price:
+          type: string
+          description: Upper price bound (decimal string)
+          example: "0.00125"
+        liquidity_amount:
+          type: string
+          description: Liquidity provided in this range (decimal string)
+        tokens_owed_0:
+          type: string
+          description: Unclaimed fees for token0 (decimal string)
+        tokens_owed_1:
+          type: string
+          description: Unclaimed fees for token1 (decimal string)
+        in_range:
+          type: boolean
+          description: Whether current price is within this range
+        fee_growth_inside_0_x128:
+          type: string
+          description: Fee growth accumulator for token0
+        fee_growth_inside_1_x128:
+          type: string
+          description: Fee growth accumulator for token1
+
+    ContractFee:
+      type: object
+      required: [contract_address, fee_token_address, fee_token_symbol, amount, amount_usd, claimable]
+      properties:
+        contract_address:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{40}$'
+        fee_token_address:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{40}$'
+        fee_token_symbol:
+          type: string
+        amount:
+          type: string
+          description: Raw fee amount (decimal string)
+        amount_usd:
+          type: string
+          description: USD value (decimal string)
+        claimable:
+          type: boolean
+          description: Whether fees are currently claimable (gas-economic)
+        gas_break_even_usd:
+          type: string
+          description: Estimated gas cost to claim (decimal string)
+          example: "5.23"
+
+    # ============================================================
+    # DERIVED METRICS — pre-computed for the "Storyboard Visual Layout"
+    # ============================================================
+    DerivedMetrics:
+      type: object
+      required:
+        - global_status
+        - asset_aggregation_series
+        - total_value_vs_baseline
+        - tick_bracket_hypervisor
+        - portfolio_deviation_matrix
+        - structural_channels
+        - strategy_counterfactual
+        - velocity_gas_sandbox
+      properties:
+        global_status:
+          $ref: '#/components/schemas/GlobalStatus'
+        asset_aggregation_series:
+          $ref: '#/components/schemas/AssetAggregationSeries'
+        total_value_vs_baseline:
+          $ref: '#/components/schemas/TotalValueVsBaseline'
+        tick_bracket_hypervisor:
+          $ref: '#/components/schemas/TickBracketHypervisor'
+        portfolio_deviation_matrix:
+          $ref: '#/components/schemas/PortfolioDeviationMatrix'
+        structural_channels:
+          $ref: '#/components/schemas/StructuralChannels'
+        strategy_counterfactual:
+          $ref: '#/components/schemas/StrategyCounterfactual'
+        velocity_gas_sandbox:
+          $ref: '#/components/schemas/VelocityGasSandbox'
+
+    GlobalStatus:
+      type: object
+      required:
+        - total_portfolio_usd
+        - total_native_usd
+        - total_stable_usd
+        - total_fees_accrued_usd
+        - total_fees_claimable_usd
+        - gas_to_fee_delta_usd
+        - high_water_mark_usd
+        - high_water_mark_date
+      properties:
+        total_portfolio_usd:
+          type: string
+          description: Total portfolio value in USD
+        total_native_usd:
+          type: string
+          description: Value of native tokens (NOCK, ETH, etc.)
+        total_stable_usd:
+          type: string
+          description: Value of stablecoins (USDC, USDT, etc.)
+        total_fees_accrued_usd:
+          type: string
+          description: All unclaimed fees across contracts
+        total_fees_claimable_usd:
+          type: string
+          description: Fees worth claiming after gas
+        gas_to_fee_delta_usd:
+          type: string
+          description: Net value after gas costs
+        high_water_mark_usd:
+          type: string
+          description: All-time high portfolio value
+        high_water_mark_date:
+          type: string
+          format: date-time
+          description: When the high-water mark was set
+
+    AssetAggregationSeries:
+      type: object
+      required: [time_points, safe_haven_series, active_protocol_series]
+      properties:
+        time_points:
+          type: array
+          items:
+            type: string
+            format: date-time
+          description: Timestamps for each data point (aligned with series)
+        safe_haven_series:
+          type: array
+          items:
+            type: string
+          description: USD value in immobile storage (cold wallet, staking) at each point
+        active_protocol_series:
+          type: array
+          items:
+            type: string
+          description: USD value in active ranges/pools at each point
+
+    TotalValueVsBaseline:
+      type: object
+      required: [time_points, portfolio_value_series, token_price_series, high_water_mark_series]
+      properties:
+        time_points:
+          type: array
+          items:
+            type: string
+            format: date-time
+        portfolio_value_series:
+          type: array
+          items:
+            type: string
+          description: Total portfolio USD at each point
+        token_price_series:
+          type: array
+          items:
+            type: string
+          description: Underlying token price (e.g., NOCK/USD) at each point
+        high_water_mark_series:
+          type: array
+          items:
+            type: string
+          description: Rolling high-water mark line
+
+    TickBracketHypervisor:
+      type: object
+      required: [current_price, brackets]
+      properties:
+        current_price:
+          type: string
+          description: Current market price (decimal string)
+        brackets:
+          type: array
+          items:
+            $ref: '#/components/schemas/TickBracket'
+          description: Hard-bounded contract limit brackets
+
+    TickBracket:
+      type: object
+      required: [lower_price, upper_price, liquidity_usd, in_range, distance_bps]
+      properties:
+        lower_price:
+          type: string
+        upper_price:
+          type: string
+        liquidity_usd:
+          type: string
+        in_range:
+          type: boolean
+        distance_bps:
+          type: integer
+          description: Distance from current price to bracket edge (basis points)
+
+    PortfolioDeviationMatrix:
+      type: object
+      required: [allocations]
+      properties:
+        allocations:
+          type: array
+          items:
+            $ref: '#/components/schemas/AllocationDeviation'
+          description: Target vs actual for each strategy bucket
+
+    AllocationDeviation:
+      type: object
+      required: [bucket_name, target_weight_bps, actual_weight_bps, deviation_bps, status]
+      properties:
+        bucket_name:
+          type: string
+          example: "Aerodrome NOCK/USDC"
+        target_weight_bps:
+          type: integer
+          description: Target allocation in basis points (sum = 10000)
+        actual_weight_bps:
+          type: integer
+          description: Actual allocation in basis points
+        deviation_bps:
+          type: integer
+          description: Actual - target (positive = over-funded)
+        status:
+          type: string
+          enum: [on_target, over_funded, under_funded, fast_running]
+          description: Visual anchor for the frontend
+
+    StructuralChannels:
+      type: object
+      required: [channels]
+      properties:
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegressionChannel'
+          description: Standard-deviation corridors; old trends ghosted on break
+
+    RegressionChannel:
+      type: object
+      required: [start_time, end_time, center_line, upper_1sd, lower_1sd, upper_2sd, lower_2sd, is_active, break_point]
+      properties:
+        start_time:
+          type: string
+          format: date-time
+        end_time:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null if channel is still active
+        center_line:
+          type: array
+          items:
+            type: object
+            required: [time, value]
+            properties:
+              time:
+                type: string
+                format: date-time
+              value:
+                type: string
+        upper_1sd:
+          type: array
+          items:
+            type: object
+            required: [time, value]
+            properties:
+              time:
+                type: string
+                format: date-time
+              value:
+                type: string
+        lower_1sd:
+          type: array
+          items:
+            type: object
+            required: [time, value]
+            properties:
+              time:
+                type: string
+                format: date-time
+              value:
+                type: string
+        upper_2sd:
+          type: array
+          items:
+            type: object
+            required: [time, value]
+            properties:
+              time:
+                type: string
+                format: date-time
+              value:
+                type: string
+        lower_2sd:
+          type: array
+          items:
+            type: object
+            required: [time, value]
+            properties:
+              time:
+                type: string
+                format: date-time
+              value:
+                type: string
+        is_active:
+          type: boolean
+        break_point:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp where price broke out, freezing this channel
+
+    StrategyCounterfactual:
+      type: object
+      required: [time_points, active_portfolio_series, passive_baseline_series]
+      properties:
+        time_points:
+          type: array
+          items:
+            type: string
+            format: date-time
+        active_portfolio_series:
+          type: array
+          items:
+            type: string
+          description: Actual portfolio growth curve (USD)
+        passive_baseline_series:
+          type: array
+          items:
+            type: string
+          description: Passive "cash out at dip" baseline (USD)
+
+    VelocityGasSandbox:
+      type: object
+      required: [contracts]
+      properties:
+        contracts:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeeCollectionIndex'
+          description: Claimable volume vs gas break-even per contract
+
+    FeeCollectionIndex:
+      type: object
+      required: [contract_address, contract_name, claimable_usd, gas_break_even_usd, efficiency_ratio, recommended_action]
+      properties:
+        contract_address:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{40}$'
+        contract_name:
+          type: string
+        claimable_usd:
+          type: string
+        gas_break_even_usd:
+          type: string
+        efficiency_ratio:
+          type: number
+          format: float
+          description: claimable_usd / gas_break_even_usd
+        recommended_action:
+          type: string
+          enum: [claim_now, wait, not_worthwhile]
+          description: Gas-economic recommendation
+
+    # ============================================================
+    # INPUT TYPES FOR WASM FUNCTIONS
+    # ============================================================
+    IngestionConfig:
+      type: object
+      required:
+        - alchemy_api_keys
+        - tracked_wallets
+        - tracked_pools
+        - tracked_ranges
+        - fee_contracts
+        - sync_window_seconds
+      properties:
+        alchemy_api_keys:
+          type: array
+          items:
+            type: string
+          description: Premium Alchemy API keys (rotated)
+        tracked_wallets:
+          type: array
+          items:
+            type: string
+            pattern: '^0x[a-fA-F0-9]{40}$'
+        tracked_pools:
+          type: array
+          items:
+            type: string
+            pattern: '^0x[a-fA-F0-9]{40}$'
+        tracked_ranges:
+          type: array
+          items:
+            type: string
+            description: Range IDs for concentrated liquidity
+        fee_contracts:
+          type: array
+          items:
+            type: string
+            pattern: '^0x[a-fA-F0-9]{40}$'
+        sync_window_seconds:
+          type: integer
+          default: 300
+          description: Max age before data is considered stale (default 5 min)
+
+    RawOnChainData:
+      type: object
+      required:
+        - wallet_balances_raw
+        - pool_states_raw
+        - range_states_raw
+        - fee_states_raw
+      properties:
+        wallet_balances_raw:
+          type: array
+          items:
+            type: object
+            # Alchemy getTokenBalances response shape
+        pool_states_raw:
+          type: array
+          items:
+            type: object
+            # Pool state from Alchemy/subgraph
+        range_states_raw:
+          type: array
+          items:
+            type: object
+            # Position state from Uniswap V4 subgraph
+        fee_states_raw:
+          type: array
+          items:
+            type: object
+            # Fee accrual state
+
+    FreshnessResult:
+      type: object
+      required: [is_fresh, age_seconds, state_hash]
+      properties:
+        is_fresh:
+          type: boolean
+        age_seconds:
+          type: integer
+        state_hash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'

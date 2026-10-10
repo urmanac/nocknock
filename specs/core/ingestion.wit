@@ -1,0 +1,38 @@
+package nocknock:core;
+
+interface ingestion {
+  /// Fetch and compute a single portfolio snapshot.
+  /// @param input JSON containing { "config": IngestionConfig, "now": "ISO8601 timestamp" }
+  /// @returns JSON Snapshot envelope with { "meta": SnapshotMeta, "data": SnapshotData }
+  compute-snapshot: func(input: string) -> string;
+
+  /// Validate freshness of a previously stored snapshot.
+  /// @param input JSON containing { "snapshot_id": "string", "max_age_seconds": u64, "now": "ISO8601 timestamp" }
+  /// @returns JSON FreshnessResult { "is_fresh": bool, "age_seconds": u64, "state_hash": "string" }
+  check-freshness: func(input: string) -> string;
+
+  /// Compute derived metrics from raw on-chain data.
+  /// @param input JSON RawOnChainData (wallet balances, pool states, tick ranges, unclaimed fees)
+  /// @returns JSON DerivedMetrics (total value, allocation weights, fee accruals, high-water marks)
+  derive-metrics: func(input: string) -> string;
+}
+
+world core-ingestion {
+  import logger: interface {
+    log: func(msg: string);
+    log-debug: func(msg: string);
+  }
+
+  import http: interface {
+    get: func(url: string) -> string;
+    post: func(url: string, body: string) -> string;
+  }
+
+  import storage: interface {
+    read: func(key: string) -> string;
+    write: func(key: string, value: string);
+    list-keys: func(prefix: string) -> string;
+  }
+
+  export ingestion;
+}

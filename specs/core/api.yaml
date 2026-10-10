@@ -1,0 +1,309 @@
+openapi: 3.0.3
+info:
+  title: NockNock Asset Tracking API
+  version: 1.0.0
+  description: |
+    REST API for the NockNock "Observe and Protect" asset state room.
+    Backend: async ingestion engine (periodic Web3 polling → immutable snapshots).
+    Frontend: calm monitoring portal consuming snapshots with freshness validation.
+
+    **Design Principles:**
+    - Backend never blocks on third-party calls during frontend requests
+    - Every payload carries deterministic sync metadata (timestamp, state hash)
+    - Frontend validates freshness locally; shows non-obtrusive stale indicator
+    - Zero "act now" urgency — pure observation
+
+servers:
+  - url: http://localhost:8080/v1
+    description: Local development
+  - url: https://api.nocknock.xyz/v1
+    description: Production
+
+tags:
+  - name: Snapshots
+    description: Portfolio snapshot endpoints (primary data plane)
+  - name: Health
+    description: Liveness and ingestion status
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness probe and ingestion status
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Ingestion worker stalled or unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /snapshot/latest:
+    get:
+      tags: [Snapshots]
+      summary: Get the most recent portfolio snapshot
+      operationId: getLatestSnapshot
+      description: |
+        Returns the latest computed snapshot with full derived metrics.
+        Frontend MUST check `meta.generated_at` against local clock and
+        `SYNC_WINDOW_SECONDS` (default 300s) to determine freshness.
+      parameters:
+        - $ref: '#/components/parameters/IfNoneMatch'
+      responses:
+        '200':
+          description: Latest snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotEnvelope'
+          headers:
+            ETag:
+              description: The snapshot's state_hash (for conditional requests)
+              schema:
+                type: string
+                pattern: '^[a-f0-9]{64}$'
+            Last-Modified:
+              description: RFC 7231 date of snapshot generation
+              schema:
+                type: string
+                format: date-time
+            Cache-Control:
+              description: Max age based on sync window
+              schema:
+                type: string
+                example: "public, max-age=300, stale-while-revalidate=600"
+        '304':
+          description: Not modified (client has current snapshot)
+        '503':
+          description: No snapshot available yet (ingestion not run)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /snapshot/historical:
+    get:
+      tags: [Snapshots]
+      summary: Get historical snapshots for time-series charts
+      operationId: getHistoricalSnapshots
+      parameters:
+        - $ref: '#/components/parameters/Interval'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Before'
+        - $ref: '#/components/parameters/After'
+      responses:
+        '200':
+          description: Paginated historical snapshots
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoricalResponse'
+        '400':
+          description: Invalid interval or pagination parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /snapshot/metadata:
+    get:
+      tags: [Snapshots]
+      summary: Get snapshot metadata only (for freshness polling)
+      operationId: getSnapshotMetadata
+      description: |
+        Lightweight endpoint for frontend to check freshness without
+        downloading full payload. Returns last N snapshots with age info.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Snapshot metadata list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetadataResponse'
+
+  /snapshot/{snapshot_id}:
+    get:
+      tags: [Snapshots]
+      summary: Get a specific snapshot by ID
+      operationId: getSnapshotById
+      parameters:
+        - $ref: '#/components/parameters/SnapshotId'
+      responses:
+        '200':
+          description: Requested snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotEnvelope'
+        '404':
+          description: Snapshot not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  parameters:
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      description: ETag (state_hash) from previous request for conditional GET
+      schema:
+        type: string
+        pattern: '^[a-f0-9]{64}$'
+    SnapshotId:
+      name: snapshot_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Interval:
+      name: interval
+      in: query
+      description: Granularity of historical snapshots
+      schema:
+        type: string
+        enum: [1h, 4h, 1d, 1w]
+        default: 1d
+    Limit:
+      name: limit
+      in: query
+      description: Maximum number of snapshots to return
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+    Before:
+      name: before
+      in: query
+      description: Return snapshots before this timestamp (exclusive)
+      schema:
+        type: string
+        format: date-time
+    After:
+      name: after
+      in: query
+      description: Return snapshots after this timestamp (inclusive)
+      schema:
+        type: string
+        format: date-time
+
+  schemas:
+    # Re-use the envelope and meta from snapshot.yaml
+    SnapshotEnvelope:
+      $ref: './snapshot.yaml#/components/schemas/SnapshotEnvelope'
+    SnapshotMeta:
+      $ref: './snapshot.yaml#/components/schemas/SnapshotMeta'
+    SnapshotData:
+      $ref: './snapshot.yaml#/components/schemas/SnapshotData'
+
+    HealthResponse:
+      type: object
+      required: [status, last_sync, ingestion_lag_seconds]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, down]
+        last_sync:
+          type: string
+          format: date-time
+          description: When ingestion last successfully completed
+        ingestion_lag_seconds:
+          type: integer
+          description: Seconds since last successful ingestion run
+        errors:
+          type: array
+          items:
+            type: string
+          description: Recent error messages (if degraded/down)
+
+    HistoricalResponse:
+      type: object
+      required: [snapshots, pagination]
+      properties:
+        snapshots:
+          type: array
+          items:
+            $ref: '#/components/schemas/SnapshotEnvelope'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    MetadataResponse:
+      type: object
+      required: [snapshots]
+      properties:
+        snapshots:
+          type: array
+          items:
+            $ref: '#/components/schemas/SnapshotMetadataEntry'
+
+    SnapshotMetadataEntry:
+      type: object
+      required: [snapshot_id, generated_at, state_hash, age_seconds]
+      properties:
+        snapshot_id:
+          type: string
+          format: uuid
+        generated_at:
+          type: string
+          format: date-time
+        state_hash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        age_seconds:
+          type: integer
+          description: Seconds since this snapshot was generated
+
+    Pagination:
+      type: object
+      required: [limit, returned, has_more]
+      properties:
+        limit:
+          type: integer
+        returned:
+          type: integer
+        has_more:
+          type: boolean
+        next_cursor:
+          type: string
+          nullable: true
+          description: Cursor for next page (opaque)
+
+    ErrorResponse:
+      type: object
+      required: [error, message, timestamp]
+      properties:
+        error:
+          type: string
+          example: "NOT_FOUND"
+        message:
+          type: string
+          example: "Snapshot 01ARZ3NDEKTSV4RRFFQ69G5FAV not found"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-10-09T17:23:29.123Z"
+        details:
+          type: object
+          nullable: true
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Optional API key for rate limiting / multi-tenant
+
+security:
+  - ApiKeyAuth: []
