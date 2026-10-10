@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT snapshot_id, generated_at, state_hash, version, data\n        FROM snapshots\n        ORDER BY generated_at DESC\n        LIMIT $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "snapshot_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "generated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "state_hash",
+        "type_info": "Bpchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "version",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "data",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "20655e61c7da2db624c4b66458ed86a060638346da4ab5909ef23e4e2fce74c5"
+}

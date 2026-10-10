@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO snapshots (snapshot_id, generated_at, state_hash, version, data)\n        VALUES ($1, $2, $3, $4, $5)\n        ON CONFLICT (snapshot_id) DO UPDATE SET\n            generated_at = EXCLUDED.generated_at,\n            state_hash = EXCLUDED.state_hash,\n            version = EXCLUDED.version,\n            data = EXCLUDED.data\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Bpchar",
+        "Varchar",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "16d2fadfde577605b031ab639e701cd6fa451549e09539ad992561cb49a82049"
+}
