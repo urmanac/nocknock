@@ -102,7 +102,7 @@ struct SnapshotMeta {
     snapshot_id: String,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 struct SnapshotData {
     wallet_balances: Vec<WalletBalance>,
     pool_mechanics: Vec<PoolMechanic>,
