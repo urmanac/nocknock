@@ -238,7 +238,7 @@ To connect NockNock to Claude Desktop, Gemini Antigravity, Cursor, or Mecris, ad
 - `get_shot_advice`: Dynamic tactical directives (Hold & Accrete, Batch Harvest, Dip Reinvestment).
 - `simulate_claim_fees`: Simulated gas expenditure vs gross/net claimable yields.
 
-Automated GitHub Actions workflows (`.github/workflows/ci.yml`) test all three tiers on every pull request and publish GitHub Releases with release notes extracted from [CHANGELOG.md](CHANGELOG.md) upon pushing version tags (`git tag v0.1.0`).
+Automated GitHub Actions workflows (`.github/workflows/ci.yml`) test all three tiers on every pull request and publish GitHub Releases with release notes extracted from [CHANGELOG.md](CHANGELOG.md) upon pushing version tags (`git tag v0.1.0`). For release governance and step-by-step instructions, see the **[Release Runbook](RELEASE.md)**.
 
 ---
 

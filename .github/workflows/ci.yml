@@ -9,12 +9,15 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   build-brain:
     name: Build & Test WASM Brain
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -32,7 +35,7 @@ jobs:
           RUSTFLAGS="-C link-arg=--allow-undefined" cargo build --target wasm32-wasip1 --release
 
       - name: Upload Brain Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nocknock-wasm-brain
           path: brain/target/wasm32-wasip1/release/nocknock_brain.wasm
@@ -41,7 +44,7 @@ jobs:
     name: Build & Test Ingestion Worker
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -57,7 +60,7 @@ jobs:
           SQLX_OFFLINE=true cargo build --release
 
       - name: Upload Worker Binary Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nocknock-worker-binaries-linux-amd64
           path: |
@@ -68,12 +71,12 @@ jobs:
     name: Build & Test Frontend Portal
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -97,7 +100,7 @@ jobs:
           tar -czf nocknock-frontend.tar.gz -C frontend/dist .
 
       - name: Upload Frontend Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nocknock-frontend-bundle
           path: nocknock-frontend.tar.gz
@@ -110,22 +113,22 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download WASM Brain Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: nocknock-wasm-brain
           path: ./release-assets
 
       - name: Download Worker Binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: nocknock-worker-binaries-linux-amd64
           path: ./release-assets
 
       - name: Download Frontend Bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: nocknock-frontend-bundle
           path: ./release-assets
@@ -147,7 +150,7 @@ jobs:
           fi
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: Release ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
