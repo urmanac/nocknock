@@ -216,4 +216,13 @@ make build-frontend # Compiles optimized production web bundle
 ```
 
 Automated GitHub Actions workflows (`.github/workflows/ci.yml`) test all three tiers on every pull request and publish GitHub Releases with release notes extracted from [CHANGELOG.md](CHANGELOG.md) upon pushing version tags (`git tag v0.1.0`).
-* `specs/core/ingestion.wit` — WebAssembly Interface Types definition
+
+---
+
+## 9. License
+
+Copyright 2026 Urmanac.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0).
+
+See the [LICENSE](LICENSE) file for full license terms.
