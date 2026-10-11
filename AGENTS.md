@@ -149,3 +149,12 @@ make test-worker      # 6 tests passing (decoding, spot math, advice)
 make test-frontend    # 12 tests passing (staleness & contract)
 make dist             # Verifies packaging of dist/ binaries and tarballs
 ```
+
+---
+
+## 10. Long-Term Architectural Vision & Roadmaps
+
+- Consult [`HANDOFF.md`](HANDOFF.md) for the strategic vision:
+  - Multi-tenant parameterization (custom operator profiles, flexible floors, dynamic tranches).
+  - Urbit native architecture (`%nocknock` desk, `sur/nocknock.hoon`, `app/nocknock.hoon`).
+  - Ames P2P sovereign syndicates and collective liquidity defense protocols.
