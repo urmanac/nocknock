@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Pre-Release Gates & Hardening (Must-Haves before v0.1.0 tag)
+- [ ] **Dynamic Live Gas Token Pricing**: Query live ETH/USD price dynamically via Chainlink or Uniswap V3/Aerodrome WETH pool on Base instead of static gas USD computation.
+- [ ] **Dynamic `tick_current` Query**: Fetch real-time active tick from Uniswap V4 PoolManager / Aerodrome pool rather than using static fallback tick values.
+- [ ] **Worker Unit & Integration Test Suite**:
+  - [ ] Add unit test parsing `0xd294f093` (`claimFees`) return data buffers.
+  - [ ] Add mock RPC integration test validating deduplication logic and ratcheting High-Water Mark.
+- [ ] **Database Migration & Disaster Recovery Tooling**:
+  - [ ] Add `make db-backup` and `make db-restore` targets using `pg_dump` / `pg_restore`.
+  - [ ] Add automated migration verification script.
+- [ ] **Graceful Shutdown**: Implement Unix signal handling (`SIGTERM`/`SIGINT`) in Axum server to cleanly drain in-flight ingestion cycles before process termination.
+- [ ] **RPC Rate-Limit & Backoff Resilience**: Add exponential backoff and jitter for Alchemy JSON-RPC requests when encountering HTTP 429 or network timeouts.
+
+### Tier 2: Agent Desktop & Model Context Protocol (MCP) Adapter
+- [ ] **MCP Server Binary (`nocknock-mcp`)**: Implement a dedicated Model Context Protocol server communicating over `stdio`:
+  - `get_portfolio_state`: Returns current live sovereign balance and tranche allocations.
+  - `get_shot_advice`: Returns active tactical advice (Hold & Accrete, Batch Harvest, Dip Reinvestment).
+  - `simulate_claim_fees`: Simulates gas vs fee return for active tranches.
+- [ ] **Zero-DB Mode for Agents**: Allow MCP server to query the local Axum API or fallback to direct RPC without needing direct PostgreSQL connection strings.
+
+### Tier 3: Edge Mobile / Android Moon Clock Model (`moon-phase-clock`)
+- [ ] **Android App Scaffold (`android/`)**:
+  - Initialize Jetpack Compose Android application mirroring `~/w/mecris/tools/moon-phase-clock`.
+  - Configure Gradle with Kotlin Multiplatform or JNI to bundle `nocknock_brain.wasm` into assets.
+- [ ] **WASM Edge Runtime**:
+  - Wire Extism or Wasmer Android SDK to execute `nocknock_brain.wasm` directly on device.
+  - Implement offline deterministic math: tick calculations, LP invariant $k=x \cdot y$, and 100k floor verification.
+- [ ] **Decentralized RPC Fallback Pipeline**:
+  - Primary: REST API sync (`/v1/snapshot/latest`).
+  - Secondary: Alchemy Base JSON-RPC client on Android.
+  - Tertiary: Public Base node (`https://mainnet.base.org`) direct `eth_call` queries when no API key is provided.
+
+### Sovereign Automation & Execution Engine (Legendary / Vision)
+- [ ] **1-Click Execution via Hardware Signer / Safe**:
+  - Integrate Safe (formerly Gnosis Safe) multisig transaction generation for batch harvesting and rebalancing.
+  - Support Ledger / Trezor / EIP-1193 wallet connect directly from the dashboard to execute tactical shots without manual contract interaction.
+- [ ] **Sovereign Multi-Wallet Aggregator**:
+  - Aggregate balances across multiple cold storage addresses, escrow contracts, and timelocks into a unified Sovereign Stack view.
+- [ ] **Real-Time Sound & Push Alerts**:
+  - Non-intrusive audio cues for Batch Harvest availability ($5.00+ fee threshold).
+  - High-priority sovereign sirens if total NOCK stack ever approaches the 100,000 hard floor buffer.
+
 ## [0.1.0] - 2026-10-11
 
 ### Added

@@ -3,6 +3,8 @@
 //! Implements `nocknock:core/ingestion` WIT interface.
 //! No HTTP, no DB, no system time — all provided by host via imports.
 
+#![allow(unused, dead_code, static_mut_refs)]
+
 use extism_pdk::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
