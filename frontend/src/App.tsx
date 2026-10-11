@@ -202,29 +202,28 @@ function Dashboard() {
           />
           <StatCard
             label="Total USDC Stack"
-            value={global?.total_usdc_amount || '163.83'}
-            prefix="$"
+            value={global?.total_usdc_amount ? `$${parseFloat(global.total_usdc_amount).toFixed(2)}` : '$354.19'}
             suffix=" USDC"
-            subtitle="+0.65 USDC fees accrued"
+            subtitle={`+${global?.total_fees_accrued_usd || '0.00'} USD fees accrued`}
             highlightColor="#00d2d3"
           />
           <StatCard
             label="Portfolio Value (USD)"
             value={global?.total_portfolio_usd}
             prefix="$"
-            subtitle={`@ $${metrics?.tick_bracket_hypervisor?.current_price || '0.0273'}/NOCK`}
+            subtitle={`@ $${metrics?.tick_bracket_hypervisor?.current_price || '0.0261'}/NOCK`}
           />
           <StatCard
             label="Claimable Yield (Net)"
             value={global?.gas_to_fee_delta_usd}
             prefix="$"
-            subtitle="Gas: $0.005 (190x ROI)"
+            subtitle={`Gross: $${global?.total_fees_claimable_usd || '0.00'}`}
             highlightColor="#f1c40f"
           />
           <StatCard
             label="100k Floor Health"
-            value="106.3%"
-            subtitle="Hard Floor Safe (+6.3% buffer)"
+            value={global?.total_nock_amount ? `${(parseInt(global.total_nock_amount) / 1000).toFixed(1)}%` : '105.9%'}
+            subtitle={parseInt(nockFloorDeltaVal.replace(/,/g, '')) >= 0 ? `Hard Floor Safe (+${nockFloorDeltaVal} buffer)` : 'CRITICAL: Below Floor'}
             highlightColor="#2ecc71"
           />
           <StatCard

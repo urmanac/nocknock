@@ -79,6 +79,14 @@ struct RawOnChainData {
     live_tranche_2_usdc: f64,
     #[serde(default)]
     live_gas_cost_usd: f64,
+    #[serde(default)]
+    live_aero_fee_usdc: f64,
+    #[serde(default)]
+    live_aero_fee_nock: f64,
+    #[serde(default)]
+    live_uni_fee_usdc: f64,
+    #[serde(default)]
+    live_uni_fee_nock: f64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -887,14 +895,44 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let now_str = Utc::now().to_rfc3339();
 
     // 6. Live Trading Fees
-    // Aerodrome: 0.18326 USDC, 5.71915 NOCK
-    // Uniswap: 0.470 USDC, 5.27 NOCK
-    let aero_fee_usdc = 0.18326f64;
-    let aero_fee_nock = 5.71915f64;
+    // Live query for Aerodrome uncollected trading fees via simulated claimFees() call from wallet
+    let aero_claim_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{
+            "from": wallet_addr,
+            "to": "0x85f1aa3a70fedd1c52705c15baed143e675cd626",
+            "data": "0xd294f093"
+        }, "latest"],
+        "id": 6
+    });
+
+    let mut aero_fee_usdc = 0.0f64;
+    let mut aero_fee_nock = 0.0f64;
+
+    if let Ok(resp) = state.http_client.post(&alchemy_url).json(&aero_claim_payload).send().await {
+        if let Ok(res_json) = resp.json::<serde_json::Value>().await {
+            if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
+                let clean = hex_str.trim_start_matches("0x");
+                if clean.len() >= 128 {
+                    if let (Ok(c0), Ok(c1)) = (
+                        u128::from_str_radix(&clean[..64], 16),
+                        u128::from_str_radix(&clean[64..128], 16),
+                    ) {
+                        aero_fee_usdc = c0 as f64 / 1e6;
+                        aero_fee_nock = c1 as f64 / 1e16;
+                    }
+                }
+            }
+        }
+    }
+
     let aero_fee_usd = aero_fee_usdc + aero_fee_nock * spot_price;
 
-    let uni_fee_usdc = 0.470f64;
-    let uni_fee_nock = 5.27f64;
+    // Uniswap V4: All previous fees were auto-compounded into position NFT #3126000
+    // Uncollected fees currently accrete afresh from 0.0
+    let uni_fee_usdc = 0.0f64;
+    let uni_fee_nock = 0.0f64;
     let uni_fee_usd = uni_fee_usdc + uni_fee_nock * spot_price;
 
     Ok(RawOnChainData {
@@ -949,8 +987,8 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
                 lower_price: "0.01237".to_string(),
                 upper_price: "2.02783".to_string(),
                 liquidity_amount: v4_liquidity_str,
-                tokens_owed_0: "0.470".to_string(),
-                tokens_owed_1: "5.27".to_string(),
+                tokens_owed_0: format!("{:.3}", uni_fee_usdc),
+                tokens_owed_1: format!("{:.2}", uni_fee_nock),
                 in_range: spot_price >= 0.01237 && spot_price <= 2.02783,
                 fee_growth_inside_0_x128: "0".to_string(),
                 fee_growth_inside_1_x128: "0".to_string(),
@@ -981,6 +1019,10 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         live_tranche_2_nock: live_t2_nock,
         live_tranche_2_usdc: live_t2_usdc,
         live_gas_cost_usd: live_gas_cost_usd,
+        live_aero_fee_usdc: aero_fee_usdc,
+        live_aero_fee_nock: aero_fee_nock,
+        live_uni_fee_usdc: uni_fee_usdc,
+        live_uni_fee_nock: uni_fee_nock,
     })
 }
 
@@ -994,10 +1036,14 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64) -> DerivedMetric
         } else { 0.0268 }
     } else { 0.0268 };
 
-    let aero_fee_nock = 5.71915f64;
-    let uni_fee_nock = 5.27f64;
-    let aero_fee_usd: f64 = 0.18326 + aero_fee_nock * spot_price;
-    let uni_fee_usd: f64 = 0.470 + uni_fee_nock * spot_price;
+    let aero_fee_nock = raw.live_aero_fee_nock;
+    let aero_fee_usdc = raw.live_aero_fee_usdc;
+    let aero_fee_usd = aero_fee_usdc + aero_fee_nock * spot_price;
+
+    let uni_fee_nock = raw.live_uni_fee_nock;
+    let uni_fee_usdc = raw.live_uni_fee_usdc;
+    let uni_fee_usd = uni_fee_usdc + uni_fee_nock * spot_price;
+
     let total_fees_usd = aero_fee_usd + uni_fee_usd;
     let gas_cost = if raw.live_gas_cost_usd > 0.0 { raw.live_gas_cost_usd } else { 0.005 };
 
