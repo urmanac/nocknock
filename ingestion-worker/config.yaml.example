@@ -1,41 +1,37 @@
 # NockNock Ingestion Worker Configuration
-# Copy to config.yaml and fill in your values
+# Copy to config.yaml and fill in your Alchemy key
 
-database_url: "postgresql://postgres:postgres@localhost:5432/nocknock?sslmode=disable"
+database_url: "postgresql://postgres:postgres@localhost:5432/nocknock"
 
-# Premium Alchemy API keys (rotate periodically)
+# Alchemy Base Mainnet API keys
 alchemy_api_keys:
-  - "YOUR_ALCHEMY_KEY_1"
-  - "YOUR_ALCHEMY_KEY_2"
+  - "YOUR_ALCHEMY_API_KEY"
 
-# Ethereum/Base addresses to track (checksummed)
+# Tracked sovereign wallet (Base mainnet)
 tracked_wallets:
-  - "0x742d35Cc6634C0532925a3b844Bc9e7595f8fEb5"  # Example: main treasury
-  - "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"  # Example: strategy wallet
+  - "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
 
-# AMM pool addresses (Aerodrome, Uniswap V4, etc.)
+# AMM pool addresses (Aerodrome vAMM-USDC/NOCK 0.3%)
 tracked_pools:
-  - "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"  # Aerodrome NOCK/USDC
-  - "0x794f7e42b5f5c5c5c5c5c5c5c5c5c5c5c5c5c5c5"  # Uniswap V4 NOCK/WETH
+  - "0x85f1aa3a70fedd1c52705c15baed143e675cd626"
 
-# Concentrated liquidity range IDs (from Uniswap V4 subgraph)
-tracked_ranges:
-  - "0x1234...5678-100-200"
-  - "0xabcd...ef01-150-250"
+# Token contracts on Base
+token_addresses:
+  - "0x4200000000000000000000000000000000000006"  # WETH
+  - "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"  # USDC
+  - "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"  # NOCK
 
-# Contract addresses with unclaimed fees
+tracked_ranges: []
+
+# Fee & LP contract references
 fee_contracts:
-  - "0x1111111111111111111111111111111111111111"
-  - "0x2222222222222222222222222222222222222222"
+  - "0x4CbB6188C6101CAcd4eb1126Cc14882Bd93dc3DB"
 
-# Freshness sync window (seconds) — frontend uses same value
+lp_tokens:
+  - "0x85f1aa3a70fedd1c52705c15baed143e675cd626"
+
+# Sync interval in seconds
 sync_window_seconds: 300
-
-# Ingestion schedule (cron expression) — every 5 minutes default
-schedule: "*/5 * * * *"
 
 # API server port
 port: 8080
-
-# Path to compiled WASM brain
-wasm_path: "../../brain/target/wasm32-wasip1/release/nocknock_brain.wasm"

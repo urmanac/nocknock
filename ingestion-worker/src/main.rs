@@ -24,16 +24,39 @@ use uuid::Uuid;
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct AppConfig {
+    #[serde(default = "default_db_url")]
     database_url: String,
+    #[serde(default)]
     alchemy_api_keys: Vec<String>,
+    #[serde(default = "default_tracked_wallets")]
     tracked_wallets: Vec<String>,
+    #[serde(default)]
     tracked_pools: Vec<String>,
+    #[serde(default)]
     token_addresses: Vec<String>,
+    #[serde(default)]
     tracked_ranges: Vec<String>,
+    #[serde(default)]
     fee_contracts: Vec<String>,
+    #[serde(default)]
     lp_tokens: Vec<String>,
+    #[serde(default = "default_sync_window")]
     sync_window_seconds: u64,
+    #[serde(default = "default_port")]
     port: u16,
+}
+
+fn default_db_url() -> String {
+    "postgresql://postgres:postgres@localhost:5432/nocknock".to_string()
+}
+fn default_tracked_wallets() -> Vec<String> {
+    vec!["0xeE114cC97eC5adeB34bA5645e315B497D8487a45".to_string()]
+}
+fn default_sync_window() -> u64 {
+    300
+}
+fn default_port() -> u16 {
+    8080
 }
 
 // ============================================================
@@ -302,10 +325,12 @@ struct AppState {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    // Load config
+    // Load config (falls back gracefully to config.yaml.example or env vars)
     let config = Config::builder()
-        .add_source(config::File::with_name("config"))
-        .add_source(config::Environment::with_prefix("APP"))
+        .add_source(config::File::with_name("config.yaml.example").required(false))
+        .add_source(config::File::with_name("config").required(false))
+        .add_source(config::Environment::with_prefix("APP").separator("__"))
+        .add_source(config::Environment::default())
         .build()?
         .try_deserialize::<AppConfig>()?;
 
