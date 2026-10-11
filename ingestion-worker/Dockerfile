@@ -21,7 +21,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 WORKDIR /app
 
 COPY --from=builder /app/target/release/nocknock-ingestion-worker /app/nocknock-ingestion-worker
-COPY config.yaml /app/config.yaml
+COPY --from=builder /app/target/release/nocknock-mcp /app/nocknock-mcp
+COPY config.yaml.example /app/config.yaml.example
+COPY config.yaml* /app/
 
 # Create non-root app user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
