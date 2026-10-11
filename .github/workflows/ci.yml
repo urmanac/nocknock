@@ -24,6 +24,11 @@ jobs:
         with:
           targets: wasm32-wasip1
 
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: brain -> target
+
       - name: Run Brain Tests
         run: |
           cd brain
@@ -48,6 +53,11 @@ jobs:
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ingestion-worker -> target
 
       - name: Run Worker Tests
         run: |

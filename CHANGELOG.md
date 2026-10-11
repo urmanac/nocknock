@@ -14,15 +14,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - [ ] Embed QR code modal on web dashboard allowing instant pairing with the Uniswap mobile app on Android/iOS.
   - [ ] Auto-reconnect active session across browser refreshes without credential or private key exposure.
 - [ ] **1-Click Tactical Multicall Generator**:
-  - [ ] Direct multicall encoder on Base: construct Aerodrome `claimFees()` call for active pool (`0x85f1...626`).
-  - [ ] Push transaction request directly to the paired Uniswap app for biometric (Fingerprint / Face ID) operator confirmation.
+  - [ ] Direct multicall encoder on Base: construct Aerodrome and Uniswap fee claim and rebalance calls.
+  - [ ] Push transaction requests directly to the paired Uniswap app for biometric (Fingerprint / Face ID) operator confirmation.
   - [ ] Real-time Base gas quote display and execution feedback loop.
+
+### Ethereum & Multi-AMM Pool Discovery & Tracking
+- [ ] **Dynamic ETH Pool Discovery (Uniswap & Aerodrome)**:
+  - [ ] Discover and optionally track Ethereum-related AMM pools on Base (e.g. WETH/USDC, WETH/NOCK, and secondary liquidity pairs).
+  - [ ] Multi-pool registry in backend ingestion worker: put discovered pools on the board and count them as part of the unified portfolio whole.
+  - [ ] Support dynamic reserve, tick, and fee queries across heterogeneous AMM architectures.
+- [ ] **Multi-Vault Portfolio Aggregation**:
+  - [ ] Expand tracking beyond the single primary vault to support multiple disparate vault contracts and liquidity tranches.
+  - [ ] Aggregated net asset value (NAV) and unified token balance accounting.
+
+### Coinbase API Integration: Staked Ethereum Tracking
+- [ ] **Read-Only Coinbase Connector**:
+  - [ ] Secure read-only API integration to observe staked Ethereum (staked ETH / cbETH) balances over time.
+  - [ ] Symbiotic Yield Telemetry: track staked ETH baseline growth alongside on-chain Base Nock vault reserves.
+  - [ ] Self-Funding Invariant: monitor how on-chain Nock vault yields fund Base L2 operations while staked ETH accumulates off-chain without churn.
+  - [ ] Historical snapshot recording for staked ETH balances in worker database.
+
+### Dual Income Streams: Harvested Yield & Capital Gains (P/L)
+- [ ] **Low-Hanging P/L Gauge Integration**:
+  - [ ] Connect to external wallet/portfolio P/L APIs (Moralis / Alchemy / Uniswap mobile telemetry) to pull token cost basis and net P/L without building a complex cost-basis engine from scratch.
+  - [ ] Local Epoch P/L: compute deterministic session delta against high-water marks and recorded spot prices.
+  - [ ] Unified Income Model: account for both ordinary yield (fee harvests) and capital gains/losses (P/L) across active positions.
 
 ### Sovereign Bookkeeping & 60/40 Balance Sheet Partition
 - [ ] **Virtual Tax Reserve Sub-Ledger**:
   - [ ] Maintain the 60/40 Split Rule as an internal accounting allocation within the single sovereign wallet (no separate physical address required).
-  - [ ] Virtual Tax Escrow Buffer: earmark 40% of realized fee harvest revenue to protect the operator's forward tax obligations.
-  - [ ] Liquid Growth Dry Powder: track 60% of harvested yield available for tactical market dip accumulation.
+  - [ ] Virtual Tax Escrow Buffer: earmark 40% of realized fee harvest revenue AND net capital gains to protect the operator's forward tax obligations.
+  - [ ] Liquid Growth Dry Powder: track 60% of harvested yield and trading returns available for tactical market dip accumulation.
   - [ ] Over-allocation Guardrail: cockpit alert if a manual or tactical move would dip into the 40% tax reserve buffer or breach the treasury floor invariant.
 
 ### Tax Compliance & Koinly Audit Integration
@@ -31,15 +53,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - [ ] Classify on-chain events unambiguously: tag fee claims as `Income / Staking Reward`, tag pool rebalances as non-taxable liquidity transfers.
   - [ ] Expose `/v1/tax/export?format=koinly` endpoint on Axum backend.
 - [ ] **"Tie-Out" Test Suite & Historical Verification**:
-  - [ ] Automated accounting validation tests: prove that local ledger state, on-chain balances, and Koinly-formatted transaction histories mathematically "tie out" without unexplained discrepancies.
+  - [ ] Automated accounting validation tests: prove that local ledger state, on-chain balances, Uniswap/indexer P/L gauges, and Koinly-formatted transaction histories mathematically "tie out" without unexplained discrepancies.
   - [ ] Audit preparation package for CPA review, ensuring peace of mind and zero tax surprises.
 
-### Visual Identity & UI Overhaul (Distinguishing v0.2.0 from v0.1.0)
-- [ ] **State Room Visual Redesign**:
+### Canvas Expansion & State Room Redesign (v0.2.0 vs v0.1.0)
+- [ ] **Visual Identity & UI Overhaul**:
   - [ ] Complete UI refresh making it impossible to confuse a v0.1.0 dashboard with a v0.2.0 dashboard.
+  - [ ] Expanded Graph Canvas: increase panel count beyond the original 7 charts to plot discovered ETH pools, multi-vault trajectories, and staked ETH accumulation curves.
   - [ ] Dual-Dial Cockpit: distinct visual gauges for the 40% Tax Reserve Buffer and 60% Growth Dry Powder.
+  - [ ] Live P/L Performance Dial: visual capital gains tracking alongside yield harvest counters.
   - [ ] WalletConnect Session Banner with live connection status and paired wallet indicator.
   - [ ] Tax Health & Invariant Safeguard indicator (clear visual reassurance that tax obligations are covered).
+
+### CI Performance & Rust Dependency Caching
+- [ ] **GitHub Actions Build Optimization**:
+  - [ ] Integrate `Swatinem/rust-cache@v2` across `build-brain` and `build-worker` jobs.
+  - [ ] Cache cargo registry, git checkouts, and target directories for `SQLX_OFFLINE=true` release compilation to cut CI turnaround times from minutes to seconds.
 
 ### Multi-Tenant Architecture & Urbit Roadmap
 - [ ] **Parameterized Operator Profiles (Backend & Schema)**:
@@ -49,6 +78,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [ ] **Urbit Native (%nocknock Desk Blueprint)**:
   - [ ] Hoon data structures in `sur/nocknock.hoon`.
   - [ ] Gall agent state skeleton in `app/nocknock.hoon`.
+
+## [0.1.1] - 2026-10-11
+
+### Fixed
+- **Canvas Tooltip Date Formatting**:
+  - Resolved `Invalid Date` display in the Total Value vs Baseline dual-axis chart and Strategy Counterfactual chart.
+  - Eliminated redundant `new Date()` wrapping on pre-formatted snapshot time strings.
+- **Chart Tooltip Theme & Visual Contrast**:
+  - Aligned all Recharts tooltips with the State Room dark aesthetic (`#161b22` container, `#30363d` border, `#8b949e` label header).
+  - Eliminated default stark white tooltip cards that clashed with cockpit canvas panels.
+
+### Changed
+- **CI Build Performance**:
+  - Added `Swatinem/rust-cache@v2` across `build-brain` and `build-worker` GitHub Actions jobs, dramatically accelerating offline SQLX compilation times.
 
 ## [0.1.0] - 2026-10-11
 

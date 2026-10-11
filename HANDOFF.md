@@ -15,6 +15,7 @@ With the publication of [Release v0.1.0](https://github.com/urmanac/nocknock/rel
 4. **Operational Rigor**:
    - `main` branch protection with mandatory PR protocol.
    - Pinned modern CI runners (`ubuntu-24.04`) and actions (`checkout@v7`, `upload-artifact@v7`, `download-artifact@v8`, `action-gh-release@v3`) with zero deprecation notices.
+   - Rust dependency caching via `Swatinem/rust-cache@v2` across `build-brain` and `build-worker`, accelerating heavyweight offline SQLX compilation from minutes to seconds.
    - Documented operational tribal knowledge in [`AGENTS.md`](AGENTS.md), release procedures in [`RELEASE.md`](RELEASE.md), and dependency roadmap in [`DEPENDENCIES.md`](DEPENDENCIES.md).
 
 ---
@@ -59,51 +60,75 @@ Sovereign operators already carry battle-tested, secure mobile wallets with biom
 
 ---
 
-## 3. Sovereign Bookkeeping & Single-Address Virtual 60/40 Partition
+## 3. Sovereign Bookkeeping: Dual Income Streams (Harvest Yield & Capital Gains P/L)
 
 ### 3.1 Protection Without Friction
-There is **no separate physical tax escrow cold address**. The active trading scope of the system is strictly focused on **NOCK (and occasional ETH/WETH routing)**. All funds reside in the single operator address we have access to.
+There is **no separate physical tax escrow cold address**. The active trading scope of the system focuses on **NOCK and Ethereum (ETH/WETH)** across Uniswap and Aerodrome. All funds reside in the single sovereign operator address we have access to.
 
 The purpose of the bookkeeping engine is simple and essential: **to observe and mitigate the risk that the scheme will not be able to fund its own tax obligations**.
 
-To achieve this without locking funds or adding transfer overhead:
-* **The 40% Tax Pre-Funding Buffer**: As fee harvests occur, 40% of realized revenue is virtually earmarked on the dashboard as locked for tax liability.
-* **The 60% Growth Dry Powder**: The remaining 60% is earmarked as liquid dry powder for tactical dip accumulation.
-* **Invariant Guard**: The cockpit warns if a suggested dip deployment would compromise the 40% tax reserve buffer or breach the untouchable treasury floor.
+### 3.2 Dual Income Streams: Ordinary Fees & Capital Gains P/L
+A complete tax and risk model cannot evaluate fee collection in isolation:
+1. **Ordinary Yield Stream (Fee Harvesting)**: Realized revenue harvested from Aerodrome and Uniswap liquidity pools via `claimFees()`. Treated as yield / staking income.
+2. **Capital Gains Stream (P/L from Trading & Inventory)**: Trading NOCK and ETH, and rebalancing concentrated liquidity positions, generates realized and unrealized capital gains and losses.
+3. **Low-Hanging Gauge from Uniswap Wallet / Indexer API**: Rather than building an intricate, error-prone cost-basis accounting engine from scratch, NockNock leverages the built-in P/L tracking already calculated by the **Uniswap mobile wallet / portfolio API** (or drop-in Web3 indexers like Moralis `getWalletProfitAndLoss`). Reading this P/L gauge directly provides authoritative profit/loss figures with zero computational bloat.
+4. **Unified Tax Reserve Pre-Funding**: Both fee income and capital gains feed into the internal tax reserve calculation, ensuring the operator's forward tax obligations are reliably covered regardless of which stream generated the tax liability.
 
-This keeps the bookkeeping simple and protective today, with room for sophisticated elaboration later.
+### 3.3 The Virtual 60/40 Balance Sheet Partition
+* **The 40% Tax Pre-Funding Buffer**: Earmark 40% of realized fee harvests and net capital gains on the dashboard as protected tax reserve.
+* **The 60% Growth Dry Powder**: Earmark 60% of harvested yield as liquid dry powder for tactical dip accumulation.
+* **Invariant Guard**: The cockpit sounds an alarm if a suggested dip deployment would compromise the 40% tax reserve buffer or breach the untouchable treasury floor.
 
 ---
 
-## 4. Tax Compliance & The Koinly "Tie-Out" Test Suite
+## 4. Multi-Asset Scope: Ethereum AMM Discovery, Multi-Vault Tracking & Coinbase Staked ETH
+
+### 4.1 Ethereum & Multi-AMM Tracking on Base
+While NOCK/USDC was the genesis asset pair, active operations regularly trade **Ethereum (ETH/WETH)** using both Uniswap and Aerodrome:
+* **Dynamic Pool Discovery**: Ingestion worker actively scans for and discovers Ethereum-related AMM pools on Base (e.g. `vAMM-WETH/USDC`, `WETH/NOCK`, and Uniswap V3/V4 ETH positions).
+* **Put Them on the Board**: Discovered pools are automatically registered in the state room and counted as part of the greater portfolio whole.
+* **Multi-Vault Tracking**: Track disparate vault contracts and liquidity tranches simultaneously, moving beyond a two-pool limitation to full multi-vault telemetry.
+
+### 4.2 Coinbase API Integration: Off-Chain Staked Ethereum
+The operator's broader asset base includes **Staked Ethereum (cbETH / staked ETH)** held on Coinbase:
+* **Read-Only API Connector**: Track staked Ethereum balance and yield accretion over time without requiring custody or withdrawal permissions.
+* **Symbiotic Self-Funding Mechanics**: Staked ETH on Coinbase remains stable and accretive off-chain, while the on-chain Nock vault generates active, self-funding yield—taking full advantage of Base L2's near-zero transaction fees (<$0.01) to operate autonomously without draining reserves.
+* **Holistic Net-Worth Telemetry**: Combines on-chain Base LP reserves, treasury vault holdings, and Coinbase staked ETH into a unified multi-asset net worth timeline.
+
+---
+
+## 5. Tax Compliance & The Koinly "Tie-Out" Test Suite
 
 NockNock does not intend to become a complex standalone tax calculation hub. All operator wallets are tracked in compliance with the law on platforms like **[Koinly](https://koinly.io)**. 
 
 Our mission is to build the machine that interfaces seamlessly with that machine:
 1. **Automated "Tie-Out" Test Suite**:
-   - Build a rigorous series of accounting verification tests proving that NockNock's internal sub-ledger, on-chain Base state, and Koinly-formatted export logs mathematically "tie out" cleanly.
+   - Build a rigorous series of accounting verification tests proving that NockNock's internal sub-ledger, on-chain Base state, Uniswap P/L gauges, and Koinly-formatted export logs mathematically "tie out" cleanly.
    - When the operator interfaces with their CPA next year, the records tie out without surprises, confusion, or forensic reconciliation.
 2. **Standardized Transaction Tagging**:
    - Classify fee harvests unambiguously as staking/yield rewards.
+   - Tag capital gain events consistently with Uniswap wallet telemetry.
    - Ensure liquidity pool range adjustments are not misconstrued by automated tax aggregators as taxable disposals.
 
 ---
 
-## 5. Visual Identity & UI Overhaul (Differentiating v0.2.0 from v0.1.0)
+## 6. Visual Identity & Canvas Expansion (Differentiating v0.2.0 from v0.1.0)
 
 A core design mandate for the next release: **it must be impossible to mistake a NockNock v0.1.0 dashboard for a v0.2.0 dashboard**.
 
 The visual cockpit will receive a purposeful overhaul:
-* **Dual-Dial Resource Gauges**: Visually distinct real-time dials for the 40% Tax Reserve Buffer vs 60% Growth Dry Powder.
+* **Expanded Graph Canvas**: Increase visualization panels beyond the original 7 charts to plot discovered ETH AMM depths, multi-vault yields, and Staked Ethereum accretion curves.
+* **Dual-Dial Resource Gauges**: Visually distinct real-time dials for the 40% Tax Reserve Buffer vs 60% Growth Dry Powder (incorporating both fee harvests and Uniswap P/L gauges).
+* **Uniswap Wallet P/L Performance Gauge**: Real-time display of capital gains and portfolio P/L imported directly from the Uniswap wallet API.
 * **WalletConnect Session Banner**: High-visibility paired session status with Uniswap mobile app link telemetry.
 * **Tax Obligation Safeguard Indicator**: A calm, prominent health signal confirming that all prospective tax liabilities remain fully pre-funded.
 * **Distinct Aesthetic Palette**: Elevated typography and canvas styling reflecting the shift from passive observation to an actionable tactical state room.
 
 ---
 
-## 6. The Grand Vision: Urbit Native (`%nocknock`) & Multi-Tenant Sovereign Parameterization
+## 7. The Grand Vision: Urbit Native (`%nocknock`) & Multi-Tenant Sovereign Parameterization
 
-### 6.1 Why Urbit is the Natural Spiritual & Technical Home
+### 7.1 Why Urbit is the Natural Spiritual & Technical Home
 
 The project is called **NockNock**. Its spiritual namesake is **Nock**: Urbit's pure, axiomatic functional bytecode. 
 
@@ -141,7 +166,7 @@ Today's crypto tooling is trapped in a false dichotomy: either users rely on cen
 
 ---
 
-### 6.2 Multi-Tenant Sovereign Parameterization
+### 7.2 Multi-Tenant Sovereign Parameterization
 
 NockNock v0.1.0 demonstrated proof-of-concept for a single operator tracking a specific asset allocation on Base. To fulfill its broader utility, NockNock will support **multi-tenant, parameterized sovereign profiles** for diverse operators, treasuries, and syndicates:
 
@@ -158,7 +183,7 @@ NockNock v0.1.0 demonstrated proof-of-concept for a single operator tracking a s
 
 ---
 
-### 6.3 Hoon Architecture (`sur/nocknock.hoon`)
+### 7.3 Hoon Architecture (`sur/nocknock.hoon`)
 
 ```hoon
 :: sur/nocknock.hoon
@@ -197,7 +222,7 @@ NockNock v0.1.0 demonstrated proof-of-concept for a single operator tracking a s
 
 ---
 
-### 6.4 Federated Sovereign Syndicates over Ames
+### 7.4 Federated Sovereign Syndicates over Ames
 
 When multiple ships run `%nocknock`, they can coordinate over Urbit's encrypted peer-to-peer network (**Ames**):
 1. **Collective Liquidity Defense**: Independent ships holding `$NOCK` or LP positions coordinate defensive dip-reinvestments or pool rebalances without centralized channels.
@@ -206,7 +231,7 @@ When multiple ships run `%nocknock`, they can coordinate over Urbit's encrypted 
 
 ---
 
-## 7. Phased Evolution Roadmap
+## 8. Phased Evolution Roadmap
 
 ```mermaid
 flowchart LR
@@ -216,12 +241,14 @@ flowchart LR
         A3["Calm Monitoring Cockpit"]
     end
 
-    subgraph Phase2["v0.2.0 (Golden Path Execution)"]
-        B1["WalletConnect / Uniswap Mobile App"]
-        B2["1-Click Harvest Execution"]
-        B3["Virtual 60/40 Balance Sheet Ledger"]
-        B4["Koinly Tie-Out Test Suite"]
-        B5["Complete Visual UI Redesign"]
+    subgraph Phase2["v0.2.0 (Execution, Multi-AMM & P/L)"]
+        B1["WalletConnect / Uniswap Mobile Signing"]
+        B2["Dynamic ETH Pool & Multi-Vault Discovery"]
+        B3["Coinbase Staked ETH Connector"]
+        B4["Dual Income (Fees + Uniswap P/L Gauge)"]
+        B5["Virtual 60/40 Balance Sheet Ledger"]
+        B6["Koinly Tie-Out Test Suite"]
+        B7["Canvas Expansion & UI Overhaul"]
     end
 
     subgraph Phase3["v0.3.0 (Urbit Native & Profiles)"]
@@ -239,7 +266,7 @@ flowchart LR
 ```
 
 * **v0.1.0** *(Shipped 2026-10-11)*: Sovereign single-tenant foundation, WASM brain, MCP adapter, and calm React dashboard.
-* **v0.2.0** *(Next)*: Golden Path Web Cockpit + WalletConnect (Uniswap Mobile App), 1-click execution, virtual 60/40 sub-ledger, automated Koinly "tie-out" test suite, and complete visual UI overhaul.
+* **v0.2.0** *(Next)*: Golden Path Web Cockpit + WalletConnect (Uniswap Mobile App), 1-click execution, dynamic Ethereum AMM & multi-vault discovery, Coinbase Staked ETH telemetry, dual-income accounting (harvested fees + low-hanging capital gains P/L gauge), virtual 60/40 sub-ledger, automated Koinly "tie-out" test suite, Rust CI caching, and complete visual UI overhaul.
 * **v0.3.0**: Native Urbit `%nocknock` Desk distribution, Hoon Gall agent, Iris on-chain polling, and Parameterized Profiles.
 * **v0.4.0**: Ames Federated Syndicates and collective liquidity defense protocols.
 

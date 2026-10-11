@@ -303,7 +303,12 @@ function Dashboard() {
                 tickFormatter={v => `${(v / 1000).toFixed(0)}k`}
               />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-              <Tooltip formatter={(v: any) => `${Number(v).toLocaleString()} NOCK`} />
+              <Tooltip
+                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#e0e0e0' }}
+                itemStyle={{ fontSize: '0.8rem' }}
+                labelStyle={{ color: '#8b949e', fontWeight: 600, marginBottom: 4 }}
+                formatter={(v: any) => `${Number(v).toLocaleString()} NOCK`}
+              />
               <ReferenceLine
                 y={100000}
                 stroke="#e74c3c"
@@ -352,7 +357,11 @@ function Dashboard() {
               <YAxis yAxisId="left" orientation="left" stroke="#555" fontSize={11} tickFormatter={v => '$' + v.toLocaleString()} />
               <YAxis yAxisId="right" orientation="right" stroke="#555" fontSize={11} tickFormatter={v => '$' + v.toFixed(4)} domain={['auto', 'auto']} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-              <Tooltip labelFormatter={v => new Date(v).toLocaleTimeString()} />
+              <Tooltip
+                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#e0e0e0' }}
+                itemStyle={{ fontSize: '0.8rem' }}
+                labelStyle={{ color: '#8b949e', fontWeight: 600, marginBottom: 4 }}
+              />
               <Line yAxisId="left" type="monotone" dataKey="portfolio" stroke="#2ecc71" strokeWidth={2} dot={{ r: 3 }} name="Portfolio USD" />
               <Line yAxisId="left" type="monotone" dataKey="highWaterMark" stroke="#f39c12" strokeWidth={1} strokeDasharray="5 5" dot={false} name="High-Water Mark" />
               <Line yAxisId="right" type="monotone" dataKey="tokenPrice" stroke="#3498db" strokeWidth={2} dot={{ r: 3 }} name="NOCK Spot Price" />
@@ -367,7 +376,12 @@ function Dashboard() {
               <XAxis type="number" tickFormatter={v => '$' + v.toLocaleString()} stroke="#555" fontSize={11} />
               <YAxis type="category" dataKey="name" width={100} stroke="#555" fontSize={11} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
-              <Tooltip formatter={v => '$' + v.toLocaleString()} />
+              <Tooltip
+                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#e0e0e0' }}
+                itemStyle={{ fontSize: '0.8rem' }}
+                labelStyle={{ color: '#8b949e', fontWeight: 600, marginBottom: 4 }}
+                formatter={v => '$' + v.toLocaleString()}
+              />
               <Bar dataKey="upper" fill="#f39c12" fillOpacity={0.4} name="Upper Bracket ($)" />
               <Bar dataKey="lower" fill="#2ecc71" fillOpacity={0.4} name="Lower Bracket ($)" />
               <Legend />
@@ -386,7 +400,12 @@ function Dashboard() {
               <XAxis type="number" tickFormatter={v => `${v}%`} stroke="#555" fontSize={11} />
               <YAxis type="category" dataKey="name" width={120} stroke="#555" fontSize={11} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
-              <Tooltip formatter={(v: any) => `${Number(v).toFixed(1)}%`} />
+              <Tooltip
+                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#e0e0e0' }}
+                itemStyle={{ fontSize: '0.8rem' }}
+                labelStyle={{ color: '#8b949e', fontWeight: 600, marginBottom: 4 }}
+                formatter={(v: any) => `${Number(v).toFixed(1)}%`}
+              />
               <Bar dataKey="target" fill="#666" fillOpacity={0.5} name="Target %" />
               <Bar dataKey="actual" name="Actual %">
                 {deviationData.map((d: any, i: number) => (
@@ -413,7 +432,11 @@ function Dashboard() {
               <XAxis dataKey="time" stroke="#555" fontSize={11} tickLine={false} />
               <YAxis stroke="#555" fontSize={11} tickFormatter={v => '$' + v.toLocaleString()} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-              <Tooltip labelFormatter={v => new Date(v).toLocaleTimeString()} />
+              <Tooltip
+                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#e0e0e0' }}
+                itemStyle={{ fontSize: '0.8rem' }}
+                labelStyle={{ color: '#8b949e', fontWeight: 600, marginBottom: 4 }}
+              />
               <Line type="monotone" dataKey="active" stroke="#2ecc71" strokeWidth={2} dot={{ r: 3 }} name="Active Portfolio ($)" />
               <Line type="monotone" dataKey="passive" stroke="#888" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Passive Hold ($)" />
               <Legend />
@@ -431,7 +454,12 @@ function Dashboard() {
               <XAxis dataKey="name" stroke="#555" fontSize={11} tickLine={false} />
               <YAxis stroke="#555" fontSize={11} tickFormatter={v => '$' + v.toLocaleString()} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-              <Tooltip formatter={(v: any) => `$${Number(v).toFixed(4)}`} />
+              <Tooltip
+                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#e0e0e0' }}
+                itemStyle={{ fontSize: '0.8rem' }}
+                labelStyle={{ color: '#8b949e', fontWeight: 600, marginBottom: 4 }}
+                formatter={(v: any) => `$${Number(v).toFixed(4)}`}
+              />
               <Bar dataKey="claimable" fill="#2ecc71" fillOpacity={0.8} name="Claimable Fee Yield ($)" />
               <Bar dataKey="gasBreakEven" fill="#e74c3c" fillOpacity={0.8} name="Gas Fee ($)" />
               <Legend />
