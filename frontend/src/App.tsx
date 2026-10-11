@@ -202,7 +202,8 @@ function Dashboard() {
           />
           <StatCard
             label="Total USDC Stack"
-            value={global?.total_usdc_amount ? `$${parseFloat(global.total_usdc_amount).toFixed(2)}` : '$354.19'}
+            value={global?.total_usdc_amount || '354.19'}
+            prefix="$"
             suffix=" USDC"
             subtitle={`+${global?.total_fees_accrued_usd || '0.00'} USD fees accrued`}
             highlightColor="#00d2d3"
@@ -250,25 +251,25 @@ function Dashboard() {
         </div>
         <p style={styles.adviceDetails}>
           {global?.shot_advice_details ||
-            'Total NOCK held is 106,340 (+6,340 above the 100k hard floor). AMMs are generating dual yield (+0.61 USDC in V4 scale-out, +0.34 in Aero). Maintain posture.'}
+            `Total NOCK held is ${totalNockVal} (+${nockFloorDeltaVal} above 100k hard floor). AMMs are generating dual yield. Maintain posture.`}
         </p>
         <div style={styles.shotPillContainer}>
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>Goal 1 (NOCK Accretion):</span>
             <span style={styles.shotPillText}>
-              106,340 NOCK total. Split: 96,005 Liquid Sovereign Vault, 6,329 Aerodrome LP, 4,004 Uniswap V4 LP. Target: Compound fees if spot dips &lt; $0.020.
+              {totalNockVal} NOCK total across Treasury (Tranche 3), Aerodrome LP (Tranche 2), and Uniswap V4 LP (Tranche 1). Floor lock active if total &lt; 100,000.
             </span>
           </div>
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>Goal 2 (USDC Accumulation):</span>
             <span style={styles.shotPillText}>
-              $163.83 USDC principal + $0.65 USDC pure trading fees claimable. Gas break-even is $0.005. Target: Batch harvest when fees cross $5.00.
+              ${global?.total_usdc_amount || '354.19'} USDC across wallet and AMM liquidity. ${global?.total_fees_claimable_usd || '0.00'} live claimable yield accrued.
             </span>
           </div>
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>Impermanent Loss / Risk:</span>
             <span style={styles.shotPillText}>
-              0% realized losses (0 trades or claims made since deployment). Uniswap V4 position is 100% in-range ($0.01237 - $2.02783).
+              0% realized losses. Uniswap V4 concentrated range is active ($0.01237 - $2.02783). Aerodrome fees live-tracked on-chain.
             </span>
           </div>
         </div>
