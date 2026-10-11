@@ -96,50 +96,70 @@ Builds release binaries and verifies packaging:
 
 ---
 
-## 4. Tagging & Automated GitHub Release
+## 4. Semantic Versioning, Patch Cadence & Triage Gate
 
-Releases are triggered automatically when an annotated Git tag matching `v*` (e.g. `v0.1.0`) is pushed to `origin`.
+NockNock adheres strictly to **Semantic Versioning (SemVer 2.0.0)**:
+- **Patch Releases (`v0.1.x`)**: Reserved exclusively for bugfixes, UI reactivity fixes, RPC resilience, and data integrity repairs.
+  - **Core Tenet**: *Mock data in the production app is a bug.* Any hardcoded placeholder, static string pretending to be live math, or silent mock fallback must be triaged and resolved in a patch release.
+  - Patch releases (`v0.1.1`, `v0.1.2`, ...) can and should be shipped indefinitely until every active bug and data anomaly is eliminated.
+- **Minor Releases (`v0.2.0`)**: Reserved for backward-compatible architectural features, including:
+  - Dynamic operator profile configuration (Issue #6).
+  - Multi-tenant tranche allocations and customizable defensive floors.
+  - Sovereign Urbit integration (`%nocknock` desk, `sur/nocknock.hoon`).
+- **Major Releases (`v1.0.0`)**: Sovereign syndicate consensus and collective liquidity defense protocols.
 
-### 4.1 Update Changelog
+### 4.1 The Pre-Tag Evaluation Gate
+Merging a PR into `main` does **not** automatically trigger a release:
+1. Land bugfix PRs onto `main` to unlock CI caching and incremental stability.
+2. Review the live triage board (see [`TRIAGE.md`](file:///Users/yebyen/w/nocknock/TRIAGE.md) and `unset GITHUB_TOKEN && gh issue list --label patch-0.1.x`).
+3. Re-evaluate readiness with the operator: do not tag until the planned batch of patch fixes is confirmed green and visually validated.
+
+---
+
+## 5. Tagging & Automated GitHub Release
+
+Releases are triggered automatically when an annotated Git tag matching `v*` (e.g. `v0.1.0`, `v0.1.1`) is pushed to `origin`.
+
+### 5.1 Update Changelog
 Ensure [`CHANGELOG.md`](file:///Users/yebyen/w/nocknock/CHANGELOG.md) contains a version section corresponding to the target release tag:
 ```markdown
-## [0.1.0] - 2026-10-11
-### Added
-- Feature description...
+## [0.1.1] - 2026-10-11
+### Fixed
+- Detail bugfixes...
 ```
 The automated GitHub Actions release job parses this exact section from `CHANGELOG.md` using `awk` to populate the release notes body automatically.
 
-### 4.2 Create and Push Annotated Tag
-From the up-to-date, green `main` branch:
+### 5.2 Create and Push Annotated Tag
+Only once human evaluation confirms release readiness from an up-to-date, green `main` branch:
 ```bash
-git tag -a v0.1.0 -m "Release v0.1.0"
-git push origin v0.1.0
+git tag -a v0.1.1 -m "Release v0.1.1"
+git push origin v0.1.1
 ```
 
-### 4.3 Automated GitHub Actions Pipeline
+### 5.3 Automated GitHub Actions Pipeline
 Once pushed, GitHub Actions triggers the `NockNock CI & Release` workflow:
 1. Concurrently builds and tests `nocknock_brain.wasm`, `nocknock-ingestion-worker`, `nocknock-mcp`, and the frontend static bundle.
 2. Uploads build artifacts to workflow storage using `actions/upload-artifact@v7`.
 3. Triggers the `publish-release` job upon successful completion of all three build jobs.
 4. Downloads all assets via `actions/download-artifact@v8`.
-5. Extracts release notes for `v0.1.0` from `CHANGELOG.md`.
+5. Extracts release notes for `v0.1.1` from `CHANGELOG.md`.
 6. Publishes an official GitHub Release via `softprops/action-gh-release@v3` containing:
    - `nocknock_brain.wasm`
    - `nocknock-ingestion-worker` (Linux x86_64)
    - `nocknock-mcp` (Model Context Protocol binary)
    - `nocknock-frontend.tar.gz` (Static production web bundle)
 
-### 4.4 Verification
+### 5.4 Verification
 Monitor the release workflow in real-time:
 ```bash
 unset GITHUB_TOKEN && gh run list --workflow="NockNock CI & Release"
-unset GITHUB_TOKEN && gh release view v0.1.0
+unset GITHUB_TOKEN && gh release view v0.1.1
 ```
 Verify all four release assets are present and downloadable.
 
 ---
 
-## 5. Rollback & Emergency Tag Pruning
+## 6. Rollback & Emergency Tag Pruning
 
 If a release tag is pushed erroneously before all checks or changelogs are finalized:
 1. Delete the local tag:
