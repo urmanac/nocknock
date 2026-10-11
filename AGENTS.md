@@ -101,7 +101,8 @@ This guide captures the operational rules, environment quirks, toolchain configu
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
     ```
-- **Pinned Modern Action Versions**:
+- **Pinned Modern Action Versions & Runners**:
+  - Runners: Pin `runs-on: ubuntu-24.04` to eliminate `ubuntu-latest` migration notice annotations.
   - Checkout: `actions/checkout@v7`
   - Upload Artifacts: `actions/upload-artifact@v7`
   - Download Artifacts: `actions/download-artifact@v8`
