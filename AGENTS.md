@@ -101,7 +101,8 @@ This guide captures the operational rules, environment quirks, toolchain configu
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
     ```
-- **Pinned Modern Action Versions**:
+- **Pinned Modern Action Versions & Runners**:
+  - Runners: Pin `runs-on: ubuntu-24.04` to eliminate `ubuntu-latest` migration notice annotations.
   - Checkout: `actions/checkout@v7`
   - Upload Artifacts: `actions/upload-artifact@v7`
   - Download Artifacts: `actions/download-artifact@v8`
@@ -149,3 +150,12 @@ make test-worker      # 6 tests passing (decoding, spot math, advice)
 make test-frontend    # 12 tests passing (staleness & contract)
 make dist             # Verifies packaging of dist/ binaries and tarballs
 ```
+
+---
+
+## 10. Long-Term Architectural Vision & Roadmaps
+
+- Consult [`HANDOFF.md`](HANDOFF.md) for the strategic vision:
+  - Multi-tenant parameterization (custom operator profiles, flexible floors, dynamic tranches).
+  - Urbit native architecture (`%nocknock` desk, `sur/nocknock.hoon`, `app/nocknock.hoon`).
+  - Ames P2P sovereign syndicates and collective liquidity defense protocols.
