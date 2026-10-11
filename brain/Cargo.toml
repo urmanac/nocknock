@@ -2,6 +2,8 @@
 name = "nocknock-brain"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
+authors = ["Urmanac"]
 description = "Pure ingestion logic for NockNock — compiled to WASM, zero external deps"
 
 [lib]
