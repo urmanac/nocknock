@@ -79,9 +79,9 @@ function Dashboard() {
     ? history.map(s => {
         const dm = s.data?.derived_metrics ?? s.data;
         const ag = dm?.asset_aggregation_series;
-        const t3 = parseFloat(ag?.tranche_3_nock?.[0] || '95995.69');
-        const t2 = parseFloat(ag?.tranche_2_nock?.[0] || '6328.59');
-        const t1 = parseFloat(ag?.tranche_1_nock?.[0] || '4004.31');
+        const t3 = parseFloat(ag?.tranche_3_nock?.[0] || '0');
+        const t2 = parseFloat(ag?.tranche_2_nock?.[0] || '0');
+        const t1 = parseFloat(ag?.tranche_1_nock?.[0] || '0');
         return {
           time: formatSnapshotTime(s.meta?.generated_at, spansMultipleDays),
           tranche3Vault: Math.round(t3),
@@ -92,15 +92,21 @@ function Dashboard() {
           activeProtocol: parseFloat(ag?.active_protocol_series?.[0] || '0'),
         };
       })
-    : assetTimePoints.map((t: string, i: number) => ({
-        time: formatSnapshotTime(t, false),
-        tranche3Vault: 95996,
-        tranche2Aero: 6329,
-        tranche1V4: 4004,
-        totalNock: 106329,
-        safeHaven: parseFloat(assetSafeHaven[i] || '0'),
-        activeProtocol: parseFloat(assetActiveProtocol[i] || '0'),
-      }));
+    : assetTimePoints.map((t: string, i: number) => {
+        const ag = metrics?.asset_aggregation_series;
+        const t3 = parseFloat(ag?.tranche_3_nock?.[i] || '0');
+        const t2 = parseFloat(ag?.tranche_2_nock?.[i] || '0');
+        const t1 = parseFloat(ag?.tranche_1_nock?.[i] || '0');
+        return {
+          time: formatSnapshotTime(t, false),
+          tranche3Vault: Math.round(t3),
+          tranche2Aero: Math.round(t2),
+          tranche1V4: Math.round(t1),
+          totalNock: Math.round(t3 + t2 + t1),
+          safeHaven: parseFloat(assetSafeHaven[i] || '0'),
+          activeProtocol: parseFloat(assetActiveProtocol[i] || '0'),
+        };
+      });
 
   const valueTimePoints: string[] = metrics?.total_value_vs_baseline?.time_points || [];
   const valuePortfolio: string[] = metrics?.total_value_vs_baseline?.portfolio_value_series || [];
@@ -304,9 +310,9 @@ function Dashboard() {
               />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
               <Tooltip
-                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#e0e0e0' }}
-                itemStyle={{ fontSize: '0.8rem' }}
-                labelStyle={{ color: '#8b949e', fontWeight: 600, marginBottom: 4 }}
+                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
+                itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
+                labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
                 formatter={(v: any) => `${Number(v).toLocaleString()} NOCK`}
               />
               <ReferenceLine
@@ -340,7 +346,7 @@ function Dashboard() {
                 stroke="#9b59b6"
                 name="Tranche 1: Uniswap V4 (4,004 NOCK)"
               />
-              <Legend />
+              <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </AreaChart>
           </ResponsiveContainer>
           <div style={{ marginTop: 8, fontSize: '0.75rem', color: '#888', display: 'flex', justifyContent: 'space-between' }}>
@@ -358,9 +364,9 @@ function Dashboard() {
               <YAxis yAxisId="right" orientation="right" stroke="#555" fontSize={11} tickFormatter={v => '$' + v.toFixed(4)} domain={['auto', 'auto']} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
               <Tooltip
-                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#e0e0e0' }}
-                itemStyle={{ fontSize: '0.8rem' }}
-                labelStyle={{ color: '#8b949e', fontWeight: 600, marginBottom: 4 }}
+                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
+                itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
+                labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
               />
               <Line yAxisId="left" type="monotone" dataKey="portfolio" stroke="#2ecc71" strokeWidth={2} dot={{ r: 3 }} name="Portfolio USD" />
               <Line yAxisId="left" type="monotone" dataKey="highWaterMark" stroke="#f39c12" strokeWidth={1} strokeDasharray="5 5" dot={false} name="High-Water Mark" />
@@ -377,14 +383,14 @@ function Dashboard() {
               <YAxis type="category" dataKey="name" width={100} stroke="#555" fontSize={11} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
               <Tooltip
-                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#e0e0e0' }}
-                itemStyle={{ fontSize: '0.8rem' }}
-                labelStyle={{ color: '#8b949e', fontWeight: 600, marginBottom: 4 }}
+                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
+                itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
+                labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
                 formatter={v => '$' + v.toLocaleString()}
               />
               <Bar dataKey="upper" fill="#f39c12" fillOpacity={0.4} name="Upper Bracket ($)" />
               <Bar dataKey="lower" fill="#2ecc71" fillOpacity={0.4} name="Lower Bracket ($)" />
-              <Legend />
+              <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </BarChart>
           </ResponsiveContainer>
           <div style={{ marginTop: 12, fontSize: '0.75rem', color: '#aaa', fontFamily: 'monospace', display: 'flex', justifyContent: 'space-between' }}>
@@ -401,12 +407,12 @@ function Dashboard() {
               <YAxis type="category" dataKey="name" width={120} stroke="#555" fontSize={11} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
               <Tooltip
-                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#e0e0e0' }}
-                itemStyle={{ fontSize: '0.8rem' }}
-                labelStyle={{ color: '#8b949e', fontWeight: 600, marginBottom: 4 }}
-                formatter={(v: any) => `${Number(v).toFixed(1)}%`}
+                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
+                itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
+                labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 6, fontSize: '0.9rem' }}
+                formatter={(v: any, name: string) => [`${Number(v).toFixed(1)}%`, name]}
               />
-              <Bar dataKey="target" fill="#666" fillOpacity={0.5} name="Target %" />
+              <Bar dataKey="target" fill="#64748b" fillOpacity={0.6} name="Target %" />
               <Bar dataKey="actual" name="Actual %">
                 {deviationData.map((d: any, i: number) => (
                   <Cell
@@ -415,7 +421,7 @@ function Dashboard() {
                   />
                 ))}
               </Bar>
-              <Legend />
+              <Legend wrapperStyle={{ color: '#cbd5e1', paddingTop: 8 }} formatter={(value) => <span style={{ color: '#cbd5e1', marginRight: 12 }}>{value}</span>} />
             </BarChart>
           </ResponsiveContainer>
           <div style={{ marginTop: 8, fontSize: '0.7rem', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
@@ -433,13 +439,13 @@ function Dashboard() {
               <YAxis stroke="#555" fontSize={11} tickFormatter={v => '$' + v.toLocaleString()} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
               <Tooltip
-                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#e0e0e0' }}
-                itemStyle={{ fontSize: '0.8rem' }}
-                labelStyle={{ color: '#8b949e', fontWeight: 600, marginBottom: 4 }}
+                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
+                itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
+                labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
               />
               <Line type="monotone" dataKey="active" stroke="#2ecc71" strokeWidth={2} dot={{ r: 3 }} name="Active Portfolio ($)" />
               <Line type="monotone" dataKey="passive" stroke="#888" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Passive Hold ($)" />
-              <Legend />
+              <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </LineChart>
           </ResponsiveContainer>
           <div style={{ marginTop: 8, fontSize: '0.75rem', color: '#2ecc71', textAlign: 'center' }}>
@@ -455,14 +461,14 @@ function Dashboard() {
               <YAxis stroke="#555" fontSize={11} tickFormatter={v => '$' + v.toLocaleString()} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
               <Tooltip
-                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#e0e0e0' }}
-                itemStyle={{ fontSize: '0.8rem' }}
-                labelStyle={{ color: '#8b949e', fontWeight: 600, marginBottom: 4 }}
+                contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
+                itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
+                labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
                 formatter={(v: any) => `$${Number(v).toFixed(4)}`}
               />
               <Bar dataKey="claimable" fill="#2ecc71" fillOpacity={0.8} name="Claimable Fee Yield ($)" />
               <Bar dataKey="gasBreakEven" fill="#e74c3c" fillOpacity={0.8} name="Gas Fee ($)" />
-              <Legend />
+              <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </BarChart>
           </ResponsiveContainer>
           <div style={{ marginTop: 8, fontSize: '0.75rem', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
