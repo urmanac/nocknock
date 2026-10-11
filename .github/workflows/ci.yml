@@ -29,7 +29,7 @@ jobs:
       - name: Build WASM Brain
         run: |
           cd brain
-          cargo build --target wasm32-wasip1 --release
+          RUSTFLAGS="-C link-arg=--allow-undefined" cargo build --target wasm32-wasip1 --release
 
       - name: Upload Brain Artifact
         uses: actions/upload-artifact@v4
@@ -59,8 +59,10 @@ jobs:
       - name: Upload Worker Binary Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nocknock-ingestion-worker-linux-amd64
-          path: ingestion-worker/target/release/nocknock-ingestion-worker
+          name: nocknock-worker-binaries-linux-amd64
+          path: |
+            ingestion-worker/target/release/nocknock-ingestion-worker
+            ingestion-worker/target/release/nocknock-mcp
 
   build-frontend:
     name: Build & Test Frontend Portal
@@ -119,7 +121,7 @@ jobs:
       - name: Download Worker Binary
         uses: actions/download-artifact@v4
         with:
-          name: nocknock-ingestion-worker-linux-amd64
+          name: nocknock-worker-binaries-linux-amd64
           path: ./release-assets
 
       - name: Download Frontend Bundle
@@ -152,6 +154,7 @@ jobs:
           files: |
             ./release-assets/nocknock_brain.wasm
             ./release-assets/nocknock-ingestion-worker
+            ./release-assets/nocknock-mcp
             ./release-assets/nocknock-frontend.tar.gz
           body_path: release_body.md
           draft: false
