@@ -1,8 +1,73 @@
-# NockNock — Asset State Room
+# NockNock — Sovereign Asset State Room & Dual-Growth Engine
 
-> **"Observe and Protect"** — An asynchronous, low-friction portfolio monitoring system that eliminates active maintenance overhead.
+> **"Observe and Protect"** — An asynchronous, zero-maintenance asset observation portal and tactical advisory engine for dual-token growth (**NOCK** and **USDC**) on Base network.
 
-## Architecture
+---
+
+## 1. Strategic Philosophy & Portfolio Architecture
+
+NockNock monitors and guides a three-tier capital allocation strategy designed to grow the absolute holding of both **NOCK** and **USDC** while maintaining an invariant floor:
+
+```
+                            SOVEREIGN CAPITAL FLOW
+ 
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │ 1. SOURCING LIQUIDITY                                                 │
+  │    ┌───────────────────────────┐      ┌───────────────────────────┐   │
+  │    │ Uniswap V4 LP (Tranche 1) │      │  Aerodrome LP (Tranche 2) │   │
+  │    │ Range: $0.01237 - $2.028  │      │  Volatile Pool (0.3% fee) │   │
+  │    │ Automated DCA Scale-Out   │      │  Continuous Yield Engine  │   │
+  │    └─────────────┬─────────────┘      └─────────────┬─────────────┘   │
+  └──────────────────┼──────────────────────────────────┼─────────────────┘
+                     │                                  │
+                     ▼                                  ▼
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │ 2. HARVESTING & ALLOCATION HUB (60/40 SPLIT RULE)                      │
+  │    When claimable fees cross $5.00 threshold:                          │
+  │    ├── 40% ➔ Tax Escrow (Cold reserve pre-funding capital gains liability)
+  │    └── 60% ➔ Growth Capital / The Vault (Dry powder for market dips)   │
+  └────────────────────────────────────────────────────────────────────────┘
+                     │
+                     ▼
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │ 3. SOVEREIGN FOUNDATION (Tranche 3)                                    │
+  │    Untouchable Treasury Floor: >= 100,000 NOCK                         │
+  │    Hard safety floor — never liquidated, staked, or impaired.          │
+  └────────────────────────────────────────────────────────────────────────┘
+```
+
+### Strategic Tranches
+
+1. **Tranche 1: Uniswap V4 LP (5% Target Allocation)**
+   - Contract / NFT ID: `#3126000` on Base (`0x7c5f5a4bbd8fd63184577525326123b519429bdc`)
+   - Tick Range: `[-274200, -223200]` ($0.01237 to $2.02783)
+   - Function: Automated DCA scale-out engine. As NOCK price appreciates toward $2.028, liquidity gradually shifts into 100% USDC.
+2. **Tranche 2: Aerodrome Engine (10% Target Allocation)**
+   - Pool: `0x85f1aa3a70fedd1c52705c15baed143e675cd626` (USDC/NOCK 0.3% volatile)
+   - Function: High-velocity trading fee accumulator. Yield is harvested and recycled.
+3. **Tranche 3: Sovereign Treasury (80% Target Allocation)**
+   - Hard Floor Invariant: **100,000 NOCK minimum**.
+   - Liquid cold wallet reserves protecting sovereign voting weight and governance posture.
+4. **Liquid USDC Buffer (5% Target Allocation)**
+   - Dry powder from DCA scale-outs and harvested yield, deployed on market retractions.
+
+---
+
+## 2. Tactical Shot Advice Engine
+
+The backend continuously evaluates on-chain conditions and outputs dynamic recommendations:
+
+| Trigger Condition | Posture | Strategic Action |
+|:---|:---|:---|
+| `total_nock < 100,000` | **DEFENSIVE LOCK** | Floor breach! All yield locked to restore 100,000 sovereign minimum. |
+| `spot_price < $0.020` | **DIP REINVESTMENT** | Spot price entered accumulation zone. Deploy saved USDC to buy discounted NOCK. |
+| `spot_price >= $2.028` | **RANGE EXIT FLASHPOINT** | V4 runway is 100% USDC. Take principal and construct single-sided high walls at $5.00+. |
+| `claimable_fees >= $5.00` | **BATCH HARVEST** | Gas efficiency optimal (>50x). Execute batch claim and enforce 60/40 Split Rule. |
+| Normal Market | **HOLD & ACCRETE** | AMMs generating dual yield; maintain current balanced posture. |
+
+---
+
+## 3. Technical Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -11,215 +76,110 @@
 │                                                                             │
 │   ┌──────────────────┐      HTTP/JSON (REST)       ┌──────────────────┐   │
 │   │  Ingestion       │ ◄─────────────────────────► │  Frontend        │   │
-│   │  Backend Engine  │    /v1/snapshot/latest      │  (React/TS)      │   │
-│   │  (Async Worker)  │    /v1/snapshot/historical  │  Calm Monitoring │   │
+│   │  Backend Engine  │    /v1/snapshot/latest      │  (React/TS/Vite) │   │
+│   │  (Rust / Axum)   │    /v1/snapshot/historical  │  Dashboard Room  │   │
 │   └────────┬─────────┘    /v1/snapshot/metadata    └────────┬─────────┘   │
-│           │                                                │              │
-│           │  ┌──────────────┐                               │              │
-│           └► │  WASM Brain  │  (pure logic, no I/O)         │              │
-│              │  (Rust)      │  compute-snapshot             │              │
-│              │              │  derive-metrics               │              │
-│              │              │  check-freshness              │              │
-│              └──────────────┘                               │              │
-│                     ▲                                       │              │
-│                     │ host imports                          │              │
-│              ┌──────┴──────┐                                 │              │
-│              │  Host Env   │                                 │              │
-│              │  (Go)       │                                 │              │
-│              │  • HTTP     │                                 │              │
-│              │  • Storage  │                                 │              │
-│              │  • Logger   │                                 │              │
-│              └─────────────┘                                 │              │
+│            │              /health                           │             │
+│            │                                                │             │
+│            ▼                                                ▼             │
+│   ┌──────────────────┐                             ┌──────────────────┐   │
+│   │ PostgreSQL 16    │                             │ useFreshness Hook│   │
+│   │ TimescaleDB      │                             │ Stale Banner     │   │
+│   │ Deduplicated DB  │                             │ React ErrorBound │   │
+│   └──────────────────┘                             └──────────────────┘   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Two completely isolated modules communicating exclusively via a stable network API contract:**
+* **Rust Ingestion Worker** (`ingestion-worker/`):
+  - Polls Base mainnet via Alchemy JSON-RPC:
+    - `eth_gasPrice` for real-time gas break-even economics ($0.0043/tx)
+    - `getReserves` and LP `balanceOf` on Aerodrome pool
+    - `getPositionLiquidity(3126000)` on Uniswap V4 PositionManager
+    - `alchemy_getTokenBalances` for liquid wallet tokens
+  - Computes derived metrics, deviation matrix, and shot advice.
+  - Generates deterministic SHA-256 state hashes.
+  - Implements snapshot deduplication to prevent database bloat.
+* **React Frontend Dashboard** (`frontend/`):
+  - 6 KPI Stat Cards: Sovereign NOCK Stack, USDC Stack, Net Portfolio, Claimable Yield, Floor Health, High-Water Mark.
+  - Tactical Shot Advice Cockpit Banner.
+  - 7 Recharts panels with historical time-series curves and 100,000 NOCK Reference Line.
+  - Client-side freshness validation (5-minute sync window, zero urgency).
+  - Protected with top-level React Error Boundary.
 
-1. **Ingestion Backend Engine** — Silent, detached operational monitor
-   - Periodic Web3 data fetching (Alchemy premium APIs)
-   - Pure WASM logic for computations (deterministic, testable)
-   - Immutable snapshot storage with SHA-256 state hashes
-   - REST API with sync metadata on every payload
+---
 
-2. **Unified Presentation Front-End** — Calm monitoring portal
-   - Freshness validation (client-side, no push)
-   - Non-obtrusive stale data indicator
-   - Storyboard visual layout (7 dashboard panels)
-   - Decoupled — any consumer gets identical data
-
-## Spec-Driven Development
-
-All contracts live in `specs/core/`:
-
-| File | Purpose |
-|------|---------|
-| `ingestion.wit` | WASM Interface Types (pure logic contract) |
-| `snapshot.yaml` | Canonical data models (OpenAPI 3.0 components) |
-| `api.yaml` | REST API contract (OpenAPI 3.0) |
-
-These are the **single source of truth**. Code is generated from them:
-
-```bash
-# Generate TypeScript API client for frontend
-make generate-types
-
-# Validate all specs
-make validate-specs
-```
-
-## Quick Start
+## 4. Quick Start
 
 ### Prerequisites
-- Docker & Docker Compose
-- Rust (for WASM brain): `rustup target add wasm32-wasip1`
-- Go 1.23+ (for ingestion worker)
-- Node 20+ (for frontend)
+- Docker & Docker Compose (or PostgreSQL 16 + Rust 1.80+ + Node 20+)
+- Alchemy API Key for Base Mainnet
 
-### Local Development
+### Running via Docker Compose
 
 ```bash
-# 1. Build WASM brain
-make build-brain
+# Clone the repository
+git clone https://github.com/your-username/nocknock.git
+cd nocknock
 
-# 2. Start infrastructure (PostgreSQL + worker + frontend)
-docker-compose up -d
+# Start PostgreSQL, Ingestion Worker, and Frontend
+docker compose up -d --build
 
-# 3. Frontend at http://localhost:3000
-#    API at http://localhost:8080/v1
+# Open Dashboard
+http://localhost:3000
+
+# REST API
+http://localhost:8080/v1/snapshot/latest
+http://localhost:8080/health
 ```
 
-### Manual Development (without Docker)
+### Running Manually
 
 ```bash
-# Terminal 1: Start PostgreSQL
-docker run -d --name nocknock-db -e POSTGRES_PASSWORD=postgres -p 5432:5432 timescale/timescaledb:latest-pg16
+# Terminal 1: Database
+# Ensure PostgreSQL is running on localhost:5432 with database 'nocknock'
 
-# Terminal 2: Run ingestion worker (dev mode)
+# Terminal 2: Ingestion Worker
 cd ingestion-worker
-cp config.yaml.example config.yaml
-# Edit config.yaml with your Alchemy keys
-go run ./cmd/worker -dev -config config.yaml
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/nocknock" cargo run --release
 
-# Terminal 3: Run frontend
+# Terminal 3: Frontend Portal
 cd frontend
 npm install
-npm run dev
+npm run dev -- --port 3000
 ```
 
-## Project Structure
+---
 
-```
-nocknock/
-├── specs/
-│   └── core/
-│       ├── ingestion.wit       # WASM logic contract
-│       ├── snapshot.yaml       # Data models (OpenAPI components)
-│       └── api.yaml            # REST API contract
-├── brain/                      # Rust WASM (pure logic)
-│   ├── src/
-│   │   ├── lib.rs              # Exports ingestion.wit functions
-│   │   └── *.rs                # Implementation modules
-│   └── Cargo.toml
-├── ingestion-worker/           # Go host runtime
-│   ├── cmd/worker/main.go      # Scheduler + HTTP server + WASM host
-│   ├── go.mod
-│   └── Dockerfile
-├── frontend/                   # React + TypeScript
-│   ├── src/
-│   │   ├── api/                # Generated API client
-│   │   ├── hooks/useFreshness.ts  # Core freshness contract
-│   │   ├── components/         # Storyboard panels
-│   │   └── types/              # TypeScript types
-│   ├── package.json
-│   └── vite.config.ts
-├── docker-compose.yml
-├── init-db.sql
-└── Makefile
-```
-
-## Key Contracts
-
-### Snapshot Envelope (every API response)
-```json
-{
-  "meta": {
-    "generated_at": "2026-10-09T17:23:29.123Z",
-    "state_hash": "a1b2c3d4e5f6...",
-    "version": "1.0.0",
-    "snapshot_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-  },
-  "data": { /* SnapshotData */ }
-}
-```
-
-### Freshness Validation (Frontend)
-```typescript
-const { freshness } = useFreshness(fetchSnapshot, {
-  syncWindowSeconds: 300,  // Must match backend config
-  pollIntervalMs: 10_000,
-});
-
-// freshness.isFresh → boolean
-// freshness.ageSeconds → number
-// freshness.stateHash → string
-```
-
-### Stale Data Banner (Non-Obtrusive)
-- Shows when `age > syncWindowSeconds`
-- Fixed position, low visual priority
-- Dismissible but auto-reappears on next stale check
-- **No blinking, no countdowns, no modals**
-
-## Storyboard Visual Layout (Frontend Panels)
-
-| Panel | Data Source | Purpose |
-|-------|-------------|---------|
-| **Global Status Bar** | `global_status` | Spot metrics, balances, fee deltas, high-water mark |
-| **Asset Aggregation** | `asset_aggregation_series` | Stacked area: safe-haven vs active protocol |
-| **Total Value vs Baseline** | `total_value_vs_baseline` | Dual-axis: portfolio value vs token price + HW mark |
-| **Tick Bracket Hypervisor** | `tick_bracket_hypervisor` | Cross-section: price vs hard-bounded range brackets |
-| **Portfolio Deviation** | `portfolio_deviation_matrix` | Target vs actual weights, over/under-funded anchors |
-| **Structural Channels** | `structural_channels` | Regression corridors, ghosted on break |
-| **Strategy Counterfactual** | `strategy_counterfactual` | Active vs passive (cash-out) growth curves |
-| **Velocity Gas Sandbox** | `velocity_gas_sandbox` | Claimable fees vs gas break-even per contract |
-
-## Testing
+## 5. Verification & Testing
 
 ```bash
-# Brain unit tests (pure logic)
-make test-brain
+# 1. Run Frontend Contract Tests (12/12 passing)
+cd frontend
+npm test -- --run
 
-# Worker integration tests
-make test-worker
+# 2. Build Frontend Production Bundle
+npm run build
 
-# Frontend unit tests
-make test-frontend
+# 3. Check Rust Compilation & Offline SQLX Cache
+cd ../ingestion-worker
+SQLX_OFFLINE=true cargo check
 
-# Contract tests (requires running worker)
-make test-contract
-
-# All tests
-make all
+# 4. Trigger Immediate On-Chain Sync
+curl -X POST http://localhost:8080/v1/ingest
 ```
 
-## Design Principles (from `useless` & `time-tracker`)
+---
 
-1. **Pure logic in WASM** — `ingestion.wit` defines the brain. No HTTP, no DB, no time.
-2. **Deterministic envelopes** — Every response has `meta.state_hash` = SHA-256 of canonicalized data.
-3. **Decimal strings, never floats** — All amounts, USD values, prices use `string` with `description: "decimal string"`.
-4. **Freshness is a client concern** — Backend exposes timestamps; frontend validates locally.
-5. **Versioned schemas** — `meta.version` follows semver. Breaking changes = new major version.
+## 6. Cloud Deployment
 
-## Environment Variables
+For deploying to production servers, VPS (DigitalOcean / Hetzner), Fly.io, or AWS, refer to the complete **[Deployment Guide](DEPLOYMENT.md)**.
 
-| Variable | Service | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | Worker | PostgreSQL connection string |
-| `PORT` | Worker | API server port (default 8080) |
-| `VITE_API_BASE` | Frontend | API base URL (default `/v1`) |
-| `ALCHEMY_API_KEY_*` | Worker | Premium Alchemy keys (optional, can use config.yaml) |
+---
 
-## License
+## 7. Spec Contracts
 
-ISC
+Single sources of truth in `specs/core/`:
+* `specs/core/snapshot.yaml` — Canonical data model (OpenAPI 3.0)
+* `specs/core/api.yaml` — REST API interface specification
+* `specs/core/ingestion.wit` — WebAssembly Interface Types definition

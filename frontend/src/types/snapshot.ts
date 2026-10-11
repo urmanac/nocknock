@@ -39,6 +39,11 @@ export interface GlobalStatus {
   gas_to_fee_delta_usd: string;
   high_water_mark_usd: string;
   high_water_mark_date: string;
+  total_nock_amount?: string;
+  nock_floor_delta?: string;
+  total_usdc_amount?: string;
+  shot_advice_action?: string;
+  shot_advice_details?: string;
 }
 
 export interface AssetAggregationSeries {

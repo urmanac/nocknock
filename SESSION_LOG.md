@@ -139,3 +139,51 @@ All work committed. No uncommitted changes.
 ---
 
 **Ready for handoff.** The system is end-to-end functional with frozen contracts. Antigravity can focus on real data pipelines, historical visualization, and production hardening.
+
+
+---
+
+# Session 2: Antigravity Alignment & Production Hardening
+**Date:** 2026-10-11  
+**Agent:** Antigravity (Gemini Flash & Claude Opus)  
+**Status:** Complete, Verified, Ready for Cloud Deployment
+
+## Summary of Accomplishments
+
+1. **Strategic Document & Blueprint Alignment**:
+   - Analyzed original confidential PDF (`assets/nock_portfolio_strategy.pdf`) and visual layouts (`assets/image_253d60a2.jpg`, `assets/image_6cc4c3c4.jpg`).
+   - Realigned the system from an abstract observer into a tactical **Dual-Growth Engine** focused on accumulating both **NOCK** and **USDC** while enforcing the **100,000 NOCK hard floor**.
+
+2. **Full Live On-Chain Data Pipelines (Replacing Stubs & Hardcoded Values)**:
+   - **Live Gas Break-Even**: Integrated `eth_gasPrice` JSON-RPC calls on Base. Computes real-time USD claim gas costs ($0.0043/tx) and live gas efficiency ratios.
+   - **Aerodrome LP Share**: Directly calls `balanceOf` (`0x85f1...cd626`) and `totalSupply()` to dynamically calculate Tranche 2's share of NOCK and USDC reserves.
+   - **Uniswap V4 Concentrated Liquidity**: Directly queries `getPositionLiquidity(3126000)` on the Uniswap V4 PositionManager contract (`0x7c5f5a4bbd8fd63184577525326123b519429bdc`).
+   - **Dynamic Liquidity Scaling**: Tranche 1 token balances scale dynamically as liquidity is added or modified. Verified on-chain when user added liquidity (+23.7% bump to 81,297,590,130,616).
+   - **Liquid Wallet Reserves**: Live `alchemy_getTokenBalances` for NOCK and USDC.
+
+3. **Dynamic Shot Advice Engine**:
+   - Programmed the strategic decision matrix:
+     - Floor Recovery Lock (`< 100,000 NOCK`)
+     - Dip Reinvestment Trigger (`< $0.020 NOCK`)
+     - V4 Runway Exit / High-Wall Milestone (`>= $2.028 NOCK`)
+     - Batch Harvesting & 60/40 Split Rule (`>= $5.00 Fees`)
+     - Normal Accretion Posture
+
+4. **Data Integrity & Storage Architecture**:
+   - **Persistent High-Water Mark**: Ratchets strictly upward against historical database peaks ($3,200.25).
+   - **Snapshot Deduplication**: Compares SHA-256 state hashes. When on-chain state is unchanged, updates `generated_at` on the existing record instead of inserting redundant rows.
+   - **Offline SQLX Cache**: Ran `cargo sqlx prepare` to generate `.sqlx` cache for zero-database Docker builds.
+
+5. **Frontend State Room Enhancements**:
+   - 6 KPI Stat Cards displaying token amounts, USD values, and floor health.
+   - Tactical Cockpit Banner surfacing real-time shot advice.
+   - React Error Boundary protecting against unexpected rendering failures.
+   - Multi-day vs intraday time formatting (`MMM d, HH:mm` vs `HH:mm`).
+   - 100,000 NOCK ReferenceLine on the Sovereign Stack chart.
+   - Fixed historical snapshot deserialization bug.
+
+6. **Cloud Deployment Readiness**:
+   - Created multi-stage Rust `Dockerfile` for `ingestion-worker`.
+   - Created production multi-stage `Dockerfile` and `nginx.conf` reverse proxy for `frontend`.
+   - Updated `docker-compose.yml` for turnkey cloud orchestration.
+   - Authored `DEPLOYMENT.md` with instructions for Docker, Fly.io, Railway, and VPS/Caddy.

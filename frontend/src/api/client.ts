@@ -72,7 +72,7 @@ export const api = {
 
   latestSnapshot: <T = unknown>() => request<SnapshotEnvelope<T>>('/snapshot/latest'),
 
-  historicalSnapshots: <T = unknown>(params?: {
+  historicalSnapshots: (params?: {
     interval?: '1h' | '4h' | '1d' | '1w';
     limit?: number;
     before?: string;

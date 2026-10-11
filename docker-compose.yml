@@ -20,40 +20,29 @@ services:
       timeout: 5s
       retries: 5
 
-  # Ingestion Worker — polls Alchemy, runs WASM brain, serves API
+  # Ingestion Worker — Rust daemon (polls Base via Alchemy, serves REST API)
   worker:
     build:
       context: ./ingestion-worker
       dockerfile: Dockerfile
     container_name: nocknock-worker
     environment:
-      DATABASE_URL: "postgresql://postgres:postgres@db:5432/nocknock?sslmode=disable"
+      DATABASE_URL: "postgresql://postgres:postgres@db:5432/nocknock"
       PORT: "8080"
-      # Alchemy keys can be overridden at runtime
-      # ALCHEMY_API_KEY_1: ${ALCHEMY_API_KEY_1}
-      # ALCHEMY_API_KEY_2: ${ALCHEMY_API_KEY_2}
     ports:
       - "8080:8080"
     depends_on:
       db:
         condition: service_healthy
-    volumes:
-      - ./ingestion-worker/config.yaml:/app/config.yaml:ro
-      - ./brain/target/wasm32-wasip1/release/nocknock_brain.wasm:/app/brain.wasm:ro
 
-  # Frontend dev server (Vite + React)
+  # Frontend — React dashboard served via Nginx reverse proxy
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
     container_name: nocknock-frontend
     ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    environment:
-      VITE_API_BASE: "http://localhost:8080/v1"
+      - "3000:80"
     depends_on:
       - worker
 

@@ -1,39 +1,32 @@
-# Ingestion Worker Dockerfile
-# Multi-stage: build Go binary, then copy to minimal runtime
-
-# Build stage
-FROM golang:1.23-alpine AS builder
+# Multi-stage Rust build with SQLX offline mode
+FROM rust:1.80-slim-bookworm AS builder
 
 WORKDIR /app
 
-# Install build deps
-RUN apk add --no-cache git make gcc musl-dev
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 
-# Copy go.mod/go.sum first for layer caching
-COPY go.mod go.sum ./
-RUN go mod download
+COPY Cargo.toml Cargo.lock ./
+COPY .sqlx ./.sqlx
+COPY migrations ./migrations
+COPY src ./src
 
-# Copy source
-COPY . .
+ENV SQLX_OFFLINE=true
+RUN cargo build --release
 
-# Build static binary
-RUN CGO_ENABLED=1 GOOS=linux go build -o /worker ./cmd/worker
+# Minimal runtime stage
+FROM debian:bookworm-slim
 
-# Runtime stage
-FROM alpine:3.20
-
-RUN apk add --no-cache ca-certificates tzdata
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY --from=builder /worker /app/worker
-COPY config.yaml.example /app/config.yaml.example
+COPY --from=builder /app/target/release/nocknock-ingestion-worker /app/nocknock-ingestion-worker
+COPY config.yaml /app/config.yaml
 
-# Non-root user
-RUN adduser -D -g '' appuser
+# Create non-root app user
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8080
 
-ENTRYPOINT ["/app/worker"]
-CMD ["-config", "/app/config.yaml"]
+ENTRYPOINT ["/app/nocknock-ingestion-worker"]

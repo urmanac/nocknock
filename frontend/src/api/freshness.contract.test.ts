@@ -10,7 +10,9 @@
  * 5. Stale data indicator logic works correctly
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
+
+declare const process: { env: Record<string, string | undefined> };
 
 // Test configuration
 const API_BASE = process.env.VITE_API_BASE || 'http://localhost:8080/v1';
