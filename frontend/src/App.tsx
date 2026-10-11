@@ -136,7 +136,7 @@ function Dashboard() {
         };
       })
     : counterTimePoints.map((t: string, i: number) => ({
-        time: new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        time: formatSnapshotTime(t, false),
         active: parseFloat(counterActive[i] || '0'),
         passive: parseFloat(counterPassive[i] || '0'),
       }));

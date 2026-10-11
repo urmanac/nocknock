@@ -133,6 +133,17 @@ http://localhost:8080/v1/snapshot/latest
 http://localhost:8080/health
 ```
 
+### Running in Persistent Background with Tmux (Recommended)
+
+To run both the ingestion worker and frontend dev server in a persistent, detached background session:
+
+```bash
+make tmux         # Builds worker & launches both services in 'nocknock' session
+make tmux-attach  # Connects directly to session (Ctrl-b d to detach)
+make tmux-status  # Checks active session status
+make tmux-stop    # Gracefully terminates the session
+```
+
 ### Running Manually
 
 ```bash

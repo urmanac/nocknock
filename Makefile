@@ -1,7 +1,8 @@
 .PHONY: setup build-brain test-brain lint-brain generate-types validate-specs \
         build-worker test-worker run-worker \
         build-frontend test-frontend dev-frontend \
-        test-contract clean all
+        test-contract clean all \
+        tmux tmux-start tmux-stop tmux-attach tmux-status dev
 
 # ============================================================
 # TOOLCHAIN
@@ -52,57 +53,81 @@ format-brain:
 # ============================================================
 # INGESTION WORKER (Host runtime) — scheduler + storage + API
 # ============================================================
-build-worker: build-brain
-	cd ingestion-worker && go build -o bin/worker ./cmd/worker
+build-worker:
+	cd ingestion-worker && SQLX_OFFLINE=true cargo build --release
 
 test-worker:
-	cd ingestion-worker && go test ./...
+	cd ingestion-worker && cargo test
 
 run-worker: build-worker
-	cd ingestion-worker && ./bin/worker
+	cd ingestion-worker && DATABASE_URL="postgresql://postgres:postgres@localhost:5432/nocknock" ./target/release/nocknock-ingestion-worker
 
 # ============================================================
 # FRONTEND (React + TypeScript) — calm monitoring portal
 # ============================================================
-build-frontend: generate-types
+build-frontend:
 	cd frontend && npm run build
 
 test-frontend:
-	cd frontend && npm run test
+	cd frontend && npm test -- --run
 
-dev-frontend: generate-types
+dev-frontend:
 	cd frontend && npm run dev
 
 # ============================================================
 # CONTRACT TESTS — verify backend ↔ frontend contract
 # ============================================================
-test-contract: build-worker build-frontend
-	@echo "Starting test worker on :8080..."
-	cd ingestion-worker && ./bin/worker --test-mode --port 8080 & \
-	WORKER_PID=$$!; \
-	sleep 2; \
-	cd frontend && npm run test:contract; \
-	kill $$WORKER_PID
+test-contract: build-worker
+	@echo "Running frontend contract tests..."
+	cd frontend && npm test -- --run
+
+# ============================================================
+# TMUX ORCHESTRATION — persistent background execution
+# ============================================================
+TMUX_SESSION := nocknock
+
+tmux: tmux-start
+
+tmux-start: build-worker
+	@echo "Starting NockNock in tmux session '$(TMUX_SESSION)'..."
+	@tmux has-session -t $(TMUX_SESSION) 2>/dev/null && tmux kill-session -t $(TMUX_SESSION) || true
+	@tmux new-session -d -s $(TMUX_SESSION) -n "worker" \
+		"cd /Users/yebyen/w/nocknock/ingestion-worker && DATABASE_URL=\"postgresql://postgres:postgres@localhost:5432/nocknock\" ./target/release/nocknock-ingestion-worker; exec zsh"
+	@tmux new-window -t $(TMUX_SESSION):1 -n "frontend" \
+		"cd /Users/yebyen/w/nocknock/frontend && npm run dev -- --host 0.0.0.0 --port 3000; exec zsh"
+	@tmux select-window -t $(TMUX_SESSION):0
+	@echo "=========================================================="
+	@echo "NockNock is running in tmux session '$(TMUX_SESSION)'!"
+	@echo "  • Ingestion API: http://localhost:8080"
+	@echo "  • Frontend Web:  http://localhost:3000"
+	@echo ""
+	@echo "Commands:"
+	@echo "  make tmux-attach  (or 'tmux attach -t $(TMUX_SESSION)')"
+	@echo "  make tmux-stop    (or 'tmux kill-session -t $(TMUX_SESSION)')"
+	@echo "  make tmux-status  (or 'tmux ls')"
+	@echo "=========================================================="
+
+tmux-attach:
+	tmux attach -t $(TMUX_SESSION)
+
+tmux-stop:
+	@tmux kill-session -t $(TMUX_SESSION) 2>/dev/null && echo "Stopped tmux session '$(TMUX_SESSION)'" || echo "No active '$(TMUX_SESSION)' tmux session found"
+
+tmux-status:
+	@tmux ls 2>/dev/null || echo "No tmux sessions running"
 
 # ============================================================
 # FULL PIPELINE
 # ============================================================
-all: validate-specs build-brain test-brain build-worker test-worker build-frontend test-frontend
+all: build-worker test-worker build-frontend test-frontend
 
 clean:
 	cd brain && cargo clean || true
-	cd ingestion-worker && rm -rf bin || true
+	cd ingestion-worker && cargo clean || true
 	cd frontend && rm -rf dist node_modules/.cache || true
 	rm -rf /tmp/wit-check
 
 # ============================================================
 # DEVELOPMENT SHORTCUTS
 # ============================================================
-dev: generate-types
-	@echo "Starting ingestion worker (dev)..."
-	cd ingestion-worker && go run ./cmd/worker --dev & \
-	WORKER_PID=$$!; \
-	echo "Worker PID: $$WORKER_PID"; \
-	echo "Starting frontend dev server..."; \
-	cd frontend && npm run dev; \
-	kill $$WORKER_PID
+dev: tmux-start

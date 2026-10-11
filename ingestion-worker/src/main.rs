@@ -5,23 +5,23 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, Utc};
 use config::Config;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use sqlx::{types::Json as PgJson, PgPool, postgres::PgRow};
+use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use ulid::Ulid;
 use uuid::Uuid;
 
 // ============================================================
 // Configuration
 // ============================================================
 
+#[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct AppConfig {
     database_url: String,
@@ -520,7 +520,7 @@ async fn get_historical_snapshots_handler(
     Extension(state): Extension<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
-    let interval = params
+    let _interval = params
         .get("interval")
         .map(|s| s.as_str())
         .unwrap_or("1d");
@@ -994,9 +994,10 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64) -> DerivedMetric
         } else { 0.0268 }
     } else { 0.0268 };
 
-    // 2. Exact fees calculation
-    let aero_fee_usd: f64 = 0.18326 + 5.71915 * spot_price;
-    let uni_fee_usd: f64 = 0.470 + 5.27 * spot_price;
+    let aero_fee_nock = 5.71915f64;
+    let uni_fee_nock = 5.27f64;
+    let aero_fee_usd: f64 = 0.18326 + aero_fee_nock * spot_price;
+    let uni_fee_usd: f64 = 0.470 + uni_fee_nock * spot_price;
     let total_fees_usd = aero_fee_usd + uni_fee_usd;
     let gas_cost = if raw.live_gas_cost_usd > 0.0 { raw.live_gas_cost_usd } else { 0.005 };
 
@@ -1029,7 +1030,7 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64) -> DerivedMetric
     let total_stable_usd = t1_usdc + t2_usdc + wallet_usdc;
 
     let now_str = Utc::now().to_rfc3339();
-    let total_nock = t1_nock + t2_nock + t3_nock + 10.989f64;
+    let total_nock = t1_nock + t2_nock + t3_nock + aero_fee_nock + uni_fee_nock;
     let nock_floor_delta = total_nock - 100000.0;
     let current_hwm = prev_hwm.max(total_portfolio_usd);
 
