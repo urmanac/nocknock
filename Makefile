@@ -3,7 +3,7 @@
         build-frontend test-frontend dev-frontend \
         test-contract clean all \
         tmux tmux-start tmux-stop tmux-attach tmux-status dev \
-        release dist
+        release dist db-backup db-restore
 
 # ============================================================
 # TOOLCHAIN
@@ -147,3 +147,17 @@ dist: release
 	@echo "Release artifacts packaged in dist/:"
 	@ls -lh dist/
 	@echo "=========================================================="
+
+# ============================================================
+# DATABASE OPS & DISASTER RECOVERY
+# ============================================================
+db-backup:
+	@mkdir -p backups
+	@BACKUP_FILE="backups/nocknock_$$(date +%Y%m%d_%H%M%S).dump"; \
+	pg_dump -h localhost -p 5432 -U postgres -d nocknock -F c -b -f "$$BACKUP_FILE"; \
+	echo "✅ Database backup created at: $$BACKUP_FILE"
+
+db-restore:
+	@test -n "$(FILE)" || (echo "❌ Usage: make db-restore FILE=backups/nocknock_xxx.dump" && exit 1)
+	pg_restore -h localhost -p 5432 -U postgres -d nocknock --clean --if-exists $(FILE)
+	@echo "✅ Database restored from $(FILE)"

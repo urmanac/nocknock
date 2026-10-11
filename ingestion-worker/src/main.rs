@@ -406,9 +406,36 @@ async fn main() -> Result<()> {
         "🚀 NockNock ingestion worker listening on http://{}",
         listener.local_addr()?
     );
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
 
+    println!("👋 Ingestion worker shut down cleanly.");
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => println!("Received Ctrl+C, shutting down gracefully..."),
+        _ = terminate => println!("Received SIGTERM, shutting down gracefully..."),
+    }
 }
 
 // ============================================================
@@ -975,7 +1002,12 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
             liquidity_usd: format!("{:.2}", reserve_usdc * 2.0),
             fee_accrued_usd: format!("{:.4}", aero_fee_usd),
             fee_tier_bps: 30, // 0.3%
-            tick_current: Some(-198000),
+            tick_current: Some(if spot_price > 0.0 {
+                let raw_ratio = spot_price / 1e10;
+                (raw_ratio.ln() / 1.0001f64.ln()).round() as i32
+            } else {
+                -266743
+            }),
             sqrt_price_x96: None,
         }],
         concentrated_liquidity: vec![
@@ -1308,4 +1340,166 @@ async fn store_snapshot(db: &PgPool, envelope: &SnapshotEnvelope) -> Result<()> 
     .execute(db)
     .await?;
     Ok(())
+}
+
+// ============================================================
+// Unit Tests
+// ============================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_claim_fees_hex_parsing() {
+        // Simulated return from 0xd294f093 (claimFees)
+        // c0 = 256220 (0.25622 USDC with 6 decimals) -> 0x3e8dc
+        // c1 = 86924344947911169 (8.69243 NOCK with 16 decimals) -> 0x134d13b2ef42a01
+        let hex_str = "0x000000000000000000000000000000000000000000000000000000000003e8dc0000000000000000000000000000000000000000000000000134d13b2ef42a01";
+        let clean = hex_str.trim_start_matches("0x");
+        assert!(clean.len() >= 128);
+
+        let c0 = u128::from_str_radix(&clean[..64], 16).unwrap();
+        let c1 = u128::from_str_radix(&clean[64..128], 16).unwrap();
+
+        let usdc = c0 as f64 / 1e6;
+        let nock = c1 as f64 / 1e16;
+
+        assert!((usdc - 0.25622).abs() < 1e-4);
+        assert!((nock - 8.69243).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_derived_metrics_defensive_lock_under_100k() {
+        let mut raw = RawOnChainData::default();
+        raw.wallet_balances = vec![
+            WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "NOCK".to_string(),
+                token_address: "0xNOCK".to_string(),
+                amount: "80000.0".to_string(),
+                amount_usd: "2080.0".to_string(),
+                updated_at: "now".to_string(),
+            },
+            WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "USDC".to_string(),
+                token_address: "0xUSDC".to_string(),
+                amount: "100.0".to_string(),
+                amount_usd: "100.0".to_string(),
+                updated_at: "now".to_string(),
+            },
+        ];
+        // Total NOCK is 80,000 < 100,000 floor
+        let metrics = compute_derived_metrics(&raw, 2500.0);
+        assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
+    }
+
+    #[test]
+    fn test_derived_metrics_batch_harvest_above_5_dollars() {
+        let mut raw = RawOnChainData::default();
+        raw.wallet_balances = vec![
+            WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "NOCK".to_string(),
+                token_address: "0xNOCK".to_string(),
+                amount: "96000.0".to_string(),
+                amount_usd: "2496.0".to_string(),
+                updated_at: "now".to_string(),
+            },
+        ];
+        raw.live_tranche_1_nock = 4000.0;
+        raw.live_tranche_2_nock = 6000.0;
+        raw.live_aero_fee_usdc = 6.0; // Accumulated fees > $5.00
+        raw.live_gas_cost_usd = 0.005;
+
+        let metrics = compute_derived_metrics(&raw, 2500.0);
+        assert!(metrics.global_status.shot_advice_action.contains("BATCH HARVEST SHOT"));
+    }
+
+    #[test]
+    fn test_derived_metrics_hold_and_accrete() {
+        let mut raw = RawOnChainData::default();
+        raw.wallet_balances = vec![
+            WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "NOCK".to_string(),
+                token_address: "0xNOCK".to_string(),
+                amount: "96000.0".to_string(),
+                amount_usd: "2496.0".to_string(),
+                updated_at: "now".to_string(),
+            },
+        ];
+        raw.live_tranche_1_nock = 4000.0;
+        raw.live_tranche_2_nock = 6000.0;
+        raw.live_aero_fee_usdc = 0.25;
+        raw.live_aero_fee_nock = 8.0;
+
+        let metrics = compute_derived_metrics(&raw, 2500.0);
+        assert!(metrics.global_status.shot_advice_action.contains("HOLD & ACCRETE"));
+    }
+
+    #[test]
+    fn test_state_hash_determinism() {
+        let data = SnapshotData {
+            wallet_balances: vec![],
+            pool_mechanics: vec![],
+            concentrated_liquidity: vec![],
+            contract_fees: vec![],
+            derived_metrics: DerivedMetrics {
+                global_status: GlobalStatus {
+                    total_portfolio_usd: "100.00".to_string(),
+                    total_native_usd: "50.00".to_string(),
+                    total_stable_usd: "50.00".to_string(),
+                    total_fees_accrued_usd: "1.00".to_string(),
+                    total_fees_claimable_usd: "1.00".to_string(),
+                    gas_to_fee_delta_usd: "0.99".to_string(),
+                    high_water_mark_usd: "100.00".to_string(),
+                    high_water_mark_date: "2026-10-11T00:00:00Z".to_string(),
+                    total_nock_amount: "105000".to_string(),
+                    nock_floor_delta: "5000".to_string(),
+                    total_usdc_amount: "50.00".to_string(),
+                    shot_advice_action: "HOLD".to_string(),
+                    shot_advice_details: "Steady".to_string(),
+                },
+                asset_aggregation_series: AssetAggregationSeries {
+                    time_points: vec![],
+                    safe_haven_series: vec![],
+                    active_protocol_series: vec![],
+                    tranche_1_nock: vec![],
+                    tranche_2_nock: vec![],
+                    tranche_3_nock: vec![],
+                },
+                tick_bracket_hypervisor: TickBracketHypervisor {
+                    brackets: vec![],
+                    current_price: "0.026".to_string(),
+                },
+                velocity_gas_sandbox: VelocityGasSandbox {
+                    contracts: vec![],
+                },
+                portfolio_deviation_matrix: PortfolioDeviationMatrix {
+                    allocations: vec![],
+                },
+                strategy_counterfactual: StrategyCounterfactual {
+                    time_points: vec![],
+                    active_portfolio_series: vec![],
+                    passive_baseline_series: vec![],
+                },
+                structural_channels: StructuralChannels {
+                    channels: vec![],
+                },
+                total_value_vs_baseline: TotalValueVsBaseline {
+                    time_points: vec![],
+                    portfolio_value_series: vec![],
+                    high_water_mark_series: vec![],
+                    token_price_series: vec![],
+                },
+            },
+        };
+
+        let hash1 = compute_state_hash(&data);
+        let hash2 = compute_state_hash(&data);
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash1.len(), 64);
+    }
 }
