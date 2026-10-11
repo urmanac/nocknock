@@ -211,9 +211,32 @@ make dist
 
 # Build individual target artifacts
 make build-brain    # Compiles wasm32-wasip1 deterministic brain (134 KB)
-make build-worker   # Compiles release ingestion worker binary
+make build-worker   # Compiles release ingestion worker and MCP binaries
 make build-frontend # Compiles optimized production web bundle
+
+# Run Model Context Protocol (MCP) server for local AI agents
+make run-mcp
 ```
+
+### Model Context Protocol (MCP) Configuration
+
+To connect NockNock to Claude Desktop, Gemini Antigravity, Cursor, or Mecris, add the server to your client configuration:
+
+```json
+{
+  "mcpServers": {
+    "nocknock": {
+      "command": "/path/to/nocknock/ingestion-worker/target/release/nocknock-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+**Exposed MCP Tools:**
+- `get_portfolio_state`: Real-time sovereign balances, NOCK floor buffer delta, and tranche allocations.
+- `get_shot_advice`: Dynamic tactical directives (Hold & Accrete, Batch Harvest, Dip Reinvestment).
+- `simulate_claim_fees`: Simulated gas expenditure vs gross/net claimable yields.
 
 Automated GitHub Actions workflows (`.github/workflows/ci.yml`) test all three tiers on every pull request and publish GitHub Releases with release notes extracted from [CHANGELOG.md](CHANGELOG.md) upon pushing version tags (`git tag v0.1.0`).
 

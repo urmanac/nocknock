@@ -142,11 +142,15 @@ dist: release
 	@mkdir -p dist
 	@cp brain/target/$(RUSTUP_TARGET)/release/nocknock_brain.wasm dist/ 2>/dev/null || cp brain/target/wasm32-wasip1/release/nocknock_brain.wasm dist/ 2>/dev/null || true
 	@cp ingestion-worker/target/release/nocknock-ingestion-worker dist/
+	@cp ingestion-worker/target/release/nocknock-mcp dist/
 	@tar -czf dist/nocknock-frontend.tar.gz -C frontend/dist .
 	@echo "=========================================================="
 	@echo "Release artifacts packaged in dist/:"
 	@ls -lh dist/
 	@echo "=========================================================="
+
+run-mcp:
+	cd ingestion-worker && ./target/release/nocknock-mcp
 
 # ============================================================
 # DATABASE OPS & DISASTER RECOVERY

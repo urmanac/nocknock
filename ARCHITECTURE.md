@@ -41,11 +41,25 @@ The system delivers real-time monitoring and tactical shot advice across multipl
 ---
 
 ### Tier 2: Agent Desktop & Model Context Protocol (MCP) Mode
-* **Rationale**: In an AI-assisted or restricted execution environment, an agent or desktop client may not have direct access or credentials to the backend database.
-* **Architecture**:
-  * An MCP server tool layer exposes standardized commands (e.g., `get_portfolio_state`, `get_shot_advice`, `simulate_harvest_efficiency`).
-  * The MCP adapter can read from the Tier 1 API when online, or connect through a local socket or sqlite/snapshot file without requiring full PostgreSQL server administration.
+* **Rationale**: In an AI-assisted or restricted execution environment, an agent or desktop client (e.g. Claude Code, Gemini Antigravity, Mecris daemon) may not have direct access or credentials to the backend database.
+* **Architecture (`nocknock-mcp`)**:
+  * An MCP server tool layer communicating via `stdio` JSON-RPC 2.0.
+  * Standardized MCP Tools:
+    * `get_portfolio_state`: Returns current total sovereign portfolio value (USD), NOCK floor buffer delta, native token balance, and tranche 1/2 allocations.
+    * `get_shot_advice`: Returns the active tactical directive (`HOLD & ACCRETE`, `BATCH HARVEST SHOT`, `DIP REINVESTMENT SHOT`, `DEFENSIVE LOCK`, etc.) along with current gas cost and accrued fee ROI.
+    * `simulate_claim_fees`: Simulates gas expenditure vs net yield accrued in Aerodrome and Uniswap V4 tranches.
+  * **Zero-DB Dual Fallback**:
+    1. Primary: Queries local Axum API endpoint `http://127.0.0.1:8080/v1/snapshot/latest`.
+    2. Fallback: Directly queries Base mainnet RPC (`eth_call`) without requiring PostgreSQL or server worker.
 * **Degradation Trigger**: Ingestion worker is running locally or remotely, but direct SQL ports are closed or firewalled.
+
+---
+
+### On-Chain Dynamic Gas Spot Pricing
+* **On-Chain Oracle**: Rather than relying on static ETH price assumptions (e.g. $2,500) or off-chain API dependencies, the system queries the Aerodrome `vAMM-WETH/USDC` pool (`0x88A43bbDF9D098eEC7bCEda4e2494615dfD9bB9C`) using read-only `getReserves()` (`0x0902f1ac`).
+* **Formula**:
+  $$\text{ETH Price (USD)} = \frac{r_1 (\text{USDC}) / 10^6}{r_0 (\text{WETH}) / 10^{18}}$$
+* **Resilience**: The query is wrapped with exponential backoff and jitter to protect against RPC rate limits (HTTP 429) or transient network spikes. If RPC is completely unreachable, it degrades safely to the conservative $2,500 peg.
 
 ---
 
