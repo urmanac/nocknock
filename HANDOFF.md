@@ -2,7 +2,7 @@
 
 > **"Observe and Protect"** — Sovereign Asset State Room & Dual-Growth Engine for NOCK and USDC on Base.
 
-This hand-off document captures the architectural foundation established in the **v0.1.0** inaugural release, identifies the highest-leverage next priorities, analyzes key missed opportunities, outlines critical success drivers, and articulates the grand strategic vision: **transitioning NockNock to an Urbit-native, multi-tenant sovereign operating system**.
+This hand-off document captures the architectural foundation established in the **v0.1.0** inaugural release, defines our pragmatic single-golden-path execution roadmap, outlines our tax-compliance integration model, and articulates the long-term vision: **an Urbit-native, multi-tenant sovereign operating cockpit**.
 
 ---
 
@@ -14,64 +14,100 @@ With the publication of [Release v0.1.0](https://github.com/urmanac/nocknock/rel
 3. **Frontend Monitoring Room (`frontend/`)**: React/Vite dashboard featuring 6 KPI metrics cards, the 5-tier Tactical Shot Cockpit, and 7 Recharts analytical time-series curves.
 4. **Operational Rigor**:
    - `main` branch protection with mandatory PR protocol.
-   - Zero-deprecation GitHub Actions CI pipeline aligned with Node 24 and pinned modern actions (`checkout@v7`, `upload-artifact@v7`, `download-artifact@v8`, `action-gh-release@v3`).
+   - Pinned modern CI runners (`ubuntu-24.04`) and actions (`checkout@v7`, `upload-artifact@v7`, `download-artifact@v8`, `action-gh-release@v3`) with zero deprecation notices.
    - Documented operational tribal knowledge in [`AGENTS.md`](AGENTS.md), release procedures in [`RELEASE.md`](RELEASE.md), and dependency roadmap in [`DEPENDENCIES.md`](DEPENDENCIES.md).
 
 ---
 
-## 2. What to Work on First (Immediate Next Focus)
+## 2. The Golden Path: Web Cockpit + WalletConnect (Uniswap Mobile App)
 
-If given the immediate baton to continue, the two highest-impact engineering directions are:
+Rather than adding the operational complexity and maintenance surface of a separate native Android app, we focus on **a single, elegant Golden Path**:
 
-### A. Edge Mobile Android Client (`android/`)
-* **Context**: The WASM brain (`nocknock_brain.wasm`) was explicitly architected for edge evaluation, following the pattern proven in `~/w/mecris/tools/moon-phase-clock`.
-* **Action**:
-  - Scaffold a native Jetpack Compose Android client bundling `nocknock_brain.wasm` into assets.
-  - Implement on-device Extism/Wasmer execution so sovereign holders can verify their invariant floor and tick math completely offline.
-  - Establish a 3-tier sync pipeline: primary Axum REST API ➔ secondary Alchemy Base JSON-RPC ➔ tertiary direct public Base node (`https://mainnet.base.org`).
+```
+   ┌─────────────────────────────────────────────────────────────┐
+   │                  NOCKNOCK WEB DASHBOARD                     │
+   │               (Single Golden Path Cockpit)                  │
+   └───────────────┬─────────────────────────────┬───────────────┘
+                   │                             │
+    1. Scan QR via │ WalletConnect               │ 2. Tactical Trigger
+       Uniswap App │ (Wagmi / Viem / Reown)      │    "EXECUTE BATCH HARVEST"
+                   ▼                             ▼
+   ┌────────────────────────────────┐  ┌──────────────────────────────────┐
+   │      UNISWAP MOBILE APP        │  │     MULTICALL TX GENERATOR       │
+   │     (Android / iOS in pocket)  │  │                                  │
+   │   - Holds keys & biometrics    │  │  - Aerodrome claimFees()         │
+   │   - Reviews pre-built payload  │  │  - Single sovereign wallet       │
+   │   - Signs transaction with 1 tap│  │  - Clean tax-tagged metadata    │
+   └────────────────────────────────┘  └─────────────────┬────────────────┘
+                                                         │
+                                                         ▼
+                                          Base Mainnet Settlement
+```
 
-### B. 1-Click Tactical Shot Execution (Safe & EIP-1193 Bridge)
-* **Context**: The Tactical Advice Engine currently calculates and displays postures like **Batch Harvest**, **Dip Reinvestment**, and **Range Exit Flashpoint**, but requires manual contract interaction.
-* **Action**:
-  - Integrate Safe (formerly Gnosis Safe) transaction batching and EIP-1193 hardware wallet connect (Ledger / Trezor) into the dashboard.
-  - Enable the operator to execute a recommended batch harvest and automatically enforce the 60/40 Split Rule (40% tax escrow, 60% vault growth capital) with a single signature.
+### 2.1 Why We Don't Build a Wallet
+Sovereign operators already carry battle-tested, secure mobile wallets with biometric protection (specifically the **Uniswap mobile app**). NockNock will never handle private keys or custody funds. Instead, we bridge the web cockpit directly to the phone via **WalletConnect**.
 
----
-
-## 3. Biggest Missed Opportunities & Low-Hanging Fruit
-
-1. **Decentralized Multi-RPC Fallback Chain**:
-   - Today, the worker relies primarily on Alchemy keys. A sovereign tool should never have a single point of failure. Introducing a round-robin / fallback RPC client that automatically cascades to Infura, QuickNode, Ankr, or public Base nodes eliminates API vendor lock-in and quota downtime.
-2. **Audio Cues & Sovereign Siren Alerts**:
-   - NockNock is designed for calm observation, meaning the user should not have to watch the screen constantly. Adding subtle Web Audio chimes when claimable fees cross the $5.00 threshold, or high-priority visual/audio sirens if total reserves approach the invariant buffer, turns passive monitoring into effortless awareness.
-3. **Multi-Wallet Sovereign Aggregation**:
-   - Large holders typically partition holdings across multiple hardware devices, cold multi-sigs, and timelocks. Adding support for tracking an array of cold storage addresses allows the state room to compute the true aggregate sovereign posture across an entire institution or individual balance sheet.
-4. **Offline Database Migration & SQLx 0.9 Upgrade**:
-   - `sqlx-postgres v0.7.4` has a minor compiler warning regarding future Rust edition syntax. Upgrading to SQLx `0.9` and regenerating `.sqlx/` query cache with a live test PostgreSQL database will keep the backend on the cutting edge of async Rust.
-
----
-
-## 4. Key Drivers for Success
-
-### For the Portfolio:
-* **The Treasury Floor Invariant**: The untouchable treasury floor must remain absolute. No yield optimization, high-risk leverage, or speculative pool should ever jeopardize this sovereign foundation.
-* **Disciplined Yield Recycling (The 60/40 Split)**: As trading volume spikes on Base, fee accretion from the Aerodrome vAMM and Uniswap V4 tranches must systematically fund tax reserves (40%) and dry powder USDC (60%) for accumulation during market contractions.
-* **Strategic Range Awareness**: Recognizing when the V4 LP runway is transitioning into 100% USDC and knowing when to reconstruct single-sided high walls rather than chasing out-of-range volatility.
-
-### For the Project & Community:
-* **Progressive Degradation as an Unshakeable Moat**: A tool that requires a cloud server to function is fragile. A tool that operates as a Full Cloud Server, degrades gracefully to a Desktop MCP Agent, and further degrades to an Offline Android Handset with zero external dependencies will endure forever.
-* **Radical Simplicity & Calm Interface**: NockNock must resist the temptation to become another loud, flashing, cluttered DeFi terminal. Its power is calmness, deterministic truth, and sovereign protection.
-* **Autonomous Orchestration Integrity**: Any future AI agent or human contributor working on this repository should treat `AGENTS.md` and `RELEASE.md` as sacred covenants: preserve branch protection, verify pre-flight test suites, and only release when every check is undeniably green.
+### 2.2 1-Click Tactical Execution Flow
+1. **Connection via QR Code**:
+   - The operator opens the web dashboard on desktop or mobile browser and clicks **"Connect Wallet"**.
+   - Scanning the WalletConnect QR code using the Uniswap app instantly links the active sovereign address.
+2. **Tactical Action Proposal**:
+   - When fees cross the threshold ($5.00+) or rebalancing is indicated, the cockpit generates a suggested transaction payload.
+3. **Mobile Biometric Signing**:
+   - The Uniswap mobile app prompts the operator with the pre-assembled Base transaction details.
+   - The operator verifies and signs with fingerprint / Face ID in one tap.
 
 ---
 
-## 5. The Grand Vision: Urbit Native (`%nocknock`) & Multi-Tenant Sovereign Parameterization
+## 3. Sovereign Bookkeeping & Single-Address Virtual 60/40 Partition
 
-### 5.1 Why Urbit is the Natural Spiritual & Technical Home
+### 3.1 Protection Without Friction
+There is **no separate physical tax escrow cold address**. The active trading scope of the system is strictly focused on **NOCK (and occasional ETH/WETH routing)**. All funds reside in the single operator address we have access to.
+
+The purpose of the bookkeeping engine is simple and essential: **to observe and mitigate the risk that the scheme will not be able to fund its own tax obligations**.
+
+To achieve this without locking funds or adding transfer overhead:
+* **The 40% Tax Pre-Funding Buffer**: As fee harvests occur, 40% of realized revenue is virtually earmarked on the dashboard as locked for tax liability.
+* **The 60% Growth Dry Powder**: The remaining 60% is earmarked as liquid dry powder for tactical dip accumulation.
+* **Invariant Guard**: The cockpit warns if a suggested dip deployment would compromise the 40% tax reserve buffer or breach the untouchable treasury floor.
+
+This keeps the bookkeeping simple and protective today, with room for sophisticated elaboration later.
+
+---
+
+## 4. Tax Compliance & The Koinly "Tie-Out" Test Suite
+
+NockNock does not intend to become a complex standalone tax calculation hub. All operator wallets are tracked in compliance with the law on platforms like **[Koinly](https://koinly.io)**. 
+
+Our mission is to build the machine that interfaces seamlessly with that machine:
+1. **Automated "Tie-Out" Test Suite**:
+   - Build a rigorous series of accounting verification tests proving that NockNock's internal sub-ledger, on-chain Base state, and Koinly-formatted export logs mathematically "tie out" cleanly.
+   - When the operator interfaces with their CPA next year, the records tie out without surprises, confusion, or forensic reconciliation.
+2. **Standardized Transaction Tagging**:
+   - Classify fee harvests unambiguously as staking/yield rewards.
+   - Ensure liquidity pool range adjustments are not misconstrued by automated tax aggregators as taxable disposals.
+
+---
+
+## 5. Visual Identity & UI Overhaul (Differentiating v0.2.0 from v0.1.0)
+
+A core design mandate for the next release: **it must be impossible to mistake a NockNock v0.1.0 dashboard for a v0.2.0 dashboard**.
+
+The visual cockpit will receive a purposeful overhaul:
+* **Dual-Dial Resource Gauges**: Visually distinct real-time dials for the 40% Tax Reserve Buffer vs 60% Growth Dry Powder.
+* **WalletConnect Session Banner**: High-visibility paired session status with Uniswap mobile app link telemetry.
+* **Tax Obligation Safeguard Indicator**: A calm, prominent health signal confirming that all prospective tax liabilities remain fully pre-funded.
+* **Distinct Aesthetic Palette**: Elevated typography and canvas styling reflecting the shift from passive observation to an actionable tactical state room.
+
+---
+
+## 6. The Grand Vision: Urbit Native (`%nocknock`) & Multi-Tenant Sovereign Parameterization
+
+### 6.1 Why Urbit is the Natural Spiritual & Technical Home
 
 The project is called **NockNock**. Its spiritual namesake is **Nock**: Urbit's pure, axiomatic functional bytecode. 
 
-Today's crypto tooling is trapped in a false dichotomy: either users rely on centralized, surveillance-heavy web frontends (hosted on AWS/Cloudflare with centralized analytics), or they run complex terminal scripts that require constant sysadmin maintenance.
+Today's crypto tooling is trapped in a false dichotomy: either users rely on centralized, surveillance-heavy web frontends (hosted on AWS/Cloudflare with third-party trackers), or they run complex terminal scripts that require constant sysadmin maintenance.
 
 **Urbit solves this at the root**:
 - **Sovereignty**: An Urbit ship (`~sampel-palnet`) is a permanent, cryptographically owned personal server. Running NockNock on a ship means the state room lives inside the operator's own sovereign computer, completely private, immune to cloud deplatforming, and accessible via secure Eyre HTTP routing (`https://your-ship.arvo.network/apps/nocknock`).
@@ -105,34 +141,24 @@ Today's crypto tooling is trapped in a false dichotomy: either users rely on cen
 
 ---
 
-### 5.2 Beyond the Single Operator: Multi-Tenant Sovereign Parameterization
+### 6.2 Multi-Tenant Sovereign Parameterization
 
-NockNock v0.1.0 demonstrated proof-of-concept for a single operator tracking 100,000 NOCK and specific Base LP tranches. To fulfill its destiny, NockNock must become **multi-tenant and fully parameterized**, capable of serving diverse operators, treasuries, DAOs, and syndicates with distinct goals.
-
-#### Parameterized Profile Schema
-Each operator configures an independent **Sovereign Profile**:
+NockNock v0.1.0 demonstrated proof-of-concept for a single operator tracking a specific asset allocation on Base. To fulfill its broader utility, NockNock will support **multi-tenant, parameterized sovereign profiles** for diverse operators, treasuries, and syndicates:
 
 1. **Diverse Asset Pairs**:
-   - Any sovereign pair on Base or EVM: `$NOCK / USDC`, `$NOCK / WETH`, `WETH / USDC`, or custom Urbit community tokens.
+   - Any sovereign pair on Base or EVM: `$NOCK / USDC`, `$NOCK / WETH`, `WETH / USDC`, or community governance tokens.
 2. **Customizable Invariant Floor**:
-   - Not hardcoded to 100k: an operator can configure `floor_amount` (e.g. 10,000 NOCK, 100,000 NOCK, 1,000,000 NOCK, or 50 ETH) and the defensive trigger threshold.
+   - User-defined floor amounts (e.g. 10,000 NOCK, 100,000 NOCK, 1,000,000 NOCK, or 50 ETH) and custom defensive trigger bands.
 3. **Flexible Strategic Tranches**:
-   - Tranche 1 (Concentrated LP): Arbitrary Uniswap V3/V4 position IDs, tick ranges, and fee tiers.
-   - Tranche 2 (Volatile / Yield Engine): Aerodrome vAMM/sAMM, Slipstream, or Curve pool addresses.
-   - Tranche 3 (Treasury Floor): Protected cold storage holdings.
-   - Tranche 4 (Liquid Growth Buffer): Stablecoin or base asset dry powder.
+   - Configurable Uniswap V3/V4 position IDs, Aerodrome vAMM/sAMM pools, Slipstream, or Curve allocations.
 4. **Configurable Tactical Directives**:
-   - Custom Harvest Thresholds (e.g. $5.00, $25.00, or $100.00).
-   - Custom Split Rules (e.g. 60/40, 80/20, or 50/50 growth vs tax reserve allocation).
-   - Custom Accumulation Bands (dip re-entry target percentages).
-5. **Multi-Wallet Aggregation**:
-   - An array of addresses per profile (e.g. `cold_multisig`, `hot_lp_deployer`, `timelock_reserve`), calculating aggregate portfolio posture while maintaining individual tranche tracking.
+   - Custom harvest thresholds ($5.00 vs $50.00+).
+   - Custom virtual split rules (60/40, 80/20, 50/50).
+   - Custom accumulation dip targets.
 
 ---
 
-### 5.3 Hoon Architecture (`sur/nocknock.hoon` & `app/nocknock.hoon`)
-
-On Urbit, this translates into clean, elegant functional data structures:
+### 6.3 Hoon Architecture (`sur/nocknock.hoon`)
 
 ```hoon
 :: sur/nocknock.hoon
@@ -160,75 +186,62 @@ On Urbit, this translates into clean, elegant functional data structures:
   $:  id=profile-id
       owner=@p
       title=@t
-      wallets=(list @ux)
+      active-wallet=@ux
       treasury-floor=invariant
-      split=split-rule
+      virtual-split=split-rule
       harvest-threshold-usd=@ud
       tranches=(list tranche)
-  ==
-::
-+$  portfolio-snapshot
-  $:  timestamp=@da
-      profile=profile-id
-      net-worth-usd=@rs
-      floor-buffer-delta=@sd
-      claimable-yield-usd=@rs
-      current-advice=shot-advice
   ==
 --
 ```
 
 ---
 
-### 5.4 Federated Sovereign Syndicates over Ames
+### 6.4 Federated Sovereign Syndicates over Ames
 
 When multiple ships run `%nocknock`, they can coordinate over Urbit's encrypted peer-to-peer network (**Ames**):
-
-1. **P2P Collective Floor Defense**:
-   - Independent ships holding `$NOCK` or LP positions can form a **Sovereign Syndicate**.
-   - If an anomalous market sell-off threatens systemic liquidity, ships can coordinate defensive dip-reinvestments or pool rebalances without relying on a centralized Discord or Telegram channel.
-2. **Zero-Knowledge Sovereign Attestation**:
-   - A planet can cryptographically prove to a syndicate ship that it maintains its >= 100,000 NOCK hard floor invariant, unlocking syndicate governance or cooperative yield strategies without ever revealing its underlying wallet addresses or total wealth.
-3. **Decentralized Telemetry Gossip**:
-   - Ships distribute verified Base gas prices, dynamic pool yields, and fee accretion data peer-to-peer, eliminating reliance on proprietary indexing APIs.
+1. **Collective Liquidity Defense**: Independent ships holding `$NOCK` or LP positions coordinate defensive dip-reinvestments or pool rebalances without centralized channels.
+2. **Zero-Knowledge Sovereign Attestation**: A planet cryptographically proves it maintains its invariant floor without revealing its underlying wallet addresses or private balances.
+3. **Decentralized Telemetry Gossip**: Ships distribute Base gas prices and dynamic fee data peer-to-peer.
 
 ---
 
-## 6. Phased Evolution Roadmap
+## 7. Phased Evolution Roadmap
 
 ```mermaid
 flowchart LR
     subgraph Phase1["v0.1.0 (Live)"]
         A1["Pure WASM Brain"]
         A2["Axum Ingestion Worker"]
-        A3["Single Operator Cockpit"]
+        A3["Calm Monitoring Cockpit"]
     end
 
-    subgraph Phase2["v0.2.0 (Multi-Tenant Core)"]
-        B1["Parameterized Profile Studio"]
-        B2["Multi-Wallet Aggregator"]
-        B3["Configurable Invariants & Split Rules"]
+    subgraph Phase2["v0.2.0 (Golden Path Execution)"]
+        B1["WalletConnect / Uniswap Mobile App"]
+        B2["1-Click Harvest Execution"]
+        B3["Virtual 60/40 Balance Sheet Ledger"]
+        B4["Koinly Tie-Out Test Suite"]
+        B5["Complete Visual UI Redesign"]
     end
 
-    subgraph Phase3["v0.3.0 (Urbit Native)"]
+    subgraph Phase3["v0.3.0 (Urbit Native & Profiles)"]
         C1["Clay Desk %nocknock"]
-        C2["Gall Agent & Eyre Docket"]
-        C3["Direct Iris RPC Queries"]
+        C2["Gall Agent & Eyre Landscape"]
+        C3["Parameterized Profile Studio"]
     end
 
-    subgraph Phase4["v0.4.0 (Sovereign Syndicates)"]
-        D1["Ames P2P Coordination"]
-        D2["Collective Liquidity Defense"]
-        D3["ZK Sovereign Attestation"]
+    subgraph Phase4["v0.4.0 (Ames Syndicates)"]
+        D1["P2P Collective Defense"]
+        D2["ZK Floor Attestation"]
     end
 
     Phase1 --> Phase2 --> Phase3 --> Phase4
 ```
 
 * **v0.1.0** *(Shipped 2026-10-11)*: Sovereign single-tenant foundation, WASM brain, MCP adapter, and calm React dashboard.
-* **v0.2.0** *(Next)*: Multi-tenant database partitioning, Parameter Studio UI, multi-wallet aggregator, and customizable strategic invariants.
-* **v0.3.0**: Native Urbit `%nocknock` Desk distribution, Hoon Gall agent, Iris on-chain polling, and Docket Landscape integration.
-* **v0.4.0**: Ames Federated Syndicates, collective liquidity defense pacts, and zero-knowledge sovereign attestations.
+* **v0.2.0** *(Next)*: Golden Path Web Cockpit + WalletConnect (Uniswap Mobile App), 1-click execution, virtual 60/40 sub-ledger, automated Koinly "tie-out" test suite, and complete visual UI overhaul.
+* **v0.3.0**: Native Urbit `%nocknock` Desk distribution, Hoon Gall agent, Iris on-chain polling, and Parameterized Profiles.
+* **v0.4.0**: Ames Federated Syndicates and collective liquidity defense protocols.
 
 ---
 

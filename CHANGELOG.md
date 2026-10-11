@@ -7,47 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Pre-Release Gates & Hardening (Must-Haves before v0.1.0 tag)
-- [x] **Dynamic Live Gas Token Pricing**: Query live ETH/USD price dynamically via Aerodrome vAMM-WETH/USDC (`0x88A43bbDF9D098eEC7bCEda4e2494615dfD9bB9C`) `getReserves()` on Base to replace static gas USD conversion.
-- [x] **Dynamic `tick_current` Query**: Derived real-time active tick dynamically from on-chain spot price ratio rather than static fallback tick values.
-- [x] **Worker Unit & Integration Test Suite**:
-  - [x] Unit test parsing `0xd294f093` (`claimFees`) return data hex buffers.
-  - [x] Unit tests for tactical advice engine: batch harvesting, defensive floor lock, hold & accrete.
-  - [x] Unit test for deterministic SHA-256 state hashing.
-  - [x] Unit test for dynamic on-chain ETH/USD reserve decoding.
-- [x] **Database Migration & Disaster Recovery Tooling**:
-  - [x] Added `make db-backup` and `make db-restore` targets using PostgreSQL dump tooling.
-- [x] **Graceful Shutdown**: Implemented Unix signal handling (`SIGTERM`/`SIGINT`) in Axum server with in-flight worker draining.
-- [x] **RPC Rate-Limit & Backoff Resilience**: Added exponential backoff and jitter for Alchemy JSON-RPC requests (`post_rpc_with_retry`) to handle HTTP 429 and transient network timeouts.
+## [0.2.0] - Unreleased
 
-### Tier 2: Agent Desktop & Model Context Protocol (MCP) Adapter
-- [x] **MCP Server Binary (`nocknock-mcp`)**: Implemented dedicated Model Context Protocol server communicating over `stdio`:
-  - `get_portfolio_state`: Returns current live sovereign balance, NOCK floor buffer delta, and tranche allocations.
-  - `get_shot_advice`: Returns active tactical advice (Hold & Accrete, Batch Harvest, Dip Reinvestment).
-  - `simulate_claim_fees`: Simulates gas vs fee return for active tranches.
-- [x] **Zero-DB Mode for Agents**: MCP server queries the local Axum API (`/v1/snapshot/latest`) with seamless fallback to direct Base JSON-RPC when running without PostgreSQL or worker.
+### Golden Path: Web Cockpit & Uniswap Mobile App Execution
+- [ ] **WalletConnect Integration (AppKit / Wagmi / Viem)**:
+  - [ ] Embed QR code modal on web dashboard allowing instant pairing with the Uniswap mobile app on Android/iOS.
+  - [ ] Auto-reconnect active session across browser refreshes without credential or private key exposure.
+- [ ] **1-Click Tactical Multicall Generator**:
+  - [ ] Direct multicall encoder on Base: construct Aerodrome `claimFees()` call for active pool (`0x85f1...626`).
+  - [ ] Push transaction request directly to the paired Uniswap app for biometric (Fingerprint / Face ID) operator confirmation.
+  - [ ] Real-time Base gas quote display and execution feedback loop.
 
-### Tier 3: Edge Mobile / Android Moon Clock Model (`moon-phase-clock`)
-- [ ] **Android App Scaffold (`android/`)**:
-  - Initialize Jetpack Compose Android application mirroring `~/w/mecris/tools/moon-phase-clock`.
-  - Configure Gradle with Kotlin Multiplatform or JNI to bundle `nocknock_brain.wasm` into assets.
-- [ ] **WASM Edge Runtime**:
-  - Wire Extism or Wasmer Android SDK to execute `nocknock_brain.wasm` directly on device.
-  - Implement offline deterministic math: tick calculations, LP invariant $k=x \cdot y$, and 100k floor verification.
-- [ ] **Decentralized RPC Fallback Pipeline**:
-  - Primary: REST API sync (`/v1/snapshot/latest`).
-  - Secondary: Alchemy Base JSON-RPC client on Android.
-  - Tertiary: Public Base node (`https://mainnet.base.org`) direct `eth_call` queries when no API key is provided.
+### Sovereign Bookkeeping & 60/40 Balance Sheet Partition
+- [ ] **Virtual Tax Reserve Sub-Ledger**:
+  - [ ] Maintain the 60/40 Split Rule as an internal accounting allocation within the single sovereign wallet (no separate physical address required).
+  - [ ] Virtual Tax Escrow Buffer: earmark 40% of realized fee harvest revenue to protect the operator's forward tax obligations.
+  - [ ] Liquid Growth Dry Powder: track 60% of harvested yield available for tactical market dip accumulation.
+  - [ ] Over-allocation Guardrail: cockpit alert if a manual or tactical move would dip into the 40% tax reserve buffer or breach the treasury floor invariant.
 
-### Sovereign Automation & Execution Engine (Legendary / Vision)
-- [ ] **1-Click Execution via Hardware Signer / Safe**:
-  - Integrate Safe (formerly Gnosis Safe) multisig transaction generation for batch harvesting and rebalancing.
-  - Support Ledger / Trezor / EIP-1193 wallet connect directly from the dashboard to execute tactical shots without manual contract interaction.
-- [ ] **Sovereign Multi-Wallet Aggregator**:
-  - Aggregate balances across multiple cold storage addresses, escrow contracts, and timelocks into a unified Sovereign Stack view.
-- [ ] **Real-Time Sound & Push Alerts**:
-  - Non-intrusive audio cues for Batch Harvest availability ($5.00+ fee threshold).
-  - High-priority sovereign sirens if total NOCK stack ever approaches the 100,000 hard floor buffer.
+### Tax Compliance & Koinly Audit Integration
+- [ ] **Koinly-Ready Tax Export Engine**:
+  - [ ] Generate standardized, pre-formatted CSV and JSON exports adhering strictly to Koinly custom import specifications.
+  - [ ] Classify on-chain events unambiguously: tag fee claims as `Income / Staking Reward`, tag pool rebalances as non-taxable liquidity transfers.
+  - [ ] Expose `/v1/tax/export?format=koinly` endpoint on Axum backend.
+- [ ] **"Tie-Out" Test Suite & Historical Verification**:
+  - [ ] Automated accounting validation tests: prove that local ledger state, on-chain balances, and Koinly-formatted transaction histories mathematically "tie out" without unexplained discrepancies.
+  - [ ] Audit preparation package for CPA review, ensuring peace of mind and zero tax surprises.
+
+### Visual Identity & UI Overhaul (Distinguishing v0.2.0 from v0.1.0)
+- [ ] **State Room Visual Redesign**:
+  - [ ] Complete UI refresh making it impossible to confuse a v0.1.0 dashboard with a v0.2.0 dashboard.
+  - [ ] Dual-Dial Cockpit: distinct visual gauges for the 40% Tax Reserve Buffer and 60% Growth Dry Powder.
+  - [ ] WalletConnect Session Banner with live connection status and paired wallet indicator.
+  - [ ] Tax Health & Invariant Safeguard indicator (clear visual reassurance that tax obligations are covered).
+
+### Multi-Tenant Architecture & Urbit Roadmap
+- [ ] **Parameterized Operator Profiles (Backend & Schema)**:
+  - [ ] Migrate single-wallet config to multi-tenant profile schema in `specs/core/snapshot.yaml` and `api.yaml`.
+  - [ ] Parameterized invariant floors (custom minimum balance target beyond 100k).
+  - [ ] Configurable tranche allocations and custom split ratios (60/40, 80/20, 50/50).
+- [ ] **Urbit Native (%nocknock Desk Blueprint)**:
+  - [ ] Hoon data structures in `sur/nocknock.hoon`.
+  - [ ] Gall agent state skeleton in `app/nocknock.hoon`.
 
 ## [0.1.0] - 2026-10-11
 
