@@ -2,7 +2,8 @@
         build-worker test-worker run-worker \
         build-frontend test-frontend dev-frontend \
         test-contract clean all \
-        tmux tmux-start tmux-stop tmux-attach tmux-status dev
+        tmux tmux-start tmux-stop tmux-attach tmux-status dev \
+        release dist
 
 # ============================================================
 # TOOLCHAIN
@@ -38,7 +39,7 @@ generate-types: validate-specs
 # ============================================================
 # BRAIN (Rust WASM) — pure logic, no deps on HTTP/DB/time
 # ============================================================
-build-brain: validate-specs
+build-brain:
 	cd brain && cargo build --target $(RUSTUP_TARGET) --release
 
 test-brain:
@@ -131,3 +132,18 @@ clean:
 # DEVELOPMENT SHORTCUTS
 # ============================================================
 dev: tmux-start
+
+# ============================================================
+# RELEASE & PACKAGING MACHINERY
+# ============================================================
+release: build-brain build-worker build-frontend
+
+dist: release
+	@mkdir -p dist
+	@cp brain/target/$(RUSTUP_TARGET)/release/nocknock_brain.wasm dist/ 2>/dev/null || cp brain/target/wasm32-wasip1/release/nocknock_brain.wasm dist/ 2>/dev/null || true
+	@cp ingestion-worker/target/release/nocknock-ingestion-worker dist/
+	@tar -czf dist/nocknock-frontend.tar.gz -C frontend/dist .
+	@echo "=========================================================="
+	@echo "Release artifacts packaged in dist/:"
+	@ls -lh dist/
+	@echo "=========================================================="

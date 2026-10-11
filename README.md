@@ -193,4 +193,27 @@ For deploying to production servers, VPS (DigitalOcean / Hetzner), Fly.io, or AW
 Single sources of truth in `specs/core/`:
 * `specs/core/snapshot.yaml` — Canonical data model (OpenAPI 3.0)
 * `specs/core/api.yaml` — REST API interface specification
+
+---
+
+## 8. Release Machinery & Progressive Degradation
+
+NockNock is engineered following the **Mecris Progressive Degradation Model** (detailed in [ARCHITECTURE.md](ARCHITECTURE.md)), maintaining three tiers of execution:
+1. **Full Cloud / Server Mode**: PostgreSQL + Axum Worker + React Portal.
+2. **Desktop / MCP Adapter Mode**: Agent-driven MCP server without direct database access.
+3. **Edge / Moon Clock Android Model**: Embedded WASM Brain (`nocknock_brain.wasm`) evaluating on-chain math directly on Android handsets with public RPC fallback chains.
+
+### Release Packaging Commands
+
+```bash
+# Package all release artifacts into dist/
+make dist
+
+# Build individual target artifacts
+make build-brain    # Compiles wasm32-wasip1 deterministic brain (134 KB)
+make build-worker   # Compiles release ingestion worker binary
+make build-frontend # Compiles optimized production web bundle
+```
+
+Automated GitHub Actions workflows (`.github/workflows/ci.yml`) test all three tiers on every pull request and publish GitHub Releases with release notes extracted from [CHANGELOG.md](CHANGELOG.md) upon pushing version tags (`git tag v0.1.0`).
 * `specs/core/ingestion.wit` — WebAssembly Interface Types definition

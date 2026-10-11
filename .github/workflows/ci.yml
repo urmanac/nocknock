@@ -1,0 +1,149 @@
+name: NockNock CI & Release
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+      - '[0-9]+.[0-9]+.[0-9]+'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-brain:
+    name: Build & Test WASM Brain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+
+      - name: Run Brain Tests
+        run: |
+          cd brain
+          cargo test
+
+      - name: Build WASM Brain
+        run: |
+          cd brain
+          cargo build --target wasm32-wasip1 --release
+
+      - name: Upload Brain Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nocknock-wasm-brain
+          path: brain/target/wasm32-wasip1/release/nocknock_brain.wasm
+
+  build-worker:
+    name: Build & Test Ingestion Worker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Worker Tests
+        run: |
+          cd ingestion-worker
+          cargo test
+
+      - name: Build Worker Release Binary (Offline SQLX)
+        run: |
+          cd ingestion-worker
+          SQLX_OFFLINE=true cargo build --release
+
+      - name: Upload Worker Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nocknock-ingestion-worker-linux-amd64
+          path: ingestion-worker/target/release/nocknock-ingestion-worker
+
+  build-frontend:
+    name: Build & Test Frontend Portal
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run Frontend Contract Tests
+        run: |
+          cd frontend
+          npm test -- --run
+
+      - name: Build Production Web Bundle
+        run: |
+          cd frontend
+          npm run build
+
+      - name: Package Frontend Dist
+        run: |
+          tar -czf nocknock-frontend.tar.gz -C frontend/dist .
+
+      - name: Upload Frontend Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nocknock-frontend-bundle
+          path: nocknock-frontend.tar.gz
+
+  create-release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-brain, build-worker, build-frontend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download WASM Brain Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nocknock-wasm-brain
+          path: ./release-assets
+
+      - name: Download Worker Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: nocknock-ingestion-worker-linux-amd64
+          path: ./release-assets
+
+      - name: Download Frontend Bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: nocknock-frontend-bundle
+          path: ./release-assets
+
+      - name: Extract Release Notes
+        run: |
+          awk '/^## \[/ { p=1; count++ } count==2 { exit } p' CHANGELOG.md > release_body.md
+          if [ ! -s release_body.md ]; then
+            echo "Release ${{ github.ref_name }}" > release_body.md
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: |
+            ./release-assets/nocknock_brain.wasm
+            ./release-assets/nocknock-ingestion-worker
+            ./release-assets/nocknock-frontend.tar.gz
+          body_path: release_body.md
+          draft: false
+          prerelease: false
