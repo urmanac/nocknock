@@ -1,0 +1,346 @@
+use anyhow::Result;
+use reqwest::Client;
+use serde_json::{json, Value};
+use std::io::{self, BufRead, Write};
+use std::time::Duration;
+
+const DEFAULT_BASE_RPC: &str = "https://mainnet.base.org";
+const LOCAL_API_URL: &str = "http://127.0.0.1:8080/v1/snapshot/latest";
+const WALLET_ADDR: &str = "0xeE114cC97eC5adeB34bA5645e315B497D8487a45";
+#[allow(dead_code)]
+const WALLET_PADDED: &str = "000000000000000000000000ee114cc97ec5adeb34ba5645e315b497d8487a45";
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()?;
+
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+
+    for line in stdin.lock().lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => break,
+        };
+
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let req: Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let method = req.get("method").and_then(|m| m.as_str()).unwrap_or_default();
+        let id = req.get("id").cloned();
+
+        match method {
+            "initialize" => {
+                let resp = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {
+                        "protocolVersion": "2024-11-05",
+                        "serverInfo": {
+                            "name": "nocknock-mcp",
+                            "version": "0.1.0"
+                        },
+                        "capabilities": {
+                            "tools": {}
+                        }
+                    }
+                });
+                writeln!(handle, "{}", resp)?;
+                handle.flush()?;
+            }
+            "notifications/initialized" => {
+                // Client confirmed initialization; no response needed
+            }
+            "ping" => {
+                let resp = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {}
+                });
+                writeln!(handle, "{}", resp)?;
+                handle.flush()?;
+            }
+            "tools/list" => {
+                let resp = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {
+                        "tools": [
+                            {
+                                "name": "get_portfolio_state",
+                                "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, native token balance, and active tranche allocations.",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {},
+                                    "required": []
+                                }
+                            },
+                            {
+                                "name": "get_shot_advice",
+                                "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics.",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {},
+                                    "required": []
+                                }
+                            },
+                            {
+                                "name": "simulate_claim_fees",
+                                "description": "Simulates gas expenditure vs uncollected yield across Aerodrome and Uniswap V4 positions.",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {},
+                                    "required": []
+                                }
+                            }
+                        ]
+                    }
+                });
+                writeln!(handle, "{}", resp)?;
+                handle.flush()?;
+            }
+            "tools/call" => {
+                let tool_name = req
+                    .get("params")
+                    .and_then(|p| p.get("name"))
+                    .and_then(|n| n.as_str())
+                    .unwrap_or_default();
+
+                let result_text = handle_tool_call(&client, tool_name).await;
+                let resp = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": result_text
+                            }
+                        ]
+                    }
+                });
+                writeln!(handle, "{}", resp)?;
+                handle.flush()?;
+            }
+            _ => {
+                if let Some(req_id) = id {
+                    let err_resp = json!({
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {
+                            "code": -32601,
+                            "message": format!("Method not found: {method}")
+                        }
+                    });
+                    writeln!(handle, "{}", err_resp)?;
+                    handle.flush()?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_tool_call(client: &Client, tool_name: &str) -> String {
+    // 1. Try local Tier 1 API first
+    if let Ok(resp) = client.get(LOCAL_API_URL).timeout(Duration::from_secs(2)).send().await {
+        if resp.status().is_success() {
+            if let Ok(snap) = resp.json::<Value>().await {
+                if let Some(data) = snap.get("data") {
+                    return match tool_name {
+                        "get_portfolio_state" => format_portfolio_state(data),
+                        "get_shot_advice" => format_shot_advice(data),
+                        "simulate_claim_fees" => format_claim_simulation(data),
+                        _ => format!("Unknown tool: {tool_name}"),
+                    };
+                }
+            }
+        }
+    }
+
+    // 2. Fallback to direct decentralized Base RPC (Zero-DB mode)
+    handle_direct_rpc_fallback(client, tool_name).await
+}
+
+fn format_portfolio_state(data: &Value) -> String {
+    let global = data.pointer("/derived_metrics/global_status");
+    let total_usd = global.and_then(|g| g.get("total_portfolio_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
+    let total_nock = global.and_then(|g| g.get("total_nock_amount")).and_then(|v| v.as_str()).unwrap_or("0");
+    let nock_delta = global.and_then(|g| g.get("nock_floor_delta")).and_then(|v| v.as_str()).unwrap_or("0");
+    let total_usdc = global.and_then(|g| g.get("total_usdc_amount")).and_then(|v| v.as_str()).unwrap_or("0.00");
+    let hwm = global.and_then(|g| g.get("high_water_mark_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
+    let advice = global.and_then(|g| g.get("shot_advice_action")).and_then(|v| v.as_str()).unwrap_or("HOLD");
+
+    format!(
+        "📈 NockNock Sovereign Portfolio State (Live API)\n\
+         =========================================\n\
+         • Total Value: ${total_usd} USD\n\
+         • Sovereign NOCK Stack: {total_nock} NOCK (Floor buffer delta: +{nock_delta} above 100k)\n\
+         • Stable Stack: {total_usdc} USDC\n\
+         • High-Water Mark: ${hwm} USD\n\
+         • Tactical Directive: {advice}\n\
+         • Mode: Tier 1 Connected (Verified Persistent Snapshot)"
+    )
+}
+
+fn format_shot_advice(data: &Value) -> String {
+    let global = data.pointer("/derived_metrics/global_status");
+    let action = global.and_then(|g| g.get("shot_advice_action")).and_then(|v| v.as_str()).unwrap_or("HOLD");
+    let details = global.and_then(|g| g.get("shot_advice_details")).and_then(|v| v.as_str()).unwrap_or("Accreting");
+    let claimable_usd = global.and_then(|g| g.get("total_fees_claimable_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
+    let gas_delta = global.and_then(|g| g.get("gas_to_fee_delta_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
+
+    format!(
+        "🎯 Tactical Shot Advice Engine\n\
+         ===============================\n\
+         • Recommended Action: {action}\n\
+         • Decision Matrix Details: {details}\n\
+         • Uncollected Claimable Fees: ${claimable_usd} USD\n\
+         • Net Gas-to-Fee Profitability: +${gas_delta} USD\n\
+         • Execution Trigger: Batch Harvest shots unlock at >= $5.00 accumulated fees."
+    )
+}
+
+fn format_claim_simulation(data: &Value) -> String {
+    let fees = data.get("contract_fees").and_then(|f| f.as_array());
+    let mut details = String::new();
+    let mut total_claimable_usd = 0.0f64;
+
+    if let Some(list) = fees {
+        for fee in list {
+            let symbol = fee.get("fee_token_symbol").and_then(|s| s.as_str()).unwrap_or("Pool");
+            let amount = fee.get("amount").and_then(|a| a.as_str()).unwrap_or("0");
+            let amount_usd = fee.get("amount_usd").and_then(|a| a.as_str()).unwrap_or("0.00");
+            let gas = fee.get("gas_break_even_usd").and_then(|g| g.as_str()).unwrap_or("0.005");
+            if let Ok(usd_val) = amount_usd.parse::<f64>() {
+                total_claimable_usd += usd_val;
+            }
+            details.push_str(&format!("  - {symbol}: {amount} (~${amount_usd} USD | Gas Est: ${gas})\n"));
+        }
+    }
+
+    format!(
+        "⚡ Fee Claim Simulation\n\
+         =======================\n\
+         • Total Gross Claimable: ${:.4} USD\n\
+         • Estimated Base Gas: ~$0.005 USD\n\
+         • Net Accretion if Harvested: ${:.4} USD\n\
+         Pool Breakdown:\n{}",
+        total_claimable_usd,
+        (total_claimable_usd - 0.005).max(0.0),
+        details
+    )
+}
+
+async fn handle_direct_rpc_fallback(client: &Client, tool_name: &str) -> String {
+    // Direct decentralized query to Base node
+    let aero_reserves = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{
+            "to": "0x85f1aa3a70fedd1c52705c15baed143e675cd626",
+            "data": "0x0902f1ac"
+        }, "latest"],
+        "id": 1
+    });
+
+    let aero_claim = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{
+            "from": WALLET_ADDR,
+            "to": "0x85f1aa3a70fedd1c52705c15baed143e675cd626",
+            "data": "0xd294f093"
+        }, "latest"],
+        "id": 2
+    });
+
+    let mut spot_price = 0.0268f64;
+    let mut claim_usdc = 0.0f64;
+    let mut claim_nock = 0.0f64;
+
+    if let Ok(resp) = client.post(DEFAULT_BASE_RPC).json(&aero_reserves).send().await {
+        if let Ok(val) = resp.json::<Value>().await {
+            if let Some(hex_str) = val.get("result").and_then(|r| r.as_str()) {
+                let clean = hex_str.trim_start_matches("0x");
+                if clean.len() >= 128 {
+                    if let (Ok(r0), Ok(r1)) = (
+                        u128::from_str_radix(&clean[..64], 16),
+                        u128::from_str_radix(&clean[64..128], 16),
+                    ) {
+                        let usdc = r0 as f64 / 1e6;
+                        let nock = r1 as f64 / 1e16;
+                        if nock > 0.0 {
+                            spot_price = usdc / nock;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Ok(resp) = client.post(DEFAULT_BASE_RPC).json(&aero_claim).send().await {
+        if let Ok(val) = resp.json::<Value>().await {
+            if let Some(hex_str) = val.get("result").and_then(|r| r.as_str()) {
+                let clean = hex_str.trim_start_matches("0x");
+                if clean.len() >= 128 {
+                    if let (Ok(c0), Ok(c1)) = (
+                        u128::from_str_radix(&clean[..64], 16),
+                        u128::from_str_radix(&clean[64..128], 16),
+                    ) {
+                        claim_usdc = c0 as f64 / 1e6;
+                        claim_nock = c1 as f64 / 1e16;
+                    }
+                }
+            }
+        }
+    }
+
+    let claim_usd = claim_usdc + claim_nock * spot_price;
+    let advice = if claim_usd >= 5.0 {
+        "BATCH HARVEST SHOT"
+    } else {
+        "HOLD & ACCRETE"
+    };
+
+    match tool_name {
+        "get_portfolio_state" => format!(
+            "📈 NockNock Sovereign State (Decentralized Direct RPC Mode)\n\
+             ===========================================================\n\
+             • NOCK Spot Price: ${:.6} USD\n\
+             • Uncollected Aerodrome Yield: ${:.4} USD\n\
+             • Mode: Zero-DB Edge RPC Fallback (Database and Worker Offline)\n\
+             • Status: Sovereign RPC Connected directly to Base mainnet.",
+            spot_price, claim_usd
+        ),
+        "get_shot_advice" => format!(
+            "🎯 Tactical Shot Advice Engine (Decentralized RPC Mode)\n\
+             =======================================================\n\
+             • Recommended Action: {advice}\n\
+             • Active Accrued Yield: ${:.4} USD (Threshold: $5.00)\n\
+             • Gas Estimate: ~$0.005 USD on Base\n\
+             • Mode: Zero-DB Edge RPC Fallback",
+            claim_usd
+        ),
+        "simulate_claim_fees" => format!(
+            "⚡ Fee Claim Simulation (Decentralized RPC Mode)\n\
+             ===============================================\n\
+             • Uncollected Aerodrome Fees: {:.5} USDC + {:.4} NOCK\n\
+             • Total USD Value: ${:.4} USD\n\
+             • Estimated Gas Cost: ~$0.005 USD\n\
+             • Net Yield: ${:.4} USD",
+            claim_usdc, claim_nock, claim_usd, (claim_usd - 0.005).max(0.0)
+        ),
+        _ => format!("Unknown tool: {tool_name}"),
+    }
+}

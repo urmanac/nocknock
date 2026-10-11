@@ -87,6 +87,12 @@ struct RawOnChainData {
     live_uni_fee_usdc: f64,
     #[serde(default)]
     live_uni_fee_nock: f64,
+    #[serde(default = "default_eth_price")]
+    live_eth_price_usd: f64,
+}
+
+fn default_eth_price() -> f64 {
+    2500.0
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -751,11 +757,78 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
+async fn post_rpc_with_retry(
+    client: &Client,
+    url: &str,
+    payload: &serde_json::Value,
+    max_retries: usize,
+) -> Option<serde_json::Value> {
+    for attempt in 0..=max_retries {
+        match client.post(url).json(payload).send().await {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    if let Ok(json_val) = resp.json::<serde_json::Value>().await {
+                        if let Some(err) = json_val.get("error") {
+                            let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("RPC error");
+                            tracing::warn!("RPC returned error (attempt {}/{}): {}", attempt + 1, max_retries + 1, msg);
+                        } else {
+                            return Some(json_val);
+                        }
+                    }
+                } else if resp.status().as_u16() == 429 {
+                    tracing::warn!("Rate limited (429) on RPC (attempt {}/{})", attempt + 1, max_retries + 1);
+                } else {
+                    tracing::warn!("HTTP status {} on RPC (attempt {}/{})", resp.status(), attempt + 1, max_retries + 1);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Network error calling RPC (attempt {}/{}): {}", attempt + 1, max_retries + 1, e);
+            }
+        }
+
+        if attempt < max_retries {
+            let base_delay_ms = 100u64 * (1 << attempt);
+            let jitter_ms = (Utc::now().timestamp_subsec_millis() as u64) % 75;
+            tokio::time::sleep(tokio::time::Duration::from_millis(base_delay_ms + jitter_ms)).await;
+        }
+    }
+    None
+}
+
 async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let alchemy_key = state.config.alchemy_api_keys.first().cloned().unwrap_or_default();
     let alchemy_url = format!("https://base-mainnet.g.alchemy.com/v2/{}", alchemy_key);
     let wallet_addr = &state.config.tracked_wallets[0];
     let wallet_padded = format!("000000000000000000000000{}", wallet_addr.trim_start_matches("0x").to_lowercase());
+
+    // 0. Fetch live ETH/USD spot price from Aerodrome vAMM-WETH/USDC (0x88A43bbDF9D098eEC7bCEda4e2494615dfD9bB9C)
+    let eth_reserves_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{
+            "to": "0x88A43bbDF9D098eEC7bCEda4e2494615dfD9bB9C",
+            "data": "0x0902f1ac"
+        }, "latest"],
+        "id": 99
+    });
+    let mut live_eth_price_usd = 2500.0f64;
+    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &eth_reserves_payload, 2).await {
+        if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
+            let clean = hex_str.trim_start_matches("0x");
+            if clean.len() >= 128 {
+                if let (Ok(r0), Ok(r1)) = (
+                    u128::from_str_radix(&clean[..64], 16),
+                    u128::from_str_radix(&clean[64..128], 16),
+                ) {
+                    let weth = r0 as f64 / 1e18;
+                    let usdc = r1 as f64 / 1e6;
+                    if weth > 0.0 {
+                        live_eth_price_usd = usdc / weth;
+                    }
+                }
+            }
+        }
+    }
 
     // 1. Fetch live gas price (eth_gasPrice)
     let gas_payload = json!({
@@ -765,15 +838,13 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         "id": 10
     });
     let mut live_gas_cost_usd = 0.005f64;
-    if let Ok(resp) = state.http_client.post(&alchemy_url).json(&gas_payload).send().await {
-        if let Ok(res_json) = resp.json::<serde_json::Value>().await {
-            if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
-                let clean = hex_str.trim_start_matches("0x");
-                if let Ok(wei) = u128::from_str_radix(clean, 16) {
-                    let eth_gas_cost = (wei as f64 / 1e18) * 150_000.0;
-                    let usd_gas_cost = (eth_gas_cost * 2500.0) + 0.002;
-                    live_gas_cost_usd = usd_gas_cost.clamp(0.002, 0.05);
-                }
+    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &gas_payload, 2).await {
+        if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
+            let clean = hex_str.trim_start_matches("0x");
+            if let Ok(wei) = u128::from_str_radix(clean, 16) {
+                let eth_gas_cost = (wei as f64 / 1e18) * 150_000.0;
+                let usd_gas_cost = (eth_gas_cost * live_eth_price_usd) + 0.002;
+                live_gas_cost_usd = usd_gas_cost.clamp(0.002, 0.05);
             }
         }
     }
@@ -793,20 +864,18 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let mut reserve_usdc = 649976.92f64;
     let mut reserve_nock = 24237793.36f64;
 
-    if let Ok(resp) = state.http_client.post(&alchemy_url).json(&reserves_payload).send().await {
-        if let Ok(res_json) = resp.json::<serde_json::Value>().await {
-            if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
-                let clean = hex_str.trim_start_matches("0x");
-                if clean.len() >= 128 {
-                    if let (Ok(r0), Ok(r1)) = (
-                        u128::from_str_radix(&clean[..64], 16),
-                        u128::from_str_radix(&clean[64..128], 16),
-                    ) {
-                        reserve_usdc = r0 as f64 / 1e6;
-                        reserve_nock = r1 as f64 / 1e16;
-                        if reserve_nock > 0.0 {
-                            spot_price = reserve_usdc / reserve_nock;
-                        }
+    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &reserves_payload, 2).await {
+        if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
+            let clean = hex_str.trim_start_matches("0x");
+            if clean.len() >= 128 {
+                if let (Ok(r0), Ok(r1)) = (
+                    u128::from_str_radix(&clean[..64], 16),
+                    u128::from_str_radix(&clean[64..128], 16),
+                ) {
+                    reserve_usdc = r0 as f64 / 1e6;
+                    reserve_nock = r1 as f64 / 1e16;
+                    if reserve_nock > 0.0 {
+                        spot_price = reserve_usdc / reserve_nock;
                     }
                 }
             }
@@ -834,21 +903,17 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     });
     let mut user_lp_balance = 94027480497283u128;
     let mut pool_total_supply = 396516955911293240u128;
-    if let Ok(resp) = state.http_client.post(&alchemy_url).json(&aero_bal_payload).send().await {
-        if let Ok(res_json) = resp.json::<serde_json::Value>().await {
-            if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
-                if let Ok(val) = u128::from_str_radix(hex_str.trim_start_matches("0x"), 16) {
-                    if val > 0 { user_lp_balance = val; }
-                }
+    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &aero_bal_payload, 2).await {
+        if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
+            if let Ok(val) = u128::from_str_radix(hex_str.trim_start_matches("0x"), 16) {
+                if val > 0 { user_lp_balance = val; }
             }
         }
     }
-    if let Ok(resp) = state.http_client.post(&alchemy_url).json(&aero_ts_payload).send().await {
-        if let Ok(res_json) = resp.json::<serde_json::Value>().await {
-            if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
-                if let Ok(val) = u128::from_str_radix(hex_str.trim_start_matches("0x"), 16) {
-                    if val > 0 { pool_total_supply = val; }
-                }
+    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &aero_ts_payload, 2).await {
+        if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
+            if let Ok(val) = u128::from_str_radix(hex_str.trim_start_matches("0x"), 16) {
+                if val > 0 { pool_total_supply = val; }
             }
         }
     }
@@ -867,12 +932,10 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         "id": 5
     });
     let mut v4_liquidity_val = 81297590130616u128;
-    if let Ok(resp) = state.http_client.post(&alchemy_url).json(&v4_liq_payload).send().await {
-        if let Ok(res_json) = resp.json::<serde_json::Value>().await {
-            if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
-                if let Ok(val) = u128::from_str_radix(hex_str.trim_start_matches("0x"), 16) {
-                    if val > 0 { v4_liquidity_val = val; }
-                }
+    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &v4_liq_payload, 2).await {
+        if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
+            if let Ok(val) = u128::from_str_radix(hex_str.trim_start_matches("0x"), 16) {
+                if val > 0 { v4_liquidity_val = val; }
             }
         }
     }
@@ -898,20 +961,18 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let mut nock_balance = 96004.5203f64;
     let mut usdc_balance = 0.2316f64;
 
-    if let Ok(resp) = state.http_client.post(&alchemy_url).json(&balances_payload).send().await {
-        if let Ok(res_json) = resp.json::<serde_json::Value>().await {
-            if let Some(balances) = res_json.get("result").and_then(|r| r.get("tokenBalances")).and_then(|t| t.as_array()) {
-                for b in balances {
-                    let addr = b.get("contractAddress").and_then(|a| a.as_str()).unwrap_or_default().to_lowercase();
-                    let hex_bal = b.get("tokenBalance").and_then(|h| h.as_str()).unwrap_or("0x0").trim_start_matches("0x");
-                    if addr == "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" {
-                        if let Ok(val) = u128::from_str_radix(hex_bal, 16) {
-                            usdc_balance = val as f64 / 1e6;
-                        }
-                    } else if addr == "0x9b5e262cf9bb04869ab40b19af91d2dc85761722" {
-                        if let Ok(val) = u128::from_str_radix(hex_bal, 16) {
-                            nock_balance = val as f64 / 1e16;
-                        }
+    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &balances_payload, 2).await {
+        if let Some(balances) = res_json.get("result").and_then(|r| r.get("tokenBalances")).and_then(|t| t.as_array()) {
+            for b in balances {
+                let addr = b.get("contractAddress").and_then(|a| a.as_str()).unwrap_or_default().to_lowercase();
+                let hex_bal = b.get("tokenBalance").and_then(|h| h.as_str()).unwrap_or("0x0").trim_start_matches("0x");
+                if addr == "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" {
+                    if let Ok(val) = u128::from_str_radix(hex_bal, 16) {
+                        usdc_balance = val as f64 / 1e6;
+                    }
+                } else if addr == "0x9b5e262cf9bb04869ab40b19af91d2dc85761722" {
+                    if let Ok(val) = u128::from_str_radix(hex_bal, 16) {
+                        nock_balance = val as f64 / 1e16;
                     }
                 }
             }
@@ -937,18 +998,16 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let mut aero_fee_usdc = 0.0f64;
     let mut aero_fee_nock = 0.0f64;
 
-    if let Ok(resp) = state.http_client.post(&alchemy_url).json(&aero_claim_payload).send().await {
-        if let Ok(res_json) = resp.json::<serde_json::Value>().await {
-            if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
-                let clean = hex_str.trim_start_matches("0x");
-                if clean.len() >= 128 {
-                    if let (Ok(c0), Ok(c1)) = (
-                        u128::from_str_radix(&clean[..64], 16),
-                        u128::from_str_radix(&clean[64..128], 16),
-                    ) {
-                        aero_fee_usdc = c0 as f64 / 1e6;
-                        aero_fee_nock = c1 as f64 / 1e16;
-                    }
+    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &aero_claim_payload, 2).await {
+        if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
+            let clean = hex_str.trim_start_matches("0x");
+            if clean.len() >= 128 {
+                if let (Ok(c0), Ok(c1)) = (
+                    u128::from_str_radix(&clean[..64], 16),
+                    u128::from_str_radix(&clean[64..128], 16),
+                ) {
+                    aero_fee_usdc = c0 as f64 / 1e6;
+                    aero_fee_nock = c1 as f64 / 1e16;
                 }
             }
         }
@@ -1055,6 +1114,7 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         live_aero_fee_nock: aero_fee_nock,
         live_uni_fee_usdc: uni_fee_usdc,
         live_uni_fee_nock: uni_fee_nock,
+        live_eth_price_usd,
     })
 }
 
@@ -1501,5 +1561,26 @@ mod tests {
         let hash2 = compute_state_hash(&data);
         assert_eq!(hash1, hash2);
         assert_eq!(hash1.len(), 64);
+    }
+
+    #[test]
+    fn test_eth_usd_spot_parsing() {
+        // Sample return from Aerodrome vAMM-WETH/USDC getReserves (0x0902f1ac)
+        // r0 = 0x997534da7f7a6b1a4 = 176929380488719577508 (176.929 WETH with 18 decimals)
+        // r1 = 0x689640625e = 449198383710 (449,198.38 USDC with 6 decimals)
+        let hex_str = "0x00000000000000000000000000000000000000000000000997534da7f7a6b1a4000000000000000000000000000000000000000000000000000000689640625e";
+        let clean = hex_str.trim_start_matches("0x");
+        assert!(clean.len() >= 128);
+
+        let r0 = u128::from_str_radix(&clean[..64], 16).unwrap();
+        let r1 = u128::from_str_radix(&clean[64..128], 16).unwrap();
+
+        let weth = r0 as f64 / 1e18;
+        let usdc = r1 as f64 / 1e6;
+        assert!(weth > 0.0);
+        let eth_price = usdc / weth;
+
+        // Verify ETH price falls within expected ~$2538 range
+        assert!((eth_price - 2538.86).abs() < 1.0);
     }
 }

@@ -36,3 +36,11 @@ ulid = "1.0"
 sha2 = "0.10"
 hex = "0.4"
 once_cell = "1.19"
+
+[[bin]]
+name = "nocknock-ingestion-worker"
+path = "src/main.rs"
+
+[[bin]]
+name = "nocknock-mcp"
+path = "src/bin/mcp.rs"
