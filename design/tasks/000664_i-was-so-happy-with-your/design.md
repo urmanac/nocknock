@@ -25,12 +25,18 @@ graph TD
 
 ## Confirmed Known Issue — Deviation Matrix Legend
 
-Root cause (verified by code reading, `frontend/src/App.tsx`):
+Root cause (verified by code reading AND live browser evidence, `screenshots/01-*.png`):
 
-- `App.tsx:488` — `<Bar dataKey="actual" name="Actual %">` has **no series-level `fill`**; colors come only from per-data `<Cell>` children (`App.tsx:490-494`, colors `#ef4444` over-funded, `#f59e0b` under-funded, `#f97316` fast-running, `#10b981` on-target). Recharts' default `<Legend>` (`App.tsx:496`) derives the swatch color from the series-level fill, which is unset → renders **black**.
-- Secondary: the manual status legend at `App.tsx:499-504` lists only 3 of the 4 actual colors — it omits `#f97316` (fast-running), which the `Cell` mapping does use.
+- `App.tsx:488` — `<Bar dataKey="actual" name="Actual %">` has **no series-level `fill`**; colors come only from per-data `<Cell>` children (`App.tsx:490-494`). Recharts' default `<Legend>` (`App.tsx:496`) derives the swatch color from the series-level fill, which is unset → renders **black**.
+- The worker's `calc_status` (`main.rs:3052-3061`) only ever emits `on_target` / `under_funded` / `over_funded` — **never `fast_running`** — so the orange `#f97316` branch in the Cell mapping is dead code and only 3 actual colors exist (matches the operator's observation). Fix: remove the "Actual %" entry from the auto legend; the manual status legend below the chart already covers the 3 real colors.
 
-Planned fix (option confirmed in requirements open question): filter the "Actual %" entry out of the auto legend (or give it a neutral swatch) and extend the manual status legend to all four statuses. Small, contained change in one panel.
+## Implementation Notes (audit results, live-verified)
+
+- **Bug haul (14 defects, 3 enhancements)** — full ready-to-file bodies in `github-issues/ISSUES.md`; registry in nocknock `TRIAGE.md` §Phase E. Headliners: `fetch_eth_price_usd` still hardcodes the $2,500 fallback (main.rs:1618, zero-mock violation in claim-fees gas valuation); Tick Bracket chart draws a fabricated Aerodrome 0→999 placeholder bracket (main.rs:3042-3048) that stretches the axis and hides the real V4 bracket; MCP text formatters fabricate "~$0.005" gas + "$5.00" thresholds (main.rs:992-996, bin/mcp.rs); StatCard parseFloat strips "%" from Floor Health (shows "106.3"); Lite Cockpit shows EXECUTE buttons while WalletConnect is unconfigured; ALREADY_RECORDED (409) rendered as failure on idempotent retry.
+- **Live test results**: claim-fees payload simulates both actions successfully with real amounts; Koinly CSV/JSON verified with seeded rows (correct columns, `income` label, TxHash, Net Worth) — reviewer's Koinly priority covered; record-harvest error paths (422/404) honest; historical `interval` 400 + limit clamp intact; NOCK token on-chain `symbol()=NOCK, decimals()=16`.
+- **Not bugs (verified)**: bracket strings `0.01237/2.02783` ARE the tick-derived values at `{:.5}` (test asserts the round-trip — the doc comment's "was hardcoded" wording is misleading, not the code); `nock_floor_delta` has no commas so `parseInt` is safe; ledger aggregate refresh is per-ingestion-cycle (5-min staleness is by design).
+- **PR strategy adaptation**: Helix opens ONE PR for `feature/000664-run-020-series-bug-hunt`, so per-defect branches/PRs are replaced by focused per-defect commits on this feature branch (the TRIAGE.md one-defect-one-PR protocol applies to direct-to-GitHub flows; here the platform owns PR creation).
+- **Gotchas**: `cargo` at `~/.cargo/bin` (not on non-interactive PATH); `make tmux` unusable on Linux (macOS paths in Makefile — logged as defect); Vite needs `npm install` then `./node_modules/.bin/vite`; Alchemy key reads from `ingestion-worker/config.yaml` (`awk '/alchemy_api_keys:/ {getline; print $2}'`).
 
 ## Audit Surface Map
 
