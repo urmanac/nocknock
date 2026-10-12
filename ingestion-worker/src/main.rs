@@ -1173,6 +1173,52 @@ async fn post_rpc_with_retry(
     None
 }
 
+/// Represents an unsigned 256-bit integer as (hi: u128, lo: u128)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct U256(pub u128, pub u128);
+
+impl U256 {
+    pub fn from_hex_be(hex_str: &str) -> Result<Self> {
+        let clean = hex_str.trim_start_matches("0x");
+        if clean.len() > 64 {
+            return Err(anyhow::anyhow!("Hex string too long for U256: {}", clean.len()));
+        }
+        let padded = format!("{:0>64}", clean);
+        let hi = u128::from_str_radix(&padded[0..32], 16)?;
+        let lo = u128::from_str_radix(&padded[32..64], 16)?;
+        Ok(U256(hi, lo))
+    }
+
+    /// Wrapping subtraction modulo 2^256
+    pub fn wrapping_sub(&self, other: &Self) -> Self {
+        let (lo, borrow) = self.1.overflowing_sub(other.1);
+        let hi = self.0.wrapping_sub(other.0).wrapping_sub(borrow as u128);
+        U256(hi, lo)
+    }
+
+    /// Computes (self * liquidity) >> 128 where liquidity is u128
+    pub fn mul_div_q128(&self, liquidity: u128) -> u128 {
+        let a = self.1 >> 64;
+        let b = self.1 & 0xFFFF_FFFF_FFFF_FFFF;
+        let c = liquidity >> 64;
+        let d = liquidity & 0xFFFF_FFFF_FFFF_FFFF;
+
+        let bd = b * d;
+        let ad = a * d;
+        let bc = b * c;
+        let ac = a * c;
+
+        let mid = (bd >> 64) + (ad & 0xFFFF_FFFF_FFFF_FFFF) + (bc & 0xFFFF_FFFF_FFFF_FFFF);
+        let hi_part = ac + (ad >> 64) + (bc >> 64) + (mid >> 64);
+
+        self.0.wrapping_mul(liquidity).wrapping_add(hi_part)
+    }
+
+    pub fn to_hex_be(&self) -> String {
+        format!("{:032x}{:032x}", self.0, self.1)
+    }
+}
+
 async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let alchemy_key = state.config.alchemy_api_keys.first().cloned().unwrap_or_default();
     let alchemy_url = format!("https://base-mainnet.g.alchemy.com/v2/{}", alchemy_key);
@@ -1308,90 +1354,103 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let live_t2_usdc = reserve_usdc * lp_share;
     let live_t2_nock = reserve_nock * lp_share;
 
-    // 4. Fetch Uniswap V4 Position Info (includes liquidity + uncollected fees tokensOwed0/1)
+    // 4. Fetch Uniswap V4 Position Info & Live Uncollected Fees via official StateView contract on Base
+    // StateView: 0xa3c0c9b65bad0b08107aa264b0f3db444b867a71
+    // PositionManager: 0x7c5f5a4bbd8fd63184577525326123b519429bdc
+    // PoolId: 0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13
     let v4_pos_id = state.config.v4_position_id.unwrap_or(3126000);
     let v4_pos_hex = format!("{:064x}", v4_pos_id);
-    let v4_liq_payload = json!({
+    let state_view_addr = "0xa3c0c9b65bad0b08107aa264b0f3db444b867a71";
+    let pool_id_hex = "064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13";
+    let pos_manager_padded = "0000000000000000000000007c5f5a4bbd8fd63184577525326123b519429bdc";
+    let tick_lower_hex = format!("{:064x}", 223200u32);
+    let tick_upper_hex = format!("{:064x}", 274200u32);
+
+    // 4a. getPositionInfo(bytes32,address,int24,int24,bytes32) -> 0xdacf1d2f
+    let get_pos_data = format!("0xdacf1d2f{}{}{}{}{}", pool_id_hex, pos_manager_padded, tick_lower_hex, tick_upper_hex, v4_pos_hex);
+    let v4_pos_payload = json!({
         "jsonrpc": "2.0",
         "method": "eth_call",
         "params": [{
-            "to": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
-            "data": format!("0x1efeed33{}", v4_pos_hex)
+            "to": state_view_addr,
+            "data": get_pos_data
         }, "latest"],
         "id": 5
     });
+
+    // 4b. getFeeGrowthInside(bytes32,int24,int24) -> 0x53e9c1fb
+    let get_fg_data = format!("0x53e9c1fb{}{}{}", pool_id_hex, tick_lower_hex, tick_upper_hex);
+    let v4_fg_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{
+            "to": state_view_addr,
+            "data": get_fg_data
+        }, "latest"],
+        "id": 6
+    });
+
     let mut v4_liquidity_val = 0u128;
-    let mut v4_tokens_owed_0 = 0u128; // USDC fees (6 decimals)
-    let mut v4_tokens_owed_1 = 0u128; // NOCK fees (18 decimals)
+    let mut fg0_last = U256::default();
+    let mut fg1_last = U256::default();
+    let mut fg0_curr = U256::default();
+    let mut fg1_curr = U256::default();
     let mut v4_live_query_success = false;
-    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &v4_liq_payload, 2).await {
-        if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
-            let clean = hex_str.trim_start_matches("0x");
-            // positions() returns: liquidity(96), tickLower(24), tickUpper(24), feeGrowthInside0LastX128(160), feeGrowthInside1LastX128(160), tokensOwed0(128), tokensOwed1(128)
-            // Each field is 32 bytes (64 hex chars) padded
-            if clean.len() >= 288 {
-                // liquidity at offset 0-63
-                if let Ok(val) = u128::from_str_radix(&clean[0..64], 16) {
-                    v4_liquidity_val = val;
-                }
-                // tokensOwed0 at offset 160-191 (5th field, 0-indexed = 5 * 64 = 320 hex chars = offset 160 bytes)
-                if let Ok(val) = u128::from_str_radix(&clean[160..224], 16) {
-                    v4_tokens_owed_0 = val;
-                }
-                // tokensOwed1 at offset 192-223 (6th field)
-                if let Ok(val) = u128::from_str_radix(&clean[224..288], 16) {
-                    v4_tokens_owed_1 = val;
-                }
-                if v4_liquidity_val > 0 {
-                    v4_live_query_success = true;
+
+    if let (Some(res_pos), Some(res_fg)) = (
+        post_rpc_with_retry(&state.http_client, &alchemy_url, &v4_pos_payload, 2).await,
+        post_rpc_with_retry(&state.http_client, &alchemy_url, &v4_fg_payload, 2).await,
+    ) {
+        if let (Some(hex_pos), Some(hex_fg)) = (
+            res_pos.get("result").and_then(|r| r.as_str()),
+            res_fg.get("result").and_then(|r| r.as_str()),
+        ) {
+            let clean_pos = hex_pos.trim_start_matches("0x");
+            let clean_fg = hex_fg.trim_start_matches("0x");
+            if clean_pos.len() >= 192 && clean_fg.len() >= 128 {
+                if let (Ok(liq), Ok(f0_l), Ok(f1_l), Ok(f0_c), Ok(f1_c)) = (
+                    u128::from_str_radix(&clean_pos[0..64], 16),
+                    U256::from_hex_be(&clean_pos[64..128]),
+                    U256::from_hex_be(&clean_pos[128..192]),
+                    U256::from_hex_be(&clean_fg[0..64]),
+                    U256::from_hex_be(&clean_fg[64..128]),
+                ) {
+                    if liq > 0 {
+                        v4_liquidity_val = liq;
+                        fg0_last = f0_l;
+                        fg1_last = f1_l;
+                        fg0_curr = f0_c;
+                        fg1_curr = f1_c;
+                        v4_live_query_success = true;
+                    }
                 }
             }
         }
     }
-    
-    let profile = state.config.profile();
-    let v4_scale: f64;
-    let live_t1_nock: f64;
-    let live_t1_usdc: f64;
-    let live_uni_fee_usdc: f64;
-    let live_uni_fee_nock: f64;
-    let live_uni_fee_usd: f64;
-    let v4_liquidity_str: String;
-    
-    if v4_live_query_success {
-        // Use live on-chain data
-        v4_scale = (v4_liquidity_val as f64) / profile.v4_baseline_liquidity;
-        v4_liquidity_str = v4_liquidity_val.to_string();
-        live_t1_nock = profile.v4_baseline_nock * v4_scale;
-        live_t1_usdc = profile.v4_fee_baseline_usdc * v4_scale;
-        
-        // 4b. Use LIVE on-chain uncollected fees from tokensOwed0/1 instead of scaled baseline
-        live_uni_fee_usdc = v4_tokens_owed_0 as f64 / 1e6; // USDC has 6 decimals
-        live_uni_fee_nock = v4_tokens_owed_1 as f64 / 1e18; // NOCK has 18 decimals
-        live_uni_fee_usd = live_uni_fee_usdc + live_uni_fee_nock * spot_price;
-        
-        // Log if live fees differ significantly from scaled baseline
-        let baseline_uni_fee_usdc = profile.v4_fee_baseline_usdc * v4_scale;
-        let baseline_uni_fee_nock = profile.v4_fee_baseline_nock * v4_scale;
-        if (live_uni_fee_usdc - baseline_uni_fee_usdc).abs() > baseline_uni_fee_usdc * 0.5 ||
-           (live_uni_fee_nock - baseline_uni_fee_nock).abs() > baseline_uni_fee_nock * 0.5 {
-            tracing::warn!(
-                "Uniswap V4 live fees differ from scaled baseline: live_usdc={:.6} vs baseline_usdc={:.6}, live_nock={:.6} vs baseline_nock={:.6}",
-                live_uni_fee_usdc, baseline_uni_fee_usdc, live_uni_fee_nock, baseline_uni_fee_nock
-            );
-        }
-        tracing::info!("Uniswap V4 live query successful: liquidity={}, fees_usdc={:.6}, fees_nock={:.6}", v4_liquidity_val, live_uni_fee_usdc, live_uni_fee_nock);
-    } else {
-        // Fallback to scaled baseline (PositionManager eth_call reverts or returns 0)
-        tracing::warn!("Uniswap V4 PositionManager eth_call failed or returned 0; falling back to scaled baseline fees");
-        v4_liquidity_val = profile.v4_baseline_liquidity as u128;
-        v4_liquidity_str = v4_liquidity_val.to_string();
-        live_t1_nock = profile.v4_baseline_nock;
-        live_t1_usdc = profile.v4_fee_baseline_usdc;
-        live_uni_fee_usdc = profile.v4_fee_baseline_usdc;
-        live_uni_fee_nock = profile.v4_fee_baseline_nock;
-        live_uni_fee_usd = live_uni_fee_usdc + live_uni_fee_nock * spot_price;
+
+    if !v4_live_query_success {
+        return Err(anyhow::anyhow!("Failed to query live Uniswap V4 position and fee growth from StateView RPC"));
     }
+
+    let delta_fg0 = fg0_curr.wrapping_sub(&fg0_last);
+    let delta_fg1 = fg1_curr.wrapping_sub(&fg1_last);
+    let fee0_raw = delta_fg0.mul_div_q128(v4_liquidity_val);
+    let fee1_raw = delta_fg1.mul_div_q128(v4_liquidity_val);
+
+    let live_uni_fee_usdc = fee0_raw as f64 / 1e6; // USDC has 6 decimals
+    let live_uni_fee_nock = fee1_raw as f64 / 1e16; // NOCK has 16 decimals
+    let live_uni_fee_usd = live_uni_fee_usdc + live_uni_fee_nock * spot_price;
+
+    let profile = state.config.profile();
+    let v4_scale = (v4_liquidity_val as f64) / profile.v4_baseline_liquidity;
+    let v4_liquidity_str = v4_liquidity_val.to_string();
+    let live_t1_nock = profile.v4_baseline_nock * v4_scale;
+    let live_t1_usdc = profile.v4_baseline_usdc * v4_scale;
+
+    tracing::info!(
+        "Uniswap V4 live StateView query successful: liquidity={}, fees_usdc={:.6}, fees_nock={:.4}, fees_usd={:.4}",
+        v4_liquidity_val, live_uni_fee_usdc, live_uni_fee_nock, live_uni_fee_usd
+    );
 
     // 5. Fetch live token balances for tracked wallet
     let balances_payload = json!({
@@ -1534,8 +1593,8 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
                 tokens_owed_0: format!("{:.6}", live_uni_fee_usdc),
                 tokens_owed_1: format!("{:.4}", live_uni_fee_nock),
                 in_range: spot_price >= 0.01237 && spot_price <= 2.02783,
-                fee_growth_inside_0_x128: "0".to_string(),
-                fee_growth_inside_1_x128: "0".to_string(),
+                fee_growth_inside_0_x128: fg0_curr.to_hex_be(),
+                fee_growth_inside_1_x128: fg1_curr.to_hex_be(),
             }
         ],
         contract_fees: vec![
@@ -1862,30 +1921,13 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
             },
         },
         structural_channels,
-        strategy_counterfactual: {
-            let mut time_points = Vec::new();
-            let mut active_series = Vec::new();
-            let mut passive_series = Vec::new();
-
-            let len = counterfactual_portfolio.len().min(counterfactual_native.len());
-            for i in 0..len {
-                let ts = Utc::now() - chrono::Duration::minutes((counterfactual_portfolio.len() - i) as i64 * 5);
-                time_points.push(ts.to_rfc3339());
-                active_series.push(format!("{:.2}", counterfactual_portfolio[i]));
-                passive_series.push(format!("{:.2}", counterfactual_native[i]));
-            }
-
-            // Always include current point
-            time_points.push(now_str.clone());
-            active_series.push(format!("{:.2}", total_portfolio_usd));
-            passive_series.push(format!("{:.2}", total_native_usd));
-
-            StrategyCounterfactual {
-                time_points,
-                active_portfolio_series: active_series,
-                passive_baseline_series: passive_series,
-            }
-        },
+        strategy_counterfactual: compute_counterfactual_sync(
+            counterfactual_portfolio,
+            counterfactual_native,
+            total_portfolio_usd,
+            total_native_usd,
+            &now_str,
+        ),
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: vec![
                 FeeCollectionIndex {
@@ -2187,6 +2229,31 @@ operator_profile:
 
         // Verify ETH price falls within expected ~$2538 range
         assert!((eth_price - 2538.86).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_u256_wrapping_sub_and_mul_div() {
+        // Live on-chain feeGrowthInside values for Uniswap V4 NOCK/USDC pool #3126000
+        let fg0_curr = U256::from_hex_be("00000000000000000000002af933ab46390e82c57ffd6903").unwrap();
+        let fg0_last = U256::from_hex_be("000000000000000000000024a1cdc1fa3d9c5ed6c43492cf").unwrap();
+        let fg1_curr = U256::from_hex_be("000000000000087947b99b01f17bd63c97cbe99129a02a0e").unwrap();
+        let fg1_last = U256::from_hex_be("00000000000005db4b66cee311145e59a7723d5ce16bb18f").unwrap();
+        let liquidity = 81297590130616u128;
+
+        let delta0 = fg0_curr.wrapping_sub(&fg0_last);
+        let delta1 = fg1_curr.wrapping_sub(&fg1_last);
+
+        let fee0_raw = delta0.mul_div_q128(liquidity);
+        let fee1_raw = delta1.mul_div_q128(liquidity);
+
+        // Verify exact fee token amounts match on-chain Uniswap mobile UI
+        assert_eq!(fee0_raw, 120033); // 0.120033 USDC (6 decimals)
+        assert_eq!(fee1_raw, 54468217823004916); // 5.446822 NOCK (16 decimals)
+
+        let usdc = fee0_raw as f64 / 1e6;
+        let nock = fee1_raw as f64 / 1e16;
+        assert!((usdc - 0.120033).abs() < 1e-6);
+        assert!((nock - 5.446822).abs() < 1e-6);
     }
 
     #[test]
