@@ -2,7 +2,7 @@ use anyhow::Result;
 use axum::{
     extract::Extension,
     http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     Json,
 };
 use chrono::{DateTime, Utc};
@@ -696,53 +696,110 @@ async fn trigger_ingest_handler(
 async fn get_historical_snapshots_handler(
     Extension(state): Extension<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-) -> impl IntoResponse {
-    let _interval = params
-        .get("interval")
-        .map(|s| s.as_str())
-        .unwrap_or("1d");
+) -> Response {
+    // `interval` was declared in api.yaml but never implemented (now removed from the
+    // spec); reject it explicitly instead of silently ignoring declared parameters.
+    if params.contains_key("interval") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "INVALID_PARAMETER",
+                "message": "interval is not supported; use before/after RFC3339 cursors with limit"
+            })),
+        )
+            .into_response();
+    }
+
     let limit = params
         .get("limit")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(100);
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(100)
+        .clamp(1, 1000);
 
-    let rows = sqlx::query!(
-        r#"
-        SELECT snapshot_id, generated_at, state_hash, version, data
-        FROM snapshots
-        ORDER BY generated_at DESC
-        LIMIT $1
-        "#,
-        limit as i64
-    )
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    let parse_cursor = |key: &str| -> Option<DateTime<Utc>> {
+        params
+            .get(key)
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|d| d.with_timezone(&Utc))
+    };
+    let before = parse_cursor("before");
+    let after = parse_cursor("after");
+
+    let base =
+        "SELECT snapshot_id, generated_at, state_hash, version, data FROM snapshots".to_string();
+    let rows = if let Some(before) = before {
+        sqlx::query(&format!(
+            "{base} WHERE generated_at < $1 ORDER BY generated_at DESC LIMIT $2"
+        ))
+        .bind(before)
+        .bind(limit)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default()
+    } else if let Some(after) = after {
+        sqlx::query(&format!(
+            "{base} WHERE generated_at > $1 ORDER BY generated_at DESC LIMIT $2"
+        ))
+        .bind(after)
+        .bind(limit)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default()
+    } else {
+        sqlx::query(&format!("{base} ORDER BY generated_at DESC LIMIT $1"))
+            .bind(limit)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default()
+    };
 
     let snapshots: Vec<SnapshotEnvelope> = rows
         .into_iter()
         .filter_map(|r| {
-            let data: SnapshotData = serde_json::from_value(r.data).ok()?;
-            Some(SnapshotEnvelope {
+            let data: SnapshotData = serde_json::from_value(r.try_get("data").ok()?).ok()?;
+            let envelope = SnapshotEnvelope {
                 meta: SnapshotMeta {
-                    generated_at: r.generated_at,
-                    state_hash: r.state_hash,
-                    version: r.version,
-                    snapshot_id: r.snapshot_id,
+                    generated_at: r.try_get("generated_at").ok()?,
+                    state_hash: r.try_get("state_hash").ok()?,
+                    version: r.try_get("version").ok()?,
+                    snapshot_id: r.try_get("snapshot_id").ok()?,
                 },
                 data,
-            })
+            };
+            Some(envelope)
+        })
+        .map(|mut envelope| {
+            slim_historical_payload(&mut envelope.data);
+            envelope
         })
         .collect();
 
+    let returned = snapshots.len();
     Json(json!({
         "snapshots": snapshots,
         "pagination": {
             "limit": limit,
-            "returned": snapshots.len(),
-            "has_more": snapshots.len() == limit as usize,
+            "returned": returned,
+            "has_more": returned == limit as usize,
         }
     }))
+    .into_response()
+}
+
+/// Bound the historical response payload: charts only read each stored snapshot's
+/// scalar / current-point values (the `[0]` element of embedded series), never its
+/// multi-point series. Truncating the embedded counterfactual to its current point and
+/// dropping the Bollinger channel points keeps a 288-row response ~1 MB instead of
+/// ~5 MB. `/snapshot/latest` still serves the full embedded series (MCP consumers and
+/// the cold-start chart fallback rely on it; snapshot.yaml declares these fields).
+fn slim_historical_payload(data: &mut SnapshotData) {
+    let dm = &mut data.derived_metrics;
+    dm.strategy_counterfactual.time_points.truncate(1);
+    dm.strategy_counterfactual.active_portfolio_series.truncate(1);
+    dm.strategy_counterfactual.passive_baseline_series.truncate(1);
+    // Channels are recomputed by the worker each cycle from history; historical rows
+    // never need to carry them
+    dm.structural_channels.channels.clear();
 }
 
 async fn get_snapshot_metadata_handler(
