@@ -1,4 +1,5 @@
 import React from 'react';
+import { LiteCockpit, WalletConnectBadge } from './components/LiteCockpit';
 import { createRoot } from 'react-dom/client';
 import {
   AreaChart,
@@ -218,6 +219,8 @@ function Dashboard() {
             <h1 style={styles.title}>NockNock</h1>
             <span style={styles.engineBadge}>Dual-Growth Engine</span>
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <WalletConnectBadge />
           <div style={styles.statusPill}>
             <span style={{
               ...styles.statusDot,
@@ -235,6 +238,7 @@ function Dashboard() {
                   : 'SYNC DELAYED'}
             </span>
             <span style={styles.ageText}>{ageDisplay}</span>
+          </div>
           </div>
         </div>
 
@@ -513,6 +517,55 @@ function Dashboard() {
           })()}
         </CanvasPanel>
 
+        {/* 5b. Sovereign 60/40 Ledger — dual dials + live P/L vs high-water mark */}
+        <CanvasPanel title="Sovereign 60/40 Ledger (Virtual Tax Reserve vs Growth Dry Powder)">
+          {(() => {
+            const ledger = metrics?.sovereign_ledger;
+            const total = ledger ? parseFloat(ledger.cumulative_harvested_usd) : 0;
+            const tax = ledger ? parseFloat(ledger.tax_reserve_usd) : 0;
+            const powder = ledger ? parseFloat(ledger.growth_dry_powder_usd) : 0;
+            const taxPct = total > 0 ? (tax / total) * 100 : 0;
+            const hwm = parseFloat(global?.high_water_mark_usd || '0');
+            const current = parseFloat(global?.total_portfolio_usd || '0');
+            const plPct = hwm > 0 ? ((current / hwm) - 1) * 100 : 0;
+            const plColor = plPct >= 0 ? '#10b981' : '#f59e0b';
+            const Dial = ({ label, value, pct, color }: { label: string; value: string; pct: number; color: string }) => (
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ fontSize: '0.7rem', letterSpacing: 2, color: '#8b949e', marginBottom: 6 }}>{label}</div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 700, color, marginBottom: 6 }}>${value}</div>
+                <div style={{ background: '#0d1117', borderRadius: 999, height: 10, border: '1px solid #30363d', overflow: 'hidden' }}>
+                  <div style={{ width: `${Math.max(2, Math.min(100, pct))}%`, background: color, height: '100%', borderRadius: 999 }} />
+                </div>
+                <div style={{ fontSize: '0.7rem', color: '#484f58', marginTop: 4 }}>{pct.toFixed(0)}% of realized harvests</div>
+              </div>
+            );
+            return (
+              <div>
+                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 14 }}>
+                  <Dial label="40% TAX RESERVE (PROTECTED)" value={tax.toFixed(2)} pct={taxPct} color="#38bdf8" />
+                  <Dial label="60% GROWTH DRY POWDER (DEPLOYABLE)" value={powder.toFixed(2)} pct={100 - taxPct} color="#10b981" />
+                  <div style={{ flex: 1, minWidth: 180 }}>
+                    <div style={{ fontSize: '0.7rem', letterSpacing: 2, color: '#8b949e', marginBottom: 6 }}>LIVE P/L vs HIGH-WATER MARK</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 700, color: plColor }}>
+                      {plPct >= 0 ? '+' : ''}{plPct.toFixed(2)}%
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: '#484f58', marginTop: 10 }}>
+                      ${current.toFixed(2)} vs HWM ${hwm.toFixed(2)} · {ledger ? `${ledger.harvest_count} verified harvests` : 'no harvest ledger yet'}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: '#2ecc71', marginTop: 6, letterSpacing: 1 }}>
+                      ✓ TAX RESERVE PROTECTED — never deployable
+                    </div>
+                  </div>
+                </div>
+                <div style={{ fontSize: '0.7rem', color: '#484f58', lineHeight: 1.6 }}>
+                  Virtual accounting inside the single sovereign wallet: {ledger?.last_harvest_at ? `last verified harvest ${new Date(ledger.last_harvest_at).toLocaleString()}. ` : 'No receipt-verified harvests recorded yet. '}
+                  Tax reserve ratio configured in operator_profile.tax_reserve_ratio (default 0.40).
+                </div>
+              </div>
+            );
+          })()}
+        </CanvasPanel>
+
         {/* 6. Velocity Gas Sandbox — Fee Harvesting & Gas ROI */}
         <CanvasPanel title="Velocity Gas Sandbox (Yield vs Gas Break-Even)">
           <ResponsiveContainer width="100%" height={260}>
@@ -763,7 +816,11 @@ const root = createRoot(document.getElementById('root')!);
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <Dashboard />
+      {new URLSearchParams(window.location.search).get('view') === 'lite' ? (
+        <LiteCockpit />
+      ) : (
+        <Dashboard />
+      )}
     </ErrorBoundary>
   </React.StrictMode>
 );

@@ -99,6 +99,7 @@
 3. **No Custom Wallet Development**:
    - NockNock does NOT build its own wallet.
    - Pair with existing mobile wallets (e.g. Uniswap mobile app on Android/iOS) via WalletConnect for biometric confirmation.
+   - **v0.2.0 pairing runbook**: open the dashboard, click PAIR in the header badge (or open `/?view=lite`), scan the QR / accept the deep link in the Uniswap app, and grant read-only + suggest-transactions permissions. Payloads come from `GET /v1/execute/claim-fees/payload` (simulate-first); the wallet signs with your thumbprint. If a transaction shows approved but nothing lands, the Uniswap app is holding it unbroadcast — open the Uniswap app to broadcast; the cockpit records the receipt automatically once it lands (up to ~10 min). Requires `VITE_WALLETCONNECT_PROJECT_ID` at frontend build time (free Reown project id).
 4. **Traded Assets & CPA Tie-Out**:
    - The treasury only actively trades NOCK and sometimes ETH/WETH on Base.
    - All transactions tie out to CPA records via Koinly tax reporting.

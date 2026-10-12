@@ -284,6 +284,33 @@ components:
           $ref: '#/components/schemas/StrategyCounterfactual'
         velocity_gas_sandbox:
           $ref: '#/components/schemas/VelocityGasSandbox'
+        sovereign_ledger:
+          $ref: '#/components/schemas/SovereignLedger'
+
+    SovereignLedger:
+      type: object
+      description: |
+        Virtual 60/40 sub-ledger over receipt-verified fee harvests. Purely internal
+        accounting inside the single sovereign wallet — no on-chain address change.
+        tax_reserve_usd = cumulative_harvested_usd * operator_profile.tax_reserve_ratio
+        (default 0.40); growth_dry_powder_usd is the remainder (default 0.60).
+      properties:
+        cumulative_harvested_usd:
+          type: string
+          description: Sum of USD values of receipt-verified harvest events
+        tax_reserve_usd:
+          type: string
+          description: Virtual tax escrow buffer (protected; never deployable)
+        growth_dry_powder_usd:
+          type: string
+          description: Liquid dry powder available for tactical dip accumulation
+        harvest_count:
+          type: integer
+          description: Number of distinct verified harvest transactions
+        last_harvest_at:
+          type: string
+          format: date-time
+          nullable: true
 
     GlobalStatus:
       type: object
@@ -346,6 +373,14 @@ components:
           type: string
           description: Detailed explanation of tactical advisory status
           example: "Total NOCK held is 107,123 (+7,123 above 100k hard floor). AMMs are generating dual yield. Maintain posture."
+        regime:
+          type: string
+          description: Market regime from RSI(14) overextension detection
+          enum: [normal, overextended]
+        rsi_14:
+          type: string
+          nullable: true
+          description: Latest Wilder RSI(14) over the NOCK spot-price series
 
     AssetAggregationSeries:
       type: object

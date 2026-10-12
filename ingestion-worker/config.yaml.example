@@ -57,6 +57,11 @@ operator_profile:
   v4_fee_baseline_usdc: 0.0245
   v4_fee_baseline_nock: 1.4820
 
+  # Virtual 60/40 split rule: fraction of realized fee harvests (and measurable net
+  # capital gains) earmarked to the virtual tax reserve buffer. The remainder is
+  # liquid growth dry powder. Purely internal accounting — no on-chain address change.
+  tax_reserve_ratio: 0.40
+
   # Target allocation weights in Portfolio Deviation Matrix (basis points, sum = 10000 bps / 100%)
   target_weights_bps:
     treasury: 8000        # 80.00% Sovereign Treasury floor
@@ -66,3 +71,17 @@ operator_profile:
 
 # Optional Model Context Protocol (MCP) Bearer Token for /v1/mcp endpoint
 # mcp_bearer_token: "your-secret-bearer-token"
+
+# ============================================================
+# Directive-Transition Notifications (issue #28)
+# ============================================================
+# The worker fires a notification only when the tactical directive CHANGES
+# between sync cycles (e.g. HOLD & ACCRETE -> BATCH HARVEST SHOT). Delivery
+# failures are logged, never fatal. All channels optional; leave empty to disable.
+# notifications:
+#   telegram_bot_token: "123456:ABC..."
+#   telegram_chat_id: "123456789"
+#   pushover_token: "pushover-app-token"
+#   pushover_user: "pushover-user-key"
+#   webhook_url: "https://hooks.example/nocknock"
+#   cockpit_url: "https://your-host:3000/lite"   # deep link appended to notifications

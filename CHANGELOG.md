@@ -66,61 +66,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - Unreleased
 
-### Golden Path: Web Cockpit & Uniswap Mobile App Execution
-- [ ] **WalletConnect Integration (AppKit / Wagmi / Viem)**:
-  - [ ] Embed QR code modal on web dashboard allowing instant pairing with the Uniswap mobile app on Android/iOS.
-  - [ ] Auto-reconnect active session across browser refreshes without credential or private key exposure.
-- [ ] **1-Click Tactical Multicall Generator**:
-  - [ ] Direct multicall encoder on Base: construct Aerodrome and Uniswap fee claim and rebalance calls.
-  - [ ] Push transaction requests directly to the paired Uniswap app for biometric (Fingerprint / Face ID) operator confirmation.
-  - [ ] Real-time Base gas quote display and execution feedback loop.
+### Golden Path: Web Cockpit & Uniswap Mobile App Execution (SHIPPED)
+- [x] **WalletConnect Integration (`@walletconnect/ethereum-provider`)**:
+  - [x] Pairing QR modal + deep links to mobile wallets (Uniswap app) on the dashboard (`/?view=lite` cockpit and desktop session badge).
+  - [x] Session persisted/reconnected by the SDK across refreshes; wrong-wallet proposals refused before signing (paired account must equal the payload's sovereign wallet).
+  - [x] Requires `VITE_WALLETCONNECT_PROJECT_ID` (free Reown project id); degrades to an explicit setup hint without it.
+- [x] **Golden Path Payload Engine (worker)**:
+  - [x] `GET /v1/execute/claim-fees/payload` builds unsigned Aerodrome `claimFees()` and Uniswap V4 PositionManager collect (DECREASE_LIQUIDITY 0 + TAKE_PAIR) transactions from the live snapshot, with pre-dispatch eth_call simulation, per-action gas estimates and USD valuation.
+  - [x] Encoding verified byte-for-byte against the official @uniswap/v4-sdk planner output and accepted by live Base mainnet eth_call simulation (golden-vector tests in CI).
+  - [x] Clients dispatch via WalletConnect for biometric signing; no calldata is built client-side; nothing is broadcast by NockNock.
+- [x] **Receipt-Verified Harvest Ledger**:
+  - [x] `POST /v1/execute/record-harvest` verifies the Base receipt and records ERC-20 Transfers (USDC/NOCK) to the sovereign wallet; idempotent; explicit 404 covers the Uniswap-app pending-broadcast quirk.
+- [x] **Virtual 60/40 Sub-Ledger** (`sovereign_ledger` in derived metrics):
+  - [x] `tax_reserve_ratio` (default 0.40) in OperatorProfile; cumulative receipt-verified harvests split into a protected virtual tax reserve and growth dry powder.
+  - [x] Tax-reserve guardrail: dip-deployment advice suppressed (`SWEEP TO STABLE / ACCUMULATE DRY POWDER (Tax Guardrail)`) when the reserve exceeds the stable stack; otherwise the deployable amount and protected reserve are surfaced explicitly.
+- [x] **Koinly Tax Export**:
+  - [x] `GET /v1/tax/export?format=koinly` (CSV default, JSON available): fee claims tagged `income` with Base tx hashes; tie-out tests prove ledger ↔ export ↔ split consistency.
+- Deferred to 0.2.1 (scoped out during implementation, documented in the spec task): multicall tx aggregation (rejected — Aerodrome `claimFees()` is msg.sender-relative), Android app (web QR flow ships instead), multi-AMM pool ingestion loop, Coinbase staked-ETH connector (needs CDP key + JWT signing).
 
-### Ethereum & Multi-AMM Pool Discovery & Tracking
-- [ ] **Dynamic ETH Pool Discovery (Uniswap & Aerodrome)**:
-  - [ ] Discover and optionally track Ethereum-related AMM pools on Base (e.g. WETH/USDC, WETH/NOCK, and secondary liquidity pairs).
-  - [ ] Multi-pool registry in backend ingestion worker: put discovered pools on the board and count them as part of the unified portfolio whole.
-  - [ ] Support dynamic reserve, tick, and fee queries across heterogeneous AMM architectures.
-- [ ] **Multi-Vault Portfolio Aggregation**:
-  - [ ] Expand tracking beyond the single primary vault to support multiple disparate vault contracts and liquidity tranches.
-  - [ ] Aggregated net asset value (NAV) and unified token balance accounting.
+### Anti-Top-Buying Guardrails & Notifications (SHIPPED)
+- [x] **RSI(14) Overextension Regime** (Wilder RSI over the per-snapshot NOCK spot series): `regime` + `rsi_14` exposed in GlobalStatus; `SWEEP TO STABLE / ACCUMULATE DRY POWDER (Overextension Cooldown)` directive suppresses buy advice at RSI >= 70.
+- [x] **Directive-Transition Notifications**: Telegram, Pushover, and generic webhook adapters under `notifications` in config; transition-only dispatch (first boot silent); delivery failures logged, never fatal; optional `cockpit_url` deep link.
 
-### Coinbase API Integration: Staked Ethereum Tracking
-- [ ] **Read-Only Coinbase Connector**:
-  - [ ] Secure read-only API integration to observe staked Ethereum (staked ETH / cbETH) balances over time.
-  - [ ] Symbiotic Yield Telemetry: track staked ETH baseline growth alongside on-chain Base Nock vault reserves.
-  - [ ] Self-Funding Invariant: monitor how on-chain Nock vault yields fund Base L2 operations while staked ETH accumulates off-chain without churn.
-  - [ ] Historical snapshot recording for staked ETH balances in worker database.
+### Lite Mobile Cockpit (SHIPPED)
+- [x] `/?view=lite` phone-sized view: floor health, uncollected fees + gas ROI, ledger summary, and the EXECUTE BATCH HARVEST flow with pending-broadcast handling.
 
-### Dual Income Streams: Harvested Yield & Capital Gains (P/L)
-- [ ] **Low-Hanging P/L Gauge Integration**:
-  - [ ] Connect to external wallet/portfolio P/L APIs (Moralis / Alchemy / Uniswap mobile telemetry) to pull token cost basis and net P/L without building a complex cost-basis engine from scratch.
-  - [ ] Local Epoch P/L: compute deterministic session delta against high-water marks and recorded spot prices.
-  - [ ] Unified Income Model: account for both ordinary yield (fee harvests) and capital gains/losses (P/L) across active positions.
+### Dashboard Additions (SHIPPED)
+- [x] "Sovereign 60/40 Ledger" panel: dual dials (protected tax reserve vs deployable dry powder) + live P/L vs high-water mark, all from locally recorded data (zero external APIs, zero mock numbers).
 
-### Sovereign Bookkeeping & 60/40 Balance Sheet Partition
-- [ ] **Virtual Tax Reserve Sub-Ledger**:
-  - [ ] Maintain the 60/40 Split Rule as an internal accounting allocation within the single sovereign wallet (no separate physical address required).
-  - [ ] Virtual Tax Escrow Buffer: earmark 40% of realized fee harvest revenue AND net capital gains to protect the operator's forward tax obligations.
-  - [ ] Liquid Growth Dry Powder: track 60% of harvested yield and trading returns available for tactical market dip accumulation.
-  - [ ] Over-allocation Guardrail: cockpit alert if a manual or tactical move would dip into the 40% tax reserve buffer or breach the treasury floor invariant.
-
-### Tax Compliance & Koinly Audit Integration
-- [ ] **Koinly-Ready Tax Export Engine**:
-  - [ ] Generate standardized, pre-formatted CSV and JSON exports adhering strictly to Koinly custom import specifications.
-  - [ ] Classify on-chain events unambiguously: tag fee claims as `Income / Staking Reward`, tag pool rebalances as non-taxable liquidity transfers.
-  - [ ] Expose `/v1/tax/export?format=koinly` endpoint on Axum backend.
-- [ ] **"Tie-Out" Test Suite & Historical Verification**:
-  - [ ] Automated accounting validation tests: prove that local ledger state, on-chain balances, Uniswap/indexer P/L gauges, and Koinly-formatted transaction histories mathematically "tie out" without unexplained discrepancies.
-  - [ ] Audit preparation package for CPA review, ensuring peace of mind and zero tax surprises.
-
-### Canvas Expansion & State Room Redesign (v0.2.0 vs v0.1.0)
-- [ ] **Visual Identity & UI Overhaul**:
-  - [ ] Complete UI refresh making it impossible to confuse a v0.1.0 dashboard with a v0.2.0 dashboard.
-  - [ ] Expanded Graph Canvas: increase panel count beyond the original 7 charts to plot discovered ETH pools, multi-vault trajectories, and staked ETH accumulation curves.
-  - [ ] Dual-Dial Cockpit: distinct visual gauges for the 40% Tax Reserve Buffer and 60% Growth Dry Powder.
-  - [ ] Live P/L Performance Dial: visual capital gains tracking alongside yield harvest counters.
-  - [ ] WalletConnect Session Banner with live connection status and paired wallet indicator.
-  - [ ] Tax Health & Invariant Safeguard indicator (clear visual reassurance that tax obligations are covered).
+### CI Performance & Rust Dependency Caching (VERIFIED)
+- [x] `Swatinem/rust-cache@v2` confirmed on both Rust jobs (worker `ingestion-worker -> target`, brain `brain -> target`).
 
 ### CI Performance & Rust Dependency Caching
 - [ ] **GitHub Actions Build Optimization**:

@@ -64,6 +64,7 @@ The system delivers real-time monitoring and tactical shot advice across multipl
 ---
 
 ### Tier 3: Edge Mobile & Moon Clock Android Model (`moon-phase-clock`)
+* **v0.2.0 status**: deferred. The web `/?view=lite` cockpit + WalletConnect QR flow ships instead; the native Android app remains planned future work consuming the same worker payload endpoints. **Code-reuse gap (documented, deliberate)**: for 0.2.0 clients consume REST-computed values and the V4/Aerodrome claim encoders are Rust-only in the worker — the brain-wasm-in-Android-assets reuse pattern is not wired yet; `android/app/src/main/assets/` remains the reserved embedding path.
 * **Rationale**: Mirroring `moon-phase-clock`, the Android mobile app provides calm, sovereign glancability directly on a handset or widget.
 * **Two-Brain Separation**:
   1. **Server Brain (`ingestion-worker/src/main.rs`)**: Focuses on high-volume historical analytics, database deduplication, cron ingestion, and multi-day charting.

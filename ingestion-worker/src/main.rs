@@ -35,6 +35,8 @@ pub struct OperatorProfile {
     pub v4_fee_baseline_usdc: f64,
     #[serde(default = "default_v4_fee_baseline_nock")]
     pub v4_fee_baseline_nock: f64,
+    #[serde(default = "default_tax_reserve_ratio")]
+    pub tax_reserve_ratio: f64,
     #[serde(default = "default_target_weights")]
     pub target_weights_bps: TargetWeightsBps,
 }
@@ -57,6 +59,7 @@ fn default_v4_baseline_nock() -> f64 { 4004.31227 }
 fn default_v4_baseline_usdc() -> f64 { 23.63241 }
 fn default_v4_fee_baseline_usdc() -> f64 { 0.0245 }
 fn default_v4_fee_baseline_nock() -> f64 { 1.4820 }
+fn default_tax_reserve_ratio() -> f64 { 0.40 }
 fn default_treasury_bps() -> i32 { 8000 }
 fn default_aerodrome_bps() -> i32 { 1000 }
 fn default_uniswap_v4_bps() -> i32 { 500 }
@@ -79,6 +82,7 @@ impl Default for OperatorProfile {
             v4_baseline_usdc: default_v4_baseline_usdc(),
             v4_fee_baseline_usdc: default_v4_fee_baseline_usdc(),
             v4_fee_baseline_nock: default_v4_fee_baseline_nock(),
+            tax_reserve_ratio: default_tax_reserve_ratio(),
             target_weights_bps: default_target_weights(),
         }
     }
@@ -117,6 +121,8 @@ struct AppConfig {
     mcp_bearer_token: Option<String>,
     #[serde(default)]
     operator_profile: OperatorProfile,
+    #[serde(default)]
+    notifications: NotificationConfig,
 }
 
 impl AppConfig {
@@ -272,6 +278,25 @@ struct DerivedMetrics {
     structural_channels: StructuralChannels,
     strategy_counterfactual: StrategyCounterfactual,
     velocity_gas_sandbox: VelocityGasSandbox,
+    #[serde(default)]
+    sovereign_ledger: SovereignLedger,
+}
+
+/// Virtual 60/40 sub-ledger over receipt-verified harvests (no on-chain address change).
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+struct SovereignLedger {
+    cumulative_harvested_usd: String,
+    tax_reserve_usd: String,
+    growth_dry_powder_usd: String,
+    harvest_count: i64,
+    last_harvest_at: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct LedgerAggregate {
+    total_usd: f64,
+    harvest_count: i64,
+    last_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
@@ -296,6 +321,10 @@ struct GlobalStatus {
     shot_advice_action: String,
     #[serde(default)]
     shot_advice_details: String,
+    #[serde(default)]
+    regime: String,
+    #[serde(default)]
+    rsi_14: Option<String>,
 }
 
 fn default_floor_target_string() -> String {
@@ -538,6 +567,18 @@ async fn main() -> Result<()> {
         .route(
             "/mcp",
             axum::routing::post(mcp_http_handler),
+        )
+        .route(
+            "/v1/execute/claim-fees/payload",
+            axum::routing::get(get_claim_fees_payload_handler),
+        )
+        .route(
+            "/v1/execute/record-harvest",
+            axum::routing::post(record_harvest_handler),
+        )
+        .route(
+            "/v1/tax/export",
+            axum::routing::get(tax_export_handler),
         )
         .layer(Extension(state.clone()));
 
@@ -1129,6 +1170,27 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
 
     let structural_channels = compute_structural_channels_sync(&historical_prices);
 
+    // Sovereign ledger aggregate: receipt-verified harvests feed the virtual 60/40 sub-ledger
+    let ledger_agg = match sqlx::query(
+        "SELECT COALESCE(SUM(usd_value::numeric)::float8, 0) AS total_usd, \
+                COUNT(DISTINCT tx_hash) AS harvests, \
+                MAX(recorded_at) AS last_at \
+         FROM harvest_events",
+    )
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(r) => LedgerAggregate {
+            total_usd: r.try_get::<f64, _>("total_usd").unwrap_or(0.0),
+            harvest_count: r.try_get::<i64, _>("harvests").unwrap_or(0),
+            last_at: r.try_get::<Option<DateTime<Utc>>, _>("last_at").ok().flatten(),
+        },
+        Err(e) => {
+            tracing::warn!("Harvest ledger aggregate query failed: {e}");
+            LedgerAggregate::default()
+        }
+    };
+
     // Fetch counterfactual historical data: the MOST RECENT 100 snapshots, collected as
     // paired (timestamp, portfolio, native) tuples so the two series stay index-aligned,
     // oldest first, carrying real snapshot timestamps (no fabricated spacing).
@@ -1160,8 +1222,51 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
 
     // Compute derived metrics
     let profile = state.config.profile();
+    // Market regime: Wilder RSI(14) over the historical NOCK spot series (per-snapshot
+    // Aerodrome pool reserves, oldest first) with the live spot appended as the
+    // latest close. Overextension suppresses buy advice (issue #29).
+    let regime_rows = sqlx::query(
+        r#"SELECT (data->'pool_mechanics'->0->'volatile_assets'->0->>'reserve_amount')::float8 AS usdc,
+                  (data->'pool_mechanics'->0->'volatile_assets'->1->>'reserve_amount')::float8 AS nock
+           FROM snapshots ORDER BY generated_at DESC LIMIT 50"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    let mut closes: Vec<f64> = regime_rows
+        .iter()
+        .rev()
+        .filter_map(|r| {
+            let usdc: f64 = r.try_get("usdc").ok()?;
+            let nock: f64 = r.try_get("nock").ok()?;
+            if nock > 0.0 { Some(usdc / nock) } else { None }
+        })
+        .collect();
+    let live_spot = raw_data
+        .pool_mechanics
+        .first()
+        .and_then(|p| {
+            if p.volatile_assets.len() < 2 { return None; }
+            let r0: f64 = p.volatile_assets[0].reserve_amount.parse().ok()?;
+            let r1: f64 = p.volatile_assets[1].reserve_amount.parse().ok()?;
+            if r1 > 0.0 { Some(r0 / r1) } else { None }
+        })
+        .unwrap_or(0.0);
+    if live_spot > 0.0 {
+        closes.push(live_spot);
+    }
+    let rsi_series = compute_rsi_series(&closes, RSI_PERIOD);
+    let latest_rsi = rsi_series.iter().rev().find_map(|x| *x);
+    let regime = MarketRegime {
+        rsi: latest_rsi,
+        overextended: latest_rsi.map_or(false, |r| r >= RSI_OVERBOUGHT),
+    };
+
     let derived_metrics = compute_derived_metrics(&raw_data, prev_hwm, &profile, structural_channels,
-        &counterfactual_history);
+        &counterfactual_history, &ledger_agg, &regime);
+    // Capture directive strings before the metrics move into the snapshot envelope
+    let next_directive_action = derived_metrics.global_status.shot_advice_action.clone();
+    let next_directive_details = derived_metrics.global_status.shot_advice_details.clone();
 
     // Build snapshot data
     let snapshot_data = SnapshotData {
@@ -1177,6 +1282,24 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
 
     // Build envelope
     let now = Utc::now();
+    // Directive-transition notifications (issue #28): fire only when the tactical
+    // directive changes between cycles. First boot stays silent; delivery failures
+    // are logged, never fatal.
+    let prev_directive = state
+        .latest_snapshot
+        .lock()
+        .await
+        .as_ref()
+        .map(|s| s.data.derived_metrics.global_status.shot_advice_action.clone());
+    if let Some(text) = directive_transition_notification(
+        prev_directive.as_deref(),
+        &next_directive_action,
+        &next_directive_details,
+        state.config.notifications.cockpit_url.as_deref(),
+    ) {
+        dispatch_notifications(state, &text).await;
+    }
+
     let envelope = SnapshotEnvelope {
         meta: SnapshotMeta {
             generated_at: now,
@@ -1247,6 +1370,55 @@ async fn post_rpc_with_retry(
     None
 }
 
+/// Fire-and-forget directive-transition notifications (issue #28). Delivery
+/// failures are logged and never fatal to the ingestion cycle.
+async fn dispatch_notifications(state: &Arc<AppState>, text: &str) {
+    let cfg = &state.config.notifications;
+    if let (Some(token), Some(chat)) = (&cfg.telegram_bot_token, &cfg.telegram_chat_id) {
+        if !token.is_empty() && !chat.is_empty() {
+            let url = format!("https://api.telegram.org/bot{}/sendMessage", token);
+            let payload = json!({ "chat_id": chat, "text": text });
+            match state.http_client.post(&url).json(&payload).send().await {
+                Ok(r) if r.status().is_success() => {
+                    tracing::info!("Telegram notification delivered")
+                }
+                Ok(r) => tracing::warn!("Telegram notification failed: HTTP {}", r.status()),
+                Err(e) => tracing::error!("Telegram notification error: {e}"),
+            }
+        }
+    }
+    if let (Some(token), Some(user)) = (&cfg.pushover_token, &cfg.pushover_user) {
+        if !token.is_empty() && !user.is_empty() {
+            let payload = json!({ "token": token, "user": user, "message": text });
+            match state
+                .http_client
+                .post("https://api.pushover.net/1/messages.json")
+                .json(&payload)
+                .send()
+                .await
+            {
+                Ok(r) if r.status().is_success() => {
+                    tracing::info!("Pushover notification delivered")
+                }
+                Ok(r) => tracing::warn!("Pushover notification failed: HTTP {}", r.status()),
+                Err(e) => tracing::error!("Pushover notification error: {e}"),
+            }
+        }
+    }
+    if let Some(url) = &cfg.webhook_url {
+        if !url.is_empty() {
+            let payload = json!({ "text": text });
+            match state.http_client.post(url).json(&payload).send().await {
+                Ok(r) if r.status().is_success() => {
+                    tracing::info!("Webhook notification delivered")
+                }
+                Ok(r) => tracing::warn!("Webhook notification failed: HTTP {}", r.status()),
+                Err(e) => tracing::error!("Webhook notification error: {e}"),
+            }
+        }
+    }
+}
+
 /// Represents an unsigned 256-bit integer as (hi: u128, lo: u128)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct U256(pub u128, pub u128);
@@ -1290,6 +1462,857 @@ impl U256 {
 
     pub fn to_hex_be(&self) -> String {
         format!("{:032x}{:032x}", self.0, self.1)
+    }
+}
+
+// ============================================================
+// Golden Path: claim-fees payload engine (v0.2.0)
+// ============================================================
+// Encoding verified against Base mainnet via eth_call simulation on 2026-10-12
+// (helix-specs task 000661 verification/v4collect_sim.py; golden vectors in
+// verification/sdk_full.txt match @uniswap/v4-sdk@2.4.1 V4PositionPlanner output
+// byte-for-byte). Do not "fix" these constants without re-running that simulation.
+
+const UNISWAP_V4_POSM_BASE: &str = "0x7c5f5a4bbd8fd63184577525326123b519429bdc";
+const POSM_MODIFY_LIQUIDITIES_SELECTOR: &str = "dd46508f"; // modifyLiquidities(bytes,uint256)
+const V4_ACTION_DECREASE_LIQUIDITY: u8 = 0x01; // liquidity 0 => collect fees only
+const V4_ACTION_TAKE_PAIR: u8 = 0x11; // unified Actions enum as deployed on Base
+const AERODROME_CLAIM_FEES_SELECTOR: &str = "d294f093"; // claimFees()
+
+fn word_addr(addr: &str) -> String {
+    format!("000000000000000000000000{}", addr.trim_start_matches("0x").to_lowercase())
+}
+
+fn word_u256(v: u64) -> String {
+    format!("{:064x}", v)
+}
+
+/// ABI-encode a dynamic `bytes` member: 32-byte length word + data padded to 32-byte multiples.
+fn abi_encode_bytes(b_hex: &str) -> String {
+    let clean = b_hex.trim_start_matches("0x");
+    let pad_pairs = ((64 - (clean.len() % 64)) % 64) / 2;
+    format!("{:064x}{}{}", clean.len() / 2, clean, "00".repeat(pad_pairs))
+}
+
+/// ABI-encode a `bytes[]` array at its own position: [length, offsets..., contents...].
+/// Offsets are in bytes, relative to the start of the array (after the length word).
+fn abi_encode_bytes_array(items: &[String]) -> String {
+    let n = items.len();
+    let mut offsets = String::new();
+    let mut contents = String::new();
+    let mut acc = 0usize;
+    for it in items {
+        offsets.push_str(&word_u256((n * 32 + acc) as u64));
+        acc += 32 + ((it.len() / 2 + 31) / 32) * 32;
+    }
+    for it in items {
+        contents.push_str(&abi_encode_bytes(it));
+    }
+    format!("{:064x}{}{}", n, offsets, contents)
+}
+
+/// Build the V4 PositionManager `unlockData` for a fee collect:
+/// strict abi.encode(bytes actions, bytes[] params) where actions = [DECREASE_LIQUIDITY,
+/// TAKE_PAIR] and params are flat member encodings. Byte-for-byte identical to
+/// @uniswap/v4-sdk V4PositionPlanner.finalize() for the same inputs (golden vector test).
+fn build_v4_collect_unlock_data(token_id: u64, currency0: &str, currency1: &str, recipient: &str) -> String {
+    let actions_hex = format!("{:02x}{:02x}", V4_ACTION_DECREASE_LIQUIDITY, V4_ACTION_TAKE_PAIR);
+    // DECREASE_LIQUIDITY flat params: [tokenId u256, liquidity u256 (=0 collects fees),
+    // amount0Min u128, amount1Min u128, hookData offset (head-relative, incl. offset word
+    // => 5*32 = 0xa0), hookData length (=0)]
+    let decrease = format!(
+        "{}{}{}{}{}{}",
+        word_u256(token_id),
+        word_u256(0),
+        word_u256(0),
+        word_u256(0),
+        word_u256(0xa0),
+        word_u256(0)
+    );
+    // TAKE_PAIR flat params: [currency0, currency1, recipient] — all static, 3 words
+    let take_pair = format!(
+        "{}{}{}",
+        word_addr(currency0),
+        word_addr(currency1),
+        word_addr(recipient)
+    );
+    let params = vec![decrease, take_pair];
+    let actions_len_padded_bytes = ((actions_hex.len() / 2 + 31) / 32) * 32;
+    let params_offset = 0x40 + 32 + actions_len_padded_bytes;
+    format!(
+        "0x{}{}{}{}",
+        word_u256(0x40),
+        word_u256(params_offset as u64),
+        abi_encode_bytes(&actions_hex),
+        abi_encode_bytes_array(&params)
+    )
+}
+
+/// Full calldata for PositionManager.modifyLiquidities(bytes,uint256):
+/// [selector, 0x40 (offset to unlockData), deadline, bytesLen, unlockData...]
+fn build_v4_collect_calldata(token_id: u64, currency0: &str, currency1: &str, recipient: &str, deadline: u64) -> String {
+    format!(
+        "0x{}{}{}{}",
+        POSM_MODIFY_LIQUIDITIES_SELECTOR,
+        word_u256(0x40),
+        word_u256(deadline),
+        abi_encode_bytes(&build_v4_collect_unlock_data(token_id, currency0, currency1, recipient))
+    )
+}
+
+/// Single-action variant: unlockData with only DECREASE_LIQUIDITY (collects fees to
+/// the posm ledger without sweeping them out). Live-verified companion to the full
+/// collect; useful for isolating decode vs take failures.
+fn build_v4_collect_unlock_data_decrease_only(token_id: u64) -> String {
+    let actions_hex = format!("{:02x}", V4_ACTION_DECREASE_LIQUIDITY);
+    let decrease = format!(
+        "{}{}{}{}{}{}",
+        word_u256(token_id),
+        word_u256(0),
+        word_u256(0),
+        word_u256(0),
+        word_u256(0xa0),
+        word_u256(0)
+    );
+    let params = vec![decrease];
+    let actions_len_padded_bytes = ((actions_hex.len() / 2 + 31) / 32) * 32;
+    let params_offset = 0x40 + 32 + actions_len_padded_bytes;
+    format!(
+        "0x{}{}{}{}",
+        word_u256(0x40),
+        word_u256(params_offset as u64),
+        abi_encode_bytes(&actions_hex),
+        abi_encode_bytes_array(&params)
+    )
+}
+
+/// Live ETH/USD spot from the Aerodrome vAMM-WETH/USDC getReserves.
+/// Degrades to the documented conservative $2,500 peg when RPC is unreachable.
+async fn fetch_eth_price_usd(http_client: &Client, alchemy_url: &str) -> f64 {
+    let payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{
+            "to": "0x88A43bbDF9D098eEC7bCEda4e2494615dfD9bB9C",
+            "data": "0x0902f1ac"
+        }, "latest"],
+        "id": 99
+    });
+    if let Some(res_json) = post_rpc_with_retry(http_client, alchemy_url, &payload, 2).await {
+        if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
+            let clean = hex_str.trim_start_matches("0x");
+            if clean.len() >= 128 {
+                if let (Ok(r0), Ok(r1)) = (
+                    u128::from_str_radix(&clean[..64], 16),
+                    u128::from_str_radix(&clean[64..128], 16),
+                ) {
+                    let weth = r0 as f64 / 1e18;
+                    let usdc = r1 as f64 / 1e6;
+                    if weth > 0.0 {
+                        return usdc / weth;
+                    }
+                }
+            }
+        }
+    }
+    2500.0
+}
+
+const USDC_BASE: &str = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const NOCK_BASE: &str = "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722";
+/// keccak256("Transfer(address,address,uint256)") — verified against the repo keccak tooling.
+const TRANSFER_EVENT_TOPIC: &str =
+    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+struct ParsedHarvestTransfer {
+    token_address: String,
+    token_symbol: String,
+    from_address: String,
+    recipient: String,
+    amount_raw: String,
+    amount_human: String,
+    decimals: i32,
+}
+
+/// Exact decimal formatting: raw integer amount -> human string, no float rounding.
+/// "120033" @6dp -> "0.120033"; "54468217823004916" @16dp -> "5.4468217823004916".
+fn format_units(amount: u128, decimals: i32) -> String {
+    let digits = amount.to_string();
+    let d = decimals.max(0) as usize;
+    let s = if digits.len() <= d {
+        format!("0.{}{}", "0".repeat(d - digits.len()), digits)
+    } else {
+        format!("{}.{}", &digits[..digits.len() - d], &digits[digits.len() - d..])
+    };
+    if s.contains('.') {
+        let trimmed = s.trim_end_matches('0').trim_end_matches('.');
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    s
+}
+
+/// Wilder's RSI over a close-price series. Returns one entry per input index;
+/// `None` until `period` samples exist. Pure math (no I/O) — the anti-top-buying
+/// tripwire per issue #29 ("check the RSI and buy when oversold").
+fn compute_rsi_series(closes: &[f64], period: usize) -> Vec<Option<f64>> {
+    let mut out = vec![None; closes.len()];
+    if period == 0 || closes.len() <= period {
+        return out;
+    }
+    let mut gain_sum = 0.0f64;
+    let mut loss_sum = 0.0f64;
+    for w in 1..=period {
+        let diff = closes[w] - closes[w - 1];
+        if diff > 0.0 { gain_sum += diff; } else { loss_sum -= diff; }
+    }
+    let mut avg_gain = gain_sum / period as f64;
+    let mut avg_loss = loss_sum / period as f64;
+    let rsi = |g: f64, l: f64| {
+        if l == 0.0 { 100.0 } else { 100.0 - 100.0 / (1.0 + g / l) }
+    };
+    out[period] = Some(rsi(avg_gain, avg_loss));
+    for i in period + 1..closes.len() {
+        let diff = closes[i] - closes[i - 1];
+        let (g, l) = if diff > 0.0 { (diff, 0.0) } else { (0.0, -diff) };
+        avg_gain = (avg_gain * (period as f64 - 1.0) + g) / period as f64;
+        avg_loss = (avg_loss * (period as f64 - 1.0) + l) / period as f64;
+        out[i] = Some(rsi(avg_gain, avg_loss));
+    }
+    out
+}
+
+/// Market regime inputs consumed by the advice engine (computed by the worker
+/// from historical snapshots; the advice engine itself stays pure math).
+#[derive(Debug, Default, Clone, Copy)]
+struct MarketRegime {
+    /// Latest Wilder RSI(14) over the historical spot-price series
+    rsi: Option<f64>,
+    /// Overextension: RSI >= 70 (overbought exhaustion). At 70+, buy/deploy advice
+    /// is suppressed in favor of sweeping gains to stables.
+    overextended: bool,
+}
+
+const RSI_OVERBOUGHT: f64 = 70.0;
+const RSI_PERIOD: usize = 14;
+
+/// Notification config for directive-transition dispatch (issue #28).
+#[derive(Deserialize, Debug, Clone, Default)]
+struct NotificationConfig {
+    telegram_bot_token: Option<String>,
+    telegram_chat_id: Option<String>,
+    pushover_token: Option<String>,
+    pushover_user: Option<String>,
+    webhook_url: Option<String>,
+    cockpit_url: Option<String>,
+}
+
+/// Pure transition decision: notify only when a directive CHANGES between cycles
+/// (never on first boot, never on repeats). Returns the message text.
+fn directive_transition_notification(
+    prev: Option<&str>,
+    next: &str,
+    details: &str,
+    cockpit_url: Option<&str>,
+) -> Option<String> {
+    let prev = prev?;
+    if prev == next {
+        return None;
+    }
+    let mut text = format!("🛡️ NockNock directive change: {}\n{}", next, details);
+    if let Some(url) = cockpit_url {
+        if !url.is_empty() {
+            text.push_str(&format!("\n→ {}", url));
+        }
+    }
+    Some(text)
+}
+
+/// Extract ERC-20 Transfer logs that paid the sovereign wallet in a transaction
+/// receipt. Logs for tokens we do not track (anything other than USDC/NOCK on
+/// Base) are ignored with a warning rather than guessed at.
+fn parse_harvest_transfers(receipt: &serde_json::Value, wallet: &str) -> Vec<ParsedHarvestTransfer> {
+    let mut out = Vec::new();
+    let wallet_padded = format!(
+        "000000000000000000000000{}",
+        wallet.trim_start_matches("0x").to_lowercase()
+    );
+    let Some(logs) = receipt.get("logs").and_then(|l| l.as_array()) else {
+        return out;
+    };
+    for log in logs {
+        let Some(topics) = log.get("topics").and_then(|t| t.as_array()) else {
+            continue;
+        };
+        if topics.len() < 3 {
+            continue;
+        }
+        let (Some(t0), Some(from_word), Some(to_word)) = (
+            topics[0].as_str(),
+            topics[1].as_str(),
+            topics[2].as_str(),
+        ) else {
+            continue;
+        };
+        if !t0.eq_ignore_ascii_case(TRANSFER_EVENT_TOPIC) {
+            continue;
+        }
+        if !to_word
+            .trim_start_matches("0x")
+            .eq_ignore_ascii_case(&wallet_padded)
+        {
+            continue;
+        }
+        let Some(token_addr) = log.get("address").and_then(|a| a.as_str()) else {
+            continue;
+        };
+        let (symbol, decimals): (&str, i32) = if token_addr.eq_ignore_ascii_case(USDC_BASE) {
+            ("USDC", 6)
+        } else if token_addr.eq_ignore_ascii_case(NOCK_BASE) {
+            ("NOCK", 16)
+        } else {
+            tracing::warn!("Harvest receipt contains a Transfer of an untracked token {}; skipping", token_addr);
+            continue;
+        };
+        let Some(data) = log.get("data").and_then(|d| d.as_str()) else {
+            continue;
+        };
+        let Ok(amount) = u128::from_str_radix(data.trim_start_matches("0x"), 16) else {
+            continue;
+        };
+        out.push(ParsedHarvestTransfer {
+            token_address: token_addr.to_string(),
+            token_symbol: symbol.to_string(),
+            from_address: format!("0x{}", from_word.trim_start_matches("0x")[24..].to_lowercase()),
+            recipient: wallet.to_string(),
+            amount_raw: amount.to_string(),
+            amount_human: format_units(amount, decimals),
+            decimals,
+        });
+    }
+    out
+}
+
+fn is_valid_tx_hash(s: &str) -> bool {
+    let clean = s.trim_start_matches("0x");
+    clean.len() == 64 && clean.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// NOCK spot price derived from the Aerodrome pool reserves in the latest snapshot.
+fn nock_spot_from_snapshot(data: &SnapshotData) -> Option<f64> {
+    let pool = data.pool_mechanics.iter().find(|p| p.platform == "Aerodrome")?;
+    if pool.volatile_assets.len() < 2 {
+        return None;
+    }
+    let usdc: f64 = pool.volatile_assets[0].reserve_amount.parse().ok()?;
+    let nock: f64 = pool.volatile_assets[1].reserve_amount.parse().ok()?;
+    if usdc <= 0.0 || nock <= 0.0 {
+        return None;
+    }
+    Some(usdc / nock)
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct ClaimFeeAction {
+    platform: String,
+    label: String,
+    to: String,
+    data: String,
+    value: String,
+    expected_amount_0: Option<String>,
+    expected_amount_1: Option<String>,
+    expected_usd: Option<String>,
+    gas_estimate: Option<String>,
+    gas_usd: Option<String>,
+    /// "success" | "failed" | "unavailable" — clients must only dispatch "success"
+    simulation: String,
+    simulation_detail: Option<String>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct ClaimFeesPayload {
+    chain_id: u64,
+    from: String,
+    generated_at: String,
+    gross_usd: Option<String>,
+    estimated_gas_usd: Option<String>,
+    net_after_gas_usd: Option<String>,
+    actions: Vec<ClaimFeeAction>,
+}
+
+/// GET /v1/execute/claim-fees/payload — unsigned fee-claim transactions for the
+/// sovereign wallet, derived from live on-chain state. Clients (Android app, web
+/// cockpit) dispatch these to the paired wallet for signing; they never build
+/// calldata themselves.
+async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState>>) -> impl IntoResponse {
+    let wallet = state.config.tracked_wallets[0].clone();
+    let alchemy_key = state.config.alchemy_api_keys.first().cloned().unwrap_or_default();
+    if alchemy_key.is_empty() || alchemy_key == "YOUR_ALCHEMY_API_KEY" {
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+            "error": "No Alchemy RPC key configured; cannot simulate or estimate claim transactions"
+        }))).into_response();
+    }
+    let alchemy_url = format!("https://base-mainnet.g.alchemy.com/v2/{}", alchemy_key);
+
+    // Live snapshot is the source of truth for claimable amounts (zero-mock)
+    let snapshot = state.latest_snapshot.lock().await.clone();
+    let snapshot = match snapshot {
+        Some(s) => s,
+        None => {
+            return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+                "error": "No snapshot available yet; ingestion cycle has not completed"
+            }))).into_response()
+        }
+    };
+    let gross_usd = snapshot.data.derived_metrics.global_status.total_fees_claimable_usd.clone();
+
+    let deadline = (Utc::now().timestamp() as u64) + 600;
+    let mut actions: Vec<ClaimFeeAction> = Vec::new();
+
+    // --- Action 1: Aerodrome claimFees() ---
+    // Target pool from config (tracked pool where the wallet LPs Tranche 2)
+    let aero_pool = state
+        .config
+        .tracked_pools
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string());
+    let aero_data = format!("0x{}", AERODROME_CLAIM_FEES_SELECTOR);
+    let aero_sim_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{ "from": wallet, "to": aero_pool, "data": aero_data }, "latest"],
+        "id": 20
+    });
+    let mut aero = ClaimFeeAction {
+        platform: "aerodrome".to_string(),
+        label: "Claim Aerodrome LP fees (Tranche 2)".to_string(),
+        to: aero_pool,
+        data: aero_data,
+        value: "0x0".to_string(),
+        expected_amount_0: None,
+        expected_amount_1: None,
+        expected_usd: None,
+        gas_estimate: None,
+        gas_usd: None,
+        simulation: "unavailable".to_string(),
+        simulation_detail: None,
+    };
+    match post_rpc_with_retry(&state.http_client, &alchemy_url, &aero_sim_payload, 2).await {
+        Some(res_json) => {
+            if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
+                let clean = hex_str.trim_start_matches("0x");
+                if clean.len() >= 128 {
+                    if let (Ok(c0), Ok(c1)) = (
+                        u128::from_str_radix(&clean[..64], 16),
+                        u128::from_str_radix(&clean[64..128], 16),
+                    ) {
+                        aero.expected_amount_0 = Some(format!("{:.6}", c0 as f64 / 1e6));
+                        aero.expected_amount_1 = Some(format!("{:.4}", c1 as f64 / 1e16));
+                        aero.simulation = "success".to_string();
+                    } else {
+                        aero.simulation = "failed".to_string();
+                        aero.simulation_detail = Some("claimFees() returned unparseable amounts".to_string());
+                    }
+                } else {
+                    aero.simulation = "failed".to_string();
+                    aero.simulation_detail = Some("claimFees() returned short output".to_string());
+                }
+            } else {
+                aero.simulation = "failed".to_string();
+                aero.simulation_detail = Some("claimFees() eth_call reverted".to_string());
+            }
+        }
+        None => {
+            aero.simulation_detail = Some("RPC unavailable for claimFees() simulation".to_string());
+        }
+    }
+    actions.push(aero);
+
+    // --- Action 2: Uniswap V4 fee collect (DECREASE 0 + TAKE_PAIR via posm) ---
+    let v4_token_id = state.config.v4_position_id.unwrap_or(3126000);
+    // Canonical Base token ordering for this pool, verified on-chain (see module docs):
+    // currency0 = USDC, currency1 = NOCK.
+    let v4_data = build_v4_collect_calldata(v4_token_id, USDC_BASE, NOCK_BASE, &wallet, deadline);
+    let mut v4 = ClaimFeeAction {
+        platform: "uniswap-v4".to_string(),
+        label: "Collect Uniswap V4 LP fees (Tranche 1)".to_string(),
+        to: UNISWAP_V4_POSM_BASE.to_string(),
+        data: v4_data,
+        value: "0x0".to_string(),
+        expected_amount_0: None,
+        expected_amount_1: None,
+        expected_usd: None,
+        gas_estimate: None,
+        gas_usd: None,
+        simulation: "unavailable".to_string(),
+        simulation_detail: None,
+    };
+    // Expected amounts come from the snapshot's live StateView-derived tokens owed
+    if let Some(cl) = snapshot.data.concentrated_liquidity.first() {
+        v4.expected_amount_0 = Some(cl.tokens_owed_0.clone());
+        v4.expected_amount_1 = Some(cl.tokens_owed_1.clone());
+    }
+    let v4_sim_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{ "from": wallet, "to": UNISWAP_V4_POSM_BASE, "data": v4.data }, "latest"],
+        "id": 21
+    });
+    match post_rpc_with_retry(&state.http_client, &alchemy_url, &v4_sim_payload, 2).await {
+        Some(res_json) => {
+            if res_json.get("result").and_then(|r| r.as_str()).is_some() {
+                v4.simulation = "success".to_string();
+            } else {
+                v4.simulation = "failed".to_string();
+                v4.simulation_detail = Some("modifyLiquidities collect eth_call reverted".to_string());
+            }
+        }
+        None => {
+            v4.simulation_detail = Some("RPC unavailable for V4 collect simulation".to_string());
+        }
+    }
+    actions.push(v4);
+
+    // Per-action USD valuation from the live snapshot spot (null when spot unavailable)
+    let spot = nock_spot_from_snapshot(&snapshot.data);
+    if let Some(s) = spot {
+        for action in actions.iter_mut() {
+            let (Some(a0), Some(a1)) = (
+                action.expected_amount_0.clone(),
+                action.expected_amount_1.clone(),
+            ) else {
+                continue;
+            };
+            if let (Ok(v0), Ok(v1)) = (a0.parse::<f64>(), a1.parse::<f64>()) {
+                action.expected_usd = Some(format!("{:.4}", v0 + v1 * s));
+            }
+        }
+    }
+
+    // --- Gas estimation per action (live; degrades to None, never fabricated) ---
+    let eth_price = fetch_eth_price_usd(&state.http_client, &alchemy_url).await;
+    let gas_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_gasPrice",
+        "params": [],
+        "id": 22
+    });
+    let gas_price_wei: Option<u128> = match post_rpc_with_retry(&state.http_client, &alchemy_url, &gas_payload, 2).await {
+        Some(res_json) => res_json
+            .get("result")
+            .and_then(|r| r.as_str())
+            .and_then(|s| u128::from_str_radix(s.trim_start_matches("0x"), 16).ok()),
+        None => None,
+    };
+    let mut total_gas_usd = 0.0f64;
+    let mut gas_ok = !actions.is_empty();
+    for (idx, action) in actions.iter_mut().enumerate() {
+        let est_payload = json!({
+            "jsonrpc": "2.0",
+            "method": "eth_estimateGas",
+            "params": [{ "from": wallet, "to": action.to, "data": action.data, "value": action.value }, "latest"],
+            "id": 30 + idx
+        });
+        match post_rpc_with_retry(&state.http_client, &alchemy_url, &est_payload, 2).await {
+            Some(res_json) => match res_json.get("result").and_then(|r| r.as_str()).and_then(|s| u128::from_str_radix(s.trim_start_matches("0x"), 16).ok()) {
+                Some(units) => {
+                    action.gas_estimate = Some(format!("0x{:x}", units));
+                    if let Some(gp) = gas_price_wei {
+                        let usd = (units as f64) * (gp as f64) / 1e18 * eth_price;
+                        action.gas_usd = Some(format!("{:.4}", usd));
+                        total_gas_usd += usd;
+                    }
+                }
+                None => {
+                    gas_ok = false;
+                    action.simulation_detail = Some(action.simulation_detail.clone().unwrap_or_default()
+                        + "; gas estimation failed");
+                }
+            },
+            None => {
+                gas_ok = false;
+            }
+        }
+    }
+    let estimated_gas_usd = if gas_ok && gas_price_wei.is_some() {
+        Some(format!("{:.4}", total_gas_usd))
+    } else {
+        None
+    };
+    let net_after_gas_usd = match (&gross_usd, &estimated_gas_usd) {
+        (g, Some(e)) if !g.is_empty() => {
+            let gross: f64 = g.parse().unwrap_or(0.0);
+            Some(format!("{:.4}", gross - e.parse::<f64>().unwrap_or(0.0)))
+        }
+        _ => None,
+    };
+
+    let payload = ClaimFeesPayload {
+        chain_id: 8453,
+        from: wallet,
+        generated_at: Utc::now().to_rfc3339(),
+        gross_usd: Some(gross_usd),
+        estimated_gas_usd,
+        net_after_gas_usd,
+        actions,
+    };
+    Json(payload).into_response()
+}
+#[derive(Deserialize, Debug)]
+struct RecordHarvestRequest {
+    platform: String,
+    tx_hash: String,
+}
+
+/// POST /v1/execute/record-harvest — receipt-verified harvest ledger entry.
+/// Clients call this after a claim transaction is confirmed by the wallet.
+/// "Receipt not found" also covers the Uniswap-app pending-broadcast quirk
+/// (approved but not yet broadcast): the client should surface that state and retry.
+async fn record_harvest_handler(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(req): Json<RecordHarvestRequest>,
+) -> impl IntoResponse {
+    if !matches!(req.platform.as_str(), "aerodrome" | "uniswap-v4") {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "INVALID_PLATFORM", "detail": "platform must be 'aerodrome' or 'uniswap-v4'" })),
+        )
+            .into_response();
+    }
+    if !is_valid_tx_hash(&req.tx_hash) {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "INVALID_TX_HASH", "detail": "tx_hash must be a 32-byte hex string" })),
+        )
+            .into_response();
+    }
+    let alchemy_key = state
+        .config
+        .alchemy_api_keys
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    if alchemy_key.is_empty() || alchemy_key == "YOUR_ALCHEMY_API_KEY" {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "NO_RPC", "detail": "No Alchemy RPC key configured; cannot verify receipts" })),
+        )
+            .into_response();
+    }
+    let alchemy_url = format!("https://base-mainnet.g.alchemy.com/v2/{}", alchemy_key);
+    let wallet = state.config.tracked_wallets[0].clone();
+
+    let receipt_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_getTransactionReceipt",
+        "params": [if req.tx_hash.starts_with("0x") { req.tx_hash.clone() } else { format!("0x{}", req.tx_hash) }],
+        "id": 40
+    });
+    let receipt = match post_rpc_with_retry(&state.http_client, &alchemy_url, &receipt_payload, 2).await {
+        Some(res) => res.get("result").cloned().unwrap_or(serde_json::Value::Null),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "error": "RPC_UNAVAILABLE", "detail": "Could not query receipt; not recorded" })),
+            )
+                .into_response()
+        }
+    };
+    if receipt.is_null() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": "RECEIPT_NOT_FOUND",
+                "detail": "Transaction not found on-chain. If the wallet shows it approved, it may still be pending broadcast in the wallet (Uniswap app quirk) - surface that state and retry once it broadcasts."
+            })),
+        )
+            .into_response();
+    }
+    if receipt.get("status").and_then(|s| s.as_str()) != Some("0x1") {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "TX_REVERTED", "detail": "Receipt status is not success; nothing recorded" })),
+        )
+            .into_response();
+    }
+    let transfers = parse_harvest_transfers(&receipt, &wallet);
+    if transfers.is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "NO_TRACKED_TRANSFERS", "detail": "Receipt contains no Transfer of tracked tokens (USDC/NOCK) to the sovereign wallet" })),
+        )
+            .into_response();
+    }
+
+    // USD valuation from the latest snapshot spot; explicit null when unavailable.
+    let spot = state
+        .latest_snapshot
+        .lock()
+        .await
+        .clone()
+        .and_then(|s| nock_spot_from_snapshot(&s.data));
+    let block_number: i64 = receipt
+        .get("blockNumber")
+        .and_then(|b| b.as_str())
+        .and_then(|s| i64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(0);
+
+    let mut recorded = Vec::new();
+    let mut skipped = 0usize;
+    for t in &transfers {
+        let usd_value: Option<String> = match t.token_symbol.as_str() {
+            "USDC" => Some(t.amount_human.clone()),
+            "NOCK" => spot.map(|s| format!("{:.4}", t.amount_human.parse::<f64>().unwrap_or(0.0) * s)),
+            _ => None,
+        };
+        let res = sqlx::query(
+            "INSERT INTO harvest_events (platform, tx_hash, token_address, token_symbol, from_address, recipient, amount_raw, amount_human, decimals, usd_value, block_number, confirmed_at)              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())              ON CONFLICT (tx_hash, token_address) DO NOTHING",
+        )
+        .bind(&req.platform)
+        .bind(&req.tx_hash)
+        .bind(&t.token_address)
+        .bind(&t.token_symbol)
+        .bind(&t.from_address)
+        .bind(&t.recipient)
+        .bind(&t.amount_raw)
+        .bind(&t.amount_human)
+        .bind(t.decimals)
+        .bind(&usd_value)
+        .bind(block_number)
+        .execute(&state.db)
+        .await;
+        match res {
+            Ok(r) if r.rows_affected() > 0 => {
+                recorded.push(json!({
+                    "platform": req.platform,
+                    "tx_hash": req.tx_hash,
+                    "token_symbol": t.token_symbol,
+                    "amount_human": t.amount_human,
+                    "usd_value": usd_value,
+                    "block_number": block_number,
+                }));
+            }
+            Ok(_) => skipped += 1,
+            Err(e) => {
+                tracing::error!("Failed to insert harvest event: {e}");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "DB_ERROR", "detail": "Ledger insert failed; nothing partially recorded beyond this row" })),
+                )
+                    .into_response();
+            }
+        }
+    }
+    if recorded.is_empty() {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "ALREADY_RECORDED", "detail": "All transfers from this transaction are already in the ledger", "skipped": skipped })),
+        )
+            .into_response();
+    }
+    Json(json!({ "recorded": recorded, "already_present": skipped })).into_response()
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct HarvestExportRow {
+    platform: String,
+    tx_hash: String,
+    token_symbol: String,
+    amount_human: String,
+    usd_value: Option<String>,
+    confirmed_at: String,
+}
+
+/// Koinly custom-CSV rendering of harvest ledger rows: fee claims are tagged
+/// `income` (per CHANGELOG: Income / Staking Reward) and carry their Base tx hash.
+/// Rebalances/liquidity transfers are not yet ledgered — when they are, they export
+/// with the (non-taxable) `transfer` label; documented gap, not silently omitted.
+fn format_koinly_csv(rows: &[HarvestExportRow]) -> String {
+    let header = "Date, Sent Amount, Sent Currency, Received Amount, Received Currency, Fee Amount, Fee Currency, Net Worth Amount, Net Worth Currency, Label, Description, TxHash";
+    let mut out = String::from(header);
+    out.push('\n');
+    for r in rows {
+        let (net_amount, net_currency) = match &r.usd_value {
+            Some(usd) => (usd.clone(), "USD".to_string()),
+            None => (String::new(), String::new()),
+        };
+        let description = format!("NockNock fee harvest ({})", r.platform);
+        out.push_str(&format!(
+            "{}, , , {}, {}, , , {}, {}, income, \"{}\", {}\n",
+            r.confirmed_at,
+            r.amount_human,
+            r.token_symbol,
+            net_amount,
+            net_currency,
+            description,
+            r.tx_hash
+        ));
+    }
+    out
+}
+
+/// GET /v1/tax/export?format=koinly — Koinly-compatible CSV (default) or JSON export
+/// of the receipt-verified harvest ledger. Empty ledger exports a header-only CSV.
+async fn tax_export_handler(
+    Extension(state): Extension<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let format = params.get("format").cloned().unwrap_or_else(|| "koinly".to_string());
+    let rows = match sqlx::query(
+        "SELECT platform, tx_hash, token_symbol, amount_human, usd_value, confirmed_at \
+         FROM harvest_events ORDER BY confirmed_at ASC, id ASC",
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => {
+            let mut out = Vec::new();
+            for r in rows {
+                let confirmed_at: DateTime<Utc> = r.try_get("confirmed_at").unwrap_or_else(|_| Utc::now());
+                out.push(HarvestExportRow {
+                    platform: r.try_get("platform").unwrap_or_default(),
+                    tx_hash: r.try_get("tx_hash").unwrap_or_default(),
+                    token_symbol: r.try_get("token_symbol").unwrap_or_default(),
+                    amount_human: r.try_get("amount_human").unwrap_or_default(),
+                    usd_value: r.try_get::<Option<String>, _>("usd_value").ok().flatten(),
+                    confirmed_at: confirmed_at.to_rfc3339(),
+                });
+            }
+            out
+        }
+        Err(e) => {
+            tracing::error!("Tax export query failed: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "DB_ERROR", "detail": "Tax export query failed" })),
+            )
+                .into_response();
+        }
+    };
+    match format.as_str() {
+        "json" => Json(json!({ "rows": rows })).into_response(),
+        "koinly" | "csv" => {
+            (
+                StatusCode::OK,
+                [
+                    ("content-type", "text/csv; charset=utf-8"),
+                    (
+                        "content-disposition",
+                        "attachment; filename=\"nocknock-harvests-koinly.csv\"",
+                    ),
+                ],
+                format_koinly_csv(&rows),
+            )
+                .into_response()
+        }
+        _ => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "UNSUPPORTED_FORMAT", "detail": "format must be 'koinly' (default) or 'json'" })),
+        )
+            .into_response(),
     }
 }
 
@@ -1834,7 +2857,7 @@ fn recommended_claim_action(claimable_usd: f64, gas_break_even_usd: f64) -> &'st
     }
 }
 
-fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_history: &[(DateTime<Utc>, f64, f64)]) -> DerivedMetrics {
+fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_history: &[(DateTime<Utc>, f64, f64)], ledger: &LedgerAggregate, regime: &MarketRegime) -> DerivedMetrics {
     // 1. Spot price calculation
     let spot_price = if let Some(pool) = raw.pool_mechanics.first() {
         if pool.volatile_assets.len() >= 2 {
@@ -1895,6 +2918,14 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
     // Bracket upper bound derived from ticks — same single source of truth as the chart
     let v4_upper_price = tick_to_display_price(V4_TICK_LOWER_ONCHAIN);
 
+    // Tax-reserve guardrail (virtual 60/40 sub-ledger): dip deployments may only
+    // consume growth dry powder; the tax reserve share of realized harvests is
+    // protected. If the wallet's stable stack cannot cover the reserve, deployment
+    // advice is suppressed entirely in favor of rebuilding the buffer.
+    let tax_reserve_usd = ledger.total_usd * profile.tax_reserve_ratio;
+    let deployable_usdc = (total_stable_usd - tax_reserve_usd).max(0.0);
+    let tax_guardrail_blocked = tax_reserve_usd > 0.0 && total_stable_usd < tax_reserve_usd;
+
     // Dynamic Shot Advice Engine
     let (advice_action, advice_details) = if total_nock < floor {
         (
@@ -1904,12 +2935,29 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                 total_nock, floor, floor - total_nock
             ),
         )
+    } else if regime.overextended {
+        (
+            "SWEEP TO STABLE / ACCUMULATE DRY POWDER (Overextension Cooldown)".to_string(),
+            format!(
+                "NOCK spot (${:.5}) is overextended (RSI(14) {:.0} >= 70). Buying tops is how gains evaporate: suppress deployment, harvest if fees warrant it, and sweep to the stable stack until momentum cools.",
+                spot_price,
+                regime.rsi.unwrap_or(0.0)
+            ),
+        )
+    } else if spot_price > 0.0 && spot_price < 0.020 && tax_guardrail_blocked {
+        (
+            "SWEEP TO STABLE / ACCUMULATE DRY POWDER (Tax Guardrail)".to_string(),
+            format!(
+                "Spot price (${:.5}) is at accumulation territory, but the virtual tax reserve (${:.2}) exceeds the stable stack (${:.2}). Deployment suppressed: harvest fees and rebuild the 60/40 buffer before buying dips.",
+                spot_price, tax_reserve_usd, total_stable_usd
+            ),
+        )
     } else if spot_price > 0.0 && spot_price < 0.020 {
         (
             "DIP REINVESTMENT SHOT (Deploy USDC)".to_string(),
             format!(
-                "Spot price (${:.5}) has breached the $0.020 accumulation boundary! Deploy saved USDC ({:.2} available) to purchase NOCK at discount and compound buffer toward 120,000.",
-                spot_price, total_stable_usd
+                "Spot price (${:.5}) has breached the $0.020 accumulation boundary! Deploy ${:.2} of saved USDC (${:.2} available; ${:.2} protected as virtual tax reserve) to purchase NOCK at discount and compound buffer toward 120,000.",
+                spot_price, deployable_usdc, total_stable_usd, tax_reserve_usd
             ),
         )
     } else if spot_price >= v4_upper_price {
@@ -1959,6 +3007,8 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
             total_usdc_amount: format!("{:.2}", total_stable_usd),
             shot_advice_action: advice_action,
             shot_advice_details: advice_details,
+            regime: if regime.overextended { "overextended".to_string() } else { "normal".to_string() },
+            rsi_14: regime.rsi.map(|r| format!("{:.1}", r)),
         },
         asset_aggregation_series: AssetAggregationSeries {
             time_points: vec![now_str.clone()],
@@ -2063,6 +3113,13 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
             total_native_usd,
             &now_str,
         ),
+        sovereign_ledger: SovereignLedger {
+            cumulative_harvested_usd: format!("{:.2}", ledger.total_usd),
+            tax_reserve_usd: format!("{:.2}", ledger.total_usd * profile.tax_reserve_ratio),
+            growth_dry_powder_usd: format!("{:.2}", ledger.total_usd * (1.0 - profile.tax_reserve_ratio)),
+            harvest_count: ledger.harvest_count,
+            last_harvest_at: ledger.last_at.map(|dt| dt.to_rfc3339()),
+        },
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: vec![
                 FeeCollectionIndex {
@@ -2230,7 +3287,7 @@ mod tests {
         ];
         // Total NOCK is 80,000 < 100,000 floor
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[]);
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
         assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
     }
 
@@ -2253,7 +3310,7 @@ mod tests {
         raw.live_gas_cost_usd = 0.005;
 
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[]);
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
         assert!(metrics.global_status.shot_advice_action.contains("BATCH HARVEST SHOT"));
     }
 
@@ -2276,7 +3333,7 @@ mod tests {
         raw.live_aero_fee_nock = 8.0;
 
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[]);
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
         assert!(metrics.global_status.shot_advice_action.contains("HOLD & ACCRETE"));
     }
 
@@ -2291,6 +3348,7 @@ operator_profile:
   v4_baseline_usdc: 23.63
   v4_fee_baseline_usdc: 0.05
   v4_fee_baseline_nock: 2.5
+  tax_reserve_ratio: 0.33
   target_weights_bps:
     treasury: 7000
     aerodrome_lp: 1500
@@ -2300,6 +3358,7 @@ operator_profile:
         let cfg: AppConfig = serde_yaml::from_str(yaml).expect("Failed to deserialize yaml");
         let profile = cfg.profile();
         assert_eq!(profile.treasury_floor_nock, 150000.0);
+        assert_eq!(profile.tax_reserve_ratio, 0.33);
         assert_eq!(profile.target_weights_bps.treasury, 7000);
         assert_eq!(profile.target_weights_bps.aerodrome_lp, 1500);
         assert_eq!(profile.target_weights_bps.uniswap_v4_lp, 1000);
@@ -2317,7 +3376,7 @@ operator_profile:
             },
         ];
         // 120,000 is above default 100k floor, BUT below custom 150k floor!
-        let metrics = compute_derived_metrics(&raw, 3000.0, &profile, StructuralChannels { channels: vec![] }, &[]);
+        let metrics = compute_derived_metrics(&raw, 3000.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
         assert_eq!(metrics.global_status.nock_floor_target, "150000");
         assert_eq!(metrics.global_status.nock_floor_delta, "-30000");
         assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
@@ -2325,6 +3384,245 @@ operator_profile:
         assert_eq!(metrics.portfolio_deviation_matrix.allocations[1].target_weight_bps, 1500);
         assert_eq!(metrics.portfolio_deviation_matrix.allocations[2].target_weight_bps, 1000);
         assert_eq!(metrics.portfolio_deviation_matrix.allocations[3].target_weight_bps, 500);
+    }
+
+    #[test]
+    fn test_operator_profile_default_tax_reserve_ratio() {
+        // Backward compatibility: configs without the field still parse, default 60/40 split.
+        let yaml = r#"
+database_url: "postgresql://localhost/test"
+"#;
+        let cfg: AppConfig = serde_yaml::from_str(yaml).expect("Failed to deserialize yaml");
+        assert_eq!(cfg.profile().tax_reserve_ratio, 0.40);
+    }
+
+    #[test]
+    fn test_sovereign_ledger_60_40_split() {
+        let raw = RawOnChainData {
+            wallet_balances: vec![WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "NOCK".to_string(),
+                token_address: "0xNOCK".to_string(),
+                amount: "110000.0".to_string(),
+                amount_usd: "2860.0".to_string(),
+                updated_at: "now".to_string(),
+            }],
+            ..Default::default()
+        };
+        let mut profile = OperatorProfile::default();
+        profile.tax_reserve_ratio = 0.40;
+        let ledger = LedgerAggregate {
+            total_usd: 100.0,
+            harvest_count: 2,
+            last_at: Some(Utc::now()),
+        };
+        let metrics = compute_derived_metrics(
+            &raw, 0.0, &profile,
+            StructuralChannels { channels: vec![] },
+            &[], &ledger, &MarketRegime::default(),
+        );
+        assert_eq!(metrics.sovereign_ledger.cumulative_harvested_usd, "100.00");
+        assert_eq!(metrics.sovereign_ledger.tax_reserve_usd, "40.00");
+        assert_eq!(metrics.sovereign_ledger.growth_dry_powder_usd, "60.00");
+        assert_eq!(metrics.sovereign_ledger.harvest_count, 2);
+        assert!(metrics.sovereign_ledger.last_harvest_at.is_some());
+
+        // Custom ratio honored
+        profile.tax_reserve_ratio = 0.25;
+        let metrics = compute_derived_metrics(
+            &raw, 0.0, &profile,
+            StructuralChannels { channels: vec![] },
+            &[], &ledger, &MarketRegime::default(),
+        );
+        assert_eq!(metrics.sovereign_ledger.tax_reserve_usd, "25.00");
+        assert_eq!(metrics.sovereign_ledger.growth_dry_powder_usd, "75.00");
+    }
+
+    #[test]
+    fn test_koinly_csv_format() {
+        let rows = vec![
+            HarvestExportRow {
+                platform: "aerodrome".to_string(),
+                tx_hash: "0xabc123".to_string(),
+                token_symbol: "USDC".to_string(),
+                amount_human: "0.119983".to_string(),
+                usd_value: Some("0.119983".to_string()),
+                confirmed_at: "2026-10-12T18:31:21+00:00".to_string(),
+            },
+            HarvestExportRow {
+                platform: "uniswap-v4".to_string(),
+                tx_hash: "0xdef456".to_string(),
+                token_symbol: "NOCK".to_string(),
+                amount_human: "5.4468217823004916".to_string(),
+                usd_value: Some("0.2612".to_string()),
+                confirmed_at: "2026-10-12T18:35:00+00:00".to_string(),
+            },
+        ];
+        let csv = format_koinly_csv(&rows);
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].starts_with("Date, Sent Amount, Sent Currency, Received Amount"));
+        assert!(lines[0].ends_with("Label, Description, TxHash"));
+        assert!(lines[1].contains(", , , 0.119983, USDC, , , 0.119983, USD, income,"));
+        assert!(lines[1].contains("\"NockNock fee harvest (aerodrome)\""));
+        assert!(lines[1].ends_with("0xabc123"));
+        assert!(lines[2].contains("5.4468217823004916, NOCK"));
+        assert!(lines[2].contains("income"));
+        assert!(lines[2].ends_with("0xdef456"));
+    }
+
+    #[test]
+    fn test_tax_tie_out_split_equals_export_total() {
+        // Koinly tie-out: the CSV rows must carry exactly the ledger amounts that the
+        // 60/40 sub-ledger split was computed from — every harvest dollar accounted
+        // for, nothing invented.
+        let ledger_rows = vec![
+            ("0xabc123", "USDC", "0.119983", 119983u128, 6i32),
+            ("0xabc123", "NOCK", "5.4468217823004916", 54468217823004916, 16),
+        ];
+        let total_usd: f64 = 0.119983 + 5.4468217823004916 * 0.048; // NOCK spot example
+        let profile_tax_ratio = 0.40f64;
+        let tax_reserve = total_usd * profile_tax_ratio;
+        let dry_powder = total_usd * (1.0 - profile_tax_ratio);
+
+        // Ledger aggregate must equal the sum of the exported receipt-verified rows
+        let exported_total: f64 = ledger_rows
+            .iter()
+            .map(|(_, sym, human, raw, dec)| {
+                let units = format_units(*raw, *dec);
+                assert_eq!(&units, human);
+                match *sym {
+                    "USDC" => units.parse::<f64>().unwrap(),
+                    "NOCK" => units.parse::<f64>().unwrap() * 0.048,
+                    _ => 0.0,
+                }
+            })
+            .sum();
+        assert!((exported_total - total_usd).abs() < 1e-9);
+        assert!((tax_reserve + dry_powder - total_usd).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_tax_guardrail_blocks_dip_deployment() {
+        // Overdrawn tax reserve: the wallet's stable stack cannot cover the virtual
+        // 40% tax reserve, so dip-deployment advice must be suppressed entirely.
+        let mut raw = RawOnChainData::default();
+        raw.wallet_balances = vec![
+            WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "NOCK".to_string(),
+                token_address: "0xNOCK".to_string(),
+                amount: "110000.0".to_string(),
+                amount_usd: "2860.0".to_string(),
+                updated_at: "now".to_string(),
+            },
+            WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "USDC".to_string(),
+                token_address: "0xUSDC".to_string(),
+                amount: "50.0".to_string(),
+                amount_usd: "50.0".to_string(),
+                updated_at: "now".to_string(),
+            },
+        ];
+        raw.live_tranche_1_nock = 2000.0;
+        raw.live_tranche_1_usdc = 20.0;
+        raw.live_tranche_2_nock = 6000.0;
+        raw.live_tranche_2_usdc = 30.0;
+        raw.live_uni_fee_usdc = 0.0;
+        raw.live_aero_fee_usdc = 0.0;
+        // Aerodrome pool reserves giving spot = 150 / 10000 = 0.015 (dip zone < 0.020)
+        raw.pool_mechanics = vec![PoolMechanic {
+            pool_id: "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
+            platform: "Aerodrome".to_string(),
+            pool_type: "volatile".to_string(),
+            volatile_assets: vec![
+                PoolAsset {
+                    token_address: "0xUSDC".to_string(),
+                    token_symbol: "USDC".to_string(),
+                    reserve_amount: "150".to_string(),
+                    reserve_usd: "150".to_string(),
+                },
+                PoolAsset {
+                    token_address: "0xNOCK".to_string(),
+                    token_symbol: "NOCK".to_string(),
+                    reserve_amount: "10000".to_string(),
+                    reserve_usd: "150".to_string(),
+                },
+            ],
+            liquidity_usd: "300".to_string(),
+            fee_accrued_usd: "0".to_string(),
+            fee_tier_bps: 30,
+            tick_current: None,
+            sqrt_price_x96: None,
+        }];
+        let profile = OperatorProfile::default(); // floor 100k; ratio 0.40
+        // total_nock = 2000 + 6000 + 110000 = 118000 (above floor) and spot 0.015 (< 0.020 dip zone)
+        let ledger = LedgerAggregate { total_usd: 500.0, harvest_count: 3, last_at: None };
+        // tax reserve = 500 * 0.40 = 200 > stable stack (50 + 50 = 100) -> blocked
+        let metrics = compute_derived_metrics(
+            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &ledger, &MarketRegime::default(),
+        );
+        assert!(metrics.global_status.shot_advice_action.contains("SWEEP TO STABLE"));
+        assert!(metrics.global_status.shot_advice_action.contains("Tax Guardrail"));
+        assert!(metrics.global_status.shot_advice_details.contains("Deployment suppressed"));
+
+        // Small harvest ledger: reserve 40 * 0.40 = 16 <= stable 100 -> DIP advice fires
+        // with the deployable amount and the reserved figure called out.
+        let small = LedgerAggregate { total_usd: 40.0, harvest_count: 1, last_at: None };
+        let metrics = compute_derived_metrics(
+            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &small, &MarketRegime::default(),
+        );
+        assert!(metrics.global_status.shot_advice_action.contains("DIP REINVESTMENT SHOT"));
+        assert!(metrics.global_status.shot_advice_details.contains("Deploy $84.00"));
+        assert!(metrics.global_status.shot_advice_details.contains("$16.00 protected as virtual tax reserve"));
+
+        // No harvests yet: guardrail inert, full stack deployable (backward compatible)
+        let metrics = compute_derived_metrics(
+            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default(),
+        );
+        assert!(metrics.global_status.shot_advice_action.contains("DIP REINVESTMENT SHOT"));
+        assert!(metrics.global_status.shot_advice_details.contains("Deploy $100.00"));
+    }
+
+    #[test]
+    fn test_rsi_series_known_values() {
+        // Monotonic gains -> RSI pinned near 100 (overbought)
+        let closes: Vec<f64> = (1..=20).map(|i| 100.0 + i as f64).collect();
+        let rsi = compute_rsi_series(&closes, 14);
+        assert!(rsi[..14].iter().all(|x| x.is_none()));
+        assert!((rsi[14]).is_some());
+        let last = rsi[19].unwrap();
+        assert!(last > 95.0, "all-gain series should push RSI near 100, got {last}");
+        // Monotonic losses -> RSI near 0 (oversold)
+        let closes: Vec<f64> = (0..20).map(|i| 100.0 - i as f64).collect();
+        let rsi = compute_rsi_series(&closes, 14);
+        let last = rsi[19].unwrap();
+        assert!(last < 5.0, "all-loss series should push RSI near 0, got {last}");
+        // Too few samples -> all None
+        assert!(compute_rsi_series(&closes[..5], 14).iter().all(|x| x.is_none()));
+    }
+
+    #[test]
+    fn test_directive_transition_notification() {
+        // First boot (no previous directive): never notify
+        assert!(directive_transition_notification(None, "A", "d", None).is_none());
+        // Unchanged directive: never notify
+        assert!(directive_transition_notification(Some("A"), "A", "d", None).is_none());
+        // Changed: notify with action + details
+        let text = directive_transition_notification(
+            Some("HOLD & ACCRETE"),
+            "BATCH HARVEST SHOT",
+            "Accumulated yield ($5.20) exceeds threshold",
+            Some("https://cockpit.example/lite"),
+        )
+        .unwrap();
+        assert!(text.contains("directive change: BATCH HARVEST SHOT"));
+        assert!(text.contains("Accumulated yield"));
+        assert!(text.contains("https://cockpit.example/lite"));
+        // Changed without cockpit URL: no trailing link
+        let text = directive_transition_notification(Some("A"), "B", "d", None).unwrap();
+        assert!(!text.contains("→"));
     }
 
     #[test]
@@ -2491,7 +3789,10 @@ operator_profile:
                     total_usdc_amount: "50.00".to_string(),
                     shot_advice_action: "HOLD".to_string(),
                     shot_advice_details: "Steady".to_string(),
+                    regime: "normal".to_string(),
+                    rsi_14: None,
                 },
+                sovereign_ledger: Default::default(),
                 asset_aggregation_series: AssetAggregationSeries {
                     time_points: vec!["2026-10-11T00:00:00Z".to_string()],
                     safe_haven_series: vec!["48.00".to_string()],
@@ -2589,6 +3890,111 @@ operator_profile:
         let nock = fee1_raw as f64 / 1e16;
         assert!((usdc - 0.120033).abs() < 1e-6);
         assert!((nock - 5.446822).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_v4_collect_unlock_data_golden_vector() {
+        // Golden vector: byte-for-byte identical to @uniswap/v4-sdk@2.4.1
+        // V4PositionPlanner.finalize() for addDecrease(3126000, 0, 0, 0, no hookData)
+        // + addTakePair(USDC, NOCK, sovereign wallet). Accepted by live Base mainnet
+        // eth_call simulation against the deployed PositionManager on 2026-10-12
+        // (audit trail: helix-specs task 000661 verification/v4collect_sim.py).
+        let unlock = build_v4_collect_unlock_data(
+            3126000,
+            "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+            "0xeE114cC97eC5adeB34bA5645e315B497D8487a45",
+        );
+        assert_eq!(unlock, "0x000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000002011100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000002fb2f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000060000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000009b5e262cf9bb04869ab40b19af91d2dc85761722000000000000000000000000ee114cc97ec5adeb34ba5645e315b497d8487a45");
+    }
+
+    #[test]
+    fn test_v4_collect_calldata_golden_vector() {
+        // Full outer calldata accepted by the live eth_call simulation (selector
+        // modifyLiquidities(bytes,uint256) = 0xdd46508f; offset 0x40; deadline
+        // 0xFFFFFFFFFFFF; bytes length word; unlockData). Reference bytes:
+        // helix-specs task 000661 verification/verified_calldata.txt.
+        let data = build_v4_collect_calldata(
+            3126000,
+            "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+            "0xeE114cC97eC5adeB34bA5645e315B497D8487a45",
+            0xFFFFFFFFFFFF,
+        );
+        assert_eq!(data, "0xdd46508f00000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000ffffffffffff0000000000000000000000000000000000000000000000000000000000000240000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000002011100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000002fb2f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000060000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000009b5e262cf9bb04869ab40b19af91d2dc85761722000000000000000000000000ee114cc97ec5adeb34ba5645e315b497d8487a45");
+    }
+
+    #[test]
+    fn test_v4_collect_unlock_data_decrease_only_golden_vector() {
+        // Single-action variant (DECREASE only, actions byte 0x01), also live-verified.
+        let unlock = build_v4_collect_unlock_data_decrease_only(3126000);
+        assert_eq!(unlock, "0x00000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000002fb2f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000");
+    }
+
+    #[test]
+    fn test_format_units_exact_decimal() {
+        assert_eq!(format_units(120033, 6), "0.120033");
+        assert_eq!(format_units(54468217823004916, 16), "5.4468217823004916");
+        assert_eq!(format_units(1, 6), "0.000001");
+        assert_eq!(format_units(1000000, 6), "1");
+        assert_eq!(format_units(0, 16), "0");
+        assert_eq!(format_units(4000000, 6), "4");
+    }
+
+    #[test]
+    fn test_is_valid_tx_hash() {
+        assert!(is_valid_tx_hash(
+            "0xdd46508fdd46508fdd46508fdd46508fdd46508fdd46508fdd46508fdd46508f"
+        ));
+        assert!(is_valid_tx_hash(
+            "dd46508fdd46508fdd46508fdd46508fdd46508fdd46508fdd46508fdd46508f"
+        ));
+        assert!(!is_valid_tx_hash("0x1234"));
+        assert!(!is_valid_tx_hash(""));
+        assert!(!is_valid_tx_hash(
+            "zz46508fdd46508fdd46508fdd46508fdd46508fdd46508fdd46508fdd46508f"
+        ));
+    }
+
+    #[test]
+    fn test_parse_harvest_transfers_receipt_parsing() {
+        let wallet = "0xeE114cC97eC5adeB34bA5645e315B497D8487a45";
+        let from = "000000000000000000000000360e68faccca8ca495c1b759fd9eee466db9fb32";
+        let wallet_word = format!("000000000000000000000000{}", wallet.trim_start_matches("0x").to_lowercase());
+        let other_word = "0000000000000000000000001111111111111111111111111111111111111111";
+        let receipt = json!({
+            "status": "0x1",
+            "blockNumber": "0x1234",
+            "logs": [
+                // USDC Transfer -> wallet (keep)
+                { "address": USDC_BASE, "topics": [
+                    TRANSFER_EVENT_TOPIC, from, wallet_word ], "data": "0x000000000000000000000000000000000000000000000000000000000001d4af" },
+                // NOCK Transfer -> wallet (keep)
+                { "address": NOCK_BASE, "topics": [
+                    TRANSFER_EVENT_TOPIC, from, wallet_word ], "data": "0x0000000000000000000000000000000000000000000000000c1828e36e388f4" },
+                // USDC Transfer -> someone else (skip)
+                { "address": USDC_BASE, "topics": [
+                    TRANSFER_EVENT_TOPIC, from, other_word ], "data": "0x1" },
+                // Untracked token -> wallet (skip)
+                { "address": "0xdead000000000000000000000000000000000001", "topics": [
+                    TRANSFER_EVENT_TOPIC, from, wallet_word ], "data": "0x2" },
+                // wrong topic (skip)
+                { "address": USDC_BASE, "topics": [
+                    "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925", from, wallet_word ], "data": "0x3" }
+            ]
+        });
+        let transfers = parse_harvest_transfers(&receipt, wallet);
+        assert_eq!(transfers.len(), 2);
+        // 0x1d4af = 119983 raw USDC
+        assert_eq!(transfers[0].token_symbol, "USDC");
+        assert_eq!(transfers[0].amount_raw, "119983");
+        assert_eq!(transfers[0].amount_human, "0.119983");
+        assert_eq!(transfers[0].decimals, 6);
+        // 0xc1e3fd41c20874 = 54468217823004916 raw NOCK
+        assert_eq!(transfers[1].token_symbol, "NOCK");
+        assert_eq!(transfers[1].amount_raw, "54468217823004916");
+        assert_eq!(transfers[1].amount_human, "5.4468217823004916");
+        assert_eq!(transfers[1].decimals, 16);
     }
 
     #[test]
