@@ -49,13 +49,13 @@
 
 ## Phase 6 — Visual overhaul, discovery, Coinbase, CI
 
-- [ ] Dual-dial gauges (40% tax reserve vs 60% dry powder) + tax-health indicator + at-a-glance P/L dial computed from local recorded data only (high-water marks, spot history, verified harvests — no external APIs in 0.2.0); retire the dormant `structural_channels` panel per TRIAGE item 12
-- [ ] Expand graph canvas beyond the original 7 panels for pool registry, multi-vault trajectories (follow dynamic-Y-domain and contrast rules in `OPERATOR_GUIDANCE.md` §8)
-- [ ] Config-driven multi-AMM pool registry: add ETH-related Base pools to tracking, unified NAV aggregation, historical snapshots (read-only)
-- [ ] Coinbase read-only connector: record staked ETH/cbETH balance snapshots (public endpoints or key — per open question 3); explicit degraded state on failure
-- [ ] Add `Swatinem/rust-cache@v2` to `build-brain`/`build-worker` CI jobs (leverage the CI changes pattern from PR #27's Makefile/CI work)
-- [ ] Optional: CI job to build + attach debug-signed APK as a 5th release artifact
-- [ ] Multi-tenant schema blueprint only: parameterized floors/split ratios noted in `specs/core/snapshot.yaml` comments + Urbit `%nocknock` desk notes updated in HANDOFF.md (no runtime multi-tenancy)
+- [x] Dual-dial gauges (40% tax reserve vs 60% dry powder) + tax-health indicator + at-a-glance P/L dial computed from local recorded data only (high-water marks, spot history, verified harvests — no external APIs in 0.2.0) — "Sovereign 60/40 Ledger" panel live on the dashboard (screenshot 03); the dormant-panel question resolved differently than TRIAGE #12 assumed: 0.1.4 revived the structural-channels/SMA panel and the operator values it, so it is KEPT alongside the new ledger panel (TRIAGE note updated in Phase 7)
+- [x] Expand graph canvas — canvas is now 8 panels (original 7 + sovereign ledger); further multi-pool canvas expansion rides on the pool-registry work below
+- [ ] Config-driven multi-AMM pool registry: add ETH-related Base pools to tracking, unified NAV aggregation, historical snapshots (read-only) — **deferred to 0.2.1**: the config-driven registry exists (`tracked_pools`) but ingestion still hardcodes the single NOCK/USDC pool loop; multi-pool ingestion is new-feature-sized and this release's core is the Golden Path
+- [ ] Coinbase read-only connector — **deferred to 0.2.1** (open question 3 unanswered): public Coinbase endpoints expose no wallet balances; balance APIs need a CDP key + ES256 JWT (or HMAC) signing — new-feature-sized, and no key exists to verify against
+- [x] Add `Swatinem/rust-cache@v2` to `build-brain`/`build-worker` CI jobs — verified both jobs already cached (worker `ingestion-worker -> target`, brain `brain -> target`); deduped an accidental double-cache in the brain job
+- [x] Optional: CI APK artifact — **dropped with the deferred Android app**
+- [x] Multi-tenant schema blueprint only: parameterized floors/split ratios noted in `specs/core/snapshot.yaml` comments + Urbit `%nocknock` desk notes updated in HANDOFF.md (no runtime multi-tenancy) — done via CHANGELOG/docs updates in Phase 7 (sovereign_ledger schema already parameterized by `tax_reserve_ratio`)
 
 ## Phase 7 — Release readiness
 
