@@ -416,6 +416,7 @@ async fn main() -> Result<()> {
     // Start API server
     let app = axum::Router::new()
         .route("/health", axum::routing::get(health_handler))
+        .route("/v1/health", axum::routing::get(health_handler))
         .route(
             "/v1/snapshot/latest",
             axum::routing::get(get_latest_snapshot_handler),
@@ -1389,11 +1390,11 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64) -> DerivedMetric
     // 1. Spot price calculation
     let spot_price = if let Some(pool) = raw.pool_mechanics.first() {
         if pool.volatile_assets.len() >= 2 {
-            let r0: f64 = pool.volatile_assets[0].reserve_amount.parse().unwrap_or(649976.0);
-            let r1: f64 = pool.volatile_assets[1].reserve_amount.parse().unwrap_or(24237793.0);
-            if r1 > 0.0 { r0 / r1 } else { 0.0268 }
-        } else { 0.0268 }
-    } else { 0.0268 };
+            let r0: f64 = pool.volatile_assets[0].reserve_amount.parse().unwrap_or(0.0);
+            let r1: f64 = pool.volatile_assets[1].reserve_amount.parse().unwrap_or(0.0);
+            if r1 > 0.0 { r0 / r1 } else { 0.0 }
+        } else { 0.0 }
+    } else { 0.0 };
 
     let aero_fee_nock = raw.live_aero_fee_nock;
     let aero_fee_usdc = raw.live_aero_fee_usdc;
@@ -1404,31 +1405,31 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64) -> DerivedMetric
     let uni_fee_usd = uni_fee_usdc + uni_fee_nock * spot_price;
 
     let total_fees_usd = aero_fee_usd + uni_fee_usd;
-    let gas_cost = if raw.live_gas_cost_usd > 0.0 { raw.live_gas_cost_usd } else { 0.005 };
+    let gas_cost = if raw.live_gas_cost_usd > 0.0 { raw.live_gas_cost_usd } else { 0.0043 };
 
     // 3. Strategic Tranches
     // Tranche 1: Uniswap V4
-    let t1_nock = if raw.live_tranche_1_nock > 0.0 { raw.live_tranche_1_nock } else { 4004.31 };
-    let t1_usdc = if raw.live_tranche_1_usdc > 0.0 { raw.live_tranche_1_usdc } else { 23.63 };
+    let t1_nock = raw.live_tranche_1_nock;
+    let t1_usdc = raw.live_tranche_1_usdc;
     let t1_usd = t1_nock * spot_price + t1_usdc;
 
     // Tranche 2: Aerodrome Engine
-    let t2_nock = if raw.live_tranche_2_nock > 0.0 { raw.live_tranche_2_nock } else { 5655.59 };
-    let t2_usdc = if raw.live_tranche_2_usdc > 0.0 { raw.live_tranche_2_usdc } else { 156.64 };
+    let t2_nock = raw.live_tranche_2_nock;
+    let t2_usdc = raw.live_tranche_2_usdc;
     let t2_usd = t2_nock * spot_price + t2_usdc;
 
     // Tranche 3: Sovereign Protected Treasury
     let wallet_nock = raw.wallet_balances.iter()
         .find(|w| w.token_symbol == "NOCK")
         .and_then(|w| w.amount.parse().ok())
-        .unwrap_or(96004.52);
+        .unwrap_or(0.0);
     let t3_nock = wallet_nock;
     let t3_usd = t3_nock * spot_price;
 
     let wallet_usdc: f64 = raw.wallet_balances.iter()
         .find(|w| w.token_symbol == "USDC")
         .and_then(|w| w.amount.parse().ok())
-        .unwrap_or(0.23);
+        .unwrap_or(0.0);
 
     let total_portfolio_usd = t1_usd + t2_usd + t3_usd + wallet_usdc;
     let total_native_usd = (t1_nock + t2_nock + t3_nock) * spot_price;
@@ -1448,7 +1449,7 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64) -> DerivedMetric
                 total_nock, 100000.0 - total_nock
             ),
         )
-    } else if spot_price < 0.020 {
+    } else if spot_price > 0.0 && spot_price < 0.020 {
         (
             "DIP REINVESTMENT SHOT (Deploy USDC)".to_string(),
             format!(

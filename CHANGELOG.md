@@ -79,6 +79,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - [ ] Hoon data structures in `sur/nocknock.hoon`.
   - [ ] Gall agent state skeleton in `app/nocknock.hoon`.
 
+## [0.1.2] - 2026-10-11
+
+### Fixed
+- **API Routing Contract & Health Probe**:
+  - Mounted `/v1/health` in Axum router alongside root `/health`, adhering to `specs/core/api.yaml` OpenAPI server path (`/v1`) and frontend `api.health()` client expectations ([#16](https://github.com/urmanac/nocknock/issues/16)).
+  - Eliminated `.replace('/v1', '')` workaround in `frontend/src/api/freshness.contract.test.ts`.
+  - Added dedicated contract test validating `/v1/health` JSON schema response structure.
+- **Zero-Mock Data Invariant in Derived Metrics**:
+  - Eliminated hardcoded fallback floats (`649976.0`, `24237793.0`, `4004.31`, `23.63`, `5655.59`, `156.64`, `96004.52`, `0.23`, `0.0268`) in `compute_derived_metrics` ([#16](https://github.com/urmanac/nocknock/issues/16)).
+  - Ensured dip reinvestment advice requires positive spot price (`spot_price > 0.0 && spot_price < 0.020`) to prevent uninitialized zero values from masquerading as market dips.
+
 ## [0.1.1] - 2026-10-11
 
 ### Fixed

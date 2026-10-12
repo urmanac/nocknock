@@ -88,9 +88,16 @@ This document defines the issue triage protocol, label architecture, bug severit
 #### 6. [Issue #5: Dynamic on-chain fee calculation for Uniswap V4 uncollected yield](https://github.com/urmanac/nocknock/issues/5)
 * **Component**: `ingestion-worker/src/main.rs:1043-1048`
 * **Labels**: `bug`, `backend`, `data-integrity`, `patch-0.1.x`
-* **Status**: Resolved (Branch `fix/backend-yield-and-history-integrity`)
+* **Status**: Resolved & Merged (PR #14)
 * **Defect**: Uniswap V4 uncollected fees are hardcoded to `0.0` following the auto-compounding transaction (`0x6e1b...ddf2`), hiding newly accreting yield from the dashboard.
 * **Fix**: Dynamically calculate accreting V4 fees scaled by position liquidity ratio and config baselines, displaying accurate uncollected yield.
+
+#### 7. [Issue #16: Mount /v1/health route and eliminate residual fallback constants in derived metrics](https://github.com/urmanac/nocknock/issues/16)
+* **Component**: `ingestion-worker/src/main.rs:418, 1390-1450`, `frontend/src/api/freshness.contract.test.ts:54`
+* **Labels**: `bug`, `backend`, `frontend`, `data-integrity`, `patch-0.1.x`
+* **Status**: Resolved (Branch `fix/v1-health-and-derived-fallbacks`)
+* **Defect**: `/v1/health` returned 404 due to root-only `/health` registration; `compute_derived_metrics` contained residual fallback floats (`0.0268`, `96004.52`, etc.) violating zero-mock invariant.
+* **Fix**: Mount `/v1/health` alongside `/health`, eliminate all synthetic constants, and add contract tests.
 
 ---
 
