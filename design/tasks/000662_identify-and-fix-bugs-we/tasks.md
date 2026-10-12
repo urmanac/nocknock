@@ -39,13 +39,14 @@
 
 ## Batch 5 — API contract (BUG-A1) & history depth (BUG-F7 server side)
 
-- [~] Implement `before`/`after` filters on `get_historical_snapshots_handler`; reject unsupported `interval` with 400
-- [ ] Remove `Interval` parameter from `specs/core/api.yaml`; update frontend `historicalSnapshots` typing
-- [ ] `SQLX_OFFLINE=true cargo test` + frontend tests green; open PR, merge
+- [x] Implement `before`/`after` filters on `get_historical_snapshots_handler`; reject unsupported `interval` with 400
+- [x] Remove `Interval` parameter from `specs/core/api.yaml`; update frontend `historicalSnapshots` typing
+- [x] Truncate embedded counterfactual/series in historical responses to bound the 288-row payload (design D11 server side)
+- [x] `SQLX_OFFLINE=true cargo test` + frontend tests green; open PR, merge
 
 ## Batch 6 — Release (v0.1.4)
 
-- [ ] Update `CHANGELOG.md` with a populated `0.1.4` section; bump versions (`frontend/package.json`, worker `Cargo.toml`/Cargo.lock)
+- [~] Update `CHANGELOG.md` with a populated `0.1.4` section; bump versions (`frontend/package.json`, worker `Cargo.toml`/Cargo.lock)
 - [ ] Run full pre-flight gate: `make test-brain && make test-worker && make test-frontend && make dist`
 - [ ] Confirm all PRs merged and CI green on `main`; pull latest `main`
 - [ ] Request operator authorization, then tag `v0.1.4` and push tag (release workflow attaches artifacts); update `TRIAGE.md` registry statuses
