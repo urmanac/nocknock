@@ -91,6 +91,17 @@ android/
 
 Config: server URL + optional auth token entered once, stored in `SharedPreferences`; Reown project ID compiled in (`BuildConfig`).
 
+## Implementation Notes (verified on-chain during Phase 1, 2026-10-12)
+
+- **V4 posm collect encoding is VERIFIED LIVE** (see `verification/v4collect_sim.py` + `sdk_full.txt` golden vector; simulated via `eth_call` on `mainnet.base.org` from the sovereign wallet — both DECREASE-only and DECREASE+TAKE_PAIR succeed):
+  - Selector: `modifyLiquidities(bytes,uint256)` = `0xdd46508f`; outer layout: `[selector, 0x40, deadline, bytesLen, unlockData…]`.
+  - `unlockData` = strict `abi.encode(bytes actions, bytes[] params)` = `[0x40, paramsOffset, actionsLen, actionsData, arrLen, off0, off1, …]`; matches `@uniswap/v4-sdk@2.4.1` `V4PositionPlanner.finalize()` byte-for-byte.
+  - Deployed Base posm (`0x7c5f…9bdc`) uses the **unified Actions enum**: `DECREASE_LIQUIDITY = 0x01`, `TAKE_PAIR = 0x11` (NOT the old v1.0.0 `TAKE_PAIR = 0x07`).
+  - Params are **flat member encodings** (no tuple offset word): DECREASE = `[tokenId, liquidity=0, amount0Min u128, amount1Min u128, hookDataOff=0xa0, hookDataLen=0]`; TAKE_PAIR = `[currency0, currency1, recipient]`. Dynamic-member offsets are head-relative *including the offset word itself* (4 statics + 1 offset → 0xa0).
+  - Pool key for token #3126000 (queried via `getPoolAndPositionInfo` `0x7ba03aad`): currency0 = USDC `0x8335…2913`, currency1 = NOCK `0x9B5E…1722`, fee = 30000, tickSpacing = 300, hooks = zero. "Collect fees" = DECREASE with liquidity 0 (credits fees to posm ledger) then TAKE_PAIR sweeps them to the recipient.
+- Gotcha hit during encoding: padding an ABI `bytes` member must be to a multiple of 32 **bytes** (64 hex chars) — an initial char/byte mixup shifted every downstream word and produced misleading `SliceOutOfBounds` (`0x3b99b53d`) and `DeadlinePassed` (`0xbfb22adf`) errors. Lesson: diff hand-rolled encoders against the official SDK's output byte-for-byte before simulating.
+- Selectors derived with a from-scratch keccak-256 (validated: `claimFees()` → `0xd294f093`, `transfer(address,uint256)` → `0xa9059cbb`, `balanceOf(address)` → `0x70a08231`, empty-string vector) — matches `js-sha3` and the chain.
+
 ## Learnings / Notes for Implementers
 
 - **Zero-mock invariant is enforced in code review and tests**: PR #25 deleted a fallback branch rather than fixing it quietly. Any new "estimated" number must be labeled degraded or fail the cycle.

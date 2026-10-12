@@ -4,8 +4,8 @@
 
 ## Phase 1 — Golden Path payload engine (worker)
 
-- [ ] Smoke test: same-device Reown Sign pairing with the Uniswap app on a real phone, signing an Aerodrome `claimFees()` contract-interaction tx — the operator has proven this flow from a browser dapp; confirm the native SDK path behaves the same, including the pending-broadcast quirk
-- [ ] Add `OperatorProfile` fields: `tax_reserve_ratio` (default 0.40) to `config.yaml.example` + worker config struct with test
+- [ ] Smoke test: same-device Reown Sign pairing with the Uniswap app on a real phone, signing an Aerodrome `claimFees()` contract-interaction tx — **requires operator's device (sandbox has no phone); folded into the Phase 7 playtest**
+- [~] Add `OperatorProfile` fields: `tax_reserve_ratio` (default 0.40) to `config.yaml.example` + worker config struct with test
 - [ ] Implement `GET /v1/execute/claim-fees/payload`: build Aerodrome `claimFees()` (`0xd294f093` → `0x85f1aa3a…d626`) and Uniswap V4 PositionManager `modifyLiquidities` collect (`DECREASE_LIQUIDITY` 0-delta + `TAKE_PAIR` → sovereign wallet) unsigned txs from the live snapshot, with pre-dispatch `eth_call` simulation and explicit failure
 - [ ] Add unit tests for the V4 posm multicall encoder (action byte layout, deadline, recipient padding) mirroring the existing `U256`/hex-parsing test style
 - [ ] Extend `specs/core/api.yaml` with the payload endpoint and run `make test-mcp` to confirm MCP/HTTP surfaces still pass
