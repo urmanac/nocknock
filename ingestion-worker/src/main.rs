@@ -1051,49 +1051,60 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     .await
     .unwrap_or(0.0);
 
-    // Compute structural channels from historical data
+    // Compute structural channels from historical data — most recent 50 snapshots,
+    // oldest first, with their real snapshot timestamps
     let historical_rows = sqlx::query(
-        r#"SELECT (data->'derived_metrics'->'global_status'->>'total_portfolio_usd')::float8 as portfolio_usd FROM snapshots ORDER BY generated_at DESC LIMIT 50"#
+        r#"SELECT generated_at, (data->'derived_metrics'->'global_status'->>'total_portfolio_usd')::float8 as portfolio_usd FROM snapshots ORDER BY generated_at DESC LIMIT 50"#
     )
     .fetch_all(&state.db)
     .await
     .unwrap_or_default();
 
-    let historical_prices: Vec<f64> = historical_rows
+    let historical_prices: Vec<(DateTime<Utc>, f64)> = historical_rows
         .iter()
         .rev()
-        .filter_map(|r| r.try_get("portfolio_usd").ok())
+        .filter_map(|r| {
+            let ts: DateTime<Utc> = r.try_get("generated_at").ok()?;
+            let v: f64 = r.try_get("portfolio_usd").ok()?;
+            Some((ts, v))
+        })
         .collect();
 
     let structural_channels = compute_structural_channels_sync(&historical_prices);
 
-    // Fetch counterfactual historical data (portfolio & native series)
+    // Fetch counterfactual historical data: the MOST RECENT 100 snapshots, collected as
+    // paired (timestamp, portfolio, native) tuples so the two series stay index-aligned,
+    // oldest first, carrying real snapshot timestamps (no fabricated spacing).
     let counterfactual_rows = sqlx::query(
-        r#"SELECT (data->'derived_metrics'->'global_status'->>'total_portfolio_usd')::float8 as portfolio_usd,
-                  (data->'derived_metrics'->'global_status'->>'total_native_usd')::float8 as native_usd
-         FROM snapshots
-         ORDER BY generated_at ASC
-         LIMIT 100"#
+        r#"
+        SELECT generated_at,
+               (data->'derived_metrics'->'global_status'->>'total_portfolio_usd')::float8 as portfolio_usd,
+               (data->'derived_metrics'->'global_status'->>'total_native_usd')::float8 as native_usd
+        FROM (
+            SELECT generated_at, data FROM snapshots ORDER BY generated_at DESC LIMIT 100
+        ) recent
+        ORDER BY generated_at ASC
+        "#
     )
     .fetch_all(&state.db)
     .await
     .unwrap_or_default();
 
-    let mut counterfactual_portfolio = Vec::new();
-    let mut counterfactual_native = Vec::new();
+    let mut counterfactual_history: Vec<(DateTime<Utc>, f64, f64)> = Vec::new();
     for row in counterfactual_rows {
-        if let Ok(Some(v)) = row.try_get::<Option<f64>, _>("portfolio_usd") {
-            counterfactual_portfolio.push(v);
-        }
-        if let Ok(Some(v)) = row.try_get::<Option<f64>, _>("native_usd") {
-            counterfactual_native.push(v);
+        if let (Ok(ts), Ok(Some(p)), Ok(Some(n))) = (
+            row.try_get::<DateTime<Utc>, _>("generated_at"),
+            row.try_get::<Option<f64>, _>("portfolio_usd"),
+            row.try_get::<Option<f64>, _>("native_usd"),
+        ) {
+            counterfactual_history.push((ts, p, n));
         }
     }
 
     // Compute derived metrics
     let profile = state.config.profile();
     let derived_metrics = compute_derived_metrics(&raw_data, prev_hwm, &profile, structural_channels,
-        &counterfactual_portfolio, &counterfactual_native);
+        &counterfactual_history);
 
     // Build snapshot data
     let snapshot_data = SnapshotData {
@@ -1636,10 +1647,10 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     })
 }
 
-fn compute_structural_channels_sync(historical_prices: &[f64]) -> StructuralChannels {
+fn compute_structural_channels_sync(history: &[(DateTime<Utc>, f64)]) -> StructuralChannels {
     let mut channels = Vec::new();
 
-    if historical_prices.len() >= 20 {
+    if history.len() >= 20 {
         let window = 20;
         let mut center_line = Vec::new();
         let mut upper_1sd = Vec::new();
@@ -1647,16 +1658,19 @@ fn compute_structural_channels_sync(historical_prices: &[f64]) -> StructuralChan
         let mut upper_2sd = Vec::new();
         let mut lower_2sd = Vec::new();
 
-        for i in window..historical_prices.len() {
-            let window_slice = &historical_prices[i-window..i];
-            let sum: f64 = window_slice.iter().sum();
+        // `i` is the exclusive end of the window; iterating through len+1 means the final
+        // window `[len-window..len]` includes the newest sample (off-by-one otherwise).
+        for i in window..=history.len() {
+            let window_slice = &history[i-window..i];
+            let sum: f64 = window_slice.iter().map(|(_, v)| v).sum();
             let mean = sum / window as f64;
             let variance: f64 = window_slice.iter()
-                .map(|v| (v - mean).powi(2))
+                .map(|(_, v)| (v - mean).powi(2))
                 .sum::<f64>() / window as f64;
             let std_dev = variance.sqrt();
 
-            let ts = Utc::now() - chrono::Duration::minutes((historical_prices.len() - i) as i64 * 5);
+            // Label the point with the timestamp of the newest sample inside the window
+            let ts = window_slice[window_slice.len() - 1].0;
             center_line.push(LinePoint { time: ts.to_rfc3339(), value: format!("{:.2}", mean) });
             upper_1sd.push(LinePoint { time: ts.to_rfc3339(), value: format!("{:.2}", mean + std_dev) });
             lower_1sd.push(LinePoint { time: ts.to_rfc3339(), value: format!("{:.2}", mean - std_dev) });
@@ -1690,8 +1704,7 @@ fn compute_structural_channels_sync(historical_prices: &[f64]) -> StructuralChan
 }
 
 fn compute_counterfactual_sync(
-    historical_portfolio: &[f64],
-    historical_native: &[f64],
+    history: &[(DateTime<Utc>, f64, f64)],
     current_portfolio: f64,
     current_native: f64,
     now_str: &str,
@@ -1700,12 +1713,10 @@ fn compute_counterfactual_sync(
     let mut active_series = Vec::new();
     let mut passive_series = Vec::new();
 
-    let len = historical_portfolio.len().min(historical_native.len());
-    for i in 0..len {
-        let ts = Utc::now() - chrono::Duration::minutes((historical_portfolio.len() - i) as i64 * 5);
+    for (ts, portfolio, native) in history {
         time_points.push(ts.to_rfc3339());
-        active_series.push(format!("{:.2}", historical_portfolio[i]));
-        passive_series.push(format!("{:.2}", historical_native[i]));
+        active_series.push(format!("{:.2}", portfolio));
+        passive_series.push(format!("{:.2}", native));
     }
 
     // Always include current point
@@ -1720,7 +1731,7 @@ fn compute_counterfactual_sync(
     }
 }
 
-fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_portfolio: &[f64], counterfactual_native: &[f64]) -> DerivedMetrics {
+fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_history: &[(DateTime<Utc>, f64, f64)]) -> DerivedMetrics {
     // 1. Spot price calculation
     let spot_price = if let Some(pool) = raw.pool_mechanics.first() {
         if pool.volatile_assets.len() >= 2 {
@@ -1928,8 +1939,7 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
         },
         structural_channels,
         strategy_counterfactual: compute_counterfactual_sync(
-            counterfactual_portfolio,
-            counterfactual_native,
+            counterfactual_history,
             total_portfolio_usd,
             total_native_usd,
             &now_str,
@@ -1958,10 +1968,53 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
 }
 
 fn compute_state_hash(data: &SnapshotData) -> String {
-    // Canonical JSON: sorted keys, no whitespace
+    // Canonical JSON: sorted keys, no whitespace, wall-clock fields stripped
+    let canonical = canonical_state_json(data);
     let mut hasher = Sha256::new();
-    hasher.update(serde_json::to_vec(&data).unwrap());
+    hasher.update(serde_json::to_vec(&canonical).unwrap());
     format!("{:x}", hasher.finalize())
+}
+
+/// Canonical hash input: the snapshot payload with every wall-clock field removed.
+///
+/// Timestamps (`updated_at`, `high_water_mark_date`, series `time_points`, channel
+/// `start_time`/`end_time`/`break_point`, `LinePoint.time`) are produced fresh on every
+/// ingestion cycle and carry no state information. Including them made the hash change
+/// every cycle, defeating snapshot deduplication (`store_snapshot` would insert a new
+/// row every cycle even when on-chain state was unchanged, growing the table unboundedly
+/// and filling history charts with duplicate points).
+fn canonical_state_json(data: &SnapshotData) -> serde_json::Value {
+    let mut value = serde_json::to_value(data).expect("SnapshotData is JSON-serializable");
+    strip_volatile_time_fields(&mut value);
+    value
+}
+
+fn strip_volatile_time_fields(value: &mut serde_json::Value) {
+    const VOLATILE_KEYS: [&str; 7] = [
+        "updated_at",
+        "high_water_mark_date",
+        "time_points",
+        "time",
+        "start_time",
+        "end_time",
+        "break_point",
+    ];
+    match value {
+        serde_json::Value::Object(map) => {
+            for key in VOLATILE_KEYS {
+                map.remove(key);
+            }
+            for (_, v) in map.iter_mut() {
+                strip_volatile_time_fields(v);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                strip_volatile_time_fields(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 async fn store_snapshot(db: &PgPool, envelope: &SnapshotEnvelope) -> Result<()> {
@@ -2054,7 +2107,7 @@ mod tests {
         ];
         // Total NOCK is 80,000 < 100,000 floor
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &[]);
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[]);
         assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
     }
 
@@ -2077,7 +2130,7 @@ mod tests {
         raw.live_gas_cost_usd = 0.005;
 
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &[]);
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[]);
         assert!(metrics.global_status.shot_advice_action.contains("BATCH HARVEST SHOT"));
     }
 
@@ -2100,7 +2153,7 @@ mod tests {
         raw.live_aero_fee_nock = 8.0;
 
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &[]);
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[]);
         assert!(metrics.global_status.shot_advice_action.contains("HOLD & ACCRETE"));
     }
 
@@ -2141,7 +2194,7 @@ operator_profile:
             },
         ];
         // 120,000 is above default 100k floor, BUT below custom 150k floor!
-        let metrics = compute_derived_metrics(&raw, 3000.0, &profile, StructuralChannels { channels: vec![] }, &[], &[]);
+        let metrics = compute_derived_metrics(&raw, 3000.0, &profile, StructuralChannels { channels: vec![] }, &[]);
         assert_eq!(metrics.global_status.nock_floor_target, "150000");
         assert_eq!(metrics.global_status.nock_floor_delta, "-30000");
         assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
@@ -2153,8 +2206,105 @@ operator_profile:
 
     #[test]
     fn test_state_hash_determinism() {
-        let data = SnapshotData {
-            wallet_balances: vec![],
+        let data = sample_snapshot_data();
+
+        let hash1 = compute_state_hash(&data);
+        let hash2 = compute_state_hash(&data);
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash1.len(), 64);
+    }
+
+    #[test]
+    fn test_state_hash_ignores_volatile_timestamps() {
+        // Two snapshots whose ONLY differences are wall-clock fields (produced fresh each
+        // cycle) must hash identically — otherwise snapshot deduplication never fires.
+        let mut a = sample_snapshot_data();
+        let b = sample_snapshot_data();
+
+        a.wallet_balances[0].updated_at = "2027-01-01T00:00:00Z".to_string();
+        a.derived_metrics.global_status.high_water_mark_date = "2027-01-01T00:00:00Z".to_string();
+        a.derived_metrics.asset_aggregation_series.time_points = vec!["2027-01-01T00:00:00Z".to_string()];
+        a.derived_metrics.total_value_vs_baseline.time_points = vec!["2027-01-01T00:00:00Z".to_string()];
+        a.derived_metrics.strategy_counterfactual.time_points = vec!["2027-01-01T00:00:00Z".to_string(); 4];
+        a.derived_metrics.structural_channels.channels[0].start_time = "2027-01-01T00:00:00Z".to_string();
+        a.derived_metrics.structural_channels.channels[0].break_point = Some("2027-01-01T00:00:00Z".to_string());
+        for p in a.derived_metrics.structural_channels.channels[0].center_line.iter_mut() {
+            p.time = "2027-01-01T00:00:00Z".to_string();
+        }
+
+        assert_eq!(compute_state_hash(&a), compute_state_hash(&b));
+    }
+
+    #[test]
+    fn test_state_hash_changes_with_state() {
+        // Real state changes must change the hash so dedup keeps genuinely new snapshots.
+        let mut a = sample_snapshot_data();
+        let b = sample_snapshot_data();
+        a.wallet_balances[0].amount = "96004.52".to_string();
+        a.derived_metrics.global_status.total_nock_amount = "106141".to_string();
+
+        assert_ne!(compute_state_hash(&a), compute_state_hash(&b));
+    }
+
+    #[test]
+    fn test_counterfactual_series_use_real_timestamps_and_stay_aligned() {
+        let history = vec![
+            (Utc::now() - chrono::Duration::minutes(30), 2900.0f64, 2600.0f64),
+            (Utc::now() - chrono::Duration::minutes(25), 2910.0, 2602.0),
+            (Utc::now() - chrono::Duration::minutes(20), 2925.0, 2603.5),
+        ];
+        let now_str = Utc::now().to_rfc3339();
+        let cf = compute_counterfactual_sync(&history, 2950.0, 2605.0, &now_str);
+
+        assert_eq!(cf.time_points.len(), 4);
+        assert_eq!(cf.active_portfolio_series.len(), 4);
+        assert_eq!(cf.passive_baseline_series.len(), 4);
+
+        // Real snapshot timestamps, in chronological order — no fabricated spacing
+        assert_eq!(cf.time_points[0], history[0].0.to_rfc3339());
+        assert_eq!(cf.time_points[2], history[2].0.to_rfc3339());
+        assert_ne!(cf.time_points[0], cf.time_points[1]);
+
+        // Paired series values align with the same history rows
+        assert_eq!(cf.active_portfolio_series[1], "2910.00");
+        assert_eq!(cf.passive_baseline_series[1], "2602.00");
+
+        // Current point appended last
+        assert_eq!(cf.time_points[3], now_str);
+        assert_eq!(cf.active_portfolio_series[3], "2950.00");
+        assert_eq!(cf.passive_baseline_series[3], "2605.00");
+    }
+
+    #[test]
+    fn test_structural_channels_final_window_includes_newest_sample() {
+        // 21 samples: the final 20-sample window must include the newest price.
+        let base_ts = Utc::now() - chrono::Duration::minutes(60);
+        let mut history: Vec<(DateTime<Utc>, f64)> = (0..20)
+            .map(|i| (base_ts + chrono::Duration::minutes(i as i64), 100.0))
+            .collect();
+        let newest_ts = base_ts + chrono::Duration::minutes(20);
+        history.push((newest_ts, 200.0)); // outlier newest sample
+
+        let channels = compute_structural_channels_sync(&history);
+        let ch = &channels.channels[0];
+        let last_center: f64 = ch.center_line.last().unwrap().value.parse().unwrap();
+
+        // Window of the last 20 samples = nineteen 100s + one 200 → mean 105.00
+        assert!((last_center - 105.0).abs() < 0.01);
+        // Point is labeled with the timestamp of the newest sample in the window
+        assert_eq!(ch.center_line.last().unwrap().time, newest_ts.to_rfc3339());
+    }
+
+    fn sample_snapshot_data() -> SnapshotData {
+        SnapshotData {
+            wallet_balances: vec![WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "NOCK".to_string(),
+                token_address: "0xNOCK".to_string(),
+                amount: "96004.52".to_string(),
+                amount_usd: "2496.12".to_string(),
+                updated_at: "2026-10-11T00:00:00Z".to_string(),
+            }],
             pool_mechanics: vec![],
             concentrated_liquidity: vec![],
             contract_fees: vec![],
@@ -2176,12 +2326,12 @@ operator_profile:
                     shot_advice_details: "Steady".to_string(),
                 },
                 asset_aggregation_series: AssetAggregationSeries {
-                    time_points: vec![],
-                    safe_haven_series: vec![],
-                    active_protocol_series: vec![],
-                    tranche_1_nock: vec![],
-                    tranche_2_nock: vec![],
-                    tranche_3_nock: vec![],
+                    time_points: vec!["2026-10-11T00:00:00Z".to_string()],
+                    safe_haven_series: vec!["48.00".to_string()],
+                    active_protocol_series: vec!["2.00".to_string()],
+                    tranche_1_nock: vec!["4000".to_string()],
+                    tranche_2_nock: vec!["6000".to_string()],
+                    tranche_3_nock: vec!["96004".to_string()],
                 },
                 tick_bracket_hypervisor: TickBracketHypervisor {
                     brackets: vec![],
@@ -2194,26 +2344,38 @@ operator_profile:
                     allocations: vec![],
                 },
                 strategy_counterfactual: StrategyCounterfactual {
-                    time_points: vec![],
-                    active_portfolio_series: vec![],
-                    passive_baseline_series: vec![],
+                    time_points: vec![
+                        "2026-10-11T00:00:00Z".to_string(),
+                        "2026-10-11T00:05:00Z".to_string(),
+                        "2026-10-11T00:10:00Z".to_string(),
+                    ],
+                    active_portfolio_series: vec!["99.00".to_string(), "99.50".to_string(), "100.00".to_string()],
+                    passive_baseline_series: vec!["49.00".to_string(), "49.50".to_string(), "50.00".to_string()],
                 },
                 structural_channels: StructuralChannels {
-                    channels: vec![],
+                    channels: vec![RegressionChannel {
+                        start_time: "2026-10-11T00:00:00Z".to_string(),
+                        end_time: None,
+                        center_line: vec![
+                            LinePoint { time: "2026-10-11T00:00:00Z".to_string(), value: "99.00".to_string() },
+                            LinePoint { time: "2026-10-11T00:05:00Z".to_string(), value: "100.00".to_string() },
+                        ],
+                        upper_1sd: vec![],
+                        lower_1sd: vec![],
+                        upper_2sd: vec![],
+                        lower_2sd: vec![],
+                        is_active: true,
+                        break_point: None,
+                    }],
                 },
                 total_value_vs_baseline: TotalValueVsBaseline {
-                    time_points: vec![],
-                    portfolio_value_series: vec![],
-                    high_water_mark_series: vec![],
-                    token_price_series: vec![],
+                    time_points: vec!["2026-10-11T00:00:00Z".to_string()],
+                    portfolio_value_series: vec!["100.00".to_string()],
+                    high_water_mark_series: vec!["100.00".to_string()],
+                    token_price_series: vec!["0.02600".to_string()],
                 },
             },
-        };
-
-        let hash1 = compute_state_hash(&data);
-        let hash2 = compute_state_hash(&data);
-        assert_eq!(hash1, hash2);
-        assert_eq!(hash1.len(), 64);
+        }
     }
 
     #[test]
