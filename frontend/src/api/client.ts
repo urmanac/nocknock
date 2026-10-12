@@ -50,11 +50,11 @@ export interface HistoricalResponse {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
     headers: {
       'Content-Type': 'application/json',
       ...init?.headers,
     },
-    ...init,
   });
 
   if (!res.ok) {
@@ -75,13 +75,11 @@ export const api = {
   latestSnapshot: <T = unknown>() => request<SnapshotEnvelope<T>>('/snapshot/latest', { cache: 'no-cache' }),
 
   historicalSnapshots: (params?: {
-    interval?: '1h' | '4h' | '1d' | '1w';
     limit?: number;
     before?: string;
     after?: string;
   }) => {
     const search = new URLSearchParams();
-    if (params?.interval) search.set('interval', params.interval);
     if (params?.limit) search.set('limit', String(params.limit));
     if (params?.before) search.set('before', params.before);
     if (params?.after) search.set('after', params.after);
@@ -92,26 +90,3 @@ export const api = {
 
   snapshotById: <T = unknown>(id: string) => request<SnapshotEnvelope<T>>(`/snapshot/${id}`),
 };
-
-// Conditional GET helper — uses ETag (state_hash) for 304 Not Modified
-export async function fetchIfFresh<T>(
-  path: string,
-  lastKnownHash: string
-): Promise<{ data: SnapshotEnvelope<T>; fresh: boolean } | null> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      'If-None-Match': lastKnownHash,
-    },
-  });
-
-  if (res.status === 304) {
-    return { data: null as any, fresh: true }; // caller uses cached data
-  }
-
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status}`);
-  }
-
-  const data = await res.json();
-  return { data, fresh: false };
-}
