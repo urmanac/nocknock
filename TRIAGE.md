@@ -144,3 +144,10 @@ This document defines the issue triage protocol, label architecture, bug severit
 * **Labels**: `bug`, `frontend`, `patch-0.1.x`
 * **Status**: Resolved & Merged (PR #23)
 * **Fix**: Removed dynamic freshness state dependencies from polling effect dependency array, added stateHash comparison refs, and eliminated continuous re-render churn. CPU dropped from ~117% to near-zero idle.
+
+#### 14. Defect: False-Alarm Stale Warnings During Scheduled Ingestion Cycles
+* **Component**: `frontend/src/hooks/useFreshness.tsx`, `frontend/src/App.tsx`, `ingestion-worker/src/main.rs:1880-1920`
+* **Labels**: `bug`, `frontend`, `backend`, `patch-0.1.x`
+* **Status**: Resolved & Merged (PR #27)
+* **Defect**: Stale threshold was strictly equal to the 300s sync cycle interval, while ingestion RPC calls and transactions take a non-zero duration (~1s). At second 301, the UI flashed a stale warning banner during normal scheduled execution. Additionally, `/v1/snapshot/latest` sent `max-age=300`, causing browsers to trap stale snapshots.
+* **Fix**: Measured live ingestion cycle duration (`sync_duration_ms`) and exposed on `/health` and `/v1/health`. Added 90s grace allowance with 3-tier sync status (`LIVE ON-CHAIN` green $\to$ `SYNC IN PROGRESS` cyan $\to$ `SYNC DELAYED` amber). Switched snapshot cache header to `no-cache, must-revalidate` and added `{ cache: 'no-cache' }` fetch headers.

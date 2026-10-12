@@ -145,16 +145,7 @@ jobs:
 
       - name: Extract Release Notes
         run: |
-          TAG="${{ github.ref_name }}"
-          VERSION="${TAG#v}"
-          awk -v v="## [$VERSION]" '
-            index($0, v) == 1 { p=1; print; next }
-            p && /^## \[/ { exit }
-            p { print }
-          ' CHANGELOG.md > release_body.md
-          if [ ! -s release_body.md ]; then
-            awk '/^## \[[0-9]/ { p=1; count++ } count==2 { exit } p' CHANGELOG.md > release_body.md
-          fi
+          make release-notes TAG="${{ github.ref_name }}" > release_body.md
           if [ ! -s release_body.md ]; then
             echo "Release ${{ github.ref_name }}" > release_body.md
           fi
