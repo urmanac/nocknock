@@ -26,7 +26,7 @@
 
 ## Phase 3 — Harvest ledger, 60/40 sub-ledger, tax export
 
-- [~] Add `harvest_events` table (init-db.sql migration) + `POST /v1/execute/record-harvest` that verifies the Base receipt before recording (reject unverifiable hashes)
+- [x] Add `harvest_events` table (init-db.sql migration) + `POST /v1/execute/record-harvest` that verifies the Base receipt before recording (reject unverifiable hashes) — migration + ERC-20 Transfer log parsing (exact integer decimal formatting), receipt fetch/verify, idempotent inserts (409 on duplicate), 404 RECEIPT_NOT_FOUND doubles as the pending-broadcast signal; rejection paths verified live against the local daemon (422/422/503); 25/25 worker tests green
 - [ ] Compute virtual 60/40 split (40% tax reserve / 60% dry powder) + `tax_health` in `compute_derived_metrics`; extend `specs/core/snapshot.yaml` and the frontend contract tests
 - [ ] Brain guardrail: block dip-deployment advice that would breach the tax reserve or `nock_floor_target`; brain test for the invariant (brain stays pure math)
 - [ ] Implement `GET /v1/tax/export?format=koinly` (CSV first, JSON secondary) tagging fee claims as income and rebalances as transfers, each row with its Base tx hash
