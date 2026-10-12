@@ -98,9 +98,9 @@ tmux-start: build-worker
 	@echo "Starting NockNock in tmux session '$(TMUX_SESSION)'..."
 	@tmux has-session -t $(TMUX_SESSION) 2>/dev/null && tmux kill-session -t $(TMUX_SESSION) || true
 	@tmux new-session -d -s $(TMUX_SESSION) -n "worker" \
-		"cd /Users/yebyen/w/nocknock/ingestion-worker && DATABASE_URL=\"postgresql://postgres:postgres@localhost:5432/nocknock\" ./target/release/nocknock-ingestion-worker; exec zsh"
+		"cd $(CURDIR)/ingestion-worker && DATABASE_URL=\"postgresql://postgres:postgres@localhost:5432/nocknock\" ./target/release/nocknock-ingestion-worker; exec $$SHELL"
 	@tmux new-window -t $(TMUX_SESSION):1 -n "frontend" \
-		"cd /Users/yebyen/w/nocknock/frontend && npm run dev -- --host 0.0.0.0 --port 3000; exec zsh"
+		"cd $(CURDIR)/frontend && npm run dev -- --host 0.0.0.0 --port 3000; exec $$SHELL"
 	@tmux select-window -t $(TMUX_SESSION):0
 	@echo "=========================================================="
 	@echo "NockNock is running in tmux session '$(TMUX_SESSION)'!"

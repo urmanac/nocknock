@@ -31,6 +31,24 @@ type ActionState =
 const AWAIT_POLL_MS = 15_000;
 const AWAIT_MAX_ATTEMPTS = 40; // ~10 minutes of pending-broadcast patience
 
+export type RecordErrorKind = 'recorded' | 'awaiting_broadcast' | 'failed';
+
+/**
+ * Classify a record-harvest failure. 409 ALREADY_RECORDED is an idempotent success —
+ * the harvest IS in the ledger (the first attempt's response was lost). 404
+ * RECEIPT_NOT_FOUND covers the Uniswap-app pending-broadcast quirk (retry). Anything
+ * else is a real failure.
+ */
+export function classifyRecordError(e: unknown): RecordErrorKind {
+  const status = (e as { status?: number })?.status;
+  const msg = e instanceof Error ? e.message : String(e);
+  if (status === 409 || msg.includes('ALREADY_RECORDED')) return 'recorded';
+  if (status === 404 || msg.includes('RECEIPT_NOT_FOUND') || msg.includes('404')) {
+    return 'awaiting_broadcast';
+  }
+  return 'failed';
+}
+
 function shortAddr(a: string | undefined): string {
   if (!a) return '';
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -153,13 +171,18 @@ export function LiteCockpit() {
         loadLedger();
         return;
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes('RECEIPT_NOT_FOUND') || msg.includes('404')) {
+        const kind = classifyRecordError(e);
+        if (kind === 'recorded') {
+          setState(platform, { kind: 'recorded', txHash });
+          loadLedger();
+          return;
+        }
+        if (kind === 'awaiting_broadcast') {
           setState(platform, { kind: 'awaiting_broadcast', txHash, attempts: attempt });
           await new Promise((r) => setTimeout(r, AWAIT_POLL_MS));
           continue;
         }
-        setState(platform, { kind: 'failed', detail: msg });
+        setState(platform, { kind: 'failed', detail: e instanceof Error ? e.message : String(e) });
         return;
       }
     }
@@ -262,10 +285,10 @@ export function LiteCockpit() {
           <div style={lite.errorText}>
             Wallet pairing needs VITE_WALLETCONNECT_PROJECT_ID (free Reown project id) set at build time.
           </div>
-        ) : executable.length === 0 && payload ? (
+        ) : !walletConnectConfigured() ? null : executable.length === 0 && payload ? (
           <div style={lite.sub}>No simulated-ready claim actions right now.</div>
         ) : null}
-        {executable.map((a) => {
+        {walletConnectConfigured() && executable.map((a) => {
           const st = stateOf(a);
           return (
             <div key={a.platform} style={lite.actionRow}>

@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use config::Config;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -963,7 +963,7 @@ pub fn format_shot_advice_text(data: &serde_json::Value) -> String {
          • Decision Matrix Details: {details}\n\
          • Uncollected Claimable Fees: ${claimable_usd} USD\n\
          • Net Gas-to-Fee Profitability: +${gas_delta} USD\n\
-         • Execution Trigger: Batch Harvest shots unlock at >= $5.00 accumulated fees."
+         • Execution rule: claim advised when claimable yield ≥ 2× live gas break-even."
     )
 }
 
@@ -971,30 +971,52 @@ pub fn format_claim_simulation_text(data: &serde_json::Value) -> String {
     let fees = data.get("contract_fees").and_then(|f| f.as_array());
     let mut details = String::new();
     let mut total_claimable_usd = 0.0f64;
+    let mut gas_usd: Option<f64> = None;
 
     if let Some(list) = fees {
         for fee in list {
             let symbol = fee.get("fee_token_symbol").and_then(|s| s.as_str()).unwrap_or("Pool");
             let amount = fee.get("amount").and_then(|a| a.as_str()).unwrap_or("0");
             let amount_usd = fee.get("amount_usd").and_then(|a| a.as_str()).unwrap_or("0.00");
-            let gas = fee.get("gas_break_even_usd").and_then(|g| g.as_str()).unwrap_or("0.005");
+            let gas_str = fee.get("gas_break_even_usd").and_then(|g| g.as_str()).unwrap_or_default();
+            match gas_str.parse::<f64>() {
+                Ok(g) => {
+                    // Per-contract break-evens come from the live gas query; take the max
+                    // as the representative claim cost. Never fabricate a constant.
+                    gas_usd = Some(match gas_usd {
+                        Some(acc) => acc.max(g),
+                        None => g,
+                    });
+                    details.push_str(&format!("  - {symbol}: {amount} (~${amount_usd} USD | Gas Est: ${:.4})\n", g));
+                }
+                Err(_) => {
+                    details.push_str(&format!("  - {symbol}: {amount} (~${amount_usd} USD | Gas Est: unavailable)\n"));
+                }
+            }
             if let Ok(usd_val) = amount_usd.parse::<f64>() {
                 total_claimable_usd += usd_val;
             }
-            details.push_str(&format!("  - {symbol}: {amount} (~${amount_usd} USD | Gas Est: ${gas})\n"));
         }
     }
 
+    let (gas_line, net_line) = match gas_usd {
+        Some(g) => (
+            format!("~${:.4} USD", g),
+            format!("${:.4} USD", (total_claimable_usd - g).max(0.0)),
+        ),
+        None => (
+            "unavailable".to_string(),
+            "unknown (live gas estimate unavailable)".to_string(),
+        ),
+    };
     format!(
         "⚡ Fee Claim Simulation\n\
          =======================\n\
          • Total Gross Claimable: ${:.4} USD\n\
-         • Estimated Base Gas: ~$0.005 USD\n\
-         • Net Accretion if Harvested: ${:.4} USD\n\
+         • Estimated Gas: {}\n\
+         • Net Accretion if Harvested: {}\n\
          Pool Breakdown:\n{}",
-        total_claimable_usd,
-        (total_claimable_usd - 0.005).max(0.0),
-        details
+        total_claimable_usd, gas_line, net_line, details
     )
 }
 
@@ -1587,8 +1609,9 @@ fn build_v4_collect_unlock_data_decrease_only(token_id: u64) -> String {
 }
 
 /// Live ETH/USD spot from the Aerodrome vAMM-WETH/USDC getReserves.
-/// Degrades to the documented conservative $2,500 peg when RPC is unreachable.
-async fn fetch_eth_price_usd(http_client: &Client, alchemy_url: &str) -> f64 {
+/// Zero-mock: returns None when the RPC query fails — callers must degrade honestly
+/// instead of valuing gas at a fabricated price.
+async fn fetch_eth_price_usd(http_client: &Client, alchemy_url: &str) -> Option<f64> {
     let payload = json!({
         "jsonrpc": "2.0",
         "method": "eth_call",
@@ -1609,13 +1632,13 @@ async fn fetch_eth_price_usd(http_client: &Client, alchemy_url: &str) -> f64 {
                     let weth = r0 as f64 / 1e18;
                     let usdc = r1 as f64 / 1e6;
                     if weth > 0.0 {
-                        return usdc / weth;
+                        return Some(usdc / weth);
                     }
                 }
             }
         }
     }
-    2500.0
+    None
 }
 
 const USDC_BASE: &str = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
@@ -1847,7 +1870,15 @@ struct ClaimFeesPayload {
 /// cockpit) dispatch these to the paired wallet for signing; they never build
 /// calldata themselves.
 async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState>>) -> impl IntoResponse {
-    let wallet = state.config.tracked_wallets[0].clone();
+    let wallet = match state.config.tracked_wallets.first().cloned() {
+        Some(w) => w,
+        None => {
+            return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+                "error": "NO_TRACKED_WALLET",
+                "detail": "No tracked wallet configured; cannot build claim transactions"
+            }))).into_response();
+        }
+    };
     let alchemy_key = state.config.alchemy_api_keys.first().cloned().unwrap_or_default();
     if alchemy_key.is_empty() || alchemy_key == "YOUR_ALCHEMY_API_KEY" {
         return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
@@ -2020,8 +2051,11 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
             Some(res_json) => match res_json.get("result").and_then(|r| r.as_str()).and_then(|s| u128::from_str_radix(s.trim_start_matches("0x"), 16).ok()) {
                 Some(units) => {
                     action.gas_estimate = Some(format!("0x{:x}", units));
-                    if let Some(gp) = gas_price_wei {
-                        let usd = (units as f64) * (gp as f64) / 1e18 * eth_price;
+                    // Zero-mock: gas USD requires BOTH the live gas price and the live
+                    // ETH/USD spot; if either is unavailable the USD valuation degrades
+                    // to None instead of being valued at a fabricated price.
+                    if let (Some(gp), Some(ep)) = (gas_price_wei, eth_price) {
+                        let usd = (units as f64) * (gp as f64) / 1e18 * ep;
                         action.gas_usd = Some(format!("{:.4}", usd));
                         total_gas_usd += usd;
                     }
@@ -2037,7 +2071,7 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
             }
         }
     }
-    let estimated_gas_usd = if gas_ok && gas_price_wei.is_some() {
+    let estimated_gas_usd = if gas_ok && gas_price_wei.is_some() && eth_price.is_some() {
         Some(format!("{:.4}", total_gas_usd))
     } else {
         None
@@ -2103,7 +2137,16 @@ async fn record_harvest_handler(
             .into_response();
     }
     let alchemy_url = format!("https://base-mainnet.g.alchemy.com/v2/{}", alchemy_key);
-    let wallet = state.config.tracked_wallets[0].clone();
+    let wallet = match state.config.tracked_wallets.first().cloned() {
+        Some(w) => w,
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "error": "NO_TRACKED_WALLET", "detail": "No tracked wallet configured; cannot verify receipts" })),
+            )
+                .into_response();
+        }
+    };
 
     let receipt_payload = json!({
         "jsonrpc": "2.0",
@@ -2159,6 +2202,30 @@ async fn record_harvest_handler(
         .and_then(|b| b.as_str())
         .and_then(|s| i64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
         .unwrap_or(0);
+    // Tax-honest confirmed_at: the block timestamp (when the tx actually landed), not
+    // the wall clock at recording time — retries after the pending-broadcast quirk can
+    // record long after confirmation, which would misdate the Koinly export. Falls back
+    // to now only if the block query fails.
+    let confirmed_at: DateTime<Utc> = if block_number > 0 {
+        let block_payload = json!({
+            "jsonrpc": "2.0",
+            "id": 41,
+            "method": "eth_getBlockByNumber",
+            "params": [format!("0x{block_number:x}"), false]
+        });
+        post_rpc_with_retry(&state.http_client, &alchemy_url, &block_payload, 2)
+            .await
+            .and_then(|res| res.get("result").cloned())
+            .and_then(|blk| {
+                blk.get("timestamp")
+                    .and_then(|t| t.as_str())
+                    .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+            })
+            .and_then(|ts| Utc.timestamp_opt(ts as i64, 0).single())
+            .unwrap_or_else(Utc::now)
+    } else {
+        Utc::now()
+    };
 
     let mut recorded = Vec::new();
     let mut skipped = 0usize;
@@ -2169,7 +2236,7 @@ async fn record_harvest_handler(
             _ => None,
         };
         let res = sqlx::query(
-            "INSERT INTO harvest_events (platform, tx_hash, token_address, token_symbol, from_address, recipient, amount_raw, amount_human, decimals, usd_value, block_number, confirmed_at)              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())              ON CONFLICT (tx_hash, token_address) DO NOTHING",
+            "INSERT INTO harvest_events (platform, tx_hash, token_address, token_symbol, from_address, recipient, amount_raw, amount_human, decimals, usd_value, block_number, confirmed_at)              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)              ON CONFLICT (tx_hash, token_address) DO NOTHING",
         )
         .bind(&req.platform)
         .bind(&req.tx_hash)
@@ -2182,6 +2249,7 @@ async fn record_harvest_handler(
         .bind(t.decimals)
         .bind(&usd_value)
         .bind(block_number)
+        .bind(confirmed_at)
         .execute(&state.db)
         .await;
         match res {
@@ -2397,8 +2465,11 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
             let clean = hex_str.trim_start_matches("0x");
             if let Ok(wei) = u128::from_str_radix(clean, 16) {
                 let eth_gas_cost = (wei as f64 / 1e18) * 150_000.0;
+                // The +$0.002 add covers Base L1 data-fee volatility (documented buffer,
+                // not a mock price). No upper clamp: a silent cap understated real gas
+                // during fee spikes and biased the claim decision toward "claim now".
                 let usd_gas_cost = (eth_gas_cost * live_eth_price_usd) + 0.002;
-                live_gas_cost_usd = usd_gas_cost.clamp(0.002, 0.05);
+                live_gas_cost_usd = usd_gas_cost.max(0.002);
                 gas_price_found = true;
             }
         }
@@ -3026,6 +3097,10 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
         },
         tick_bracket_hypervisor: TickBracketHypervisor {
             current_price: format!("{:.5}", spot_price),
+            // Zero-mock: only the live tick-derived V4 bracket is emitted. The former
+            // synthetic Aerodrome placeholder (0.00000 → 999.00000) drew a fabricated
+            // full-range bar as chart truth; Tranche 2 liquidity remains visible in the
+            // NOCK-stack and deviation panels which report it accurately.
             brackets: vec![
                 TickBracket {
                     lower_price: format!("{:.5}", tick_to_display_price(V4_TICK_UPPER_ONCHAIN)),
@@ -3038,13 +3113,6 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                         tick_to_display_price(V4_TICK_UPPER_ONCHAIN),
                         tick_to_display_price(V4_TICK_LOWER_ONCHAIN),
                     ),
-                },
-                TickBracket {
-                    lower_price: "0.00000".to_string(),
-                    upper_price: "999.00000".to_string(),
-                    liquidity_usd: format!("{:.2}", t2_usd),
-                    in_range: true,
-                    distance_bps: 0,
                 },
             ],
         },
@@ -4090,5 +4158,53 @@ v4_fee_baseline_nock: 1.4820
         assert!(claim_text.contains("Uniswap V4"));
         assert!(claim_text.contains("Aerodrome"));
         assert!(claim_text.contains("0.0753"));
+    }
+
+    #[test]
+    fn test_claim_simulation_text_uses_live_gas_never_fabricates() {
+        // Live per-contract gas break-even is surfaced verbatim; the historical
+        // "~$0.005 USD" fabrication must never appear.
+        let data = json!({
+            "contract_fees": [
+                { "fee_token_symbol": "USDC+NOCK (Uniswap V4)", "amount": "0.02 USDC",
+                  "amount_usd": "0.0279", "gas_break_even_usd": "0.0041" },
+                { "fee_token_symbol": "USDC+NOCK (Aerodrome)", "amount": "0.01 USDC",
+                  "amount_usd": "0.0167", "gas_break_even_usd": "0.0042" }
+            ]
+        });
+        let text = format_claim_simulation_text(&data);
+        assert!(text.contains("0.0042"), "representative live gas (max) should be shown: {text}");
+        assert!(!text.contains("~$0.005"), "fabricated constant gas must not appear: {text}");
+        assert!(text.contains("Net Accretion if Harvested: $0.0404"), "net = gross - live gas: {text}");
+
+        // Missing gas data degrades honestly instead of substituting a constant.
+        let no_gas = json!({
+            "contract_fees": [
+                { "fee_token_symbol": "X", "amount": "1", "amount_usd": "0.50" }
+            ]
+        });
+        let text2 = format_claim_simulation_text(&no_gas);
+        assert!(text2.contains("unavailable"), "gas absence must say so: {text2}");
+        assert!(!text2.contains("0.005"), "no fabricated gas constant: {text2}");
+    }
+
+    #[test]
+    fn test_no_synthetic_aerodrome_bracket_emitted() {
+        // The Tick Bracket payload must contain ONLY the live tick-derived V4 bracket.
+        // The former 0.00000 -> 999.00000 Aerodrome placeholder drew fabricated chart truth.
+        let raw = RawOnChainData::default();
+        let metrics = compute_derived_metrics(
+            &raw,
+            0.0,
+            &OperatorProfile::default(),
+            StructuralChannels { channels: vec![] },
+            &[],
+            &LedgerAggregate::default(),
+            &MarketRegime::default(),
+        );
+        assert_eq!(metrics.tick_bracket_hypervisor.brackets.len(), 1);
+        let bracket = &metrics.tick_bracket_hypervisor.brackets[0];
+        assert_ne!(bracket.lower_price, "0.00000");
+        assert_ne!(bracket.upper_price, "999.00000");
     }
 }

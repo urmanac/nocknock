@@ -199,16 +199,24 @@ function Dashboard() {
       }))
     : [];
 
-  const floorTarget = global?.nock_floor_target ? parseInt(global.nock_floor_target) : 100000;
-  const floorTargetFormatted = floorTarget.toLocaleString();
-  const floorTargetShort = `${(floorTarget / 1000).toFixed(0)}k`;
+  // Zero-mock: never fabricate a floor target — when the field is absent the UI shows
+  // '—'/UNKNOWN instead of a hardcoded 100000 that would masquerade as live truth.
+  const floorTarget = global?.nock_floor_target ? parseInt(global.nock_floor_target) : 0;
+  const floorKnown = floorTarget > 0;
+  const floorTargetFormatted = floorKnown ? floorTarget.toLocaleString() : '—';
+  const floorTargetShort = floorKnown ? `${(floorTarget / 1000).toFixed(0)}k` : '—';
   const nockAmountRaw = global?.total_nock_amount ? parseInt(global.total_nock_amount) : 0;
   const totalNockVal = nockAmountRaw > 0 ? nockAmountRaw.toLocaleString() : '—';
-  const nockFloorDeltaRaw = global?.nock_floor_delta ? parseInt(global.nock_floor_delta) : (nockAmountRaw ? nockAmountRaw - floorTarget : 0);
-  const nockFloorDeltaVal = nockFloorDeltaRaw.toLocaleString();
-  const isFloorSafe = nockFloorDeltaRaw >= 0;
-  const floorHealthColor = isFloorSafe ? '#10b981' : '#ef4444';
-  const nockFloorDeltaPct = ((nockFloorDeltaRaw / floorTarget) * 100).toFixed(1);
+  const nockFloorDeltaRaw = floorKnown
+    ? (global?.nock_floor_delta ? parseInt(global.nock_floor_delta) : nockAmountRaw - floorTarget)
+    : 0;
+  const nockFloorDeltaKnown = floorKnown;
+  const nockFloorDeltaVal = nockFloorDeltaKnown ? nockFloorDeltaRaw.toLocaleString() : '—';
+  const isFloorSafe = nockFloorDeltaKnown ? nockFloorDeltaRaw >= 0 : false;
+  const floorHealthColor = !nockFloorDeltaKnown ? '#8b949e' : isFloorSafe ? '#10b981' : '#ef4444';
+  const nockFloorDeltaPct = nockFloorDeltaKnown && floorTarget > 0
+    ? ((nockFloorDeltaRaw / floorTarget) * 100).toFixed(1)
+    : null;
 
   return (
     <div style={styles.container}>
@@ -267,7 +275,7 @@ function Dashboard() {
             label="Total NOCK Stack"
             value={totalNockVal}
             suffix=" NOCK"
-            subtitle={`${nockFloorDeltaRaw >= 0 ? '+' : ''}${nockFloorDeltaVal} above ${floorTargetShort} floor`}
+            subtitle={nockFloorDeltaKnown ? `${nockFloorDeltaRaw >= 0 ? '+' : ''}${nockFloorDeltaVal} above ${floorTargetShort} floor` : 'floor target unavailable'}
             highlightColor={floorHealthColor}
           />
           <StatCard
@@ -282,7 +290,7 @@ function Dashboard() {
             label="Portfolio Value (USD)"
             value={global?.total_portfolio_usd}
             prefix="$"
-            subtitle={`@ $${metrics?.tick_bracket_hypervisor?.current_price || '0.00'}/NOCK`}
+            subtitle={`@ $${metrics?.tick_bracket_hypervisor?.current_price || '—'}/NOCK`}
           />
           <StatCard
             label="Claimable Yield (Net)"
@@ -293,8 +301,9 @@ function Dashboard() {
           />
           <StatCard
             label={`${floorTargetShort.toUpperCase()} Floor Health`}
-            value={nockAmountRaw > 0 ? `${((nockAmountRaw / floorTarget) * 100).toFixed(1)}%` : '—'}
-            subtitle={isFloorSafe ? `Hard Floor Safe (+${nockFloorDeltaVal} buffer)` : `CRITICAL: ${nockFloorDeltaVal} Below Floor`}
+            value={nockAmountRaw > 0 && floorKnown ? ((nockAmountRaw / floorTarget) * 100).toFixed(1) : undefined}
+            suffix="%"
+            subtitle={!nockFloorDeltaKnown ? 'floor status unknown' : isFloorSafe ? `Hard Floor Safe (+${nockFloorDeltaVal} buffer)` : `CRITICAL: ${nockFloorDeltaVal} Below Floor`}
             highlightColor={floorHealthColor}
           />
           <StatCard
@@ -317,11 +326,11 @@ function Dashboard() {
           </div>
           <div style={{
             ...styles.floorStatusTag,
-            background: isFloorSafe ? '#064e3b' : '#450a0a',
-            color: isFloorSafe ? '#a7f3d0' : '#fecaca',
-            border: isFloorSafe ? '1px solid #059669' : '1px solid #dc2626',
+            background: !nockFloorDeltaKnown ? '#161b22' : isFloorSafe ? '#064e3b' : '#450a0a',
+            color: !nockFloorDeltaKnown ? '#8b949e' : isFloorSafe ? '#a7f3d0' : '#fecaca',
+            border: !nockFloorDeltaKnown ? '1px solid #30363d' : isFloorSafe ? '1px solid #059669' : '1px solid #dc2626',
           }}>
-            Floor Invariant: <strong>{floorTargetFormatted} NOCK Hard Floor {isFloorSafe ? 'PROTECTED' : 'BREACHED'}</strong> ({nockFloorDeltaRaw >= 0 ? '+' : ''}{nockFloorDeltaVal} cushion)
+            Floor Invariant: <strong>{floorTargetFormatted} NOCK Hard Floor {!nockFloorDeltaKnown ? 'UNKNOWN' : isFloorSafe ? 'PROTECTED' : 'BREACHED'}</strong>{nockFloorDeltaKnown && <> ({nockFloorDeltaRaw >= 0 ? '+' : ''}{nockFloorDeltaVal} cushion)</>}
           </div>
         </div>
         <p style={styles.adviceDetails}>
@@ -344,7 +353,7 @@ function Dashboard() {
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>Impermanent Loss / Risk:</span>
             <span style={styles.shotPillText}>
-              0% realized losses. Uniswap V4 concentrated range is active (${metrics?.tick_bracket_hypervisor?.brackets?.[0]?.lower_price || '0.01237'} – ${metrics?.tick_bracket_hypervisor?.brackets?.[0]?.upper_price || '2.02783'}). Aerodrome fees live-tracked on-chain.
+              0% realized losses. Uniswap V4 concentrated range is active ({metrics?.tick_bracket_hypervisor?.brackets?.[0]?.lower_price ? `$${metrics.tick_bracket_hypervisor.brackets[0].lower_price} – $${metrics.tick_bracket_hypervisor.brackets[0].upper_price}` : '—'}). Aerodrome fees live-tracked on-chain.
             </span>
           </div>
         </div>
@@ -374,10 +383,10 @@ function Dashboard() {
               <YAxis
                 stroke="#334155"
                 tick={{ fill: '#94a3b8', fontSize: 11 }}
-                domain={[
+                domain={floorKnown ? [
                   (dataMin: number) => Math.max(0, Math.floor(Math.min(dataMin, floorTarget - 5000) / 5000) * 5000),
                   (dataMax: number) => Math.ceil(Math.max(dataMax, floorTarget + 5000) / 5000) * 5000,
-                ]}
+                ] : ['auto', 'auto']}
                 tickFormatter={v => `${(v / 1000).toFixed(0)}k`}
               />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
@@ -387,13 +396,15 @@ function Dashboard() {
                 labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
                 formatter={(v: any) => `${Number(v).toLocaleString()} NOCK`}
               />
-              <ReferenceLine
-                y={floorTarget}
-                stroke="#ef4444"
-                strokeDasharray="4 4"
-                strokeWidth={2}
-                label={{ value: `${floorTargetShort.toUpperCase()} HARD FLOOR`, fill: '#ef4444', fontSize: 11, position: 'insideTopLeft' }}
-              />
+              {floorKnown && (
+                <ReferenceLine
+                  y={floorTarget}
+                  stroke="#ef4444"
+                  strokeDasharray="4 4"
+                  strokeWidth={2}
+                  label={{ value: `${floorTargetShort.toUpperCase()} HARD FLOOR`, fill: '#ef4444', fontSize: 11, position: 'insideTopLeft' }}
+                />
+              )}
               <Area
                 type="monotone"
                 dataKey="tranche3Vault"
@@ -423,7 +434,7 @@ function Dashboard() {
           </ResponsiveContainer>
           <div style={{ marginTop: 8, fontSize: '0.75rem', color: '#888', display: 'flex', justifyContent: 'space-between' }}>
             <span>Total Holding: <strong style={{ color: floorHealthColor }}>{totalNockVal} NOCK</strong></span>
-            <span>Safety Buffer: <strong style={{ color: floorHealthColor }}>{nockFloorDeltaRaw >= 0 ? `+${nockFloorDeltaVal}` : nockFloorDeltaVal} NOCK ({nockFloorDeltaRaw >= 0 ? `+${nockFloorDeltaPct}%` : `${nockFloorDeltaPct}%`})</strong> above floor</span>
+            <span>Safety Buffer: <strong style={{ color: floorHealthColor }}>{nockFloorDeltaKnown ? `${nockFloorDeltaRaw >= 0 ? `+${nockFloorDeltaVal}` : nockFloorDeltaVal} NOCK (${nockFloorDeltaRaw >= 0 ? `+${nockFloorDeltaPct}%` : `${nockFloorDeltaPct}%`}) above floor` : '—'}</strong></span>
           </div>
         </CanvasPanel>
 
@@ -467,7 +478,17 @@ function Dashboard() {
           </ResponsiveContainer>
           <div style={{ marginTop: 12, fontSize: '0.75rem', color: '#aaa', fontFamily: 'monospace', display: 'flex', justifyContent: 'space-between' }}>
             <span>Spot Price: <strong>${metrics?.tick_bracket_hypervisor?.current_price || '0.00'}</strong></span>
-            <span style={{ color: '#10b981' }}>Uniswap V4 Range: {metrics?.tick_bracket_hypervisor?.brackets?.[0]?.lower_price ? `$${metrics?.tick_bracket_hypervisor?.brackets?.[0]?.lower_price} – $${metrics?.tick_bracket_hypervisor?.brackets?.[0]?.upper_price}` : '—'} (IN RANGE)</span>
+            {(() => {
+              const v4Bracket = metrics?.tick_bracket_hypervisor?.brackets?.[0];
+              if (!v4Bracket?.lower_price) {
+                return <span style={{ color: '#8b949e' }}>Uniswap V4 Range: —</span>;
+              }
+              return (
+                <span style={{ color: v4Bracket.in_range ? '#10b981' : '#f59e0b' }}>
+                  Uniswap V4 Range: ${v4Bracket.lower_price} – ${v4Bracket.upper_price} ({v4Bracket.in_range ? 'IN RANGE' : 'OUT OF RANGE'})
+                </span>
+              );
+            })()}
           </div>
         </CanvasPanel>
 
@@ -493,7 +514,14 @@ function Dashboard() {
                   />
                 ))}
               </Bar>
-              <Legend wrapperStyle={{ color: '#f1f5f9', paddingTop: 8 }} formatter={(value) => <span style={{ color: '#f1f5f9', fontWeight: 600, marginRight: 16 }}>{value}</span>} />
+              {/* The 'actual' series is colored per-status via Cells, so its auto legend swatch
+                  (series fill, unset => black) would lie. Legend shows only Target %; the
+                  per-status color key below maps the real cell colors. */}
+              <Legend
+                payload={[{ value: 'Target %', type: 'square', color: '#38bdf8', id: 'target' }]}
+                wrapperStyle={{ color: '#f1f5f9', paddingTop: 8 }}
+                formatter={(value) => <span style={{ color: '#f1f5f9', fontWeight: 600, marginRight: 16 }}>{value}</span>}
+              />
             </BarChart>
           </ResponsiveContainer>
           <div style={{ marginTop: 8, fontSize: '0.75rem', display: 'flex', gap: 16, flexWrap: 'wrap', color: '#cbd5e1' }}>
@@ -553,7 +581,7 @@ function Dashboard() {
                 <div style={{ fontSize: '0.7rem', letterSpacing: 2, color: '#8b949e', marginBottom: 6 }}>{label}</div>
                 <div style={{ fontSize: '1.4rem', fontWeight: 700, color, marginBottom: 6 }}>${value}</div>
                 <div style={{ background: '#0d1117', borderRadius: 999, height: 10, border: '1px solid #30363d', overflow: 'hidden' }}>
-                  <div style={{ width: `${Math.max(2, Math.min(100, pct))}%`, background: color, height: '100%', borderRadius: 999 }} />
+                  <div style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: color, height: '100%', borderRadius: 999 }} />
                 </div>
                 <div style={{ fontSize: '0.7rem', color: '#484f58', marginTop: 4 }}>{pct.toFixed(0)}% of realized harvests</div>
               </div>
@@ -565,8 +593,8 @@ function Dashboard() {
                   <Dial label="60% GROWTH DRY POWDER (DEPLOYABLE)" value={powder.toFixed(2)} pct={100 - taxPct} color="#10b981" />
                   <div style={{ flex: 1, minWidth: 180 }}>
                     <div style={{ fontSize: '0.7rem', letterSpacing: 2, color: '#8b949e', marginBottom: 6 }}>LIVE P/L vs HIGH-WATER MARK</div>
-                    <div style={{ fontSize: '1.4rem', fontWeight: 700, color: plColor }}>
-                      {plPct >= 0 ? '+' : ''}{plPct.toFixed(2)}%
+                    <div style={{ fontSize: '1.4rem', fontWeight: 700, color: hwm > 0 ? plColor : '#8b949e' }}>
+                      {hwm > 0 ? `${plPct >= 0 ? '+' : ''}${plPct.toFixed(2)}%` : '—'}
                     </div>
                     <div style={{ fontSize: '0.7rem', color: '#484f58', marginTop: 10 }}>
                       ${current.toFixed(2)} vs HWM ${hwm.toFixed(2)} · {ledger ? `${ledger.harvest_count} verified harvests` : 'no harvest ledger yet'}

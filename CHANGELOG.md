@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — 0.2.x Triage Cycle (task 000664, live-data audit)
+- **Zero-mock**: ETH/USD price lookup in the claim-fees gas valuation no longer falls back to a hardcoded $2,500; when the price RPC fails, gas USD degrades to "unavailable" instead of a fabricated valuation.
+- **Zero-mock**: removed the synthetic Aerodrome tick bracket (0.00000 → 999.00000) from `tick_bracket_hypervisor`; the chart now shows only the live tick-derived V4 bracket (Tranche 2 liquidity remains visible in the stack/deviation panels).
+- **Zero-mock**: MCP formatters (`nocknock-mcp` stdio + `/v1/mcp` HTTP) surface the live gas break-even from the snapshot ("unavailable" when absent) instead of a hardcoded ~$0.005 gas and a stale $5.00 execution trigger.
+- **Tax honesty**: harvest `confirmed_at` now uses the on-chain block timestamp instead of the recording wall clock, keeping Koinly export dates correct across pending-broadcast retries.
+- Gas break-even no longer silently clamped at $0.05 (documented $0.002 L1-data buffer retained).
+- Dashboard: deviation matrix legend no longer shows a phantom black swatch for "Actual %" (the per-status color key below the chart documents the real cell colors); Floor Health keeps its "%" unit; tick-bracket subtitle derives IN/OUT OF RANGE from live state; residual hardcoded fallbacks (floor 100000, bracket strings, $0.00 price) replaced with honest placeholders; 60/40 dials no longer draw a phantom sliver at zero.
+- Lite Cockpit: EXECUTE actions hidden while WalletConnect is unconfigured; an idempotent record-harvest retry (409 ALREADY_RECORDED) now completes as recorded instead of showing a failure; API errors surface the backend's human `detail` with the HTTP status preserved.
+- Golden-path handlers return a clean 503 when no tracked wallet is configured instead of panicking on the empty config index.
+- Makefile tmux targets use `$(CURDIR)` instead of a hardcoded macOS path.
+
+### Tests
+- Worker: 33 unit tests (+2: claim-simulation gas honesty, no synthetic bracket).
+- Frontend: 25 tests (+5: error mapping detail/status, record-harvest classifier).
+
 ### Deferred to 0.2.1 / Future Releases
 - [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).
 - [ ] **Multi-Pool Dynamic Ingestion**: Discovering and tracking secondary AMM pools on Base.
