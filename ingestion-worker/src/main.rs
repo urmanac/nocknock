@@ -11,7 +11,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -503,6 +503,14 @@ async fn main() -> Result<()> {
         .route("/v1/health", axum::routing::get(health_handler))
         .route(
             "/v1/snapshot/latest",
+            axum::routing::get(get_latest_snapshot_handler),
+        )
+        .route(
+            "/v1/snapshot",
+            axum::routing::get(get_latest_snapshot_handler),
+        )
+        .route(
+            "/snapshot",
             axum::routing::get(get_latest_snapshot_handler),
         )
         .route(
@@ -1040,9 +1048,49 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     .await
     .unwrap_or(0.0);
 
+    // Compute structural channels from historical data
+    let historical_rows = sqlx::query(
+        r#"SELECT (data->'derived_metrics'->'global_status'->>'total_portfolio_usd')::float8 as portfolio_usd FROM snapshots ORDER BY generated_at DESC LIMIT 50"#
+    )
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let historical_prices: Vec<f64> = historical_rows
+        .iter()
+        .rev()
+        .filter_map(|r| r.try_get("portfolio_usd").ok())
+        .collect();
+
+    let structural_channels = compute_structural_channels_sync(&historical_prices);
+
+    // Fetch counterfactual historical data (portfolio & native series)
+    let counterfactual_rows = sqlx::query(
+        r#"SELECT (data->'derived_metrics'->'global_status'->>'total_portfolio_usd')::float8 as portfolio_usd,
+                  (data->'derived_metrics'->'global_status'->>'total_native_usd')::float8 as native_usd
+         FROM snapshots
+         ORDER BY generated_at ASC
+         LIMIT 100"#
+    )
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let mut counterfactual_portfolio = Vec::new();
+    let mut counterfactual_native = Vec::new();
+    for row in counterfactual_rows {
+        if let Ok(Some(v)) = row.try_get::<Option<f64>, _>("portfolio_usd") {
+            counterfactual_portfolio.push(v);
+        }
+        if let Ok(Some(v)) = row.try_get::<Option<f64>, _>("native_usd") {
+            counterfactual_native.push(v);
+        }
+    }
+
     // Compute derived metrics
     let profile = state.config.profile();
-    let derived_metrics = compute_derived_metrics(&raw_data, prev_hwm, &profile);
+    let derived_metrics = compute_derived_metrics(&raw_data, prev_hwm, &profile, structural_channels,
+        &counterfactual_portfolio, &counterfactual_native);
 
     // Build snapshot data
     let snapshot_data = SnapshotData {
@@ -1472,7 +1520,91 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     })
 }
 
-fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile) -> DerivedMetrics {
+fn compute_structural_channels_sync(historical_prices: &[f64]) -> StructuralChannels {
+    let mut channels = Vec::new();
+
+    if historical_prices.len() >= 20 {
+        let window = 20;
+        let mut center_line = Vec::new();
+        let mut upper_1sd = Vec::new();
+        let mut lower_1sd = Vec::new();
+        let mut upper_2sd = Vec::new();
+        let mut lower_2sd = Vec::new();
+
+        for i in window..historical_prices.len() {
+            let window_slice = &historical_prices[i-window..i];
+            let sum: f64 = window_slice.iter().sum();
+            let mean = sum / window as f64;
+            let variance: f64 = window_slice.iter()
+                .map(|v| (v - mean).powi(2))
+                .sum::<f64>() / window as f64;
+            let std_dev = variance.sqrt();
+
+            let ts = Utc::now() - chrono::Duration::minutes((historical_prices.len() - i) as i64 * 5);
+            center_line.push(LinePoint { time: ts.to_rfc3339(), value: format!("{:.2}", mean) });
+            upper_1sd.push(LinePoint { time: ts.to_rfc3339(), value: format!("{:.2}", mean + std_dev) });
+            lower_1sd.push(LinePoint { time: ts.to_rfc3339(), value: format!("{:.2}", mean - std_dev) });
+            upper_2sd.push(LinePoint { time: ts.to_rfc3339(), value: format!("{:.2}", mean + 2.0 * std_dev) });
+            lower_2sd.push(LinePoint { time: ts.to_rfc3339(), value: format!("{:.2}", mean - 2.0 * std_dev) });
+        }
+
+        if !center_line.is_empty() {
+            let last_idx = center_line.len() - 1;
+            let break_point = if last_idx > 0 {
+                Some(center_line[last_idx].time.clone())
+            } else {
+                None
+            };
+
+            channels.push(RegressionChannel {
+                start_time: center_line.first().map(|p| p.time.clone()).unwrap_or_else(|| Utc::now().to_rfc3339()),
+                end_time: None,
+                center_line,
+                upper_1sd,
+                lower_1sd,
+                upper_2sd,
+                lower_2sd,
+                is_active: true,
+                break_point,
+            });
+        }
+    }
+
+    StructuralChannels { channels }
+}
+
+fn compute_counterfactual_sync(
+    historical_portfolio: &[f64],
+    historical_native: &[f64],
+    current_portfolio: f64,
+    current_native: f64,
+    now_str: &str,
+) -> StrategyCounterfactual {
+    let mut time_points = Vec::new();
+    let mut active_series = Vec::new();
+    let mut passive_series = Vec::new();
+
+    let len = historical_portfolio.len().min(historical_native.len());
+    for i in 0..len {
+        let ts = Utc::now() - chrono::Duration::minutes((historical_portfolio.len() - i) as i64 * 5);
+        time_points.push(ts.to_rfc3339());
+        active_series.push(format!("{:.2}", historical_portfolio[i]));
+        passive_series.push(format!("{:.2}", historical_native[i]));
+    }
+
+    // Always include current point
+    time_points.push(now_str.to_string());
+    active_series.push(format!("{:.2}", current_portfolio));
+    passive_series.push(format!("{:.2}", current_native));
+
+    StrategyCounterfactual {
+        time_points,
+        active_portfolio_series: active_series,
+        passive_baseline_series: passive_series,
+    }
+}
+
+fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_portfolio: &[f64], counterfactual_native: &[f64]) -> DerivedMetrics {
     // 1. Spot price calculation
     let spot_price = if let Some(pool) = raw.pool_mechanics.first() {
         if pool.volatile_assets.len() >= 2 {
@@ -1678,11 +1810,30 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                 ]
             },
         },
-        structural_channels: StructuralChannels { channels: vec![] },
-        strategy_counterfactual: StrategyCounterfactual {
-            time_points: vec![now_str.clone()],
-            active_portfolio_series: vec![format!("{:.2}", total_portfolio_usd)],
-            passive_baseline_series: vec![format!("{:.2}", total_native_usd)],
+        structural_channels,
+        strategy_counterfactual: {
+            let mut time_points = Vec::new();
+            let mut active_series = Vec::new();
+            let mut passive_series = Vec::new();
+
+            let len = counterfactual_portfolio.len().min(counterfactual_native.len());
+            for i in 0..len {
+                let ts = Utc::now() - chrono::Duration::minutes((counterfactual_portfolio.len() - i) as i64 * 5);
+                time_points.push(ts.to_rfc3339());
+                active_series.push(format!("{:.2}", counterfactual_portfolio[i]));
+                passive_series.push(format!("{:.2}", counterfactual_native[i]));
+            }
+
+            // Always include current point
+            time_points.push(now_str.clone());
+            active_series.push(format!("{:.2}", total_portfolio_usd));
+            passive_series.push(format!("{:.2}", total_native_usd));
+
+            StrategyCounterfactual {
+                time_points,
+                active_portfolio_series: active_series,
+                passive_baseline_series: passive_series,
+            }
         },
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: vec![
@@ -1804,7 +1955,7 @@ mod tests {
         ];
         // Total NOCK is 80,000 < 100,000 floor
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile);
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &[]);
         assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
     }
 
@@ -1827,7 +1978,7 @@ mod tests {
         raw.live_gas_cost_usd = 0.005;
 
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile);
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &[]);
         assert!(metrics.global_status.shot_advice_action.contains("BATCH HARVEST SHOT"));
     }
 
@@ -1850,7 +2001,7 @@ mod tests {
         raw.live_aero_fee_nock = 8.0;
 
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile);
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &[]);
         assert!(metrics.global_status.shot_advice_action.contains("HOLD & ACCRETE"));
     }
 
@@ -1891,7 +2042,7 @@ operator_profile:
             },
         ];
         // 120,000 is above default 100k floor, BUT below custom 150k floor!
-        let metrics = compute_derived_metrics(&raw, 3000.0, &profile);
+        let metrics = compute_derived_metrics(&raw, 3000.0, &profile, StructuralChannels { channels: vec![] }, &[], &[]);
         assert_eq!(metrics.global_status.nock_floor_target, "150000");
         assert_eq!(metrics.global_status.nock_floor_delta, "-30000");
         assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
