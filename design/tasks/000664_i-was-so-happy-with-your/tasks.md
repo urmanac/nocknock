@@ -6,24 +6,25 @@
 - [x] Capture baseline screenshots into `screenshots/` — `01-deviation-matrix-legend-bug-baseline.png` (black "Actual %" swatch visible; Aerodrome 0→999 placeholder bar also visible) and `02-baseline-full-dashboard.png`.
 
 ## Phase 2 — Audit & Triage (log before fixing)
-- [ ] Audit WalletConnect bridge + session badge (`frontend/src/walletconnect.ts`, header badge in `App.tsx`) against live pairing; file issues for confirmed defects.
-- [ ] Audit claim-fees payload engine (`ingestion-worker/src/main.rs:1843-2067`): calldata vs planner specs, pre-simulation failure paths, zero-claim handling; file issues.
-- [ ] Audit record-harvest ledger endpoint (`main.rs:2068-2254`): receipt parsing, idempotency, USD valuation, retry semantics; file issues.
-- [ ] Audit Koinly tax export (`main.rs:2255-2330`): CSV conformance, `income` tag, param validation; file issues.
-- [ ] Audit 60/40 sovereign ledger derivation + panel (`main.rs` ~L3114, `App.tsx:539-586`): split math, zero-division/first-boot display, dial pct floor; file issues.
-- [ ] Audit RSI regime + tax-reserve/overextension guardrails in worker; file issues.
-- [ ] Audit directive-transition notifications (dup suppression, first-boot silence, webhook failure isolation); file issues.
-- [ ] Audit Lite Cockpit + view switcher (`frontend/src/components/LiteCockpit.tsx`, header pills) for zero-mock and mobile correctness; file issues.
-- [ ] Regression-sweep pre-0.2.0 surfaces: snapshot dedup, historical API cursors, freshness hook, client headers, MCP server parity with new endpoints; file issues.
-- [ ] Contract/docs drift audit: `specs/core/api.yaml` vs handlers, README/CHANGELOG claims, Makefile portability (macOS-only `tmux` target); file issues.
-- [ ] Re-check zero-mock invariant end-to-end (grep for residual fallback constants in worker + frontend); file issues.
+- [x] Audit WalletConnect bridge + session badge (`frontend/src/walletconnect.ts`, header badge in `App.tsx`) — zero-custody checks correct (account/sovereign match enforced, unconfigured degradation honest); live pairing untestable here (no project id) — hint state verified.
+- [x] Audit claim-fees payload engine (`ingestion-worker/src/main.rs:1843-2067`): calldata golden-vector verified, live sim success on both actions; found E1 ($2,500 fallback), E12 (unguarded indexing), E13 (gas clamp).
+- [x] Audit record-harvest ledger endpoint (`main.rs:2068-2254`): receipt parsing/idempotency/valuation verified live (422/404 paths honest); found E11 (NOW() vs block timestamp).
+- [x] Audit Koinly tax export (`main.rs:2255-2330`): CSV+JSON verified with seeded rows (correct columns, `income` label, TxHash, Net Worth); empty-ledger header + 422 bad-format verified. No defects in the renderer itself.
+- [x] Audit 60/40 sovereign ledger derivation + panel (`main.rs` ~L3114, `App.tsx:539-586`): split math tested in-repo; found dial `Math.max(2,…)` sliver + HWM=0 display notes (bundled into E10 fix set).
+- [x] Audit RSI regime + tax-reserve/overextension guardrails in worker — Wilder RSI correct, guardrails sound, cold-start `rsi_14: None` verified live. No defects.
+- [x] Audit directive-transition notifications — failure isolation correct; found EB (no retry/outbox) as enhancement.
+- [x] Audit Lite Cockpit + view switcher (`frontend/src/components/LiteCockpit.tsx`, header pills): live-verified; found E8 (EXECUTE gating), E5 (409-as-failure).
+- [x] Regression-sweep pre-0.2.0 surfaces: freshness hook, client headers, historical cursors/400/limit-clamp live-verified — 0.1.x fixes intact. MCP parity gap → EA.
+- [x] Contract/docs drift audit: `specs/core/api.yaml` covers all new routes; found E14 (Makefile macOS paths).
+- [x] Re-check zero-mock invariant end-to-end: found E1, E7 (MCP fabrications), E10 (frontend fallback constants), E2 (placeholder bracket).
+- [x] Write ready-to-file issue bodies → `github-issues/ISSUES.md` (14 defects + 3 enhancements); registry → nocknock `TRIAGE.md` Phase E.
 
 ## Phase 3 — Fixes (iterate per patch)
-- [ ] Update `TRIAGE.md`: add `patch-0.2.x` label row and a new 0.2.x active-inventory section listing every finding.
-- [ ] Fix the deviation-matrix legend: remove/repair the black "Actual %" swatch and extend the manual status legend to all four actual colors (incl. `fast_running` orange `#f97316`); verify with browser screenshot; PR referencing its issue.
-- [ ] Fix each remaining confirmed defect as its own short-lived `fix/<slug>-issue-N` branch → PR → merge → close issue (respecting SemVer: bugs only, no features).
-- [ ] Add bounded micro-tests (≤6 total) tied to fixed defects in the same PRs; keep existing suites green (`make test-brain`, `make test-worker`, `make test-frontend`).
-- [ ] Update `CHANGELOG.md` per fix batch; cut patch releases (`v0.2.1`, ...) only with explicit operator authorization after CI green.
+- [x] Update `TRIAGE.md`: add `patch-0.2.x` label row and a new 0.2.x active-inventory section listing every finding.
+- [~] Fix the deviation-matrix legend: remove/repair the black "Actual %" swatch; keep the manual status legend (3 real colors; `fast_running` orange confirmed dead code).
+- [~] Fix remaining confirmed defects E1, E2, E4-E14 as focused commits on this feature branch (Helix opens the single PR; see design.md PR-strategy adaptation).
+- [~] Add bounded micro-tests (≤6 total) tied to fixed defects; keep existing suites green (`make test-brain`, `make test-worker`, `make test-frontend`).
+- [ ] Update `CHANGELOG.md` per fix batch; patch releases (`v0.2.1`, ...) remain operator-authorized only.
 
 ## Phase 4 — Close-out
 - [ ] Final assessment: `TRIAGE.md` 0.2.x inventory statuses finalized (fixed / open / deferred-as-enhancement).
