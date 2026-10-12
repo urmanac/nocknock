@@ -2,8 +2,8 @@
 
 ## Phase A — Schema & Contemporaneous Recording
 
-- [ ] Add migration `ingestion-worker/migrations/20261012000004_create_market_price_history.up.sql` per design Phase A (PK `timestamp`, `price_usd`, nullable OHLCV, `source`, `is_backfilled`, `backfilled_at`, DESC index, all `IF NOT EXISTS`)
-- [ ] In `run_ingestion_cycle`, insert the live spot price as a contemporaneous row (`source='aerodrome_rpc'`, `is_backfilled=false`) via `INSERT ... ON CONFLICT (timestamp) DO NOTHING`, placed before the `state_hash` dedup short-circuit, skipped when `live_spot <= 0`
+- [~] Add migration `ingestion-worker/migrations/20261012000004_create_market_price_history.up.sql` per design Phase A (PK `timestamp`, `price_usd`, nullable OHLCV, `source`, `is_backfilled`, `backfilled_at`, DESC index, all `IF NOT EXISTS`)
+- [~] In `run_ingestion_cycle`, insert the live spot price as a contemporaneous row (`source='aerodrome_rpc'`, `is_backfilled=false`) via `INSERT ... ON CONFLICT (timestamp) DO NOTHING`, placed before the `state_hash` dedup short-circuit, skipped when `live_spot <= 0`
 
 ## Phase B — Backfill Engine
 
