@@ -21,6 +21,69 @@ use uuid::Uuid;
 // Configuration
 // ============================================================
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct OperatorProfile {
+    #[serde(default = "default_treasury_floor")]
+    pub treasury_floor_nock: f64,
+    #[serde(default = "default_v4_baseline_liquidity")]
+    pub v4_baseline_liquidity: f64,
+    #[serde(default = "default_v4_baseline_nock")]
+    pub v4_baseline_nock: f64,
+    #[serde(default = "default_v4_baseline_usdc")]
+    pub v4_baseline_usdc: f64,
+    #[serde(default = "default_v4_fee_baseline_usdc")]
+    pub v4_fee_baseline_usdc: f64,
+    #[serde(default = "default_v4_fee_baseline_nock")]
+    pub v4_fee_baseline_nock: f64,
+    #[serde(default = "default_target_weights")]
+    pub target_weights_bps: TargetWeightsBps,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct TargetWeightsBps {
+    #[serde(default = "default_treasury_bps")]
+    pub treasury: i32,
+    #[serde(default = "default_aerodrome_bps")]
+    pub aerodrome_lp: i32,
+    #[serde(default = "default_uniswap_v4_bps")]
+    pub uniswap_v4_lp: i32,
+    #[serde(default = "default_cash_bps")]
+    pub cash: i32,
+}
+
+fn default_treasury_floor() -> f64 { 100000.0 }
+fn default_v4_baseline_liquidity() -> f64 { 65719361234409.0 }
+fn default_v4_baseline_nock() -> f64 { 4004.31227 }
+fn default_v4_baseline_usdc() -> f64 { 23.63241 }
+fn default_v4_fee_baseline_usdc() -> f64 { 0.0245 }
+fn default_v4_fee_baseline_nock() -> f64 { 1.4820 }
+fn default_treasury_bps() -> i32 { 8000 }
+fn default_aerodrome_bps() -> i32 { 1000 }
+fn default_uniswap_v4_bps() -> i32 { 500 }
+fn default_cash_bps() -> i32 { 500 }
+fn default_target_weights() -> TargetWeightsBps {
+    TargetWeightsBps {
+        treasury: 8000,
+        aerodrome_lp: 1000,
+        uniswap_v4_lp: 500,
+        cash: 500,
+    }
+}
+
+impl Default for OperatorProfile {
+    fn default() -> Self {
+        Self {
+            treasury_floor_nock: default_treasury_floor(),
+            v4_baseline_liquidity: default_v4_baseline_liquidity(),
+            v4_baseline_nock: default_v4_baseline_nock(),
+            v4_baseline_usdc: default_v4_baseline_usdc(),
+            v4_fee_baseline_usdc: default_v4_fee_baseline_usdc(),
+            v4_fee_baseline_nock: default_v4_fee_baseline_nock(),
+            target_weights_bps: default_target_weights(),
+        }
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct AppConfig {
@@ -52,6 +115,21 @@ struct AppConfig {
     v4_fee_baseline_nock: Option<f64>,
     #[serde(default)]
     mcp_bearer_token: Option<String>,
+    #[serde(default)]
+    operator_profile: OperatorProfile,
+}
+
+impl AppConfig {
+    pub fn profile(&self) -> OperatorProfile {
+        let mut p = self.operator_profile.clone();
+        if let Some(v) = self.v4_fee_baseline_usdc {
+            p.v4_fee_baseline_usdc = v;
+        }
+        if let Some(v) = self.v4_fee_baseline_nock {
+            p.v4_fee_baseline_nock = v;
+        }
+        p
+    }
 }
 
 fn default_db_url() -> String {
@@ -210,12 +288,18 @@ struct GlobalStatus {
     total_nock_amount: String,
     #[serde(default)]
     nock_floor_delta: String,
+    #[serde(default = "default_floor_target_string")]
+    nock_floor_target: String,
     #[serde(default)]
     total_usdc_amount: String,
     #[serde(default)]
     shot_advice_action: String,
     #[serde(default)]
     shot_advice_details: String,
+}
+
+fn default_floor_target_string() -> String {
+    "100000".to_string()
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
@@ -957,7 +1041,8 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     .unwrap_or(0.0);
 
     // Compute derived metrics
-    let derived_metrics = compute_derived_metrics(&raw_data, prev_hwm);
+    let profile = state.config.profile();
+    let derived_metrics = compute_derived_metrics(&raw_data, prev_hwm, &profile);
 
     // Build snapshot data
     let snapshot_data = SnapshotData {
@@ -1198,10 +1283,11 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     if v4_liquidity_val == 0 {
         return Err(anyhow::anyhow!("Failed to query live Uniswap V4 position liquidity from RPC"));
     }
+    let profile = state.config.profile();
     let v4_liquidity_str = v4_liquidity_val.to_string();
-    let v4_scale = (v4_liquidity_val as f64) / 65719361234409.0;
-    let live_t1_nock = 4004.31227 * v4_scale;
-    let live_t1_usdc = 23.63241 * v4_scale;
+    let v4_scale = (v4_liquidity_val as f64) / profile.v4_baseline_liquidity;
+    let live_t1_nock = profile.v4_baseline_nock * v4_scale;
+    let live_t1_usdc = profile.v4_baseline_usdc * v4_scale;
 
     // 5. Fetch live token balances for tracked wallet
     let balances_payload = json!({
@@ -1283,8 +1369,8 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
 
     // Uniswap V4: Dynamic fee calculation for uncollected yield accumulating since position creation/compounding.
     // Scales operator-profile baseline by current position liquidity ratio.
-    let uni_baseline_usdc = state.config.v4_fee_baseline_usdc.unwrap_or(0.0245);
-    let uni_baseline_nock = state.config.v4_fee_baseline_nock.unwrap_or(1.4820);
+    let uni_baseline_usdc = profile.v4_fee_baseline_usdc;
+    let uni_baseline_nock = profile.v4_fee_baseline_nock;
     let uni_fee_usdc = uni_baseline_usdc * v4_scale;
     let uni_fee_nock = uni_baseline_nock * v4_scale;
     let uni_fee_usd = uni_fee_usdc + uni_fee_nock * spot_price;
@@ -1386,7 +1472,7 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     })
 }
 
-fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64) -> DerivedMetrics {
+fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile) -> DerivedMetrics {
     // 1. Spot price calculation
     let spot_price = if let Some(pool) = raw.pool_mechanics.first() {
         if pool.volatile_assets.len() >= 2 {
@@ -1435,18 +1521,19 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64) -> DerivedMetric
     let total_native_usd = (t1_nock + t2_nock + t3_nock) * spot_price;
     let total_stable_usd = t1_usdc + t2_usdc + wallet_usdc;
 
+    let floor = profile.treasury_floor_nock;
     let now_str = Utc::now().to_rfc3339();
     let total_nock = t1_nock + t2_nock + t3_nock + aero_fee_nock + uni_fee_nock;
-    let nock_floor_delta = total_nock - 100000.0;
+    let nock_floor_delta = total_nock - floor;
     let current_hwm = prev_hwm.max(total_portfolio_usd);
 
     // Dynamic Shot Advice Engine
-    let (advice_action, advice_details) = if total_nock < 100000.0 {
+    let (advice_action, advice_details) = if total_nock < floor {
         (
             "DEFENSIVE LOCK (Floor Recovery)".to_string(),
             format!(
-                "CRITICAL: Total NOCK stack ({:.0}) is below the 100,000 floor by {:.0} NOCK! All yield and stable reserves are locked to replenish the sovereign foundation.",
-                total_nock, 100000.0 - total_nock
+                "CRITICAL: Total NOCK stack ({:.0}) is below the {:.0} floor by {:.0} NOCK! All yield and stable reserves are locked to replenish the sovereign foundation.",
+                total_nock, floor, floor - total_nock
             ),
         )
     } else if spot_price > 0.0 && spot_price < 0.020 {
@@ -1477,8 +1564,8 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64) -> DerivedMetric
         (
             "HOLD & ACCRETE (Dual Growth Engine Active)".to_string(),
             format!(
-                "Total NOCK held is {:.0} (+{:.0} above 100k hard floor). AMMs are generating dual yield (+{:.2} USDC in V4 scale-out, +{:.2} in Aero). 0% realized loss. Maintain posture.",
-                total_nock, nock_floor_delta, uni_fee_usd, aero_fee_usd
+                "Total NOCK held is {:.0} (+{:.0} above {:.0} hard floor). AMMs are generating dual yield (+{:.2} USDC in V4 scale-out, +{:.2} in Aero). 0% realized loss. Maintain posture.",
+                total_nock, nock_floor_delta, floor, uni_fee_usd, aero_fee_usd
             ),
         )
     };
@@ -1495,6 +1582,7 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64) -> DerivedMetric
             high_water_mark_date: now_str.clone(),
             total_nock_amount: format!("{:.0}", total_nock),
             nock_floor_delta: format!("{:.0}", nock_floor_delta),
+            nock_floor_target: format!("{:.0}", floor),
             total_usdc_amount: format!("{:.2}", total_stable_usd),
             shot_advice_action: advice_action,
             shot_advice_details: advice_details,
@@ -1545,46 +1633,47 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64) -> DerivedMetric
                     }
                 };
 
+                let w = &profile.target_weights_bps;
                 let t3_weight = ((t3_usd / total_portfolio_usd) * 10000.0) as i32;
-                let t3_dev = t3_weight - 8000;
+                let t3_dev = t3_weight - w.treasury;
 
                 let t2_weight = ((t2_usd / total_portfolio_usd) * 10000.0) as i32;
-                let t2_dev = t2_weight - 1000;
+                let t2_dev = t2_weight - w.aerodrome_lp;
 
                 let t1_weight = ((t1_usd / total_portfolio_usd) * 10000.0) as i32;
-                let t1_dev = t1_weight - 500;
+                let t1_dev = t1_weight - w.uniswap_v4_lp;
 
                 let usdc_weight = ((wallet_usdc / total_portfolio_usd) * 10000.0) as i32;
-                let usdc_dev = usdc_weight - 500;
+                let usdc_dev = usdc_weight - w.cash;
 
                 vec![
                     AllocationDeviation {
                         bucket_name: "Sovereign Treasury (Tranche 3)".to_string(),
-                        target_weight_bps: 8000,
+                        target_weight_bps: w.treasury,
                         actual_weight_bps: t3_weight,
                         deviation_bps: t3_dev,
-                        status: calc_status(t3_dev, 8000),
+                        status: calc_status(t3_dev, w.treasury),
                     },
                     AllocationDeviation {
                         bucket_name: "Aerodrome LP (Tranche 2)".to_string(),
-                        target_weight_bps: 1000,
+                        target_weight_bps: w.aerodrome_lp,
                         actual_weight_bps: t2_weight,
                         deviation_bps: t2_dev,
-                        status: calc_status(t2_dev, 1000),
+                        status: calc_status(t2_dev, w.aerodrome_lp),
                     },
                     AllocationDeviation {
                         bucket_name: "Uniswap V4 LP (Tranche 1)".to_string(),
-                        target_weight_bps: 500,
+                        target_weight_bps: w.uniswap_v4_lp,
                         actual_weight_bps: t1_weight,
                         deviation_bps: t1_dev,
-                        status: calc_status(t1_dev, 500),
+                        status: calc_status(t1_dev, w.uniswap_v4_lp),
                     },
                     AllocationDeviation {
                         bucket_name: "Liquid USDC (Escrow/Vault)".to_string(),
-                        target_weight_bps: 500,
+                        target_weight_bps: w.cash,
                         actual_weight_bps: usdc_weight,
                         deviation_bps: usdc_dev,
-                        status: calc_status(usdc_dev, 500),
+                        status: calc_status(usdc_dev, w.cash),
                     },
                 ]
             },
@@ -1714,7 +1803,8 @@ mod tests {
             },
         ];
         // Total NOCK is 80,000 < 100,000 floor
-        let metrics = compute_derived_metrics(&raw, 2500.0);
+        let profile = OperatorProfile::default();
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile);
         assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
     }
 
@@ -1736,7 +1826,8 @@ mod tests {
         raw.live_aero_fee_usdc = 6.0; // Accumulated fees > $5.00
         raw.live_gas_cost_usd = 0.005;
 
-        let metrics = compute_derived_metrics(&raw, 2500.0);
+        let profile = OperatorProfile::default();
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile);
         assert!(metrics.global_status.shot_advice_action.contains("BATCH HARVEST SHOT"));
     }
 
@@ -1758,8 +1849,56 @@ mod tests {
         raw.live_aero_fee_usdc = 0.25;
         raw.live_aero_fee_nock = 8.0;
 
-        let metrics = compute_derived_metrics(&raw, 2500.0);
+        let profile = OperatorProfile::default();
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile);
         assert!(metrics.global_status.shot_advice_action.contains("HOLD & ACCRETE"));
+    }
+
+    #[test]
+    fn test_operator_profile_custom_treasury_floor_and_weights() {
+        let yaml = r#"
+database_url: "postgresql://localhost/test"
+operator_profile:
+  treasury_floor_nock: 150000.0
+  v4_baseline_liquidity: 65719361234409.0
+  v4_baseline_nock: 4004.31
+  v4_baseline_usdc: 23.63
+  v4_fee_baseline_usdc: 0.05
+  v4_fee_baseline_nock: 2.5
+  target_weights_bps:
+    treasury: 7000
+    aerodrome_lp: 1500
+    uniswap_v4_lp: 1000
+    cash: 500
+"#;
+        let cfg: AppConfig = serde_yaml::from_str(yaml).expect("Failed to deserialize yaml");
+        let profile = cfg.profile();
+        assert_eq!(profile.treasury_floor_nock, 150000.0);
+        assert_eq!(profile.target_weights_bps.treasury, 7000);
+        assert_eq!(profile.target_weights_bps.aerodrome_lp, 1500);
+        assert_eq!(profile.target_weights_bps.uniswap_v4_lp, 1000);
+        assert_eq!(profile.target_weights_bps.cash, 500);
+
+        let mut raw = RawOnChainData::default();
+        raw.wallet_balances = vec![
+            WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "NOCK".to_string(),
+                token_address: "0xNOCK".to_string(),
+                amount: "120000.0".to_string(),
+                amount_usd: "3120.0".to_string(),
+                updated_at: "now".to_string(),
+            },
+        ];
+        // 120,000 is above default 100k floor, BUT below custom 150k floor!
+        let metrics = compute_derived_metrics(&raw, 3000.0, &profile);
+        assert_eq!(metrics.global_status.nock_floor_target, "150000");
+        assert_eq!(metrics.global_status.nock_floor_delta, "-30000");
+        assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
+        assert_eq!(metrics.portfolio_deviation_matrix.allocations[0].target_weight_bps, 7000);
+        assert_eq!(metrics.portfolio_deviation_matrix.allocations[1].target_weight_bps, 1500);
+        assert_eq!(metrics.portfolio_deviation_matrix.allocations[2].target_weight_bps, 1000);
+        assert_eq!(metrics.portfolio_deviation_matrix.allocations[3].target_weight_bps, 500);
     }
 
     #[test]
@@ -1781,6 +1920,7 @@ mod tests {
                     high_water_mark_date: "2026-10-11T00:00:00Z".to_string(),
                     total_nock_amount: "105000".to_string(),
                     nock_floor_delta: "5000".to_string(),
+                    nock_floor_target: "100000".to_string(),
                     total_usdc_amount: "50.00".to_string(),
                     shot_advice_action: "HOLD".to_string(),
                     shot_advice_details: "Steady".to_string(),

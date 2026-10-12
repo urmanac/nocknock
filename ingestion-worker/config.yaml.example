@@ -36,10 +36,33 @@ sync_window_seconds: 300
 # API server port
 port: 8080
 
-# Uniswap V4 Position & Yield Baselines
+# Uniswap V4 Position ID
 v4_position_id: 3126000
-v4_fee_baseline_usdc: 0.0245
-v4_fee_baseline_nock: 1.4820
+
+# ============================================================
+# Operator Strategic Profile & Baseline Parameters
+# ============================================================
+# These parameters capture operator baselines, invariant targets, and LP scaling anchors.
+operator_profile:
+  # Hard floor invariant: Minimum sovereign NOCK holding required before capital deployment.
+  treasury_floor_nock: 100000.0
+
+  # Uniswap V4 Position NFT #3126000 scaling anchors:
+  # Baseline liquidity value recorded at position creation / initial compounding (65,719,361,234,409)
+  v4_baseline_liquidity: 65719361234409.0
+  # Baseline token balances in V4 position corresponding to baseline liquidity
+  v4_baseline_nock: 4004.31227
+  v4_baseline_usdc: 23.63241
+  # Baseline uncollected fee harvest anchors for dynamic V4 yield extrapolation
+  v4_fee_baseline_usdc: 0.0245
+  v4_fee_baseline_nock: 1.4820
+
+  # Target allocation weights in Portfolio Deviation Matrix (basis points, sum = 10000 bps / 100%)
+  target_weights_bps:
+    treasury: 8000        # 80.00% Sovereign Treasury floor
+    aerodrome_lp: 1000    # 10.00% Aerodrome volatile LP tranche
+    uniswap_v4_lp: 500    #  5.00% Uniswap V4 concentrated LP tranche
+    cash: 500             #  5.00% Liquid USDC cash & tax escrow buffer
 
 # Optional Model Context Protocol (MCP) Bearer Token for /v1/mcp endpoint
 # mcp_bearer_token: "your-secret-bearer-token"

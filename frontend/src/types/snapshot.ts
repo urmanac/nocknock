@@ -41,6 +41,7 @@ export interface GlobalStatus {
   high_water_mark_date: string;
   total_nock_amount?: string;
   nock_floor_delta?: string;
+  nock_floor_target?: string;
   total_usdc_amount?: string;
   shot_advice_action?: string;
   shot_advice_details?: string;

@@ -322,6 +322,30 @@ components:
           type: string
           format: date-time
           description: When the high-water mark was set
+        total_nock_amount:
+          type: string
+          description: Total NOCK token units aggregated across all tranches
+          example: "107123"
+        nock_floor_delta:
+          type: string
+          description: Signed token units relative to operator hard floor target
+          example: "+7123"
+        nock_floor_target:
+          type: string
+          description: Operator configured sovereign floor invariant in token units
+          example: "100000"
+        total_usdc_amount:
+          type: string
+          description: Total USDC stablecoin balance aggregated across wallet and pools
+          example: "450.00"
+        shot_advice_action:
+          type: string
+          description: Tactical recommended action under dual-growth thesis
+          example: "HOLD & ACCRETE (Dual Growth Engine Active)"
+        shot_advice_details:
+          type: string
+          description: Detailed explanation of tactical advisory status
+          example: "Total NOCK held is 107,123 (+7,123 above 100k hard floor). AMMs are generating dual yield. Maintain posture."
 
     AssetAggregationSeries:
       type: object
