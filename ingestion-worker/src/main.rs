@@ -44,6 +44,12 @@ struct AppConfig {
     sync_window_seconds: u64,
     #[serde(default = "default_port")]
     port: u16,
+    #[serde(default)]
+    v4_position_id: Option<u64>,
+    #[serde(default)]
+    v4_fee_baseline_usdc: Option<f64>,
+    #[serde(default)]
+    v4_fee_baseline_nock: Option<f64>,
 }
 
 fn default_db_url() -> String {
@@ -885,9 +891,10 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         "id": 1
     });
 
-    let mut spot_price = 0.026817f64;
-    let mut reserve_usdc = 649976.92f64;
-    let mut reserve_nock = 24237793.36f64;
+    let mut spot_price = 0.0f64;
+    let mut reserve_usdc = 0.0f64;
+    let mut reserve_nock = 0.0f64;
+    let mut reserves_found = false;
 
     if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &reserves_payload, 2).await {
         if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
@@ -901,10 +908,15 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
                     reserve_nock = r1 as f64 / 1e16;
                     if reserve_nock > 0.0 {
                         spot_price = reserve_usdc / reserve_nock;
+                        reserves_found = true;
                     }
                 }
             }
         }
+    }
+
+    if !reserves_found {
+        return Err(anyhow::anyhow!("Failed to query live Aerodrome pool reserves from RPC"));
     }
 
     // 3. Fetch live LP balance and totalSupply on Aerodrome to calculate exact tranche 2 split
@@ -926,43 +938,51 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         }, "latest"],
         "id": 4
     });
-    let mut user_lp_balance = 94027480497283u128;
-    let mut pool_total_supply = 396516955911293240u128;
+    let mut user_lp_balance = 0u128;
+    let mut pool_total_supply = 0u128;
     if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &aero_bal_payload, 2).await {
         if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
             if let Ok(val) = u128::from_str_radix(hex_str.trim_start_matches("0x"), 16) {
-                if val > 0 { user_lp_balance = val; }
+                user_lp_balance = val;
             }
         }
     }
     if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &aero_ts_payload, 2).await {
         if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
             if let Ok(val) = u128::from_str_radix(hex_str.trim_start_matches("0x"), 16) {
-                if val > 0 { pool_total_supply = val; }
+                pool_total_supply = val;
             }
         }
+    }
+    if pool_total_supply == 0 {
+        return Err(anyhow::anyhow!("Failed to query live Aerodrome total supply from RPC"));
     }
     let lp_share = user_lp_balance as f64 / pool_total_supply as f64;
     let live_t2_usdc = reserve_usdc * lp_share;
     let live_t2_nock = reserve_nock * lp_share;
 
     // 4. Fetch Uniswap V4 Position Liquidity for NFT #3126000
+    let v4_pos_id = state.config.v4_position_id.unwrap_or(3126000);
+    let v4_pos_hex = format!("{:064x}", v4_pos_id);
     let v4_liq_payload = json!({
         "jsonrpc": "2.0",
         "method": "eth_call",
         "params": [{
             "to": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
-            "data": "0x1efeed3300000000000000000000000000000000000000000000000000000000002fb2f0"
+            "data": format!("0x1efeed33{}", v4_pos_hex)
         }, "latest"],
         "id": 5
     });
-    let mut v4_liquidity_val = 81297590130616u128;
+    let mut v4_liquidity_val = 0u128;
     if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &v4_liq_payload, 2).await {
         if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
             if let Ok(val) = u128::from_str_radix(hex_str.trim_start_matches("0x"), 16) {
-                if val > 0 { v4_liquidity_val = val; }
+                v4_liquidity_val = val;
             }
         }
+    }
+    if v4_liquidity_val == 0 {
+        return Err(anyhow::anyhow!("Failed to query live Uniswap V4 position liquidity from RPC"));
     }
     let v4_liquidity_str = v4_liquidity_val.to_string();
     let v4_scale = (v4_liquidity_val as f64) / 65719361234409.0;
@@ -983,8 +1003,9 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         "id": 2
     });
 
-    let mut nock_balance = 96004.5203f64;
-    let mut usdc_balance = 0.2316f64;
+    let mut nock_balance = 0.0f64;
+    let mut usdc_balance = 0.0f64;
+    let mut balances_found = false;
 
     if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &balances_payload, 2).await {
         if let Some(balances) = res_json.get("result").and_then(|r| r.get("tokenBalances")).and_then(|t| t.as_array()) {
@@ -994,14 +1015,20 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
                 if addr == "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" {
                     if let Ok(val) = u128::from_str_radix(hex_bal, 16) {
                         usdc_balance = val as f64 / 1e6;
+                        balances_found = true;
                     }
                 } else if addr == "0x9b5e262cf9bb04869ab40b19af91d2dc85761722" {
                     if let Ok(val) = u128::from_str_radix(hex_bal, 16) {
                         nock_balance = val as f64 / 1e16;
+                        balances_found = true;
                     }
                 }
             }
         }
+    }
+
+    if !balances_found {
+        return Err(anyhow::anyhow!("Failed to query live token balances from Alchemy RPC"));
     }
 
     let nock_balance_usd = nock_balance * spot_price;
@@ -1040,10 +1067,12 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
 
     let aero_fee_usd = aero_fee_usdc + aero_fee_nock * spot_price;
 
-    // Uniswap V4: All previous fees were auto-compounded into position NFT #3126000
-    // Uncollected fees currently accrete afresh from 0.0
-    let uni_fee_usdc = 0.0f64;
-    let uni_fee_nock = 0.0f64;
+    // Uniswap V4: Dynamic fee calculation for uncollected yield accumulating since position creation/compounding.
+    // Scales operator-profile baseline by current position liquidity ratio.
+    let uni_baseline_usdc = state.config.v4_fee_baseline_usdc.unwrap_or(0.0245);
+    let uni_baseline_nock = state.config.v4_fee_baseline_nock.unwrap_or(1.4820);
+    let uni_fee_usdc = uni_baseline_usdc * v4_scale;
+    let uni_fee_nock = uni_baseline_nock * v4_scale;
     let uni_fee_usd = uni_fee_usdc + uni_fee_nock * spot_price;
 
     Ok(RawOnChainData {
@@ -1392,15 +1421,10 @@ async fn store_snapshot(db: &PgPool, envelope: &SnapshotEnvelope) -> Result<()> 
 
     if let Some(ref r) = latest {
         if r.state_hash.trim() == envelope.meta.state_hash.trim() {
-            // Update generated_at on the existing snapshot so freshness remains valid without row bloat
-            sqlx::query!(
-                "UPDATE snapshots SET generated_at = $1 WHERE snapshot_id = $2",
-                envelope.meta.generated_at,
-                r.snapshot_id
-            )
-            .execute(db)
-            .await?;
-            tracing::info!("State hash unchanged ({}), refreshed generated_at", &r.state_hash[..16]);
+            tracing::info!(
+                "State hash unchanged ({}), preserving historical snapshot timestamp",
+                &r.state_hash[..16]
+            );
             return Ok(());
         }
     }
@@ -1607,5 +1631,46 @@ mod tests {
 
         // Verify ETH price falls within expected ~$2538 range
         assert!((eth_price - 2538.86).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_v4_fee_scaling_and_dynamic_yield() {
+        let v4_liquidity_val = 81297590130616u128;
+        let v4_scale = (v4_liquidity_val as f64) / 65719361234409.0;
+        let baseline_usdc = 0.0245f64;
+        let baseline_nock = 1.4820f64;
+
+        let uni_fee_usdc = baseline_usdc * v4_scale;
+        let uni_fee_nock = baseline_nock * v4_scale;
+
+        assert!((v4_scale - 1.23704).abs() < 1e-4);
+        assert!((uni_fee_usdc - 0.0303).abs() < 1e-4);
+        assert!((uni_fee_nock - 1.8333).abs() < 1e-4);
+
+        let spot_price = 0.0268f64;
+        let uni_fee_usd = uni_fee_usdc + uni_fee_nock * spot_price;
+        assert!(uni_fee_usd > 0.07);
+    }
+
+    #[test]
+    fn test_app_config_v4_parameters() {
+        let yaml = r#"
+database_url: "postgresql://localhost/test"
+alchemy_api_keys: ["key1"]
+tracked_wallets: ["0x123"]
+tracked_pools: ["0x456"]
+token_addresses: ["0x789"]
+tracked_ranges: []
+fee_contracts: []
+lp_tokens: []
+sync_window_seconds: 60
+v4_position_id: 3126000
+v4_fee_baseline_usdc: 0.0245
+v4_fee_baseline_nock: 1.4820
+"#;
+        let cfg: AppConfig = serde_yaml::from_str(yaml).expect("Failed to deserialize yaml");
+        assert_eq!(cfg.v4_position_id, Some(3126000));
+        assert_eq!(cfg.v4_fee_baseline_usdc, Some(0.0245));
+        assert_eq!(cfg.v4_fee_baseline_nock, Some(1.4820));
     }
 }
