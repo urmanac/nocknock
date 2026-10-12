@@ -36,10 +36,10 @@
 
 ## Phase 4 — Anti-top-buying guardrails + notifications
 
-- [ ] Worker: compute RSI / upper-band extension series from historical snapshots (reuse structural-channels pipeline) and feed regime inputs to the brain (issue #29)
-- [ ] Brain: emit `SWEEP TO STABLE / ACCUMULATE DRY POWDER` + cooldown directive when overextension is detected; suppress buy advice during it (issue #29)
-- [ ] Worker: detect directive transitions between cycles and dispatch notifications (issue #28): Telegram bot, Pushover, generic webhook adapters configured under `[notifications]` in `config.yaml`
-- [ ] Notification payload: trigger, gross claimable, estimated gas, net accretion, deep link to lite cockpit; log (never swallow) delivery failures
+- [x] Worker: compute RSI / upper-band extension series from historical snapshots (reuse structural-channels pipeline) and feed regime inputs to the brain (issue #29) — Wilder RSI(14) (`compute_rsi_series`, pure math) over the per-snapshot NOCK spot series (pool reserves from the last 50 snapshots, live spot appended); `MarketRegime` fed to the advice engine; `regime` + `rsi_14` (nullable until 14 samples exist) exposed in GlobalStatus + snapshot.yaml
+- [x] Brain: emit `SWEEP TO STABLE / ACCUMULATE DRY POWDER` + cooldown directive when overextension is detected; suppress buy advice during it (issue #29) — overextension branch sits right after DEFENSIVE LOCK and before any buy advice; RSI >= 70 tripwire; directive text explains the discipline; regime-based (persists while extended)
+- [x] Worker: detect directive transitions between cycles and dispatch notifications (issue #28): Telegram bot, Pushover, generic webhook adapters configured under `[notifications]` in `config.yaml` — transition-only dispatch (first boot silent), delivery failures logged never fatal; verified 31/31 tests green
+- [x] Notification payload: trigger, gross claimable, estimated gas, net accretion, deep link to lite cockpit; log (never swallow) delivery failures — directive change + full advice details (which carry claimable/gas/net) + optional `cockpit_url` deep link; live daemon verified (regime: normal, rsi null until 14 samples accrue — honest absence)
 
 ## Phase 5 — Web cockpit: lite mobile view + WalletConnect
 
