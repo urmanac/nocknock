@@ -176,3 +176,16 @@ make dist             # Verifies packaging of dist/ binaries and tarballs
     - Reproduction steps and on-chain evidence (contract addresses, selectors, transaction hashes).
     - Labeling: `bug`, component (`frontend` or `backend`), severity (`data-integrity`), and target milestone (`patch-0.1.x`).
   - Refer to [`TRIAGE.md`](TRIAGE.md) for the active bug registry and triage taxonomy.
+
+---
+
+## 12. Operator Guidance & Standing Orders Reference
+
+- Comprehensive operator guidance is compiled in [`OPERATOR_GUIDANCE.md`](OPERATOR_GUIDANCE.md).
+- Agents must review `OPERATOR_GUIDANCE.md` for standing orders regarding:
+  - Branch protection and explicit operator authorization before tagging releases.
+  - The `unset GITHUB_TOKEN` elevated credential protocol.
+  - Zero mock data invariants and configuration externalization.
+  - On-chain reality: single sovereign wallet, 60/40 virtual sub-ledger, no custom wallet development.
+  - Model Context Protocol (MCP) installation, activation, and playtesting requirements.
+

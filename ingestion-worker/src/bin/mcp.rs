@@ -47,7 +47,7 @@ async fn main() -> Result<()> {
                         "protocolVersion": "2024-11-05",
                         "serverInfo": {
                             "name": "nocknock-mcp",
-                            "version": "0.1.0"
+                            "version": env!("CARGO_PKG_VERSION")
                         },
                         "capabilities": {
                             "tools": {}
@@ -152,7 +152,26 @@ async fn main() -> Result<()> {
 }
 
 async fn handle_tool_call(client: &Client, tool_name: &str) -> String {
-    // 1. Try local Tier 1 API first
+    // 1. Try local Tier 1 HTTP MCP endpoint first
+    let mcp_payload = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": tool_name
+        }
+    });
+    if let Ok(resp) = client.post("http://127.0.0.1:8080/v1/mcp").json(&mcp_payload).timeout(Duration::from_secs(2)).send().await {
+        if resp.status().is_success() {
+            if let Ok(mcp_val) = resp.json::<Value>().await {
+                if let Some(text) = mcp_val.pointer("/result/content/0/text").and_then(|t| t.as_str()) {
+                    return text.to_string();
+                }
+            }
+        }
+    }
+
+    // Fallback: try snapshot API
     if let Ok(resp) = client.get(LOCAL_API_URL).timeout(Duration::from_secs(2)).send().await {
         if resp.status().is_success() {
             if let Ok(snap) = resp.json::<Value>().await {
@@ -181,11 +200,13 @@ fn format_portfolio_state(data: &Value) -> String {
     let hwm = global.and_then(|g| g.get("high_water_mark_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
     let advice = global.and_then(|g| g.get("shot_advice_action")).and_then(|v| v.as_str()).unwrap_or("HOLD");
 
+    let delta_prefix = if nock_delta.starts_with('-') { "" } else { "+" };
+
     format!(
         "📈 NockNock Sovereign Portfolio State (Live API)\n\
          =========================================\n\
          • Total Value: ${total_usd} USD\n\
-         • Sovereign NOCK Stack: {total_nock} NOCK (Floor buffer delta: +{nock_delta} above 100k)\n\
+         • Sovereign NOCK Stack: {total_nock} NOCK (Floor buffer delta: {delta_prefix}{nock_delta} above 100k)\n\
          • Stable Stack: {total_usdc} USDC\n\
          • High-Water Mark: ${hwm} USD\n\
          • Tactical Directive: {advice}\n\
@@ -265,7 +286,7 @@ async fn handle_direct_rpc_fallback(client: &Client, tool_name: &str) -> String 
         "id": 2
     });
 
-    let mut spot_price = 0.0268f64;
+    let mut spot_price: Option<f64> = None;
     let mut claim_usdc = 0.0f64;
     let mut claim_nock = 0.0f64;
 
@@ -281,7 +302,7 @@ async fn handle_direct_rpc_fallback(client: &Client, tool_name: &str) -> String 
                         let usdc = r0 as f64 / 1e6;
                         let nock = r1 as f64 / 1e16;
                         if nock > 0.0 {
-                            spot_price = usdc / nock;
+                            spot_price = Some(usdc / nock);
                         }
                     }
                 }
@@ -306,8 +327,16 @@ async fn handle_direct_rpc_fallback(client: &Client, tool_name: &str) -> String 
         }
     }
 
-    let claim_usd = claim_usdc + claim_nock * spot_price;
-    let advice = if claim_usd >= 5.0 {
+    let price_str = spot_price
+        .map(|p| format!("${:.6} USD", p))
+        .unwrap_or_else(|| "Unavailable (RPC query failed)".to_string());
+
+    let claim_usd = spot_price.map(|p| claim_usdc + claim_nock * p);
+    let claim_usd_str = claim_usd
+        .map(|c| format!("${:.4} USD", c))
+        .unwrap_or_else(|| "Pending spot price".to_string());
+
+    let advice = if claim_usd.unwrap_or(0.0) >= 5.0 {
         "BATCH HARVEST SHOT"
     } else {
         "HOLD & ACCRETE"
@@ -317,29 +346,31 @@ async fn handle_direct_rpc_fallback(client: &Client, tool_name: &str) -> String 
         "get_portfolio_state" => format!(
             "📈 NockNock Sovereign State (Decentralized Direct RPC Mode)\n\
              ===========================================================\n\
-             • NOCK Spot Price: ${:.6} USD\n\
-             • Uncollected Aerodrome Yield: ${:.4} USD\n\
+             • NOCK Spot Price: {price_str}\n\
+             • Uncollected Aerodrome Yield: {claim_usd_str}\n\
              • Mode: Zero-DB Edge RPC Fallback (Database and Worker Offline)\n\
-             • Status: Sovereign RPC Connected directly to Base mainnet.",
-            spot_price, claim_usd
+             • Status: Sovereign RPC Connected directly to Base mainnet."
         ),
         "get_shot_advice" => format!(
             "🎯 Tactical Shot Advice Engine (Decentralized RPC Mode)\n\
              =======================================================\n\
              • Recommended Action: {advice}\n\
-             • Active Accrued Yield: ${:.4} USD (Threshold: $5.00)\n\
+             • Active Accrued Yield: {claim_usd_str} (Threshold: $5.00)\n\
              • Gas Estimate: ~$0.005 USD on Base\n\
-             • Mode: Zero-DB Edge RPC Fallback",
-            claim_usd
+             • Mode: Zero-DB Edge RPC Fallback"
         ),
         "simulate_claim_fees" => format!(
             "⚡ Fee Claim Simulation (Decentralized RPC Mode)\n\
              ===============================================\n\
              • Uncollected Aerodrome Fees: {:.5} USDC + {:.4} NOCK\n\
-             • Total USD Value: ${:.4} USD\n\
+             • Total USD Value: {claim_usd_str}\n\
              • Estimated Gas Cost: ~$0.005 USD\n\
-             • Net Yield: ${:.4} USD",
-            claim_usdc, claim_nock, claim_usd, (claim_usd - 0.005).max(0.0)
+             • Net Yield: {}",
+            claim_usdc,
+            claim_nock,
+            claim_usd
+                .map(|c| format!("${:.4} USD", (c - 0.005).max(0.0)))
+                .unwrap_or_else(|| "Pending spot price".to_string())
         ),
         _ => format!("Unknown tool: {tool_name}"),
     }

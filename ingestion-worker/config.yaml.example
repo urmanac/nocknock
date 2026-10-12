@@ -40,3 +40,6 @@ port: 8080
 v4_position_id: 3126000
 v4_fee_baseline_usdc: 0.0245
 v4_fee_baseline_nock: 1.4820
+
+# Optional Model Context Protocol (MCP) Bearer Token for /v1/mcp endpoint
+# mcp_bearer_token: "your-secret-bearer-token"
