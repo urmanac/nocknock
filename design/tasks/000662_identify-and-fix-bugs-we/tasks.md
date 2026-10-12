@@ -31,15 +31,15 @@
 
 ## Batch 4 — Frontend presentation & hygiene (BUG-F2, F3, F4, F5, F6, F7-frontend)
 
-- [~] Fix `request()` header merge order in `client.ts`; delete dead `fetchIfFresh` and `useFreshnessPoll`
-- [ ] Remove hardcoded $2.50 upper-bracket clip in `App.tsx` tickData mapping
-- [ ] Relabel "Alpha Generated" to the actual quantity (stable reserve delta), computing from counterfactual endpoints (design D7)
-- [ ] Add structural-channels panel when `structural_channels.channels` is non-empty (or fix the "7 Real Charts" comment if panel declined — see Open Questions)
-- [ ] Vitest + tsc build green; open PR, merge
+- [x] Fix `request()` header merge order in `client.ts`; delete dead `fetchIfFresh` and `useFreshnessPoll`
+- [x] Remove hardcoded $2.50 upper-bracket clip in `App.tsx` tickData mapping
+- [x] Relabel "Alpha Generated" to the actual quantity (stable reserve delta), computing from counterfactual endpoints (design D7)
+- [x] Add structural-channels panel when `structural_channels.channels` is non-empty (or fix the "7 Real Charts" comment if panel declined — see Open Questions)
+- [x] Vitest + tsc build green; open PR, merge
 
-## Batch 5 — API contract (BUG-A1)
+## Batch 5 — API contract (BUG-A1) & history depth (BUG-F7 server side)
 
-- [ ] Implement `before`/`after` filters on `get_historical_snapshots_handler`; reject unsupported `interval` with 400
+- [~] Implement `before`/`after` filters on `get_historical_snapshots_handler`; reject unsupported `interval` with 400
 - [ ] Remove `Interval` parameter from `specs/core/api.yaml`; update frontend `historicalSnapshots` typing
 - [ ] `SQLX_OFFLINE=true cargo test` + frontend tests green; open PR, merge
 
