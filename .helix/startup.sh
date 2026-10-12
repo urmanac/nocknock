@@ -14,7 +14,7 @@ echo "🚀 Starting project: nocknock"
 if ! command -v cc >/dev/null 2>&1 || ! command -v pkg-config >/dev/null 2>&1 || ! ls /usr/include/openssl/ssl.h >/dev/null 2>&1; then
   echo "Installing system build deps (gcc, libc6-dev, pkg-config, libssl-dev)..."
   sudo -n apt-get update -qq || true
-  sudo -n apt-get install -y -qq gcc libc6-dev pkg-config libssl-dev || true
+  sudo -n apt-get install -y -qq gcc libc6-dev pkg-config libssl-dev make || true
 fi
 
 # --- Rust toolchain (rustup, minimal profile; ~/.cargo resets with the sandbox) ---
