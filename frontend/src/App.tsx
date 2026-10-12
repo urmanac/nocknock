@@ -1,4 +1,5 @@
 import React from 'react';
+import { LiteCockpit, WalletConnectBadge } from './components/LiteCockpit';
 import { createRoot } from 'react-dom/client';
 import {
   AreaChart,
@@ -218,6 +219,8 @@ function Dashboard() {
             <h1 style={styles.title}>NockNock</h1>
             <span style={styles.engineBadge}>Dual-Growth Engine</span>
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <WalletConnectBadge />
           <div style={styles.statusPill}>
             <span style={{
               ...styles.statusDot,
@@ -235,6 +238,7 @@ function Dashboard() {
                   : 'SYNC DELAYED'}
             </span>
             <span style={styles.ageText}>{ageDisplay}</span>
+          </div>
           </div>
         </div>
 
@@ -763,7 +767,11 @@ const root = createRoot(document.getElementById('root')!);
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <Dashboard />
+      {new URLSearchParams(window.location.search).get('view') === 'lite' ? (
+        <LiteCockpit />
+      ) : (
+        <Dashboard />
+      )}
     </ErrorBoundary>
   </React.StrictMode>
 );

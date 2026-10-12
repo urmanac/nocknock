@@ -74,6 +74,17 @@ describe('Freshness Contract', () => {
     expect(latestSnapshot!.meta.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(latestSnapshot!.meta.snapshot_id).toMatch(/^([0-9A-Z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/);
     expect(latestSnapshot!.data).toBeDefined();
+    // v0.2.0 Golden Path: virtual 60/40 sovereign ledger rides on derived_metrics
+    const ledger = (latestSnapshot!.data as any)?.derived_metrics?.sovereign_ledger;
+    expect(ledger).toBeDefined();
+    expect(typeof ledger.cumulative_harvested_usd).toBe('string');
+    expect(typeof ledger.tax_reserve_usd).toBe('string');
+    expect(typeof ledger.growth_dry_powder_usd).toBe('string');
+    expect(typeof ledger.harvest_count).toBe('number');
+    // The virtual split must always partition the realized total (no invented dollars)
+    const total = parseFloat(ledger.cumulative_harvested_usd);
+    const split = parseFloat(ledger.tax_reserve_usd) + parseFloat(ledger.growth_dry_powder_usd);
+    expect(Math.abs(split - total)).toBeLessThan(0.01);
   });
 
   it('state_hash is deterministic for identical data', async () => {

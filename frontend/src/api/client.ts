@@ -38,6 +38,52 @@ export interface MetadataResponse {
   snapshots: MetadataEntry[];
 }
 
+
+export interface ClaimFeeAction {
+  platform: 'aerodrome' | 'uniswap-v4';
+  label: string;
+  to: string;
+  data: string;
+  value: string;
+  expected_amount_0?: string | null;
+  expected_amount_1?: string | null;
+  expected_usd?: string | null;
+  gas_estimate?: string | null;
+  gas_usd?: string | null;
+  simulation: 'success' | 'failed' | 'unavailable';
+  simulation_detail?: string | null;
+}
+
+export interface ClaimFeesPayload {
+  chain_id: number;
+  from: string;
+  generated_at: string;
+  gross_usd?: string | null;
+  estimated_gas_usd?: string | null;
+  net_after_gas_usd?: string | null;
+  actions: ClaimFeeAction[];
+}
+
+export interface RecordHarvestResponse {
+  recorded: Array<{
+    platform: string;
+    tx_hash: string;
+    token_symbol: string;
+    amount_human: string;
+    usd_value?: string | null;
+    block_number: number;
+  }>;
+  already_present: number;
+}
+
+export interface LedgerSummary {
+  cumulative_harvested_usd: string;
+  tax_reserve_usd: string;
+  growth_dry_powder_usd: string;
+  harvest_count: number;
+  last_harvest_at?: string | null;
+}
+
 export interface HistoricalResponse {
   snapshots: SnapshotEnvelope[];
   pagination: {
@@ -89,4 +135,13 @@ export const api = {
   metadata: (limit = 20) => request<MetadataResponse>(`/snapshot/metadata?limit=${limit}`),
 
   snapshotById: <T = unknown>(id: string) => request<SnapshotEnvelope<T>>(`/snapshot/${id}`),
+
+  // Golden Path execution (v0.2.0): unsigned claim payloads + receipt-verified ledger
+  claimFeesPayload: () => request<ClaimFeesPayload>('/execute/claim-fees/payload'),
+
+  recordHarvest: (platform: string, txHash: string) =>
+    request<RecordHarvestResponse>('/execute/record-harvest', {
+      method: 'POST',
+      body: JSON.stringify({ platform, tx_hash: txHash }),
+    }),
 };
