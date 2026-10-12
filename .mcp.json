@@ -1,7 +1,8 @@
 {
   "mcpServers": {
     "nocknock": {
-      "command": "./dist/nocknock-mcp"
+      "command": "./dist/nocknock-mcp",
+      "directTools": true
     }
   }
 }

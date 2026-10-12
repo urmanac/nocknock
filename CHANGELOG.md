@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Deferred to 0.2.1 / Future Releases
+- [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).
+- [ ] **Multi-Pool Dynamic Ingestion**: Discovering and tracking secondary AMM pools on Base.
+- [ ] **Coinbase Staked-ETH Connector**: CDP API integration to monitor staked ETH balances.
+- [ ] **Urbit Native (%nocknock Desk)**: Hoon data structures and Gall agent.
+
+## [0.2.0] - 2026-10-12
+
+### Added — Golden Path: Web Cockpit & Mobile Wallet Execution
+- **WalletConnect v2 Integration (`@walletconnect/ethereum-provider`)**:
+  - Instant QR pairing modal and deep links connecting the cockpit to the Uniswap mobile app on Android/iOS.
+  - Active session auto-reconnects across refreshes with zero private key custody; mismatched wallet addresses are strictly rejected before signing.
+  - Requires `VITE_WALLETCONNECT_PROJECT_ID` (Reown project ID), gracefully displaying setup hints when unconfigured.
+- **Sequential Harvest Execution Engine (`GET /v1/execute/claim-fees/payload`)**:
+  - Dynamically constructs unsigned Aerodrome `claimFees()` and Uniswap V4 PositionManager collect transactions (`modifyLiquidities` decrease 0 + `takePair`) from live on-chain snapshots.
+  - Calldata verified against `@uniswap/v4-sdk` planner specifications and pre-simulated on Base via Alchemy `eth_call`.
+  - Dispatched directly via WalletConnect for biometric confirmation (Fingerprint / Face ID); no transaction aggregation or proxying (preserving Aerodrome `msg.sender` invariant).
+- **Receipt-Verified Harvest Ledger (`POST /v1/execute/record-harvest`)**:
+  - Queries Base transaction receipts, extracts ERC-20 Transfers for USDC and NOCK paid to the sovereign wallet, and records verified harvest events idempotently.
+  - Resilient broadcast retry handling absorbs Uniswap mobile app delayed broadcast latency without false errors.
+- **Virtual 60/40 Sub-Ledger (`sovereign_ledger`)**:
+  - Maintains internal accounting allocation within the single sovereign wallet driven by `tax_reserve_ratio` (default 40%).
+  - Splits verified harvest revenues into a strictly protected Virtual Tax Reserve Buffer (40%) and Liquid Growth Dry Powder (60%).
+  - Tax guardrail suppresses buy recommendations (`SWEEP TO STABLE / ACCUMULATE DRY POWDER (Tax Guardrail)`) when tax reserves exceed stable cash reserves.
+- **Koinly-Ready Tax Export Engine (`GET /v1/tax/export?format=koinly`)**:
+  - Generates standardized CSV exports adhering strictly to Koinly custom import specifications.
+  - Fee harvests tagged unambiguously as `income` with verified Base transaction hashes, ensuring CPAs and tax software distinguish yield income from capital dispositions.
+- **Anti-Top-Buying Guardrail & Regime Detection**:
+  - Wilder RSI(14) calculated over historical NOCK spot price series; surfaces `regime` and `rsi_14` in GlobalStatus.
+  - Overextension Cooldown suppresses FOMO buy directives when RSI ≥ 70 (`SWEEP TO STABLE / ACCUMULATE DRY POWDER (Overextension Cooldown)`).
+- **Directive-Transition Notifications**:
+  - Dispatches transition alerts via Telegram, Pushover, and generic HTTP webhooks when active directives shift, with silent first-boot and deep links to cockpit.
+- **Lite Mobile Cockpit & 1-Click View Switcher**:
+  - Dedicated mobile-friendly cockpit at `/?view=lite` rendering floor health, uncollected fee valuation, and Golden Path execution buttons.
+  - 1-click view switcher pills in header (`⚡ LITE COCKPIT` ↔ `📊 FULL STATE ROOM`).
+- **Sovereign 60/40 Ledger Panel**:
+  - Dual visual gauges on desktop dashboard plotting protected tax reserves vs deployable dry powder, alongside live P/L vs high-water mark.
+
 ## [0.1.4] - 2026-10-12
 
 ### Fixed — Worker Data Integrity
@@ -63,53 +101,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   alignment & real timestamps, Bollinger window, bracket-price round-trip, bracket
   distance, claim-action thresholds.
 - Frontend: 20 contract/logic tests green; tsc build clean.
-
-## [0.2.0] - Unreleased
-
-### Golden Path: Web Cockpit & Uniswap Mobile App Execution (SHIPPED)
-- [x] **WalletConnect Integration (`@walletconnect/ethereum-provider`)**:
-  - [x] Pairing QR modal + deep links to mobile wallets (Uniswap app) on the dashboard (`/?view=lite` cockpit and desktop session badge).
-  - [x] Session persisted/reconnected by the SDK across refreshes; wrong-wallet proposals refused before signing (paired account must equal the payload's sovereign wallet).
-  - [x] Requires `VITE_WALLETCONNECT_PROJECT_ID` (free Reown project id); degrades to an explicit setup hint without it.
-- [x] **Golden Path Payload Engine (worker)**:
-  - [x] `GET /v1/execute/claim-fees/payload` builds unsigned Aerodrome `claimFees()` and Uniswap V4 PositionManager collect (DECREASE_LIQUIDITY 0 + TAKE_PAIR) transactions from the live snapshot, with pre-dispatch eth_call simulation, per-action gas estimates and USD valuation.
-  - [x] Encoding verified byte-for-byte against the official @uniswap/v4-sdk planner output and accepted by live Base mainnet eth_call simulation (golden-vector tests in CI).
-  - [x] Clients dispatch via WalletConnect for biometric signing; no calldata is built client-side; nothing is broadcast by NockNock.
-- [x] **Receipt-Verified Harvest Ledger**:
-  - [x] `POST /v1/execute/record-harvest` verifies the Base receipt and records ERC-20 Transfers (USDC/NOCK) to the sovereign wallet; idempotent; explicit 404 covers the Uniswap-app pending-broadcast quirk.
-- [x] **Virtual 60/40 Sub-Ledger** (`sovereign_ledger` in derived metrics):
-  - [x] `tax_reserve_ratio` (default 0.40) in OperatorProfile; cumulative receipt-verified harvests split into a protected virtual tax reserve and growth dry powder.
-  - [x] Tax-reserve guardrail: dip-deployment advice suppressed (`SWEEP TO STABLE / ACCUMULATE DRY POWDER (Tax Guardrail)`) when the reserve exceeds the stable stack; otherwise the deployable amount and protected reserve are surfaced explicitly.
-- [x] **Koinly Tax Export**:
-  - [x] `GET /v1/tax/export?format=koinly` (CSV default, JSON available): fee claims tagged `income` with Base tx hashes; tie-out tests prove ledger ↔ export ↔ split consistency.
-- Deferred to 0.2.1 (scoped out during implementation, documented in the spec task): multicall tx aggregation (rejected — Aerodrome `claimFees()` is msg.sender-relative), Android app (web QR flow ships instead), multi-AMM pool ingestion loop, Coinbase staked-ETH connector (needs CDP key + JWT signing).
-
-### Anti-Top-Buying Guardrails & Notifications (SHIPPED)
-- [x] **RSI(14) Overextension Regime** (Wilder RSI over the per-snapshot NOCK spot series): `regime` + `rsi_14` exposed in GlobalStatus; `SWEEP TO STABLE / ACCUMULATE DRY POWDER (Overextension Cooldown)` directive suppresses buy advice at RSI >= 70.
-- [x] **Directive-Transition Notifications**: Telegram, Pushover, and generic webhook adapters under `notifications` in config; transition-only dispatch (first boot silent); delivery failures logged, never fatal; optional `cockpit_url` deep link.
-
-### Lite Mobile Cockpit (SHIPPED)
-- [x] `/?view=lite` phone-sized view: floor health, uncollected fees + gas ROI, ledger summary, and the EXECUTE BATCH HARVEST flow with pending-broadcast handling.
-
-### Dashboard Additions (SHIPPED)
-- [x] "Sovereign 60/40 Ledger" panel: dual dials (protected tax reserve vs deployable dry powder) + live P/L vs high-water mark, all from locally recorded data (zero external APIs, zero mock numbers).
-
-### CI Performance & Rust Dependency Caching (VERIFIED)
-- [x] `Swatinem/rust-cache@v2` confirmed on both Rust jobs (worker `ingestion-worker -> target`, brain `brain -> target`).
-
-### CI Performance & Rust Dependency Caching
-- [ ] **GitHub Actions Build Optimization**:
-  - [ ] Integrate `Swatinem/rust-cache@v2` across `build-brain` and `build-worker` jobs.
-  - [ ] Cache cargo registry, git checkouts, and target directories for `SQLX_OFFLINE=true` release compilation to cut CI turnaround times from minutes to seconds.
-
-### Multi-Tenant Architecture & Urbit Roadmap
-- [ ] **Parameterized Operator Profiles (Backend & Schema)**:
-  - [ ] Migrate single-wallet config to multi-tenant profile schema in `specs/core/snapshot.yaml` and `api.yaml`.
-  - [ ] Parameterized invariant floors (custom minimum balance target beyond 100k).
-  - [ ] Configurable tranche allocations and custom split ratios (60/40, 80/20, 50/50).
-- [ ] **Urbit Native (%nocknock Desk Blueprint)**:
-  - [ ] Hoon data structures in `sur/nocknock.hoon`.
-  - [ ] Gall agent state skeleton in `app/nocknock.hoon`.
 
 ## [0.1.3] - 2026-10-12
 
