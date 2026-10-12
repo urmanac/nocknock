@@ -1740,6 +1740,22 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
     }
     actions.push(v4);
 
+    // Per-action USD valuation from the live snapshot spot (null when spot unavailable)
+    let spot = nock_spot_from_snapshot(&snapshot.data);
+    if let Some(s) = spot {
+        for action in actions.iter_mut() {
+            let (Some(a0), Some(a1)) = (
+                action.expected_amount_0.clone(),
+                action.expected_amount_1.clone(),
+            ) else {
+                continue;
+            };
+            if let (Ok(v0), Ok(v1)) = (a0.parse::<f64>(), a1.parse::<f64>()) {
+                action.expected_usd = Some(format!("{:.4}", v0 + v1 * s));
+            }
+        }
+    }
+
     // --- Gas estimation per action (live; degrades to None, never fabricated) ---
     let eth_price = fetch_eth_price_usd(&state.http_client, &alchemy_url).await;
     let gas_payload = json!({
