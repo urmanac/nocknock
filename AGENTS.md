@@ -159,3 +159,20 @@ make dist             # Verifies packaging of dist/ binaries and tarballs
   - Multi-tenant parameterization (custom operator profiles, flexible floors, dynamic tranches).
   - Urbit native architecture (`%nocknock` desk, `sur/nocknock.hoon`, `app/nocknock.hoon`).
   - Ames P2P sovereign syndicates and collective liquidity defense protocols.
+
+---
+
+## 11. Issue Triage, Label Taxonomy & Patch Cadence
+
+- **SemVer Cadence Rule**:
+  - **Features wait for minor versions (`v0.2.0`)**: Do not bundle new protocol features into patch releases.
+  - **Patches (`v0.1.1`, `v0.1.2`, ...) ship continuously**: Release patches indefinitely until all confirmed defects and data-integrity gaps are closed.
+- **The "Mock Data is a Bug" Invariant**:
+  - In a sovereign state room, synthetic numbers, silent mock fallbacks, or static percentages in UI are **high-severity data-integrity bugs**, not cosmetic issues.
+  - Never present mock data as live on-chain truth. If an RPC query fails, fail explicitly or set `degraded: true`.
+- **Pre-Branching Triage Rule**:
+  - Before writing fix code, every defect must be reported on GitHub with:
+    - Root cause analysis with `file:line` references.
+    - Reproduction steps and on-chain evidence (contract addresses, selectors, transaction hashes).
+    - Labeling: `bug`, component (`frontend` or `backend`), severity (`data-integrity`), and target milestone (`patch-0.1.x`).
+  - Refer to [`TRIAGE.md`](TRIAGE.md) for the active bug registry and triage taxonomy.
