@@ -2,8 +2,8 @@
 
 ## Phase 1 — Bring-up & Setup
 - [~] Provision `patch-0.2.x` GitHub label (green `#0e8a16`). NOTE: this sandbox has no GitHub token/`gh` — prepare ready-to-file issue bodies under this task's `github-issues/` folder instead; label + issue creation happens operator-side (or via an agent with credentials).
-- [ ] Build and start the live stack: `SQLX_OFFLINE=true cargo build --release` in `ingestion-worker/`, run worker with `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/nocknock`, start Vite dev server; verify `/health` and a live Alchemy snapshot on :8080 and dashboard on :3000.
-- [ ] Capture baseline screenshots (desktop + `?view=lite`) including the deviation-matrix legend black square, into this task's `screenshots/` folder.
+- [x] Build and start the live stack: worker built (`SQLX_OFFLINE=true cargo build --release`; NOTE: `cargo` lives at `~/.cargo/bin`, not on the non-interactive PATH) and running on :8080 with live Alchemy data; Vite on :3000 (`./node_modules/.bin/vite --port 3000 --host` after `npm install`). Verified `/health`, `/v1/snapshot/latest`, `/v1/execute/claim-fees/payload` (both actions simulate success live), `/v1/tax/export` (header-only CSV on empty ledger; 422 on bad format). On-chain verified NOCK token: `symbol()=NOCK`, `decimals()=16` — `NOCK_BASE` + 1e16 scaling correct.
+- [x] Capture baseline screenshots into `screenshots/` — `01-deviation-matrix-legend-bug-baseline.png` (black "Actual %" swatch visible; Aerodrome 0→999 placeholder bar also visible) and `02-baseline-full-dashboard.png`.
 
 ## Phase 2 — Audit & Triage (log before fixing)
 - [ ] Audit WalletConnect bridge + session badge (`frontend/src/walletconnect.ts`, header badge in `App.tsx`) against live pairing; file issues for confirmed defects.
