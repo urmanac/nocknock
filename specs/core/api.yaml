@@ -24,6 +24,8 @@ tags:
     description: Portfolio snapshot endpoints (primary data plane)
   - name: Health
     description: Liveness and ingestion status
+  - name: Execution
+    description: Golden Path claim-fees payload engine (zero-custody; clients dispatch unsigned txs to the paired wallet for signing)
 
 paths:
   /health:
@@ -145,6 +147,33 @@ paths:
                 $ref: '#/components/schemas/SnapshotEnvelope'
         '404':
           description: Snapshot not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /execute/claim-fees/payload:
+    get:
+      tags: [Execution]
+      summary: Build unsigned fee-claim transactions (Aerodrome + Uniswap V4)
+      operationId: getClaimFeesPayload
+      description: |
+        Golden Path payload engine. Returns ready-to-sign unsigned transactions that
+        collect accrued LP fees for the sovereign wallet on both AMMs:
+        Aerodrome `claimFees()` and Uniswap V4 PositionManager collect
+        (DECREASE_LIQUIDITY with 0 liquidity + TAKE_PAIR). Amounts derive from the
+        latest live snapshot and each action is pre-simulated via eth_call; clients
+        (web cockpit WalletConnect flow, future Android app) MUST only dispatch
+        actions whose `simulation` is "success" and never build calldata themselves.
+      responses:
+        '200':
+          description: Unsigned claim transactions with live amounts, gas estimate and simulation status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimFeesPayload'
+        '503':
+          description: No snapshot yet, or no RPC key configured (explicit failure, never mock data)
           content:
             application/json:
               schema:
@@ -294,6 +323,80 @@ components:
         details:
           type: object
           nullable: true
+
+  ClaimFeesPayload:
+    type: object
+    required: [chain_id, from, generated_at, actions]
+    properties:
+      chain_id:
+        type: integer
+        example: 8453
+      from:
+        type: string
+        description: Sovereign wallet that must sign (and receives the fees)
+      generated_at:
+        type: string
+        format: date-time
+      gross_usd:
+        type: string
+        nullable: true
+        description: Total claimable fees in USD from the latest live snapshot
+      estimated_gas_usd:
+        type: string
+        nullable: true
+        description: Sum of live eth_estimateGas-based USD gas cost; null when unavailable
+      net_after_gas_usd:
+        type: string
+        nullable: true
+      actions:
+        type: array
+        items:
+          $ref: '#/components/schemas/ClaimFeeAction'
+
+  ClaimFeeAction:
+    type: object
+    required: [platform, label, to, data, value, simulation]
+    properties:
+      platform:
+        type: string
+        enum: [aerodrome, uniswap-v4]
+      label:
+        type: string
+        example: "Claim Aerodrome LP fees (Tranche 2)"
+      to:
+        type: string
+        description: Contract address (Aerodrome pool or Uniswap V4 PositionManager)
+      data:
+        type: string
+        description: Full unsigned calldata (0x-prefixed)
+      value:
+        type: string
+        example: "0x0"
+      expected_amount_0:
+        type: string
+        nullable: true
+        description: Expected USDC amount (human units) from simulation/snapshot
+      expected_amount_1:
+        type: string
+        nullable: true
+        description: Expected NOCK amount (human units)
+      expected_usd:
+        type: string
+        nullable: true
+      gas_estimate:
+        type: string
+        nullable: true
+        description: eth_estimateGas result (hex wei-units of gas)
+      gas_usd:
+        type: string
+        nullable: true
+      simulation:
+        type: string
+        enum: [success, failed, unavailable]
+        description: Clients MUST only dispatch "success"
+      simulation_detail:
+        type: string
+        nullable: true
 
   securitySchemes:
     ApiKeyAuth:
