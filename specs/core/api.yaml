@@ -75,10 +75,10 @@ paths:
                 type: string
                 format: date-time
             Cache-Control:
-              description: Max age based on sync window
+              description: Revalidation directive for dynamic snapshot polling
               schema:
                 type: string
-                example: "public, max-age=300, stale-while-revalidate=600"
+                example: "no-cache, must-revalidate"
         '304':
           description: Not modified (client has current snapshot)
         '503':
@@ -222,6 +222,12 @@ components:
         ingestion_lag_seconds:
           type: integer
           description: Seconds since last successful ingestion run
+        sync_duration_ms:
+          type: integer
+          description: Measured duration in milliseconds of the most recent sync cycle
+        sync_window_seconds:
+          type: integer
+          description: Configured sync window interval in seconds
         errors:
           type: array
           items:

@@ -407,6 +407,7 @@ struct AppState {
     http_client: Client,
     config: Arc<AppConfig>,
     latest_snapshot: Mutex<Option<SnapshotEnvelope>>,
+    last_sync_duration_ms: std::sync::atomic::AtomicU64,
 }
 
 // ============================================================
@@ -474,6 +475,7 @@ async fn main() -> Result<()> {
         http_client,
         config: Arc::new(config),
         latest_snapshot: Mutex::new(initial_latest),
+        last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
     });
 
     // Start ingestion scheduler
@@ -593,10 +595,14 @@ async fn health_handler(Extension(state): Extension<Arc<AppState>>) -> impl Into
         })
         .unwrap_or(0);
 
+    let sync_duration_ms = state.last_sync_duration_ms.load(std::sync::atomic::Ordering::Relaxed);
+
     Json(json!({
         "status": status,
         "last_sync": last_sync.map(|dt| dt.to_rfc3339()),
         "ingestion_lag_seconds": ingestion_lag_seconds,
+        "sync_duration_ms": sync_duration_ms,
+        "sync_window_seconds": state.config.sync_window_seconds,
     }))
 }
 
@@ -648,11 +654,7 @@ async fn get_latest_snapshot_handler(
         if let Ok(value) = envelope.meta.generated_at.to_rfc3339().parse() {
             headers.insert("last-modified", value);
         }
-        let cache_control = format!(
-            "public, max-age={}, stale-while-revalidate={}",
-            state.config.sync_window_seconds,
-            state.config.sync_window_seconds * 2
-        );
+        let cache_control = "no-cache, must-revalidate";
         if let Ok(value) = cache_control.parse() {
             headers.insert("cache-control", value);
         }
@@ -1034,6 +1036,7 @@ async fn mcp_http_handler(
 // ============================================================
 
 async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
+    let start_time = std::time::Instant::now();
     let now = Utc::now().to_rfc3339();
     tracing::info!("Starting ingestion cycle at {now}");
 
@@ -1126,8 +1129,11 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // Update in-memory cache
     *state.latest_snapshot.lock().await = Some(envelope);
 
+    let duration_ms = start_time.elapsed().as_millis() as u64;
+    state.last_sync_duration_ms.store(duration_ms, std::sync::atomic::Ordering::Relaxed);
+
     tracing::info!(
-        "Ingestion complete: snapshot_id={}, hash={}",
+        "Ingestion complete in {duration_ms}ms: snapshot_id={}, hash={}",
         snapshot_id,
         &state_hash[..16]
     );
