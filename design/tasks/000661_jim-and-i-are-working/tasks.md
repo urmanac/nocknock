@@ -59,8 +59,8 @@
 
 ## Phase 7 — Release readiness
 
-- [ ] Update `CHANGELOG.md` `[0.2.0]` section from `[ ]` to landed items; keep `## [Unreleased]` for post-0.2.0
-- [ ] Update `HANDOFF.md` (Golden Path now executed end-to-end), `OPERATOR_GUIDANCE.md` (Android app install + pairing runbook), `TRIAGE.md` (close related registry items)
-- [ ] Document the WASM brain code-reuse gap (Android consumes REST-computed values for 0.2.0; encoders are Rust-only) in `ARCHITECTURE.md` so the long-term reuse goal isn't silently lost
-- [ ] Playtest the full loop on the real phone: notification → lite cockpit/Android app → pair → batch harvest → biometric sign → ledger + Koinly row appear
-- [ ] Verify release packaging (`make dist`) including the APK if included; then, after all CI green on `main`, tag `v0.2.0` **only with explicit operator authorization** (standing order)
+- [x] Update `CHANGELOG.md` `[0.2.0]` section from `[ ]` to landed items; keep `## [Unreleased]` for post-0.2.0 — shipped sections marked, 0.2.1 deferrals documented inline (multicall rejected on msg.sender semantics, Android app, multi-pool ingestion loop, Coinbase connector)
+- [x] Update `HANDOFF.md` (Golden Path now executed end-to-end), `OPERATOR_GUIDANCE.md` (web WalletConnect pairing runbook incl. the pending-broadcast quirk), `TRIAGE.md` (structural-channels panel KEPT — 0.1.4 revived it, v0.2.0 adds the 60/40 ledger panel instead of deprecating), `ARCHITECTURE.md` (WASM code-reuse gap documented as deliberate for 0.2.0)
+- [x] Full pre-flight green: `make test-brain` 3/3 · `test-worker` 31/31 · `test-frontend` 20/20 unit + 20/20 live contract · `test-mcp` ALL PASSED (STDIO + HTTP with live on-chain data) · `make dist` all 4 artifacts packaged
+- [ ] Playtest the full loop on the real phone (operator, needs their device + a Reown project id at frontend build time): notification → lite cockpit → PAIR via QR into the Uniswap app → batch harvest → thumbprint sign (return to Uniswap app to broadcast) → ledger + Koinly row appear — **operator action; blocked only on `VITE_WALLETCONNECT_PROJECT_ID`**
+- [ ] Tag `v0.2.0` **only with explicit operator authorization** (standing order) after CI green on merged `main`
