@@ -105,8 +105,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: res.statusText }));
-    const errorMsg = (err && (err.error || err.message || err.detail)) || `HTTP ${res.status}`;
-    throw new Error(errorMsg);
+    // Prefer the human-readable detail the backend provides; surface the machine code
+    // ('error') last, and keep the HTTP status so callers can branch (e.g. 409 = already
+    // recorded, which is an idempotent success rather than a failure).
+    const errorMsg = (err && (err.detail || err.message || err.error)) || `HTTP ${res.status}`;
+    throw Object.assign(new Error(errorMsg), { status: res.status });
   }
 
   if (res.status === 204) {

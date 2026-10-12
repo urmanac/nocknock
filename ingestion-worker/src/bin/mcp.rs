@@ -228,7 +228,7 @@ fn format_shot_advice(data: &Value) -> String {
          • Decision Matrix Details: {details}\n\
          • Uncollected Claimable Fees: ${claimable_usd} USD\n\
          • Net Gas-to-Fee Profitability: +${gas_delta} USD\n\
-         • Execution Trigger: Batch Harvest shots unlock at >= $5.00 accumulated fees."
+         • Execution rule: claim advised when claimable yield ≥ 2× live gas break-even."
     )
 }
 
@@ -236,30 +236,51 @@ fn format_claim_simulation(data: &Value) -> String {
     let fees = data.get("contract_fees").and_then(|f| f.as_array());
     let mut details = String::new();
     let mut total_claimable_usd = 0.0f64;
+    let mut gas_usd: Option<f64> = None;
 
     if let Some(list) = fees {
         for fee in list {
             let symbol = fee.get("fee_token_symbol").and_then(|s| s.as_str()).unwrap_or("Pool");
             let amount = fee.get("amount").and_then(|a| a.as_str()).unwrap_or("0");
             let amount_usd = fee.get("amount_usd").and_then(|a| a.as_str()).unwrap_or("0.00");
-            let gas = fee.get("gas_break_even_usd").and_then(|g| g.as_str()).unwrap_or("0.005");
+            let gas_str = fee.get("gas_break_even_usd").and_then(|g| g.as_str()).unwrap_or_default();
+            match gas_str.parse::<f64>() {
+                Ok(g) => {
+                    // Live per-contract gas break-even; take the max as representative.
+                    gas_usd = Some(match gas_usd {
+                        Some(acc) => acc.max(g),
+                        None => g,
+                    });
+                    details.push_str(&format!("  - {symbol}: {amount} (~${amount_usd} USD | Gas Est: ${:.4})\n", g));
+                }
+                Err(_) => {
+                    details.push_str(&format!("  - {symbol}: {amount} (~${amount_usd} USD | Gas Est: unavailable)\n"));
+                }
+            }
             if let Ok(usd_val) = amount_usd.parse::<f64>() {
                 total_claimable_usd += usd_val;
             }
-            details.push_str(&format!("  - {symbol}: {amount} (~${amount_usd} USD | Gas Est: ${gas})\n"));
         }
     }
 
+    let (gas_line, net_line) = match gas_usd {
+        Some(g) => (
+            format!("~${:.4} USD", g),
+            format!("${:.4} USD", (total_claimable_usd - g).max(0.0)),
+        ),
+        None => (
+            "unavailable".to_string(),
+            "unknown (live gas estimate unavailable)".to_string(),
+        ),
+    };
     format!(
         "⚡ Fee Claim Simulation\n\
          =======================\n\
          • Total Gross Claimable: ${:.4} USD\n\
-         • Estimated Base Gas: ~$0.005 USD\n\
-         • Net Accretion if Harvested: ${:.4} USD\n\
+         • Estimated Gas: {}\n\
+         • Net Accretion if Harvested: {}\n\
          Pool Breakdown:\n{}",
-        total_claimable_usd,
-        (total_claimable_usd - 0.005).max(0.0),
-        details
+        total_claimable_usd, gas_line, net_line, details
     )
 }
 
@@ -336,11 +357,10 @@ async fn handle_direct_rpc_fallback(client: &Client, tool_name: &str) -> String 
         .map(|c| format!("${:.4} USD", c))
         .unwrap_or_else(|| "Pending spot price".to_string());
 
-    let advice = if claim_usd.unwrap_or(0.0) >= 5.0 {
-        "BATCH HARVEST SHOT"
-    } else {
-        "HOLD & ACCRETE"
-    };
+    // Zero-DB mode has no live gas feed, so the ≥2× gas claim decision cannot be made
+    // here. Report the accrual state honestly instead of a fabricated $0.005 gas or a
+    // hardcoded $5.00 trigger.
+    let advice = "ACCRUE (live gas unavailable in zero-DB mode; open the cockpit for a live claim decision)";
 
     match tool_name {
         "get_portfolio_state" => format!(
@@ -355,8 +375,8 @@ async fn handle_direct_rpc_fallback(client: &Client, tool_name: &str) -> String 
             "🎯 Tactical Shot Advice Engine (Decentralized RPC Mode)\n\
              =======================================================\n\
              • Recommended Action: {advice}\n\
-             • Active Accrued Yield: {claim_usd_str} (Threshold: $5.00)\n\
-             • Gas Estimate: ~$0.005 USD on Base\n\
+             • Active Accrued Yield: {claim_usd_str}\n\
+             • Gas Estimate: unavailable in zero-DB mode\n\
              • Mode: Zero-DB Edge RPC Fallback"
         ),
         "simulate_claim_fees" => format!(
@@ -364,12 +384,12 @@ async fn handle_direct_rpc_fallback(client: &Client, tool_name: &str) -> String 
              ===============================================\n\
              • Uncollected Aerodrome Fees: {:.5} USDC + {:.4} NOCK\n\
              • Total USD Value: {claim_usd_str}\n\
-             • Estimated Gas Cost: ~$0.005 USD\n\
-             • Net Yield: {}",
+             • Estimated Gas Cost: unavailable in zero-DB mode\n\
+             • Net Yield: {} (claim decision needs live gas — open the cockpit)",
             claim_usdc,
             claim_nock,
             claim_usd
-                .map(|c| format!("${:.4} USD", (c - 0.005).max(0.0)))
+                .map(|c| format!("${:.4} USD (gross)", c))
                 .unwrap_or_else(|| "Pending spot price".to_string())
         ),
         _ => format!("Unknown tool: {tool_name}"),

@@ -32,7 +32,8 @@ This document defines the issue triage protocol, label architecture, bug severit
 | **`frontend`** | `#1d76db` | UI components, React hooks, and visualization canvas | `frontend/src/**` |
 | **`backend`** | `#5319e7` | Ingestion daemon, Axum REST API, and MCP adapter | `ingestion-worker/src/**` |
 | **`patch-0.1.x`** | `#0e8a16` | Targeted for resolution in the `v0.1.x` patch series | Fixes required prior to `v0.2.0` |
-| **`enhancement`** | `#a2eeef` | New feature or architectural expansion | Features deferred to `v0.2.0` |
+| **`patch-0.2.x`** | `#0e8a16` | Targeted for resolution in the `v0.2.x` patch series | Fixes required prior to `v0.3.0` |
+| **`enhancement`** | `#a2eeef` | New feature or architectural expansion | Features deferred to the next minor release |
 | **`triage`** | `#d4c5f9` | Needs investigation or reproduction | Initial incoming state |
 
 ---
@@ -106,6 +107,34 @@ This document defines the issue triage protocol, label architecture, bug severit
 * **Labels**: `enhancement`, `backend`, `frontend`
 * **Status**: Resolved & Merged (PR #18)
 * **Scope**: Migrated 100k treasury floor, V4 liquidity scale baselines, and target weights into `config.yaml` as part of the multi-tenant operator profile architecture. Retained historical baseline numbers reverently in configuration docs.
+
+---
+
+### Phase E: 0.2.x Triage Cycle (task 000664 — live-data audit of the Golden Path release)
+
+> Filed from the 0.2.0 bug hunt (live Alchemy stack; ready-to-file issue bodies in
+> `helix-specs/design/tasks/000664_i-was-so-happy-with-your/github-issues/ISSUES.md`).
+> Fixes land as focused commits on `feature/000664-run-020-series-bug-hunt`.
+
+| # | Defect | Component | Labels | Status |
+|---|---|---|---|---|
+| E1 | ETH price lookup falls back to hardcoded $2,500 in claim-fees gas valuation | `ingestion-worker/src/main.rs:1591-1619, 1996` | `bug`, `backend`, `data-integrity`, `patch-0.2.x` | Fixed (commit on 000664) |
+| E2 | Tick Bracket chart draws fabricated Aerodrome 0→999 placeholder bracket (axis stretched, V4 bracket hidden) | `main.rs:3042-3048`, `frontend/src/App.tsx` | `bug`, `backend`, `frontend`, `data-integrity`, `patch-0.2.x` | Fixed (commit on 000664) |
+| E3 | Deviation matrix legend shows black swatch for "Actual %" (per-Cell colors, no series fill) | `frontend/src/App.tsx:488-496` | `bug`, `frontend`, `patch-0.2.x` | Fixed (commit on 000664) |
+| E4 | StatCard parseFloat strips "%" from Floor Health value (shows bare `106.3`) | `frontend/src/App.tsx:296, 665` | `bug`, `frontend`, `patch-0.2.x` | Fixed (commit on 000664) |
+| E5 | 409 ALREADY_RECORDED (idempotent retry) shown as failure in Lite Cockpit; client drops HTTP status | `frontend/src/api/client.ts`, `LiteCockpit.tsx:148-170` | `bug`, `frontend`, `backend`, `patch-0.2.x` | Fixed (commit on 000664) |
+| E6 | API client prefers machine error codes over human `detail` guidance | `frontend/src/api/client.ts:108` | `bug`, `frontend`, `patch-0.2.x` | Fixed (commit on 000664) |
+| E7 | MCP formatters fabricate "~$0.005" gas + "$5.00" threshold text (zero-mock violations) | `main.rs:970-999`, `bin/mcp.rs:235-372` | `bug`, `backend`, `data-integrity`, `patch-0.2.x` | Fixed (commit on 000664) |
+| E8 | Lite Cockpit renders EXECUTE buttons while WalletConnect is unconfigured | `LiteCockpit.tsx:259-305` | `bug`, `frontend`, `patch-0.2.x` | Fixed (commit on 000664) |
+| E9 | Tick bracket subtitle hardcodes "(IN RANGE)" ignoring live `in_range` | `frontend/src/App.tsx:470` | `bug`, `frontend`, `patch-0.2.x` | Fixed (commit on 000664) |
+| E10 | Residual mock fallback constants in dashboard text (floor 100000, bracket strings, $0.00) | `frontend/src/App.tsx:202, 285, 347` | `bug`, `frontend`, `data-integrity`, `patch-0.2.x` | Fixed (commit on 000664) |
+| E11 | Harvest `confirmed_at` uses recording time instead of block timestamp (tax-date drift) | `main.rs:2172` | `bug`, `backend`, `data-integrity`, `patch-0.2.x` | Fixed (commit on 000664) |
+| E12 | Unguarded `tracked_wallets[0]` / `tracked_pools.first()` indexing panics on empty config | `main.rs:1850, 2106` | `bug`, `backend`, `patch-0.2.x` | Fixed (commit on 000664) |
+| E13 | Gas cost silently clamped to ≤$0.05; undocumented `+0.002` constant | `main.rs:2398-2403` | `bug`, `backend`, `data-integrity`, `patch-0.2.x` | Fixed (commit on 000664) |
+| E14 | Makefile tmux targets hardcode macOS path (broken everywhere else) | `Makefile` | `bug`, `backend`, `patch-0.2.x` | Fixed (commit on 000664) |
+| EA | MCP tools missing for all 0.2.0 Golden Path features (ledger, tax export, payload) | `bin/mcp.rs` | `enhancement`, `backend` | Deferred to 0.3.0 planning |
+| EB | No persist/retry for failed directive-transition notifications | `main.rs:1288-1301` | `enhancement`, `backend` | Deferred (low) |
+| EC | Externalize `v4_position_id` / Aerodrome pool fallbacks (config externalization) | `main.rs:1876-1881, 1935, 2493` | `enhancement`, `backend` | Deferred (low) |
 
 ---
 
