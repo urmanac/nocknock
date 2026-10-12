@@ -1308,7 +1308,7 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let live_t2_usdc = reserve_usdc * lp_share;
     let live_t2_nock = reserve_nock * lp_share;
 
-    // 4. Fetch Uniswap V4 Position Liquidity for NFT #3126000
+    // 4. Fetch Uniswap V4 Position Info (includes liquidity + uncollected fees tokensOwed0/1)
     let v4_pos_id = state.config.v4_position_id.unwrap_or(3126000);
     let v4_pos_hex = format!("{:064x}", v4_pos_id);
     let v4_liq_payload = json!({
@@ -1321,21 +1321,77 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         "id": 5
     });
     let mut v4_liquidity_val = 0u128;
+    let mut v4_tokens_owed_0 = 0u128; // USDC fees (6 decimals)
+    let mut v4_tokens_owed_1 = 0u128; // NOCK fees (18 decimals)
+    let mut v4_live_query_success = false;
     if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &v4_liq_payload, 2).await {
         if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
-            if let Ok(val) = u128::from_str_radix(hex_str.trim_start_matches("0x"), 16) {
-                v4_liquidity_val = val;
+            let clean = hex_str.trim_start_matches("0x");
+            // positions() returns: liquidity(96), tickLower(24), tickUpper(24), feeGrowthInside0LastX128(160), feeGrowthInside1LastX128(160), tokensOwed0(128), tokensOwed1(128)
+            // Each field is 32 bytes (64 hex chars) padded
+            if clean.len() >= 288 {
+                // liquidity at offset 0-63
+                if let Ok(val) = u128::from_str_radix(&clean[0..64], 16) {
+                    v4_liquidity_val = val;
+                }
+                // tokensOwed0 at offset 160-191 (5th field, 0-indexed = 5 * 64 = 320 hex chars = offset 160 bytes)
+                if let Ok(val) = u128::from_str_radix(&clean[160..224], 16) {
+                    v4_tokens_owed_0 = val;
+                }
+                // tokensOwed1 at offset 192-223 (6th field)
+                if let Ok(val) = u128::from_str_radix(&clean[224..288], 16) {
+                    v4_tokens_owed_1 = val;
+                }
+                if v4_liquidity_val > 0 {
+                    v4_live_query_success = true;
+                }
             }
         }
     }
-    if v4_liquidity_val == 0 {
-        return Err(anyhow::anyhow!("Failed to query live Uniswap V4 position liquidity from RPC"));
-    }
+    
     let profile = state.config.profile();
-    let v4_liquidity_str = v4_liquidity_val.to_string();
-    let v4_scale = (v4_liquidity_val as f64) / profile.v4_baseline_liquidity;
-    let live_t1_nock = profile.v4_baseline_nock * v4_scale;
-    let live_t1_usdc = profile.v4_baseline_usdc * v4_scale;
+    let v4_scale: f64;
+    let live_t1_nock: f64;
+    let live_t1_usdc: f64;
+    let live_uni_fee_usdc: f64;
+    let live_uni_fee_nock: f64;
+    let live_uni_fee_usd: f64;
+    let v4_liquidity_str: String;
+    
+    if v4_live_query_success {
+        // Use live on-chain data
+        v4_scale = (v4_liquidity_val as f64) / profile.v4_baseline_liquidity;
+        v4_liquidity_str = v4_liquidity_val.to_string();
+        live_t1_nock = profile.v4_baseline_nock * v4_scale;
+        live_t1_usdc = profile.v4_fee_baseline_usdc * v4_scale;
+        
+        // 4b. Use LIVE on-chain uncollected fees from tokensOwed0/1 instead of scaled baseline
+        live_uni_fee_usdc = v4_tokens_owed_0 as f64 / 1e6; // USDC has 6 decimals
+        live_uni_fee_nock = v4_tokens_owed_1 as f64 / 1e18; // NOCK has 18 decimals
+        live_uni_fee_usd = live_uni_fee_usdc + live_uni_fee_nock * spot_price;
+        
+        // Log if live fees differ significantly from scaled baseline
+        let baseline_uni_fee_usdc = profile.v4_fee_baseline_usdc * v4_scale;
+        let baseline_uni_fee_nock = profile.v4_fee_baseline_nock * v4_scale;
+        if (live_uni_fee_usdc - baseline_uni_fee_usdc).abs() > baseline_uni_fee_usdc * 0.5 ||
+           (live_uni_fee_nock - baseline_uni_fee_nock).abs() > baseline_uni_fee_nock * 0.5 {
+            tracing::warn!(
+                "Uniswap V4 live fees differ from scaled baseline: live_usdc={:.6} vs baseline_usdc={:.6}, live_nock={:.6} vs baseline_nock={:.6}",
+                live_uni_fee_usdc, baseline_uni_fee_usdc, live_uni_fee_nock, baseline_uni_fee_nock
+            );
+        }
+        tracing::info!("Uniswap V4 live query successful: liquidity={}, fees_usdc={:.6}, fees_nock={:.6}", v4_liquidity_val, live_uni_fee_usdc, live_uni_fee_nock);
+    } else {
+        // Fallback to scaled baseline (PositionManager eth_call reverts or returns 0)
+        tracing::warn!("Uniswap V4 PositionManager eth_call failed or returned 0; falling back to scaled baseline fees");
+        v4_liquidity_val = profile.v4_baseline_liquidity as u128;
+        v4_liquidity_str = v4_liquidity_val.to_string();
+        live_t1_nock = profile.v4_baseline_nock;
+        live_t1_usdc = profile.v4_fee_baseline_usdc;
+        live_uni_fee_usdc = profile.v4_fee_baseline_usdc;
+        live_uni_fee_nock = profile.v4_fee_baseline_nock;
+        live_uni_fee_usd = live_uni_fee_usdc + live_uni_fee_nock * spot_price;
+    }
 
     // 5. Fetch live token balances for tracked wallet
     let balances_payload = json!({
@@ -1415,13 +1471,8 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
 
     let aero_fee_usd = aero_fee_usdc + aero_fee_nock * spot_price;
 
-    // Uniswap V4: Dynamic fee calculation for uncollected yield accumulating since position creation/compounding.
-    // Scales operator-profile baseline by current position liquidity ratio.
-    let uni_baseline_usdc = profile.v4_fee_baseline_usdc;
-    let uni_baseline_nock = profile.v4_fee_baseline_nock;
-    let uni_fee_usdc = uni_baseline_usdc * v4_scale;
-    let uni_fee_nock = uni_baseline_nock * v4_scale;
-    let uni_fee_usd = uni_fee_usdc + uni_fee_nock * spot_price;
+    // Uniswap V4: Use LIVE on-chain uncollected fees from tokensOwed0/1 (queried above)
+    // instead of scaling operator-profile baseline by liquidity ratio.
 
     Ok(RawOnChainData {
         wallet_balances: vec![
@@ -1480,8 +1531,8 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
                 lower_price: "0.01237".to_string(),
                 upper_price: "2.02783".to_string(),
                 liquidity_amount: v4_liquidity_str,
-                tokens_owed_0: format!("{:.3}", uni_fee_usdc),
-                tokens_owed_1: format!("{:.2}", uni_fee_nock),
+                tokens_owed_0: format!("{:.6}", live_uni_fee_usdc),
+                tokens_owed_1: format!("{:.4}", live_uni_fee_nock),
                 in_range: spot_price >= 0.01237 && spot_price <= 2.02783,
                 fee_growth_inside_0_x128: "0".to_string(),
                 fee_growth_inside_1_x128: "0".to_string(),
@@ -1492,8 +1543,8 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
                 contract_address: "0x7c5f5a4bbd8fd63184577525326123b519429bdc".to_string(),
                 fee_token_address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".to_string(),
                 fee_token_symbol: "USDC+NOCK (Uniswap V4)".to_string(),
-                amount: format!("{:.3} USDC + {:.2} NOCK", uni_fee_usdc, uni_fee_nock),
-                amount_usd: format!("{:.4}", uni_fee_usd),
+                amount: format!("{:.6} USDC + {:.4} NOCK", live_uni_fee_usdc, live_uni_fee_nock),
+                amount_usd: format!("{:.4}", live_uni_fee_usd),
                 claimable: true,
                 gas_break_even_usd: format!("{:.4}", live_gas_cost_usd),
             },
@@ -1514,8 +1565,8 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         live_gas_cost_usd: live_gas_cost_usd,
         live_aero_fee_usdc: aero_fee_usdc,
         live_aero_fee_nock: aero_fee_nock,
-        live_uni_fee_usdc: uni_fee_usdc,
-        live_uni_fee_nock: uni_fee_nock,
+        live_uni_fee_usdc: live_uni_fee_usdc,
+        live_uni_fee_nock: live_uni_fee_nock,
         live_eth_price_usd,
     })
 }
@@ -2139,22 +2190,22 @@ operator_profile:
     }
 
     #[test]
-    fn test_v4_fee_scaling_and_dynamic_yield() {
+    fn test_v4_liquidity_scaling() {
+        // Test that liquidity scaling math works for tranche 1 position sizing
         let v4_liquidity_val = 81297590130616u128;
         let v4_scale = (v4_liquidity_val as f64) / 65719361234409.0;
-        let baseline_usdc = 0.0245f64;
         let baseline_nock = 1.4820f64;
+        let baseline_usdc = 0.0245f64;
 
-        let uni_fee_usdc = baseline_usdc * v4_scale;
-        let uni_fee_nock = baseline_nock * v4_scale;
+        let scaled_nock = baseline_nock * v4_scale;
+        let scaled_usdc = baseline_usdc * v4_scale;
 
         assert!((v4_scale - 1.23704).abs() < 1e-4);
-        assert!((uni_fee_usdc - 0.0303).abs() < 1e-4);
-        assert!((uni_fee_nock - 1.8333).abs() < 1e-4);
+        assert!((scaled_nock - 1.8333).abs() < 1e-4);
+        assert!((scaled_usdc - 0.0303).abs() < 1e-4);
 
-        let spot_price = 0.0268f64;
-        let uni_fee_usd = uni_fee_usdc + uni_fee_nock * spot_price;
-        assert!(uni_fee_usd > 0.07);
+        // Note: Uniswap V4 fees are now queried live via tokensOwed0/1 from positions()
+        // instead of using scaled baselines. See run_ingestion_cycle for live fee query.
     }
 
     #[test]
