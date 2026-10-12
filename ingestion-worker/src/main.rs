@@ -276,6 +276,25 @@ struct DerivedMetrics {
     structural_channels: StructuralChannels,
     strategy_counterfactual: StrategyCounterfactual,
     velocity_gas_sandbox: VelocityGasSandbox,
+    #[serde(default)]
+    sovereign_ledger: SovereignLedger,
+}
+
+/// Virtual 60/40 sub-ledger over receipt-verified harvests (no on-chain address change).
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+struct SovereignLedger {
+    cumulative_harvested_usd: String,
+    tax_reserve_usd: String,
+    growth_dry_powder_usd: String,
+    harvest_count: i64,
+    last_harvest_at: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct LedgerAggregate {
+    total_usd: f64,
+    harvest_count: i64,
+    last_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
@@ -1141,6 +1160,27 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
 
     let structural_channels = compute_structural_channels_sync(&historical_prices);
 
+    // Sovereign ledger aggregate: receipt-verified harvests feed the virtual 60/40 sub-ledger
+    let ledger_agg = match sqlx::query(
+        "SELECT COALESCE(SUM(usd_value::numeric)::float8, 0) AS total_usd, \
+                COUNT(DISTINCT tx_hash) AS harvests, \
+                MAX(recorded_at) AS last_at \
+         FROM harvest_events",
+    )
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(r) => LedgerAggregate {
+            total_usd: r.try_get::<f64, _>("total_usd").unwrap_or(0.0),
+            harvest_count: r.try_get::<i64, _>("harvests").unwrap_or(0),
+            last_at: r.try_get::<Option<DateTime<Utc>>, _>("last_at").ok().flatten(),
+        },
+        Err(e) => {
+            tracing::warn!("Harvest ledger aggregate query failed: {e}");
+            LedgerAggregate::default()
+        }
+    };
+
     // Fetch counterfactual historical data: the MOST RECENT 100 snapshots, collected as
     // paired (timestamp, portfolio, native) tuples so the two series stay index-aligned,
     // oldest first, carrying real snapshot timestamps (no fabricated spacing).
@@ -1173,7 +1213,7 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // Compute derived metrics
     let profile = state.config.profile();
     let derived_metrics = compute_derived_metrics(&raw_data, prev_hwm, &profile, structural_channels,
-        &counterfactual_history);
+        &counterfactual_history, &ledger_agg);
 
     // Build snapshot data
     let snapshot_data = SnapshotData {
@@ -2521,7 +2561,7 @@ fn recommended_claim_action(claimable_usd: f64, gas_break_even_usd: f64) -> &'st
     }
 }
 
-fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_history: &[(DateTime<Utc>, f64, f64)]) -> DerivedMetrics {
+fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_history: &[(DateTime<Utc>, f64, f64)], ledger: &LedgerAggregate) -> DerivedMetrics {
     // 1. Spot price calculation
     let spot_price = if let Some(pool) = raw.pool_mechanics.first() {
         if pool.volatile_assets.len() >= 2 {
@@ -2750,6 +2790,13 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
             total_native_usd,
             &now_str,
         ),
+        sovereign_ledger: SovereignLedger {
+            cumulative_harvested_usd: format!("{:.2}", ledger.total_usd),
+            tax_reserve_usd: format!("{:.2}", ledger.total_usd * profile.tax_reserve_ratio),
+            growth_dry_powder_usd: format!("{:.2}", ledger.total_usd * (1.0 - profile.tax_reserve_ratio)),
+            harvest_count: ledger.harvest_count,
+            last_harvest_at: ledger.last_at.map(|dt| dt.to_rfc3339()),
+        },
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: vec![
                 FeeCollectionIndex {
@@ -2917,7 +2964,7 @@ mod tests {
         ];
         // Total NOCK is 80,000 < 100,000 floor
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[]);
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default());
         assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
     }
 
@@ -2940,7 +2987,7 @@ mod tests {
         raw.live_gas_cost_usd = 0.005;
 
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[]);
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default());
         assert!(metrics.global_status.shot_advice_action.contains("BATCH HARVEST SHOT"));
     }
 
@@ -2963,7 +3010,7 @@ mod tests {
         raw.live_aero_fee_nock = 8.0;
 
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[]);
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default());
         assert!(metrics.global_status.shot_advice_action.contains("HOLD & ACCRETE"));
     }
 
@@ -3006,7 +3053,7 @@ operator_profile:
             },
         ];
         // 120,000 is above default 100k floor, BUT below custom 150k floor!
-        let metrics = compute_derived_metrics(&raw, 3000.0, &profile, StructuralChannels { channels: vec![] }, &[]);
+        let metrics = compute_derived_metrics(&raw, 3000.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default());
         assert_eq!(metrics.global_status.nock_floor_target, "150000");
         assert_eq!(metrics.global_status.nock_floor_delta, "-30000");
         assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
@@ -3024,6 +3071,48 @@ database_url: "postgresql://localhost/test"
 "#;
         let cfg: AppConfig = serde_yaml::from_str(yaml).expect("Failed to deserialize yaml");
         assert_eq!(cfg.profile().tax_reserve_ratio, 0.40);
+    }
+
+    #[test]
+    fn test_sovereign_ledger_60_40_split() {
+        let raw = RawOnChainData {
+            wallet_balances: vec![WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "NOCK".to_string(),
+                token_address: "0xNOCK".to_string(),
+                amount: "110000.0".to_string(),
+                amount_usd: "2860.0".to_string(),
+                updated_at: "now".to_string(),
+            }],
+            ..Default::default()
+        };
+        let mut profile = OperatorProfile::default();
+        profile.tax_reserve_ratio = 0.40;
+        let ledger = LedgerAggregate {
+            total_usd: 100.0,
+            harvest_count: 2,
+            last_at: Some(Utc::now()),
+        };
+        let metrics = compute_derived_metrics(
+            &raw, 0.0, &profile,
+            StructuralChannels { channels: vec![] },
+            &[], &ledger,
+        );
+        assert_eq!(metrics.sovereign_ledger.cumulative_harvested_usd, "100.00");
+        assert_eq!(metrics.sovereign_ledger.tax_reserve_usd, "40.00");
+        assert_eq!(metrics.sovereign_ledger.growth_dry_powder_usd, "60.00");
+        assert_eq!(metrics.sovereign_ledger.harvest_count, 2);
+        assert!(metrics.sovereign_ledger.last_harvest_at.is_some());
+
+        // Custom ratio honored
+        profile.tax_reserve_ratio = 0.25;
+        let metrics = compute_derived_metrics(
+            &raw, 0.0, &profile,
+            StructuralChannels { channels: vec![] },
+            &[], &ledger,
+        );
+        assert_eq!(metrics.sovereign_ledger.tax_reserve_usd, "25.00");
+        assert_eq!(metrics.sovereign_ledger.growth_dry_powder_usd, "75.00");
     }
 
     #[test]
@@ -3191,6 +3280,7 @@ database_url: "postgresql://localhost/test"
                     shot_advice_action: "HOLD".to_string(),
                     shot_advice_details: "Steady".to_string(),
                 },
+                sovereign_ledger: Default::default(),
                 asset_aggregation_series: AssetAggregationSeries {
                     time_points: vec!["2026-10-11T00:00:00Z".to_string()],
                     safe_haven_series: vec!["48.00".to_string()],
