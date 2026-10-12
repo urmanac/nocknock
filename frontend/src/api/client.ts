@@ -22,6 +22,8 @@ export interface HealthResponse {
   status: 'ok' | 'degraded' | 'down';
   last_sync: string;
   ingestion_lag_seconds: number;
+  sync_duration_ms?: number;
+  sync_window_seconds?: number;
   errors?: string[];
 }
 
@@ -70,7 +72,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<HealthResponse>('/health'),
 
-  latestSnapshot: <T = unknown>() => request<SnapshotEnvelope<T>>('/snapshot/latest'),
+  latestSnapshot: <T = unknown>() => request<SnapshotEnvelope<T>>('/snapshot/latest', { cache: 'no-cache' }),
 
   historicalSnapshots: (params?: {
     interval?: '1h' | '4h' | '1d' | '1w';

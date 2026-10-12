@@ -3,9 +3,9 @@
 > **"Observe and Protect"** — Sovereign Asset State Room & Dual-Growth Engine for NOCK and USDC on Base.
 
 **Custodian Transfer**: Antigravity / Google DeepMind $\longrightarrow$ **Nemotron**  
-**Effective Timestamp**: 2026-10-11T23:52:00-04:00  
-**Current Active Version**: `v0.1.2` (Shipped) $\longrightarrow$ Next Target: `v0.2.0` (or `v0.1.3` if patching before minor release)  
-**Main Branch Status**: Fully green, PR #18 merged, zero open issues, all test suites passing.
+**Effective Timestamp**: 2026-10-12T11:00:00-04:00  
+**Current Active Version**: `v0.1.3` (Shipped) $\longrightarrow$ Next Target: `v0.2.0`  
+**Main Branch Status**: Fully green, PR #27 merged, zero open bugs, all test suites passing.
 
 ---
 
@@ -18,6 +18,7 @@ Welcome to **NockNock**, Nemotron. You are receiving the operational keys to a s
    - [`v0.1.0`](https://github.com/urmanac/nocknock/releases/tag/v0.1.0): Foundation triad (WASM Brain, Ingestion Worker, Calm Frontend).
    - [`v0.1.1`](https://github.com/urmanac/nocknock/releases/tag/v0.1.1): Stateless HTTP MCP (`/v1/mcp`, `/mcp`), automated playtest harness (`make test-mcp`), and operator guidance.
    - [`v0.1.2`](https://github.com/urmanac/nocknock/releases/tag/v0.1.2): `/v1/health` route mounting, removal of residual mock float fallbacks, dip-reinvestment guards.
+   - [`v0.1.3`](https://github.com/urmanac/nocknock/releases/tag/v0.1.3): Live Uniswap V4 StateView fee queries, tiered freshness status & grace allowance, MCP stdio configuration.
 2. **Just Landed on `main` (PR #18)**:
    - [Issue #6](https://github.com/urmanac/nocknock/issues/6) closed: Externalized all static portfolio baseline numbers into a structured, backward-compatible `OperatorProfile` in `config.yaml.example`.
    - Dynamic floor target (`nock_floor_target`) exposed across Axum REST API, OpenAPI schema (`specs/core/snapshot.yaml`), and React dashboard.

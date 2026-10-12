@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 const SYNC_WINDOW_SECONDS_DEFAULT = 300;
+const SYNC_GRACE_SECONDS_DEFAULT = 90; // Allowance for sync execution duration + polling cycle
+
+export type SyncStatus = 'fresh' | 'syncing' | 'stale';
 
 // ============================================================
 // Types (mirroring snapshot.yaml SnapshotMeta)
@@ -20,15 +23,20 @@ export interface SnapshotEnvelope<T = unknown> {
 
 export interface FreshnessState {
   isFresh: boolean;
+  syncStatus: SyncStatus;
   ageSeconds: number;
   stateHash: string;
   lastChecked: number;
   staleSince: number | null; // timestamp when data became stale
+  syncWindowSeconds: number;
+  syncGraceSeconds: number;
 }
 
 export interface UseFreshnessOptions {
   /** Sync window in seconds (default 300 = 5 minutes) */
   syncWindowSeconds?: number;
+  /** Allowance in seconds for sync execution before declaring stale (default 90s) */
+  syncGraceSeconds?: number;
   /** Polling interval for freshness check (default 10 seconds) */
   pollIntervalMs?: number;
   /** Callback when freshness changes */
@@ -52,7 +60,8 @@ export function useFreshness<T = unknown>(
   options: UseFreshnessOptions = {}
 ) {
   const {
-    syncWindowSeconds = 300,
+    syncWindowSeconds = SYNC_WINDOW_SECONDS_DEFAULT,
+    syncGraceSeconds = SYNC_GRACE_SECONDS_DEFAULT,
     pollIntervalMs = 10_000,
     onFreshnessChange,
     debug = false,
@@ -63,10 +72,13 @@ export function useFreshness<T = unknown>(
   const [error, setError] = useState<Error | null>(null);
   const [freshness, setFreshness] = useState<FreshnessState>({
     isFresh: true,
+    syncStatus: 'fresh',
     ageSeconds: 0,
     stateHash: '',
     lastChecked: Date.now(),
     staleSince: null,
+    syncWindowSeconds,
+    syncGraceSeconds,
   });
 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -81,21 +93,33 @@ export function useFreshness<T = unknown>(
     if (debug) console.log(`[useFreshness] ${msg}`);
   }, [debug]);
 
-  // Compute freshness from snapshot meta
+  // Compute freshness from snapshot meta with sync grace allowance
   const computeFreshness = useCallback((meta: SnapshotMeta): FreshnessState => {
     const generatedAt = new Date(meta.generated_at).getTime();
     const now = Date.now();
     const ageSeconds = Math.max(0, Math.floor((now - generatedAt) / 1000));
-    const isFresh = ageSeconds <= syncWindowSeconds;
+    const staleThreshold = syncWindowSeconds + syncGraceSeconds;
+
+    let syncStatus: SyncStatus = 'fresh';
+    if (ageSeconds > staleThreshold) {
+      syncStatus = 'stale';
+    } else if (ageSeconds > syncWindowSeconds) {
+      syncStatus = 'syncing';
+    }
+
+    const isFresh = syncStatus !== 'stale';
 
     return {
       isFresh,
+      syncStatus,
       ageSeconds,
       stateHash: meta.state_hash,
       lastChecked: now,
       staleSince: isFresh ? null : (freshnessRef.current.staleSince ?? now),
+      syncWindowSeconds,
+      syncGraceSeconds,
     };
-  }, [syncWindowSeconds]);
+  }, [syncWindowSeconds, syncGraceSeconds]);
 
   // Fetch and update snapshot
   const refresh = useCallback(async (isBackground = false) => {
@@ -114,6 +138,7 @@ export function useFreshness<T = unknown>(
         const newFreshness = computeFreshness(data.meta);
         // Only update freshness if it actually changed
         if (newFreshness.isFresh !== freshnessRef.current.isFresh ||
+            newFreshness.syncStatus !== freshnessRef.current.syncStatus ||
             newFreshness.ageSeconds !== freshnessRef.current.ageSeconds ||
             newFreshness.stateHash !== freshnessRef.current.stateHash) {
           setFreshness(newFreshness);
@@ -151,6 +176,7 @@ export function useFreshness<T = unknown>(
         const newFreshness = computeFreshness(snapshotRef.current.meta);
         // Only update freshness state if it actually changed
         if (newFreshness.isFresh !== freshnessRef.current.isFresh ||
+            newFreshness.syncStatus !== freshnessRef.current.syncStatus ||
             newFreshness.ageSeconds !== freshnessRef.current.ageSeconds ||
             newFreshness.stateHash !== freshnessRef.current.stateHash) {
           setFreshness(newFreshness);
@@ -201,14 +227,23 @@ export function useFreshnessPoll(
   fetchMetadata: () => Promise<{ generated_at: string; state_hash: string } | null>,
   options: UseFreshnessOptions = {}
 ) {
-  const { syncWindowSeconds = 300, pollIntervalMs = 10_000, onFreshnessChange, debug = false } = options;
+  const {
+    syncWindowSeconds = SYNC_WINDOW_SECONDS_DEFAULT,
+    syncGraceSeconds = SYNC_GRACE_SECONDS_DEFAULT,
+    pollIntervalMs = 10_000,
+    onFreshnessChange,
+    debug = false,
+  } = options;
 
   const [freshness, setFreshness] = useState<FreshnessState>({
     isFresh: true,
+    syncStatus: 'fresh',
     ageSeconds: 0,
     stateHash: '',
     lastChecked: Date.now(),
     staleSince: null,
+    syncWindowSeconds,
+    syncGraceSeconds,
   });
 
   const log = useCallback((msg: string) => {
@@ -229,18 +264,31 @@ export function useFreshnessPoll(
       const generatedAt = new Date(meta.generated_at).getTime();
       const now = Date.now();
       const ageSeconds = Math.floor((now - generatedAt) / 1000);
-      const isFresh = ageSeconds <= syncWindowSeconds;
+      const staleThreshold = syncWindowSeconds + syncGraceSeconds;
+
+      let syncStatus: SyncStatus = 'fresh';
+      if (ageSeconds > staleThreshold) {
+        syncStatus = 'stale';
+      } else if (ageSeconds > syncWindowSeconds) {
+        syncStatus = 'syncing';
+      }
+
+      const isFresh = syncStatus !== 'stale';
 
       const newFreshness: FreshnessState = {
         isFresh,
+        syncStatus,
         ageSeconds,
         stateHash: meta.state_hash,
         lastChecked: now,
         staleSince: isFresh ? null : (freshnessRef.current.staleSince ?? now),
+        syncWindowSeconds,
+        syncGraceSeconds,
       };
 
       // Only update state if freshness actually changed
       if (newFreshness.isFresh !== freshnessRef.current.isFresh ||
+          newFreshness.syncStatus !== freshnessRef.current.syncStatus ||
           newFreshness.ageSeconds !== freshnessRef.current.ageSeconds ||
           newFreshness.stateHash !== freshnessRef.current.stateHash) {
         setFreshness(newFreshness);
@@ -311,7 +359,9 @@ export function StaleBanner({ freshness, onDismiss, dismissible = true }: StaleB
       aria-live="polite"
     >
       <span style={{ color: '#f39c12', fontWeight: 500 }}>●</span>
-      <span>Data is {ageStr} old (sync window: {SYNC_WINDOW_SECONDS_DEFAULT}s)</span>
+      <span>
+        Data is {ageStr} old (sync cycle delayed beyond {Math.floor(freshness.syncWindowSeconds / 60)}m window + {freshness.syncGraceSeconds}s allowance)
+      </span>
       {dismissible && (
         <button
           onClick={onDismiss}

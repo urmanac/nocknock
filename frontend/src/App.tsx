@@ -196,10 +196,18 @@ function Dashboard() {
           <div style={styles.statusPill}>
             <span style={{
               ...styles.statusDot,
-              background: freshness.isFresh ? '#2ecc71' : '#f39c12',
+              background: freshness.syncStatus === 'fresh'
+                ? '#2ecc71'
+                : freshness.syncStatus === 'syncing'
+                  ? '#38bdf8'
+                  : '#f39c12',
             }} />
             <span style={styles.statusText}>
-              {freshness.isFresh ? 'LIVE ON-CHAIN' : 'STALE'}
+              {freshness.syncStatus === 'fresh'
+                ? 'LIVE ON-CHAIN'
+                : freshness.syncStatus === 'syncing'
+                  ? 'SYNC IN PROGRESS'
+                  : 'SYNC DELAYED'}
             </span>
             <span style={styles.ageText}>{ageDisplay}</span>
           </div>

@@ -140,6 +140,9 @@ describe('Freshness Contract', () => {
     const data = await res.json();
     expect(['ok', 'starting', 'degraded']).toContain(data.status);
     expect(typeof data.ingestion_lag_seconds).toBe('number');
+    if (data.sync_duration_ms !== undefined) {
+      expect(typeof data.sync_duration_ms).toBe('number');
+    }
   });
 });
 
@@ -178,6 +181,61 @@ describe('Stale Data Detection Logic', () => {
     const now = Date.now();
     const generated = new Date(now + 10_000).toISOString(); // 10 sec in future
     expect(computeFreshness(generated, now, 300).isFresh).toBe(true);
+  });
+});
+
+describe('Tiered Sync Status & Grace Allowance Logic', () => {
+  const computeTieredFreshness = (
+    generatedAt: string,
+    now: number,
+    windowSec: number = 300,
+    graceSec: number = 90
+  ) => {
+    const age = Math.floor((now - new Date(generatedAt).getTime()) / 1000);
+    const staleThreshold = windowSec + graceSec;
+    let syncStatus = 'fresh';
+    if (age > staleThreshold) {
+      syncStatus = 'stale';
+    } else if (age > windowSec) {
+      syncStatus = 'syncing';
+    }
+    return {
+      isFresh: syncStatus !== 'stale',
+      syncStatus,
+      ageSeconds: age,
+    };
+  };
+
+  it('data within sync window is fresh and in fresh status', () => {
+    const now = Date.now();
+    const generated = new Date(now - 120_000).toISOString(); // 2m ago
+    const res = computeTieredFreshness(generated, now, 300, 90);
+    expect(res.isFresh).toBe(true);
+    expect(res.syncStatus).toBe('fresh');
+  });
+
+  it('data during expected sync execution window is marked syncing, NOT stale', () => {
+    const now = Date.now();
+    const generated = new Date(now - 320_000).toISOString(); // 5m 20s ago
+    const res = computeTieredFreshness(generated, now, 300, 90);
+    expect(res.isFresh).toBe(true); // NOT stale
+    expect(res.syncStatus).toBe('syncing');
+  });
+
+  it('data at boundary of grace period is still considered syncing', () => {
+    const now = Date.now();
+    const generated = new Date(now - 390_000).toISOString(); // exactly 390s ago
+    const res = computeTieredFreshness(generated, now, 300, 90);
+    expect(res.isFresh).toBe(true);
+    expect(res.syncStatus).toBe('syncing');
+  });
+
+  it('data past sync window + grace allowance is marked stale', () => {
+    const now = Date.now();
+    const generated = new Date(now - 391_000).toISOString(); // 391s ago
+    const res = computeTieredFreshness(generated, now, 300, 90);
+    expect(res.isFresh).toBe(false);
+    expect(res.syncStatus).toBe('stale');
   });
 });
 

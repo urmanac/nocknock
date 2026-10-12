@@ -3,7 +3,7 @@
         build-frontend test-frontend dev-frontend \
         test-contract clean all \
         tmux tmux-start tmux-stop tmux-attach tmux-status dev \
-        release dist db-backup db-restore
+        release dist release-notes db-backup db-restore
 
 # ============================================================
 # TOOLCHAIN
@@ -153,6 +153,21 @@ dist: release
 	@echo "Release artifacts packaged in dist/:"
 	@ls -lh dist/
 	@echo "=========================================================="
+
+release-notes:
+	@v="$(VERSION)"; \
+	if [ -z "$$v" ] && [ -n "$(TAG)" ]; then \
+		v="$$(echo "$(TAG)" | sed 's/^v//')"; \
+	fi; \
+	if [ -z "$$v" ]; then \
+		awk '/^## \[[0-9]+\.[0-9]+\.[0-9]+\] - [0-9]{4}/ { p=1 } p && /^## \[/ && count++ > 0 { exit } p' CHANGELOG.md; \
+	else \
+		awk -v target="## [$$v]" ' \
+			index($$0, target) == 1 { p=1; print; next } \
+			p && /^## \[/ { exit } \
+			p { print } \
+		' CHANGELOG.md; \
+	fi
 
 run-mcp:
 	cd ingestion-worker && ./target/release/nocknock-mcp
