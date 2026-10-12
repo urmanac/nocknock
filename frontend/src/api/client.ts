@@ -105,7 +105,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error(err.message || `HTTP ${res.status}`);
+    const errorMsg = (err && (err.error || err.message || err.detail)) || `HTTP ${res.status}`;
+    throw new Error(errorMsg);
   }
 
   if (res.status === 204) {

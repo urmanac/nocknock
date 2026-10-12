@@ -220,8 +220,27 @@ function Dashboard() {
             <span style={styles.engineBadge}>Dual-Growth Engine</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <WalletConnectBadge />
-          <div style={styles.statusPill}>
+            <a
+              href="/?view=lite"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: 1,
+                color: '#38bdf8',
+                textDecoration: 'none',
+                border: '1px solid #0284c7',
+                borderRadius: 999,
+                padding: '4px 10px',
+                background: '#0c4a6e22',
+              }}
+            >
+              ⚡ LITE COCKPIT
+            </a>
+            <WalletConnectBadge />
+            <div style={styles.statusPill}>
             <span style={{
               ...styles.statusDot,
               background: freshness.syncStatus === 'fresh'

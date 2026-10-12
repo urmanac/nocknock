@@ -154,7 +154,7 @@ export function LiteCockpit() {
         return;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes('RECEIPT_NOT_FOUND')) {
+        if (msg.includes('RECEIPT_NOT_FOUND') || msg.includes('404')) {
           setState(platform, { kind: 'awaiting_broadcast', txHash, attempts: attempt });
           await new Promise((r) => setTimeout(r, AWAIT_POLL_MS));
           continue;
@@ -195,7 +195,28 @@ export function LiteCockpit() {
     <div style={lite.container}>
       <header style={lite.header}>
         <h1 style={lite.title}>NockNock Lite</h1>
-        <WalletConnectBadge />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <a
+            href="/"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: 1,
+              color: '#94a3b8',
+              textDecoration: 'none',
+              border: '1px solid #30363d',
+              borderRadius: 999,
+              padding: '4px 10px',
+              background: '#161b22',
+            }}
+          >
+            📊 FULL STATE ROOM
+          </a>
+          <WalletConnectBadge />
+        </div>
       </header>
 
       {/* 1. Floor health */}
