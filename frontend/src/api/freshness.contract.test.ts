@@ -171,3 +171,55 @@ describe('Stale Data Detection Logic', () => {
     expect(computeFreshness(generated, now, 300).isFresh).toBe(true);
   });
 });
+
+describe('Dashboard Metric & Domain Calculations', () => {
+  it('dynamic YAxis domain never clips values outside static 90k-115k bounds', () => {
+    const domainCalc = {
+      min: (dataMin: number) => Math.max(0, Math.floor(Math.min(dataMin, 95000) / 5000) * 5000),
+      max: (dataMax: number) => Math.ceil(Math.max(dataMax, 105000) / 5000) * 5000,
+    };
+
+    // Standard steady state (~106k)
+    expect(domainCalc.min(106000)).toBe(95000);
+    expect(domainCalc.max(106000)).toBe(110000);
+
+    // Deep drawdown below 90k (e.g. 78,400) - must frame cleanly without clipping
+    expect(domainCalc.min(78400)).toBe(75000);
+    expect(domainCalc.max(78400)).toBe(105000); // 100k floor remains visible
+
+    // Accretion surge above 115k (e.g. 142,500) - must frame cleanly without clipping
+    expect(domainCalc.min(142500)).toBe(95000);
+    expect(domainCalc.max(142500)).toBe(145000);
+  });
+
+  it('computes alpha dollar and percentage dynamically against baseline', () => {
+    const calcAlpha = (active: number, passive: number) => {
+      const alphaUsd = active - passive;
+      const alphaPct = passive > 0 ? ((alphaUsd / passive) * 100).toFixed(1) : '0.0';
+      return { alphaUsd, alphaPct };
+    };
+
+    const res = calcAlpha(2955.76, 2605.99);
+    expect(res.alphaUsd).toBeCloseTo(349.77, 2);
+    expect(res.alphaPct).toBe('13.4');
+  });
+
+  it('computes floor buffer delta and percentage dynamically', () => {
+    const calcBuffer = (totalNock: number, floor: number = 100000) => {
+      const delta = totalNock - floor;
+      const pct = ((delta / floor) * 100).toFixed(1);
+      const isSafe = delta >= 0;
+      return { delta, pct, isSafe };
+    };
+
+    const safe = calcBuffer(106136);
+    expect(safe.delta).toBe(6136);
+    expect(safe.pct).toBe('6.1');
+    expect(safe.isSafe).toBe(true);
+
+    const breach = calcBuffer(94200);
+    expect(breach.delta).toBe(-5800);
+    expect(breach.pct).toBe('-5.8');
+    expect(breach.isSafe).toBe(false);
+  });
+});

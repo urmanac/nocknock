@@ -72,6 +72,9 @@ export function useFreshness<T = unknown>(
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
   const lastKnownFreshRef = useRef(true);
+  const snapshotRef = useRef<SnapshotEnvelope<T> | null>(null);
+  const freshnessRef = useRef<FreshnessState>(freshness);
+  freshnessRef.current = freshness;
 
   const log = useCallback((msg: string) => {
     if (debug) console.log(`[useFreshness] ${msg}`);
@@ -81,7 +84,7 @@ export function useFreshness<T = unknown>(
   const computeFreshness = useCallback((meta: SnapshotMeta): FreshnessState => {
     const generatedAt = new Date(meta.generated_at).getTime();
     const now = Date.now();
-    const ageSeconds = Math.floor((now - generatedAt) / 1000);
+    const ageSeconds = Math.max(0, Math.floor((now - generatedAt) / 1000));
     const isFresh = ageSeconds <= syncWindowSeconds;
 
     return {
@@ -89,18 +92,19 @@ export function useFreshness<T = unknown>(
       ageSeconds,
       stateHash: meta.state_hash,
       lastChecked: now,
-      staleSince: isFresh ? null : (freshness.staleSince ?? now),
+      staleSince: isFresh ? null : (freshnessRef.current.staleSince ?? now),
     };
-  }, [syncWindowSeconds, freshness.staleSince]);
+  }, [syncWindowSeconds]);
 
   // Fetch and update snapshot
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (isBackground = false) => {
     try {
-      log('Fetching snapshot...');
+      log(`Fetching snapshot (${isBackground ? 'background' : 'foreground'})...`);
       const data = await fetchSnapshot();
       if (!mountedRef.current) return;
 
       if (data) {
+        snapshotRef.current = data;
         setSnapshot(data);
         const newFreshness = computeFreshness(data.meta);
         setFreshness(newFreshness);
@@ -115,7 +119,9 @@ export function useFreshness<T = unknown>(
       setError(null);
     } catch (err) {
       if (!mountedRef.current) return;
-      setError(err instanceof Error ? err : new Error(String(err)));
+      if (!isBackground || !snapshotRef.current) {
+        setError(err instanceof Error ? err : new Error(String(err)));
+      }
       log(`Fetch error: ${err}`);
     } finally {
       if (mountedRef.current) {
@@ -124,21 +130,22 @@ export function useFreshness<T = unknown>(
     }
   }, [fetchSnapshot, computeFreshness, onFreshnessChange, log]);
 
-  // Initial fetch
+  // Initial fetch and continuous background polling
   useEffect(() => {
     mountedRef.current = true;
-    refresh();
+    refresh(false);
 
-    // Poll for freshness re-evaluation (even without new data)
-    pollTimerRef.current = setInterval(() => {
-      if (snapshot) {
-        const newFreshness = computeFreshness(snapshot.meta);
+    // Poll for freshness re-evaluation and new snapshot ingestion
+    pollTimerRef.current = setInterval(async () => {
+      if (snapshotRef.current) {
+        const newFreshness = computeFreshness(snapshotRef.current.meta);
         setFreshness(newFreshness);
         if (newFreshness.isFresh !== lastKnownFreshRef.current) {
           lastKnownFreshRef.current = newFreshness.isFresh;
           onFreshnessChange?.(newFreshness.isFresh);
         }
       }
+      await refresh(true);
     }, pollIntervalMs);
 
     return () => {
@@ -147,12 +154,12 @@ export function useFreshness<T = unknown>(
         clearInterval(pollTimerRef.current);
       }
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [refresh, computeFreshness, onFreshnessChange, pollIntervalMs]);
 
   // Re-fetch when snapshot changes externally (e.g., manual refresh button)
   const refetch = useCallback(() => {
     setLoading(true);
-    refresh();
+    refresh(false);
   }, [refresh]);
 
   return {

@@ -173,8 +173,13 @@ function Dashboard() {
     action: c.recommended_action,
   }));
 
-  const totalNockVal = global?.total_nock_amount ? parseInt(global.total_nock_amount).toLocaleString() : '106,340';
-  const nockFloorDeltaVal = global?.nock_floor_delta ? parseInt(global.nock_floor_delta).toLocaleString() : '6,340';
+  const nockAmountRaw = global?.total_nock_amount ? parseInt(global.total_nock_amount) : 0;
+  const totalNockVal = nockAmountRaw > 0 ? nockAmountRaw.toLocaleString() : '—';
+  const nockFloorDeltaRaw = global?.nock_floor_delta ? parseInt(global.nock_floor_delta) : (nockAmountRaw ? nockAmountRaw - 100000 : 0);
+  const nockFloorDeltaVal = nockFloorDeltaRaw.toLocaleString();
+  const isFloorSafe = nockFloorDeltaRaw >= 0;
+  const floorHealthColor = isFloorSafe ? '#10b981' : '#ef4444';
+  const nockFloorDeltaPct = ((nockFloorDeltaRaw / 100000) * 100).toFixed(1);
 
   return (
     <div style={styles.container}>
@@ -203,12 +208,12 @@ function Dashboard() {
             label="Total NOCK Stack"
             value={totalNockVal}
             suffix=" NOCK"
-            subtitle={`+${nockFloorDeltaVal} above 100k floor`}
-            highlightColor="#2ecc71"
+            subtitle={`${nockFloorDeltaRaw >= 0 ? '+' : ''}${nockFloorDeltaVal} above 100k floor`}
+            highlightColor={floorHealthColor}
           />
           <StatCard
             label="Total USDC Stack"
-            value={global?.total_usdc_amount || '354.19'}
+            value={global?.total_usdc_amount}
             prefix="$"
             suffix=" USDC"
             subtitle={`+${global?.total_fees_accrued_usd || '0.00'} USD fees accrued`}
@@ -218,7 +223,7 @@ function Dashboard() {
             label="Portfolio Value (USD)"
             value={global?.total_portfolio_usd}
             prefix="$"
-            subtitle={`@ $${metrics?.tick_bracket_hypervisor?.current_price || '0.0261'}/NOCK`}
+            subtitle={`@ $${metrics?.tick_bracket_hypervisor?.current_price || '0.00'}/NOCK`}
           />
           <StatCard
             label="Claimable Yield (Net)"
@@ -229,9 +234,9 @@ function Dashboard() {
           />
           <StatCard
             label="100k Floor Health"
-            value={global?.total_nock_amount ? `${(parseInt(global.total_nock_amount) / 1000).toFixed(1)}%` : '105.9%'}
-            subtitle={parseInt(nockFloorDeltaVal.replace(/,/g, '')) >= 0 ? `Hard Floor Safe (+${nockFloorDeltaVal} buffer)` : 'CRITICAL: Below Floor'}
-            highlightColor="#2ecc71"
+            value={nockAmountRaw > 0 ? `${(nockAmountRaw / 1000).toFixed(1)}%` : '—'}
+            subtitle={isFloorSafe ? `Hard Floor Safe (+${nockFloorDeltaVal} buffer)` : `CRITICAL: ${nockFloorDeltaVal} Below Floor`}
+            highlightColor={floorHealthColor}
           />
           <StatCard
             label="High-Water Mark"
@@ -251,13 +256,18 @@ function Dashboard() {
               {global?.shot_advice_action || 'HOLD & ACCRETE (Dual Growth Engine Active)'}
             </span>
           </div>
-          <div style={styles.floorStatusTag}>
-            Floor Invariant: <strong>100,000 NOCK Hard Floor PROTECTED</strong> (+{nockFloorDeltaVal} cushion)
+          <div style={{
+            ...styles.floorStatusTag,
+            background: isFloorSafe ? '#064e3b' : '#450a0a',
+            color: isFloorSafe ? '#a7f3d0' : '#fecaca',
+            border: isFloorSafe ? '1px solid #059669' : '1px solid #dc2626',
+          }}>
+            Floor Invariant: <strong>100,000 NOCK Hard Floor {isFloorSafe ? 'PROTECTED' : 'BREACHED'}</strong> ({nockFloorDeltaRaw >= 0 ? '+' : ''}{nockFloorDeltaVal} cushion)
           </div>
         </div>
         <p style={styles.adviceDetails}>
           {global?.shot_advice_details ||
-            `Total NOCK held is ${totalNockVal} (+${nockFloorDeltaVal} above 100k hard floor). AMMs are generating dual yield. Maintain posture.`}
+            `Total NOCK held is ${totalNockVal} (${nockFloorDeltaRaw >= 0 ? '+' : ''}${nockFloorDeltaVal} above 100k hard floor). AMMs are generating dual yield. Maintain posture.`}
         </p>
         <div style={styles.shotPillContainer}>
           <div style={styles.shotPill}>
@@ -269,13 +279,13 @@ function Dashboard() {
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>Goal 2 (USDC Accumulation):</span>
             <span style={styles.shotPillText}>
-              ${global?.total_usdc_amount || '354.19'} USDC across wallet and AMM liquidity. ${global?.total_fees_claimable_usd || '0.00'} live claimable yield accrued.
+              ${global?.total_usdc_amount || '0.00'} USDC across wallet and AMM liquidity. ${global?.total_fees_claimable_usd || '0.00'} live claimable yield accrued.
             </span>
           </div>
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>Impermanent Loss / Risk:</span>
             <span style={styles.shotPillText}>
-              0% realized losses. Uniswap V4 concentrated range is active ($0.01237 - $2.02783). Aerodrome fees live-tracked on-chain.
+              0% realized losses. Uniswap V4 concentrated range is active (${metrics?.tick_bracket_hypervisor?.brackets?.[0]?.lower_price || '0.01237'} – ${metrics?.tick_bracket_hypervisor?.brackets?.[0]?.upper_price || '2.02783'}). Aerodrome fees live-tracked on-chain.
             </span>
           </div>
         </div>
@@ -301,11 +311,14 @@ function Dashboard() {
                   <stop offset="95%" stopColor="#9b59b6" stopOpacity={0.15} />
                 </linearGradient>
               </defs>
-              <XAxis dataKey="time" stroke="#555" fontSize={11} tickLine={false} />
+              <XAxis dataKey="time" stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} />
               <YAxis
-                stroke="#555"
-                fontSize={11}
-                domain={[90000, 115000]}
+                stroke="#334155"
+                tick={{ fill: '#94a3b8', fontSize: 11 }}
+                domain={[
+                  (dataMin: number) => Math.max(0, Math.floor(Math.min(dataMin, 95000) / 5000) * 5000),
+                  (dataMax: number) => Math.ceil(Math.max(dataMax, 105000) / 5000) * 5000,
+                ]}
                 tickFormatter={v => `${(v / 1000).toFixed(0)}k`}
               />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
@@ -317,41 +330,41 @@ function Dashboard() {
               />
               <ReferenceLine
                 y={100000}
-                stroke="#e74c3c"
+                stroke="#ef4444"
                 strokeDasharray="4 4"
                 strokeWidth={2}
-                label={{ value: '100k HARD FLOOR', fill: '#e74c3c', fontSize: 11, position: 'insideTopLeft' }}
+                label={{ value: '100k HARD FLOOR', fill: '#ef4444', fontSize: 11, position: 'insideTopLeft' }}
               />
               <Area
                 type="monotone"
                 dataKey="tranche3Vault"
                 stackId="1"
                 fill="url(#colorVault)"
-                stroke="#2ecc71"
-                name="Tranche 3: Sovereign Vault (96,005 NOCK)"
+                stroke="#10b981"
+                name="Tranche 3: Sovereign Vault"
               />
               <Area
                 type="monotone"
                 dataKey="tranche2Aero"
                 stackId="1"
                 fill="url(#colorAero)"
-                stroke="#3498db"
-                name="Tranche 2: Aerodrome LP (6,329 NOCK)"
+                stroke="#38bdf8"
+                name="Tranche 2: Aerodrome LP"
               />
               <Area
                 type="monotone"
                 dataKey="tranche1V4"
                 stackId="1"
                 fill="url(#colorV4)"
-                stroke="#9b59b6"
-                name="Tranche 1: Uniswap V4 (4,004 NOCK)"
+                stroke="#a855f7"
+                name="Tranche 1: Uniswap V4"
               />
               <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </AreaChart>
           </ResponsiveContainer>
           <div style={{ marginTop: 8, fontSize: '0.75rem', color: '#888', display: 'flex', justifyContent: 'space-between' }}>
-            <span>Total Holding: <strong style={{ color: '#2ecc71' }}>{totalNockVal} NOCK</strong></span>
-            <span>Safety Buffer: <strong style={{ color: '#2ecc71' }}>+{nockFloorDeltaVal} NOCK (+6.3%)</strong> above floor</span>
+            <span>Total Holding: <strong style={{ color: floorHealthColor }}>{totalNockVal} NOCK</strong></span>
+            <span>Safety Buffer: <strong style={{ color: floorHealthColor }}>{nockFloorDeltaRaw >= 0 ? `+${nockFloorDeltaVal}` : nockFloorDeltaVal} NOCK ({nockFloorDeltaRaw >= 0 ? `+${nockFloorDeltaPct}%` : `${nockFloorDeltaPct}%`})</strong> above floor</span>
           </div>
         </CanvasPanel>
 
@@ -359,18 +372,18 @@ function Dashboard() {
         <CanvasPanel title="Total Value & NOCK Price vs Baseline (Dual Axis)">
           <ResponsiveContainer width="100%" height={260}>
             <ComposedChart data={valueVsBaseline} margin={{ top: 10, right: 80, left: 0, bottom: 0 }}>
-              <XAxis dataKey="time" stroke="#555" fontSize={11} tickLine={false} />
-              <YAxis yAxisId="left" orientation="left" stroke="#555" fontSize={11} tickFormatter={v => '$' + v.toLocaleString()} />
-              <YAxis yAxisId="right" orientation="right" stroke="#555" fontSize={11} tickFormatter={v => '$' + v.toFixed(4)} domain={['auto', 'auto']} />
+              <XAxis dataKey="time" stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} />
+              <YAxis yAxisId="left" orientation="left" stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => '$' + v.toLocaleString()} />
+              <YAxis yAxisId="right" orientation="right" stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => '$' + v.toFixed(4)} domain={['auto', 'auto']} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
               <Tooltip
                 contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
                 itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
                 labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
               />
-              <Line yAxisId="left" type="monotone" dataKey="portfolio" stroke="#2ecc71" strokeWidth={2} dot={{ r: 3 }} name="Portfolio USD" />
-              <Line yAxisId="left" type="monotone" dataKey="highWaterMark" stroke="#f39c12" strokeWidth={1} strokeDasharray="5 5" dot={false} name="High-Water Mark" />
-              <Line yAxisId="right" type="monotone" dataKey="tokenPrice" stroke="#3498db" strokeWidth={2} dot={{ r: 3 }} name="NOCK Spot Price" />
+              <Line yAxisId="left" type="monotone" dataKey="portfolio" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} name="Portfolio USD" />
+              <Line yAxisId="left" type="monotone" dataKey="highWaterMark" stroke="#f59e0b" strokeWidth={1} strokeDasharray="5 5" dot={false} name="High-Water Mark" />
+              <Line yAxisId="right" type="monotone" dataKey="tokenPrice" stroke="#38bdf8" strokeWidth={2} dot={{ r: 3 }} name="NOCK Spot Price" />
             </ComposedChart>
           </ResponsiveContainer>
         </CanvasPanel>
@@ -378,9 +391,9 @@ function Dashboard() {
         {/* 3. Tick Bracket Hypervisor — Horizontal Ranges */}
         <CanvasPanel title="Tick Bracket Hypervisor (Uniswap V4 vs Aero)">
           <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={tickData} layout="vertical" margin={{ top: 10, right: 30, left: 100, bottom: 0 }}>
-              <XAxis type="number" tickFormatter={v => '$' + v.toLocaleString()} stroke="#555" fontSize={11} />
-              <YAxis type="category" dataKey="name" width={100} stroke="#555" fontSize={11} />
+            <BarChart data={tickData} layout="vertical" margin={{ top: 10, right: 30, left: 110, bottom: 0 }}>
+              <XAxis type="number" tickFormatter={v => '$' + v.toLocaleString()} stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+              <YAxis type="category" dataKey="name" width={110} stroke="#334155" tick={{ fill: '#cbd5e1', fontSize: 11 }} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
               <Tooltip
                 contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
@@ -388,23 +401,23 @@ function Dashboard() {
                 labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
                 formatter={v => '$' + v.toLocaleString()}
               />
-              <Bar dataKey="upper" fill="#f39c12" fillOpacity={0.4} name="Upper Bracket ($)" />
-              <Bar dataKey="lower" fill="#2ecc71" fillOpacity={0.4} name="Lower Bracket ($)" />
+              <Bar dataKey="upper" fill="#f59e0b" fillOpacity={0.6} name="Upper Bracket ($)" />
+              <Bar dataKey="lower" fill="#10b981" fillOpacity={0.6} name="Lower Bracket ($)" />
               <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </BarChart>
           </ResponsiveContainer>
           <div style={{ marginTop: 12, fontSize: '0.75rem', color: '#aaa', fontFamily: 'monospace', display: 'flex', justifyContent: 'space-between' }}>
-            <span>Spot Price: <strong>${metrics?.tick_bracket_hypervisor?.current_price || '0.02726'}</strong></span>
-            <span style={{ color: '#2ecc71' }}>Uniswap V4 Range: $0.01237 – $2.02783 (IN RANGE)</span>
+            <span>Spot Price: <strong>${metrics?.tick_bracket_hypervisor?.current_price || '0.00'}</strong></span>
+            <span style={{ color: '#10b981' }}>Uniswap V4 Range: {metrics?.tick_bracket_hypervisor?.brackets?.[0]?.lower_price ? `$${metrics?.tick_bracket_hypervisor?.brackets?.[0]?.lower_price} – $${metrics?.tick_bracket_hypervisor?.brackets?.[0]?.upper_price}` : '—'} (IN RANGE)</span>
           </div>
         </CanvasPanel>
 
         {/* 4. Portfolio Deviation Matrix — Bar Chart */}
         <CanvasPanel title="Portfolio Deviation Matrix (Target vs Actual)">
           <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={deviationData} layout="vertical" margin={{ top: 10, right: 30, left: 120, bottom: 0 }}>
-              <XAxis type="number" tickFormatter={v => `${v}%`} stroke="#555" fontSize={11} />
-              <YAxis type="category" dataKey="name" width={120} stroke="#555" fontSize={11} />
+            <BarChart data={deviationData} layout="vertical" margin={{ top: 10, right: 30, left: 130, bottom: 0 }}>
+              <XAxis type="number" tickFormatter={v => `${v}%`} stroke="#334155" tick={{ fill: '#cbd5e1', fontSize: 11 }} />
+              <YAxis type="category" dataKey="name" width={130} stroke="#334155" tick={{ fill: '#e2e8f0', fontSize: 11 }} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
               <Tooltip
                 contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
@@ -412,22 +425,23 @@ function Dashboard() {
                 labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 6, fontSize: '0.9rem' }}
                 formatter={(v: any, name: string) => [`${Number(v).toFixed(1)}%`, name]}
               />
-              <Bar dataKey="target" fill="#64748b" fillOpacity={0.6} name="Target %" />
+              <Bar dataKey="target" fill="#38bdf8" fillOpacity={0.85} stroke="#0284c7" strokeWidth={1} name="Target %" />
               <Bar dataKey="actual" name="Actual %">
                 {deviationData.map((d: any, i: number) => (
                   <Cell
                     key={i}
-                    fill={d.status === 'over_funded' ? '#e74c3c' : d.status === 'under_funded' ? '#f39c12' : d.status === 'fast_running' ? '#e67e22' : '#2ecc71'}
+                    fill={d.status === 'over_funded' ? '#ef4444' : d.status === 'under_funded' ? '#f59e0b' : d.status === 'fast_running' ? '#f97316' : '#10b981'}
                   />
                 ))}
               </Bar>
-              <Legend wrapperStyle={{ color: '#cbd5e1', paddingTop: 8 }} formatter={(value) => <span style={{ color: '#cbd5e1', marginRight: 12 }}>{value}</span>} />
+              <Legend wrapperStyle={{ color: '#f1f5f9', paddingTop: 8 }} formatter={(value) => <span style={{ color: '#f1f5f9', fontWeight: 600, marginRight: 16 }}>{value}</span>} />
             </BarChart>
           </ResponsiveContainer>
-          <div style={{ marginTop: 8, fontSize: '0.7rem', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <span><span style={{ color: '#2ecc71' }}>■</span> On Target</span>
-            <span><span style={{ color: '#f39c12' }}>■</span> Under-Funded</span>
-            <span><span style={{ color: '#e74c3c' }}>■</span> Over-Funded</span>
+          <div style={{ marginTop: 8, fontSize: '0.75rem', display: 'flex', gap: 16, flexWrap: 'wrap', color: '#cbd5e1' }}>
+            <span><span style={{ color: '#38bdf8' }}>■</span> Target Weight</span>
+            <span><span style={{ color: '#10b981' }}>■</span> Actual: On Target</span>
+            <span><span style={{ color: '#f59e0b' }}>■</span> Actual: Under-Funded</span>
+            <span><span style={{ color: '#ef4444' }}>■</span> Actual: Over-Funded</span>
           </div>
         </CanvasPanel>
 
@@ -435,30 +449,39 @@ function Dashboard() {
         <CanvasPanel title="Strategy Counterfactual (Active vs 100% Hold)">
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={counterfactual} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-              <XAxis dataKey="time" stroke="#555" fontSize={11} tickLine={false} />
-              <YAxis stroke="#555" fontSize={11} tickFormatter={v => '$' + v.toLocaleString()} />
+              <XAxis dataKey="time" stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} />
+              <YAxis stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => '$' + v.toLocaleString()} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
               <Tooltip
                 contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
                 itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
                 labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
               />
-              <Line type="monotone" dataKey="active" stroke="#2ecc71" strokeWidth={2} dot={{ r: 3 }} name="Active Portfolio ($)" />
-              <Line type="monotone" dataKey="passive" stroke="#888" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Passive Hold ($)" />
+              <Line type="monotone" dataKey="active" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} name="Active Portfolio ($)" />
+              <Line type="monotone" dataKey="passive" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Passive Hold ($)" />
               <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </LineChart>
           </ResponsiveContainer>
-          <div style={{ marginTop: 8, fontSize: '0.75rem', color: '#2ecc71', textAlign: 'center' }}>
-            Alpha Generated: <strong>+${(parseFloat(global?.total_portfolio_usd || '3062') - parseFloat(global?.total_native_usd || '2898')).toFixed(2)} USD</strong> (+5.6% above passive hold)
-          </div>
+          {(() => {
+            const activeUsd = parseFloat(global?.total_portfolio_usd || '0');
+            const passiveUsd = parseFloat(global?.total_native_usd || '0');
+            const alphaUsd = activeUsd - passiveUsd;
+            const alphaPct = passiveUsd > 0 ? ((alphaUsd / passiveUsd) * 100).toFixed(1) : '0.0';
+            const alphaColor = alphaUsd >= 0 ? '#10b981' : '#ef4444';
+            return (
+              <div style={{ marginTop: 8, fontSize: '0.75rem', color: alphaColor, textAlign: 'center' }}>
+                Alpha Generated: <strong>{alphaUsd >= 0 ? `+$${alphaUsd.toFixed(2)}` : `-$${Math.abs(alphaUsd).toFixed(2)}`} USD</strong> ({alphaUsd >= 0 ? `+${alphaPct}%` : `${alphaPct}%`} vs passive hold)
+              </div>
+            );
+          })()}
         </CanvasPanel>
 
         {/* 6. Velocity Gas Sandbox — Fee Harvesting & Gas ROI */}
         <CanvasPanel title="Velocity Gas Sandbox (Yield vs Gas Break-Even)">
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={gasData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-              <XAxis dataKey="name" stroke="#555" fontSize={11} tickLine={false} />
-              <YAxis stroke="#555" fontSize={11} tickFormatter={v => '$' + v.toLocaleString()} />
+              <XAxis dataKey="name" stroke="#334155" tick={{ fill: '#cbd5e1', fontSize: 11 }} tickLine={false} />
+              <YAxis stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => '$' + v.toLocaleString()} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
               <Tooltip
                 contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
@@ -466,14 +489,14 @@ function Dashboard() {
                 labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
                 formatter={(v: any) => `$${Number(v).toFixed(4)}`}
               />
-              <Bar dataKey="claimable" fill="#2ecc71" fillOpacity={0.8} name="Claimable Fee Yield ($)" />
-              <Bar dataKey="gasBreakEven" fill="#e74c3c" fillOpacity={0.8} name="Gas Fee ($)" />
+              <Bar dataKey="claimable" fill="#10b981" fillOpacity={0.85} name="Claimable Fee Yield ($)" />
+              <Bar dataKey="gasBreakEven" fill="#ef4444" fillOpacity={0.85} name="Gas Fee ($)" />
               <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </BarChart>
           </ResponsiveContainer>
           <div style={{ marginTop: 8, fontSize: '0.75rem', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             {gasData.map((g: any) => (
-              <span key={g.name} style={{ color: g.action === 'claim_now' ? '#2ecc71' : '#f39c12' }}>
+              <span key={g.name} style={{ color: g.action === 'claim_now' ? '#10b981' : '#f59e0b' }}>
                 <strong>{g.name}:</strong> {g.action.toUpperCase()} (${g.claimable} earned / gas ${g.gasBreakEven} — {g.ratio.toFixed(0)}x ROI)
               </span>
             ))}
