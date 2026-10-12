@@ -4,7 +4,7 @@
 
 **Custodian Transfer**: Antigravity / Google DeepMind $\longrightarrow$ **Nemotron**  
 **Effective Timestamp**: 2026-10-12T11:00:00-04:00  
-**Current Active Version**: `v0.1.3` (Shipped) $\longrightarrow$ Next Target: `v0.2.0`  
+**Current Active Version**: `v0.1.4` (Shipped) $\longrightarrow$ Next Target: `v0.2.0` (Golden Path implemented on feature branch: WalletConnect claim execution, receipt-verified harvest ledger, 60/40 sub-ledger, tax guardrails, notifications, lite cockpit)  
 **Main Branch Status**: Fully green, PR #27 merged, zero open bugs, all test suites passing.
 
 ---
@@ -177,9 +177,10 @@ When patch triage is complete, execute the `v0.2.0` roadmap:
                                            Base Mainnet Settlement
 ```
 
-### 1. Golden Path Cockpit + WalletConnect (Uniswap Mobile App)
-- **Zero Custody**: Never build custom wallet custody. Bridge the web cockpit directly to the operator's Uniswap mobile app via WalletConnect (Wagmi / Viem / Reown).
-- **1-Click Execution**: When fees exceed the threshold ($5.00+), generate the `claimFees()` transaction payload and prompt mobile biometric signing (Face ID / Fingerprint).
+### 1. Golden Path Cockpit + WalletConnect (Uniswap Mobile App) — IMPLEMENTED in v0.2.0
+- **Zero Custody**: Never build custom wallet custody. The web cockpit pairs to the operator's Uniswap mobile app via WalletConnect (`@walletconnect/ethereum-provider`, QR modal + deep links); the sovereign wallet signs with biometrics.
+- **Execute Flow**: `GET /v1/execute/claim-fees/payload` builds pre-simulated unsigned transactions (Aerodrome `claimFees()` + Uniswap V4 collect); the paired wallet signs; `POST /v1/execute/record-harvest` records only receipt-verified transfers into the 60/40 ledger. Set `VITE_WALLETCONNECT_PROJECT_ID` (free Reown project id) at frontend build time.
+- **Known quirk**: the Uniswap app may hold an approved transaction unbroadcast until the operator returns to it — the cockpit shows "approved, awaiting wallet broadcast" and retries the ledger recording automatically.
 
 ### 2. Virtual 60/40 Sub-Ledger & Tax Pre-Funding
 - **No Separate Tax Cold Address**: All operations run through the single sovereign operator address.
