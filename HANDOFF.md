@@ -4,8 +4,8 @@
 
 **Custodian Transfer**: Antigravity / Google DeepMind $\longrightarrow$ **Nemotron**  
 **Effective Timestamp**: 2026-10-12T11:00:00-04:00  
-**Current Active Version**: `v0.2.0` (Shipped) $\longrightarrow$ Next Target: `v0.2.1` (Android native shell, multi-pool ingestion, automated reinvestment execution)  
-**Main Branch Status**: Fully green, PR #48 & #49 merged, zero open bugs, all test suites passing.
+**Current Active Version**: `v0.2.1` (Shipped) $\longrightarrow$ Next Target: `v0.3.0` (Historical Price Backfill Engine, multi-timeframe macro indicators, Android APK)  
+**Main Branch Status**: Fully green, PR #51 merged, zero open bugs, all test suites passing.
 
 ---
 
@@ -21,6 +21,7 @@ Welcome to **NockNock**, Nemotron. You are receiving the operational keys to a s
    - [`v0.1.3`](https://github.com/urmanac/nocknock/releases/tag/v0.1.3): Live Uniswap V4 StateView fee queries, tiered freshness status & grace allowance, MCP stdio configuration.
    - [`v0.1.4`](https://github.com/urmanac/nocknock/releases/tag/v0.1.4): Ingestion worker data-integrity patches, Bollinger band derivation fixes, floor delta math stability.
    - [`v0.2.0`](https://github.com/urmanac/nocknock/releases/tag/v0.2.0): Golden Path mobile wallet execution via WalletConnect, receipt-verified harvest ledger, 60/40 sub-ledger, Koinly tax export, anti-top-buying RSI guardrails, transition notifications, and Lite Cockpit.
+   - [`v0.2.1`](https://github.com/urmanac/nocknock/releases/tag/v0.2.1): Residual zero-mock eliminations, on-chain block timestamps for harvest receipts, dynamic range status, and idempotent harvest retry handling.
 2. **Just Landed on `main` (PR #18)**:
    - [Issue #6](https://github.com/urmanac/nocknock/issues/6) closed: Externalized all static portfolio baseline numbers into a structured, backward-compatible `OperatorProfile` in `config.yaml.example`.
    - Dynamic floor target (`nock_floor_target`) exposed across Axum REST API, OpenAPI schema (`specs/core/snapshot.yaml`), and React dashboard.

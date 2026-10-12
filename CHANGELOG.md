@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Deferred to 0.3.0 / Future Releases
+- [ ] **Historical Price Backfill Engine**: Retroactive OHLCV gap-filling via GeckoTerminal for multi-day macro indicators.
+- [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).
+- [ ] **Multi-Pool Dynamic Ingestion**: Discovering and tracking secondary AMM pools on Base.
+- [ ] **Coinbase Staked-ETH Connector**: CDP API integration to monitor staked ETH balances.
+- [ ] **Urbit Native (%nocknock Desk)**: Hoon data structures and Gall agent.
+
+## [0.2.1] - 2026-10-12
+
 ### Fixed — 0.2.x Triage Cycle (task 000664, live-data audit)
 - **Zero-mock**: ETH/USD price lookup in the claim-fees gas valuation no longer falls back to a hardcoded $2,500; when the price RPC fails, gas USD degrades to "unavailable" instead of a fabricated valuation.
 - **Zero-mock**: removed the synthetic Aerodrome tick bracket (0.00000 → 999.00000) from `tick_bracket_hypervisor`; the chart now shows only the live tick-derived V4 bracket (Tranche 2 liquidity remains visible in the stack/deviation panels).
@@ -21,12 +30,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Tests
 - Worker: 33 unit tests (+2: claim-simulation gas honesty, no synthetic bracket).
 - Frontend: 25 tests (+5: error mapping detail/status, record-harvest classifier).
-
-### Deferred to 0.2.1 / Future Releases
-- [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).
-- [ ] **Multi-Pool Dynamic Ingestion**: Discovering and tracking secondary AMM pools on Base.
-- [ ] **Coinbase Staked-ETH Connector**: CDP API integration to monitor staked ETH balances.
-- [ ] **Urbit Native (%nocknock Desk)**: Hoon data structures and Gall agent.
 
 ## [0.2.0] - 2026-10-12
 
