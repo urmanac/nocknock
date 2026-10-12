@@ -1,7 +1,7 @@
 # Implementation Tasks: Run 0.2.0 Series Bug Hunt and Triage Cycle
 
 ## Phase 1 — Bring-up & Setup
-- [ ] Create `patch-0.2.x` GitHub label (green `#0e8a16`) via `gh label create` with `unset GITHUB_TOKEN` protocol.
+- [~] Provision `patch-0.2.x` GitHub label (green `#0e8a16`). NOTE: this sandbox has no GitHub token/`gh` — prepare ready-to-file issue bodies under this task's `github-issues/` folder instead; label + issue creation happens operator-side (or via an agent with credentials).
 - [ ] Build and start the live stack: `SQLX_OFFLINE=true cargo build --release` in `ingestion-worker/`, run worker with `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/nocknock`, start Vite dev server; verify `/health` and a live Alchemy snapshot on :8080 and dashboard on :3000.
 - [ ] Capture baseline screenshots (desktop + `?view=lite`) including the deviation-matrix legend black square, into this task's `screenshots/` folder.
 
