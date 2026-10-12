@@ -102,6 +102,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Aligned all Recharts tooltips with the State Room dark aesthetic (`#161b22` container, `#30363d` border, `#8b949e` label header).
   - Eliminated default stark white tooltip cards that clashed with cockpit canvas panels.
 
+- **Model Context Protocol (MCP) Verification & Stateless HTTP**:
+  - Exposed `/v1/mcp` and `/mcp` endpoints on the Axum ingestion worker delivering stateless HTTP MCP services compliant with the 2024-11-05 MCP specification.
+  - Added optional Bearer token authentication via `mcp_bearer_token` configuration.
+  - Added comprehensive automated test suite (`scripts/playtest-mcp.py` / `make test-mcp`) validating handshake, tool discovery, and tool execution across both STDIO and HTTP transports.
+  - Dynamically bound `nocknock-mcp` version to `env!("CARGO_PKG_VERSION")`.
+  - Removed silent mock spot price fallback in edge direct-RPC mode, ensuring explicit failure states when Base RPC queries fail.
+- **Operator Guidance & Invariants Compilation**:
+  - Published [`OPERATOR_GUIDANCE.md`](OPERATOR_GUIDANCE.md) documenting standing orders, branch protection protocols, zero-mock-data rules, and 60/40 virtual sub-ledger accounting.
+
 ### Changed
 - **CI Build Performance**:
   - Added `Swatinem/rust-cache@v2` across `build-brain` and `build-worker` GitHub Actions jobs, dramatically accelerating offline SQLX compilation times.

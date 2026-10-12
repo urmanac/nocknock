@@ -50,6 +50,8 @@ struct AppConfig {
     v4_fee_baseline_usdc: Option<f64>,
     #[serde(default)]
     v4_fee_baseline_nock: Option<f64>,
+    #[serde(default)]
+    mcp_bearer_token: Option<String>,
 }
 
 fn default_db_url() -> String {
@@ -434,6 +436,14 @@ async fn main() -> Result<()> {
             "/v1/ingest",
             axum::routing::post(trigger_ingest_handler),
         )
+        .route(
+            "/v1/mcp",
+            axum::routing::post(mcp_http_handler),
+        )
+        .route(
+            "/mcp",
+            axum::routing::post(mcp_http_handler),
+        )
         .layer(Extension(state.clone()));
 
     let port = state.config.port;
@@ -721,6 +731,209 @@ async fn get_snapshot_by_id_handler(
             })),
         )
     }
+}
+
+pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
+    let global = data.pointer("/derived_metrics/global_status");
+    let total_usd = global.and_then(|g| g.get("total_portfolio_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
+    let total_nock = global.and_then(|g| g.get("total_nock_amount")).and_then(|v| v.as_str()).unwrap_or("0");
+    let nock_delta = global.and_then(|g| g.get("nock_floor_delta")).and_then(|v| v.as_str()).unwrap_or("0");
+    let total_usdc = global.and_then(|g| g.get("total_usdc_amount")).and_then(|v| v.as_str()).unwrap_or("0.00");
+    let hwm = global.and_then(|g| g.get("high_water_mark_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
+    let advice = global.and_then(|g| g.get("shot_advice_action")).and_then(|v| v.as_str()).unwrap_or("HOLD");
+
+    let delta_prefix = if nock_delta.starts_with('-') { "" } else { "+" };
+
+    format!(
+        "📈 NockNock Sovereign Portfolio State (Live API)\n\
+         =========================================\n\
+         • Total Value: ${total_usd} USD\n\
+         • Sovereign NOCK Stack: {total_nock} NOCK (Floor buffer delta: {delta_prefix}{nock_delta} above 100k)\n\
+         • Stable Stack: {total_usdc} USDC\n\
+         • High-Water Mark: ${hwm} USD\n\
+         • Tactical Directive: {advice}\n\
+         • Mode: Tier 1 Connected (Verified Persistent Snapshot)"
+    )
+}
+
+pub fn format_shot_advice_text(data: &serde_json::Value) -> String {
+    let global = data.pointer("/derived_metrics/global_status");
+    let action = global.and_then(|g| g.get("shot_advice_action")).and_then(|v| v.as_str()).unwrap_or("HOLD");
+    let details = global.and_then(|g| g.get("shot_advice_details")).and_then(|v| v.as_str()).unwrap_or("Accreting");
+    let claimable_usd = global.and_then(|g| g.get("total_fees_claimable_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
+    let gas_delta = global.and_then(|g| g.get("gas_to_fee_delta_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
+
+    format!(
+        "🎯 Tactical Shot Advice Engine\n\
+         ===============================\n\
+         • Recommended Action: {action}\n\
+         • Decision Matrix Details: {details}\n\
+         • Uncollected Claimable Fees: ${claimable_usd} USD\n\
+         • Net Gas-to-Fee Profitability: +${gas_delta} USD\n\
+         • Execution Trigger: Batch Harvest shots unlock at >= $5.00 accumulated fees."
+    )
+}
+
+pub fn format_claim_simulation_text(data: &serde_json::Value) -> String {
+    let fees = data.get("contract_fees").and_then(|f| f.as_array());
+    let mut details = String::new();
+    let mut total_claimable_usd = 0.0f64;
+
+    if let Some(list) = fees {
+        for fee in list {
+            let symbol = fee.get("fee_token_symbol").and_then(|s| s.as_str()).unwrap_or("Pool");
+            let amount = fee.get("amount").and_then(|a| a.as_str()).unwrap_or("0");
+            let amount_usd = fee.get("amount_usd").and_then(|a| a.as_str()).unwrap_or("0.00");
+            let gas = fee.get("gas_break_even_usd").and_then(|g| g.as_str()).unwrap_or("0.005");
+            if let Ok(usd_val) = amount_usd.parse::<f64>() {
+                total_claimable_usd += usd_val;
+            }
+            details.push_str(&format!("  - {symbol}: {amount} (~${amount_usd} USD | Gas Est: ${gas})\n"));
+        }
+    }
+
+    format!(
+        "⚡ Fee Claim Simulation\n\
+         =======================\n\
+         • Total Gross Claimable: ${:.4} USD\n\
+         • Estimated Base Gas: ~$0.005 USD\n\
+         • Net Accretion if Harvested: ${:.4} USD\n\
+         Pool Breakdown:\n{}",
+        total_claimable_usd,
+        (total_claimable_usd - 0.005).max(0.0),
+        details
+    )
+}
+
+async fn mcp_http_handler(
+    Extension(state): Extension<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(payload): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    // Validate Bearer token if configured
+    if let Some(ref required_token) = state.config.mcp_bearer_token {
+        let auth_header = headers.get("authorization").and_then(|h| h.to_str().ok());
+        let provided_token = auth_header.and_then(|h| {
+            h.strip_prefix("Bearer ")
+                .or_else(|| h.strip_prefix("bearer "))
+        });
+        if provided_token != Some(required_token.as_str()) {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({
+                    "jsonrpc": "2.0",
+                    "id": payload.get("id"),
+                    "error": {
+                        "code": -32001,
+                        "message": "Unauthorized: Invalid or missing Bearer token"
+                    }
+                })),
+            );
+        }
+    }
+
+    let method = payload.get("method").and_then(|m| m.as_str()).unwrap_or_default();
+    let id = payload.get("id").cloned();
+
+    let response = match method {
+        "initialize" => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "serverInfo": {
+                    "name": "nocknock-mcp",
+                    "version": env!("CARGO_PKG_VERSION")
+                },
+                "capabilities": {
+                    "tools": {}
+                }
+            }
+        }),
+        "ping" => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {}
+        }),
+        "tools/list" => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "tools": [
+                    {
+                        "name": "get_portfolio_state",
+                        "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, native token balance, and active tranche allocations.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {},
+                            "required": []
+                        }
+                    },
+                    {
+                        "name": "get_shot_advice",
+                        "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {},
+                            "required": []
+                        }
+                    },
+                    {
+                        "name": "simulate_claim_fees",
+                        "description": "Simulates gas expenditure vs uncollected yield across Aerodrome and Uniswap V4 positions.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {},
+                            "required": []
+                        }
+                    }
+                ]
+            }
+        }),
+        "tools/call" => {
+            let tool_name = payload
+                .get("params")
+                .and_then(|p| p.get("name"))
+                .and_then(|n| n.as_str())
+                .unwrap_or_default();
+
+            let latest = state.latest_snapshot.lock().await;
+            let result_text = if let Some(ref env) = *latest {
+                let data_val = serde_json::to_value(&env.data).unwrap_or_default();
+                match tool_name {
+                    "get_portfolio_state" => format_portfolio_state_text(&data_val),
+                    "get_shot_advice" => format_shot_advice_text(&data_val),
+                    "simulate_claim_fees" => format_claim_simulation_text(&data_val),
+                    _ => format!("Unknown tool: {tool_name}"),
+                }
+            } else {
+                "No snapshot available yet".to_string()
+            };
+
+            json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": result_text
+                        }
+                    ]
+                }
+            })
+        }
+        _ => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": -32601,
+                "message": format!("Method not found: {method}")
+            }
+        }),
+    };
+
+    (StatusCode::OK, Json(response))
 }
 
 // ============================================================
@@ -1672,5 +1885,59 @@ v4_fee_baseline_nock: 1.4820
         assert_eq!(cfg.v4_position_id, Some(3126000));
         assert_eq!(cfg.v4_fee_baseline_usdc, Some(0.0245));
         assert_eq!(cfg.v4_fee_baseline_nock, Some(1.4820));
+        assert_eq!(cfg.mcp_bearer_token, None);
+    }
+
+    #[test]
+    fn test_mcp_text_formatters() {
+        let sample_data = json!({
+            "contract_fees": [
+                {
+                    "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+                    "fee_token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                    "fee_token_symbol": "USDC+NOCK (Uniswap V4)",
+                    "amount": "0.030 USDC + 1.83 NOCK",
+                    "amount_usd": "0.0753",
+                    "claimable": true,
+                    "gas_break_even_usd": "0.0043"
+                },
+                {
+                    "contract_address": "0x85f1aa3a70fedd1c52705c15baed143e675cd626",
+                    "fee_token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                    "fee_token_symbol": "USDC+NOCK (Aerodrome)",
+                    "amount": "0.03772 USDC + 2.14164 NOCK",
+                    "amount_usd": "0.0902",
+                    "claimable": true,
+                    "gas_break_even_usd": "0.0043"
+                }
+            ],
+            "derived_metrics": {
+                "global_status": {
+                    "total_portfolio_usd": "2952.37",
+                    "total_nock_amount": "106140",
+                    "nock_floor_delta": "6140",
+                    "total_usdc_amount": "349.68",
+                    "high_water_mark_usd": "3200.25",
+                    "shot_advice_action": "HOLD & ACCRETE",
+                    "shot_advice_details": "Accreting yield steadily",
+                    "total_fees_claimable_usd": "0.17",
+                    "gas_to_fee_delta_usd": "0.16"
+                }
+            }
+        });
+
+        let state_text = format_portfolio_state_text(&sample_data);
+        assert!(state_text.contains("106140 NOCK"));
+        assert!(state_text.contains("+6140 above 100k"));
+        assert!(state_text.contains("$2952.37 USD"));
+
+        let advice_text = format_shot_advice_text(&sample_data);
+        assert!(advice_text.contains("HOLD & ACCRETE"));
+        assert!(advice_text.contains("$0.17 USD"));
+
+        let claim_text = format_claim_simulation_text(&sample_data);
+        assert!(claim_text.contains("Uniswap V4"));
+        assert!(claim_text.contains("Aerodrome"));
+        assert!(claim_text.contains("0.0753"));
     }
 }

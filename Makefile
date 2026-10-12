@@ -82,6 +82,11 @@ test-contract: build-worker
 	@echo "Running frontend contract tests..."
 	cd frontend && npm test -- --run
 
+test-mcp: build-worker
+	@echo "Running MCP test suite (STDIO & Stateless HTTP)..."
+	python3 ./scripts/playtest-mcp.py
+
+
 # ============================================================
 # TMUX ORCHESTRATION — persistent background execution
 # ============================================================
