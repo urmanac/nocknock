@@ -25,6 +25,29 @@ fi
 export PATH="$HOME/.cargo/bin:$PATH"
 cargo --version || echo "WARN: cargo still unavailable; rerun this script or install manually"
 
+# --- PostgreSQL (needed by the ingestion worker at boot) ---
+if ! command -v psql >/dev/null 2>&1; then
+  echo "Installing PostgreSQL..."
+  sudo -n apt-get install -y -qq postgresql || true
+fi
+if command -v pg_isready >/dev/null 2>&1; then
+  sudo -n service postgresql start >/dev/null 2>&1 || true
+  sleep 1
+  if ! sudo -n -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='nocknock'" | grep -q 1; then
+    sudo -n -u postgres psql -qc "CREATE DATABASE nocknock;" || true
+    sudo -n -u postgres psql -qc "ALTER USER postgres PASSWORD 'postgres';" || true
+    echo "Created database nocknock"
+  fi
+  pg_isready -q && echo "PostgreSQL ready" || echo "WARN: PostgreSQL not ready"
+fi
+
+# --- Alchemy key status (presence only - the value is never printed) ---
+if [ -n "${ALCHEMY_API_KEY:-}" ]; then
+  echo "Alchemy key: present in environment (wiring below)"
+else
+  echo "Alchemy key: not in environment (helix secret injects at container creation)"
+fi
+
 
 # --- Alchemy key wiring (never echoed, never committed) ---
 # Two supported delivery channels, in priority order:
