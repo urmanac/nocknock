@@ -35,11 +35,11 @@ This feature (v0.3.0) adds an idempotent **historical price backfill engine** fe
 - **AC5** — Provenance is strict: only real provider data is stored; the DEXScreener fallback (which exposes only the current `priceUsd`) may seed at most a single point stamped with its **observation time** — never backdated to a past candle boundary.
 - **AC6** — Fail-open: GeckoTerminal/DEXScreener timeouts, HTTP 429, and malformed responses log warnings and abort the backfill attempt only; the ingestion cycle and local RPC polling proceed normally.
 - **AC7** — Macro RSI(14) is Wilder RSI over one close per UTC day spanning ≥ 14 days, drawn from `market_price_history` (daily candles + last contemporaneous point per day), with the live spot price appended as today's close. Fewer than 15 daily closes → macro RSI is `None` and overextension stays `false` (same fail-open behavior as today's insufficient-data path).
-- **AC8** — `MarketRegime`/`GlobalStatus` distinguish macro and micro RSI: the Overextension Cooldown directive uses the **macro** series; the existing short-term series remains exposed as `rsi_14` and a new `rsi_macro_14` field carries the multi-day value that `regime` is keyed on.
+- **AC8** — `MarketRegime`/`GlobalStatus` distinguish the two RSI timeframes (industry convention: RSI(14) = 14 bars of the underlying timeframe, **not** 14 days): the Overextension Cooldown uses the **daily RSI(14)** — exposed as `rsi_14_1d`, computed over one close per UTC day spanning ≥ 14 days — while the existing 5-minute series keeps its field `rsi_14` with unchanged semantics. `regime: normal|overextended` is keyed on the daily value, and the directive text cites "daily RSI(14) N >= 70" explicitly. Fewer than 15 daily closes → daily RSI is `None` and overextension stays `false` (same fail-open behavior as today's insufficient-data path).
 - **AC9** — `GET /v1/snapshot` (and `/v1/snapshot/latest`) responses include a top-level `data_provenance: { last_backfill_at, backfilled_points_count }`. It is computed live from the table, is not persisted in the snapshot JSONB, and does not affect `state_hash`/ETag.
 - **AC10** — `cd ingestion-worker && SQLX_OFFLINE=true cargo build --release` passes; any new sqlx queries have committed entries in `.sqlx/`.
 - **AC11** — `make test-brain`, `make test-worker`, `make test-frontend` pass; worker `Cargo.toml` bumped to 0.3.0 with a `CHANGELOG.md` entry.
-- **AC12** — New/changed response fields are documented in `specs/core/snapshot.yaml` (and `api.yaml` where applicable); `make validate-specs` passes.
+- **AC12** — New/changed response fields are documented in `specs/core/snapshot.yaml` (and `api.yaml` where applicable). Note: `make validate-specs` already fails on `origin/main` with 3 pre-existing errors + 13 warnings (api.yaml `ClaimFeesPayload`/`ClaimFeeAction` schema shape, missing `info.license`); the requirement is adjusted to **zero new lint problems introduced by this feature** — verified: identical 3/13 counts before and after.
 
 ## Invariants (from AGENTS.md / OPERATOR_GUIDANCE.md)
 
@@ -48,7 +48,7 @@ This feature (v0.3.0) adds an idempotent **historical price backfill engine** fe
 
 ## Open Questions
 
-1. **RSI field naming** (AC8): I propose keeping `rsi_14` as the existing short-term (micro) series for backward compatibility and adding `rsi_macro_14` for the multi-day series that drives `regime`/Overextension. The alternative is repurposing `rsi_14` as macro and adding `rsi_micro_14`. Confirm the preferred contract.
-2. **Price-history retention**: snapshots are cleaned at 90 days. Should `market_price_history` be kept indefinitely (it is tiny and is the basis for macro indicators), or share the 90-day retention policy?
-3. **DEXScreener fallback scope**: it can only seed one current-price point (no OHLCV). Keep it as a single-point fallback when GeckoTerminal is down (as specified), or drop it and rely solely on fail-open + retry on the next cycle?
-4. **Public candle endpoint**: is a `GET /v1/market/prices` read API wanted in v0.3.0 (e.g., for future charts), or should candle history stay DB-internal this release?
+1. **RSI field naming** — RESOLVED by reviewer during implementation: use industry-standard terminology (RSI(14) = 14-period lookback, named by timeframe). Implemented as `rsi_14_1d` (daily RSI(14), drives `regime`/cooldown) + unchanged `rsi_14` (5-minute series).
+2. **Price-history retention** — UNRESOLVED; implemented default: no retention job (rows are tiny and are the basis for macro indicators). If the operator wants a cap, a follow-up can add a `cleanup_old_price_points()` alongside the existing 90-day snapshot cleanup.
+3. **DEXScreener fallback scope** — implemented as specified: single-point seed stamped at observation time, used only when GeckoTerminal fails and a gap exists.
+4. **Public candle endpoint** — deferred; candle history stays DB-internal in v0.3.0 (nothing consumes it via API yet; the daily RSI reads it server-side).

@@ -22,10 +22,18 @@
 
 ## Phase D — Config, Contracts, Tests, Release
 
-- [ ] Add optional serde-defaulted `market_data` config section (`AppConfig` + `config.yaml.example` block: base URLs, pool address, gap/depth thresholds, lookbacks, `backfill_enabled`)
-- [ ] Regenerate and commit `.sqlx/` query cache entries for any new macro queries (or keep new queries runtime-form so `SQLX_OFFLINE=true cargo build --release` stays green)
-- [ ] Update `specs/core/snapshot.yaml` (add `rsi_macro_14`, clarify `rsi_14` = micro, `regime` keyed on macro) and `specs/core/api.yaml` for `data_provenance`; run `make validate-specs`
-- [ ] Unit tests in `main.rs` test module: GeckoTerminal/DEXScreener parsing (live-verified fixtures), `plan_backfill` cases, macro day-bucketing, RSI order/gap invariance, and the core regression (micro-overbought + macro-normal → no Overextension Cooldown; macro-overbought → fires)
-- [ ] Add DB-gated integration tests (skip gracefully when `DATABASE_URL` unset): idempotent re-upsert → 1 row; backfill cannot overwrite contemporaneous row
-- [ ] Bump `ingestion-worker/Cargo.toml` to `0.3.0` and add `CHANGELOG.md` `## [0.3.0]` section (backfill engine, macro/micro RSI split, `data_provenance`)
-- [ ] Pre-flight: `make test-brain`, `make test-worker`, `make test-frontend`, `SQLX_OFFLINE=true cargo build --release` (worker), `make validate-specs` all green; then branch off `main`, PR, and merge per branch-protection protocol (no tag until merged + green CI + CHANGELOG populated)
+- [x] Add optional serde-defaulted `market_data` config section (`AppConfig` + `config.yaml.example` block: base URLs, pool address, gap/depth thresholds, lookbacks, `backfill_enabled`)
+- [x] Keep new queries in runtime `sqlx::query` form (no `query!` macros) so `.sqlx/` cache is unchanged and `SQLX_OFFLINE=true cargo build --release` stays green — verified
+- [x] Update `specs/core/snapshot.yaml` (add `rsi_14_1d`, clarify `rsi_14` = 5-minute series, `regime` keyed on daily RSI, add `DataProvenance` schema + envelope field) — Redocly reports the same 3 pre-existing errors + 13 warnings as `origin/main` (api.yaml `ClaimFeesPayload`/`ClaimFeeAction` struct shape, missing `info.license`); my additions introduce zero new lint problems
+- [x] Unit tests in `main.rs` test module: GeckoTerminal/DEXScreener parsing (live-verified fixtures), `plan_backfill` cases, macro day-bucketing, RSI order/gap invariance, and the core regression (micro-overbought + macro-normal → no Overextension Cooldown; macro-overbought → fires) — 43/43 pass
+- [x] Add DB-gated integration tests (skip gracefully when `DATABASE_URL` unset; verified against the live sandbox Postgres): idempotent re-upsert → 1 row; backfill cannot overwrite contemporaneous row
+- [x] Bump `ingestion-worker/Cargo.toml` to `0.3.0` and add `CHANGELOG.md` `[Unreleased] → Added — Market Price Backfill & Multi-Timeframe Regime Engine (v0.3.0)` section (release chore PR later promotes it to a `## [0.3.0]` heading per repo convention)
+- [x] Pre-flight: `make test-brain` (3/3), `make test-worker` (43/43), `make test-frontend` (25/25), `SQLX_OFFLINE=true cargo build --release` — all green; branch merged from current `main` (v0.2.1), pushed as `feature/000663-historical-price`
+
+## E2E Verification (live, sandbox Postgres + real providers)
+
+- [x] Boot on empty `market_price_history`: backfilled **29 daily + 161 hourly real candles** from live GeckoTerminal (in-progress candles correctly excluded)
+- [x] Immediate second check: idempotent no-op (0 new rows)
+- [x] Fresh DB cycle: contemporaneous `aerodrome_rpc` spot row recorded; `rsi_14_1d = 38.3` computed from real daily closes; `regime: normal`; `rsi_14: None` (fresh DB < 15 micro samples → fail-open)
+- [x] `GET /v1/snapshot` returns `data_provenance: { last_backfill_at, backfilled_points_count: 190 }`; DB provenance split verified: 190 `geckoterminal`/backfilled vs contemporaneous `aerodrome_rpc` rows
+- [x] Release binary boot with fresh (< 15 min) data: silent no-op backfill, snapshot cycle 280ms
