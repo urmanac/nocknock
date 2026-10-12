@@ -49,4 +49,4 @@
 - [x] Update `CHANGELOG.md` with a populated `0.1.4` section; bump versions (`frontend/package.json`, worker `Cargo.toml`)
 - [x] Run full pre-flight gate: `make test-brain` (3/3), `make test-worker` (18/18), `make test-frontend` (20/20), `make dist` (4 artifacts packaged)
 - [x] Merge `origin/main` into the feature branch (already up to date; branch verified mergeable) and push `feature/000662-fix-point-release-bugs`
-- [ ] Post-merge handoff (operator/platform, outside agent control): open the PR via the UI, CI green on `main`, pull latest main, then tag `v0.1.4` **with explicit operator authorization** (OPERATOR_GUIDANCE.md); update `TRIAGE.md` registry statuses; optionally file GitHub issues from the spec registry via Gemini + `gh`
+- [~] Post-merge handoff (operator/platform): **PR #33 open with all 6 commits; CI checks passing (worker build verified green on the PR)** — remaining: merge PR #33, confirm CI green on `main`, pull latest main, then tag `v0.1.4` **with explicit operator authorization** (OPERATOR_GUIDANCE.md); update `TRIAGE.md` registry statuses; optionally file GitHub issues from the spec registry via Gemini + `gh`
