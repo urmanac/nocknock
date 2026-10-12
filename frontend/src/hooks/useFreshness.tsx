@@ -75,6 +75,7 @@ export function useFreshness<T = unknown>(
   const snapshotRef = useRef<SnapshotEnvelope<T> | null>(null);
   const freshnessRef = useRef<FreshnessState>(freshness);
   freshnessRef.current = freshness;
+  const lastStateHashRef = useRef<string>('');
 
   const log = useCallback((msg: string) => {
     if (debug) console.log(`[useFreshness] ${msg}`);
@@ -104,10 +105,19 @@ export function useFreshness<T = unknown>(
       if (!mountedRef.current) return;
 
       if (data) {
-        snapshotRef.current = data;
-        setSnapshot(data);
+        // Only update snapshot if state_hash changed (new data)
+        if (data.meta.state_hash !== lastStateHashRef.current) {
+          lastStateHashRef.current = data.meta.state_hash;
+          snapshotRef.current = data;
+          setSnapshot(data);
+        }
         const newFreshness = computeFreshness(data.meta);
-        setFreshness(newFreshness);
+        // Only update freshness if it actually changed
+        if (newFreshness.isFresh !== freshnessRef.current.isFresh ||
+            newFreshness.ageSeconds !== freshnessRef.current.ageSeconds ||
+            newFreshness.stateHash !== freshnessRef.current.stateHash) {
+          setFreshness(newFreshness);
+        }
 
         // Notify on freshness transition
         if (newFreshness.isFresh !== lastKnownFreshRef.current) {
@@ -139,7 +149,12 @@ export function useFreshness<T = unknown>(
     pollTimerRef.current = setInterval(async () => {
       if (snapshotRef.current) {
         const newFreshness = computeFreshness(snapshotRef.current.meta);
-        setFreshness(newFreshness);
+        // Only update freshness state if it actually changed
+        if (newFreshness.isFresh !== freshnessRef.current.isFresh ||
+            newFreshness.ageSeconds !== freshnessRef.current.ageSeconds ||
+            newFreshness.stateHash !== freshnessRef.current.stateHash) {
+          setFreshness(newFreshness);
+        }
         if (newFreshness.isFresh !== lastKnownFreshRef.current) {
           lastKnownFreshRef.current = newFreshness.isFresh;
           onFreshnessChange?.(newFreshness.isFresh);
@@ -200,6 +215,9 @@ export function useFreshnessPoll(
     if (debug) console.log(`[useFreshnessPoll] ${msg}`);
   }, [debug]);
 
+  const freshnessRef = useRef(freshness);
+  freshnessRef.current = freshness;
+
   useEffect(() => {
     let mounted = true;
     let timer: ReturnType<typeof setInterval>;
@@ -218,12 +236,17 @@ export function useFreshnessPoll(
         ageSeconds,
         stateHash: meta.state_hash,
         lastChecked: now,
-        staleSince: isFresh ? null : (freshness.staleSince ?? now),
+        staleSince: isFresh ? null : (freshnessRef.current.staleSince ?? now),
       };
 
-      setFreshness(newFreshness);
-      if (newFreshness.isFresh !== freshness.isFresh) {
-        onFreshnessChange?.(newFreshness.isFresh);
+      // Only update state if freshness actually changed
+      if (newFreshness.isFresh !== freshnessRef.current.isFresh ||
+          newFreshness.ageSeconds !== freshnessRef.current.ageSeconds ||
+          newFreshness.stateHash !== freshnessRef.current.stateHash) {
+        setFreshness(newFreshness);
+        if (newFreshness.isFresh !== freshnessRef.current.isFresh) {
+          onFreshnessChange?.(newFreshness.isFresh);
+        }
       }
     };
 
@@ -234,7 +257,7 @@ export function useFreshnessPoll(
       mounted = false;
       clearInterval(timer);
     };
-  }, [fetchMetadata, syncWindowSeconds, pollIntervalMs, onFreshnessChange, freshness.isFresh, freshness.staleSince, log]);
+  }, [fetchMetadata, syncWindowSeconds, pollIntervalMs, onFreshnessChange, log]);
 
   return freshness;
 }
