@@ -24,14 +24,14 @@
 
 ## Batch 3 — Frontend resilience (BUG-F1)
 
-- [~] Store `onFreshnessChange` in a ref; remove it from `refresh` deps and the main polling effect deps (design D6)
-- [ ] In `refresh`, only `setError` when no snapshot is available; keep last-known data on transient failures
-- [ ] Retry the historical-snapshot fetch on poll cadence instead of swallowing errors forever after one failure
-- [ ] `cd frontend && npm test` and `npm run build` green; open PR, merge
+- [x] Store `onFreshnessChange` in a ref; remove it from `refresh` deps and the main polling effect deps (design D6)
+- [x] In `refresh`, only `setError` when no snapshot is available; keep last-known data on transient failures
+- [x] Retry the historical-snapshot fetch on poll cadence instead of swallowing errors forever after one failure
+- [x] `cd frontend && npm test` and `npm run build` green; open PR, merge
 
-## Batch 4 — Frontend presentation & hygiene (BUG-F2, F3, F4, F5, F6)
+## Batch 4 — Frontend presentation & hygiene (BUG-F2, F3, F4, F5, F6, F7-frontend)
 
-- [ ] Fix `request()` header merge order in `client.ts`; delete dead `fetchIfFresh` and `useFreshnessPoll`
+- [~] Fix `request()` header merge order in `client.ts`; delete dead `fetchIfFresh` and `useFreshnessPoll`
 - [ ] Remove hardcoded $2.50 upper-bracket clip in `App.tsx` tickData mapping
 - [ ] Relabel "Alpha Generated" to the actual quantity (stable reserve delta), computing from counterfactual endpoints (design D7)
 - [ ] Add structural-channels panel when `structural_channels.channels` is non-empty (or fix the "7 Real Charts" comment if panel declined — see Open Questions)
