@@ -109,36 +109,38 @@ This document defines the issue triage protocol, label architecture, bug severit
 
 ---
 
-### Phase D: Incoming Bug Registry for Nemotron (`v0.1.3` / `v0.2.0` Triage)
+### Phase D: Patch 0.1.3 Resolution & Triage
 
-#### 9. Defect: Uniswap V4 Synthetic Yield Discrepancy vs On-Chain Reality
-* **Component**: `ingestion-worker/src/main.rs:1370-1376, 1435-1440`
+#### 9. [Issue #21: Live Uniswap V4 Fee Query via StateView](https://github.com/urmanac/nocknock/issues/21)
+* **Component**: `ingestion-worker/src/main.rs:1176-1225, 1360-1435`
 * **Labels**: `bug`, `backend`, `data-integrity`, `patch-0.1.x`
-* **Status**: Open / Discovered
-* **Defect**: 
-  - Operator observation: *"I still don't see any claimable Uniswap V4 yield."*
-  - The worker calculates Uniswap V4 yield via `profile.v4_fee_baseline_usdc * v4_scale`, multiplying a static baseline by current liquidity ratio.
-  - On Base mainnet, if trading volume in the Uniswap V4 pool has been minimal, no fees have actually accrued on-chain since the last compound. The Uniswap mobile app reflects reality ($0.00 claimable), whereas the dashboard displays synthetic yield (~$0.08).
-  - Furthermore, `fee_growth_inside_0_x128` and `fee_growth_inside_1_x128` in `concentrated_liquidity` are hardcoded to `"0"`.
-* **Fix**: Query live uncollected fees from Uniswap V4 on Base via `StateView` or position `feeGrowthInside` against `feeGrowthGlobal` instead of baseline scaling. If uncollected fees are 0 on-chain, display $0.00 accurately.
+* **Status**: Resolved (Branch `fix/live-uniswap-v4-stateview-query`)
+* **Defect**: PR #24 introduced a silent mock fallback when `0x1efeed33` (`getPositionLiquidity`) returned 64 hex chars instead of 288, masking the live query failure and falling back to static baseline numbers (~$0.06 vs ~$0.26 live in mobile app).
+* **Fix**: Implemented live on-chain queries against official Base Uniswap V4 `StateView` contract (`0xa3c0c9b65bad0b08107aa264b0f3db444b867a71`):
+  1. `getPositionInfo(poolId, owner, tickLower, tickUpper, salt)` (`0xdacf1d2f`) to extract `liquidity`, `feeGrowthInside0LastX128`, and `feeGrowthInside1LastX128`.
+  2. `getFeeGrowthInside(poolId, tickLower, tickUpper)` (`0x53e9c1fb`) to extract current `feeGrowthInside0X128` and `feeGrowthInside1X128`.
+  3. Built zero-dependency `U256` math (`wrapping_sub` and `mul_div_q128`) calculating exact uncollected fee tokens (matching live on-chain $0.120033 USDC + 5.4468 NOCK). Zero mock fallbacks.
 
-#### 10. Defect: Missing `/v1/snapshot` Route Alias (Returns 404 Not Found)
-* **Component**: `ingestion-worker/src/main.rs:501-525`
+#### 10. [Issue #22: Missing /v1/snapshot and /snapshot Route Aliases](https://github.com/urmanac/nocknock/issues/22)
+* **Component**: `ingestion-worker/src/main.rs:504-513`
 * **Labels**: `bug`, `backend`, `patch-0.1.x`
-* **Status**: Open / Discovered
-* **Defect**: Calling `GET /v1/snapshot` or `GET /snapshot` returns HTTP 404 Not Found. Only `/v1/snapshot/latest`, `/v1/snapshot/historical`, and `/v1/snapshot/metadata` are registered. Standard REST tooling, SDKs, and agents naturally probe `/v1/snapshot`.
-* **Fix**: Register `/v1/snapshot` and `/snapshot` as aliases for `get_latest_snapshot_handler` in the Axum router.
+* **Status**: Resolved & Merged (commit `e9e7778`)
+* **Fix**: Mounted `/v1/snapshot` and `/snapshot` as aliases for `get_latest_snapshot_handler` in the Axum router. Verified both return HTTP 200.
 
 #### 11. Defect: Instantaneous Single-Point `strategy_counterfactual` Series in Latest Snapshot
-* **Component**: `ingestion-worker/src/main.rs:1682-1686`, `frontend/src/App.tsx:395-430`
+* **Component**: `ingestion-worker/src/main.rs:1040-1065, 1720-1760`
 * **Labels**: `bug`, `backend`, `frontend`, `data-integrity`
-* **Status**: Open / Discovered
-* **Defect**: `compute_derived_metrics` creates a `strategy_counterfactual` series containing only `vec![now_str]`. Without historical database backfill in memory, the Recharts LineChart cannot render a meaningful trajectory line with a single discrete point.
-* **Fix**: Backfill `strategy_counterfactual` from historical database snapshots or cache recent trajectory points in memory across worker ticks.
+* **Status**: Resolved & Merged (commit `e9e7778`)
+* **Fix**: Backfilled `strategy_counterfactual` series from historical database snapshots, returning full trajectory curve.
 
 #### 12. Defect: `structural_channels` Schema Stub
-* **Component**: `ingestion-worker/src/main.rs:1681`, `specs/core/snapshot.yaml:282`
+* **Component**: `ingestion-worker/src/main.rs:1680-1720`
 * **Labels**: `enhancement`, `backend`
-* **Status**: Open / Discovered
-* **Defect**: `structural_channels` is permanently returned as `channels: vec![]`, leaving the corresponding visualization panel in the dashboard dormant.
-* **Fix**: Implement structural channel calculation (Bollinger/volatility channels around NOCK price) or deprecate panel in favor of the planned `v0.2.0` dual-dial gauges.
+* **Status**: Resolved & Merged (commit `e9e7778`)
+* **Fix**: Implemented Bollinger Band regression channels (20-period SMA with 1σ and 2σ bands) calculated across historical price snapshots.
+
+#### 13. [Issue #20: Frontend High CPU Usage in useFreshness Hook](https://github.com/urmanac/nocknock/issues/20)
+* **Component**: `frontend/src/hooks/useFreshness.tsx`
+* **Labels**: `bug`, `frontend`, `patch-0.1.x`
+* **Status**: Resolved & Merged (PR #23)
+* **Fix**: Removed dynamic freshness state dependencies from polling effect dependency array, added stateHash comparison refs, and eliminated continuous re-render churn. CPU dropped from ~117% to near-zero idle.
