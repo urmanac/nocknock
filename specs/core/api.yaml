@@ -94,7 +94,6 @@ paths:
       summary: Get historical snapshots for time-series charts
       operationId: getHistoricalSnapshots
       parameters:
-        - $ref: '#/components/parameters/Interval'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Before'
         - $ref: '#/components/parameters/After'
@@ -167,14 +166,6 @@ components:
       schema:
         type: string
         format: uuid
-    Interval:
-      name: interval
-      in: query
-      description: Granularity of historical snapshots
-      schema:
-        type: string
-        enum: [1h, 4h, 1d, 1w]
-        default: 1d
     Limit:
       name: limit
       in: query

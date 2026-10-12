@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-10-12
+
+### Fixed — Worker Data Integrity
+- **Snapshot deduplication actually fires** (`fix(worker): canonical state hash`): the
+  state hash embedded wall-clock timestamps (`updated_at`, `high_water_mark_date`, series
+  `time_points`, fabricated channel timestamps), so it changed every ingestion cycle and
+  `store_snapshot` inserted a new row every 5 minutes even with unchanged on-chain state —
+  growing the table unboundedly and filling history charts with duplicate flat points.
+  The hash now strips volatile time fields; identical state no longer inserts rows while
+  `/v1/snapshot/latest` still serves fresh timestamps from the in-memory cache.
+- **Strategy Counterfactual uses recent history**: the backfill query selected the
+  OLDEST 100 snapshots (`ORDER BY generated_at ASC LIMIT 100`), so the chart stopped
+  reflecting recent history as the table grew. It now selects the most recent 100,
+  oldest-first, as paired `(timestamp, portfolio, native)` tuples so the two series can
+  never misalign, and carries real snapshot timestamps instead of fabricated 5-minute
+  spacing (structural channels likewise).
+- **Bollinger window off-by-one**: the final SMA window now includes the newest sample.
+
+### Fixed — Zero-Mock Invariant
+- Failing ETH-price or gas-price RPC queries now **fail the ingestion cycle** instead of
+  silently substituting hardcoded `2500.0` USD / `0.005` USD / `0.0043` USD fallbacks into
+  snapshots (gas break-even, efficiency ratios, advice text).
+- `recommended_action` is computed from claimable yield vs gas break-even
+  (`claim_now` at ≥2× gas, else `claim_recommended` / `accumulate`) — the dashboard no
+  longer shows "CLAIM NOW" at $0 claimable.
+- Uniswap V4 bracket display prices, `in_range`, and `distance_bps` are derived from the
+  on-chain ticks (verified `0.012366` / `2.02788`) instead of duplicated hardcoded
+  strings; the RANGE EXIT advice threshold uses the same derived bound.
+
+### Fixed — Frontend
+- **Dashboard survives transient fetch failures**: `useFreshness` no longer tears down and
+  recreates its polling interval (with an extra foreground fetch) on every render, and a
+  failed fetch keeps last-known data — the full-screen error state appears only when no
+  snapshot has ever loaded. History fetch retries every 60s while empty.
+- **Deep, bounded chart timeline** (~24h instead of ~4h): charts request 288 snapshots;
+  historical responses truncate embedded multi-point series the charts never read,
+  bounding the payload to ~1 MB.
+- **Honest stat labels**: the "Alpha Generated vs passive hold" stat is relabeled to what
+  it actually measures — "Stable Reserve Delta (Total − Native-Only)"; the counterfactual
+  panel is titled "Portfolio Composition: Total (Native + USDC) vs Native-Only".
+- The tick-bracket chart shows the true upper price (removed hardcoded $2.50 clip).
+- New 7th panel renders the backend Bollinger structural channel (SMA ± 1σ/2σ bands)
+  when band data exists.
+
+### Fixed — API Contract
+- `/v1/snapshot/historical` implements `before`/`after` RFC3339 cursor filters, clamps
+  `limit` to 1–1000, and returns 400 for the never-implemented `interval` parameter
+  (removed from `specs/core/api.yaml`).
+- `client.ts` `request()` no longer lets caller headers clobber `Content-Type`.
+- Removed dead code: `fetchIfFresh`, `useFreshnessPoll`.
+
+### Tests
+- Worker: 18 unit tests (was 11) — hash time-invariance/value-sensitivity, counterfactual
+  alignment & real timestamps, Bollinger window, bracket-price round-trip, bracket
+  distance, claim-action thresholds.
+- Frontend: 20 contract/logic tests green; tsc build clean.
+
 ## [0.2.0] - Unreleased
 
 ### Golden Path: Web Cockpit & Uniswap Mobile App Execution

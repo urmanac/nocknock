@@ -2,7 +2,7 @@ use anyhow::Result;
 use axum::{
     extract::Extension,
     http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     Json,
 };
 use chrono::{DateTime, Utc};
@@ -704,53 +704,110 @@ async fn trigger_ingest_handler(
 async fn get_historical_snapshots_handler(
     Extension(state): Extension<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-) -> impl IntoResponse {
-    let _interval = params
-        .get("interval")
-        .map(|s| s.as_str())
-        .unwrap_or("1d");
+) -> Response {
+    // `interval` was declared in api.yaml but never implemented (now removed from the
+    // spec); reject it explicitly instead of silently ignoring declared parameters.
+    if params.contains_key("interval") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "INVALID_PARAMETER",
+                "message": "interval is not supported; use before/after RFC3339 cursors with limit"
+            })),
+        )
+            .into_response();
+    }
+
     let limit = params
         .get("limit")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(100);
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(100)
+        .clamp(1, 1000);
 
-    let rows = sqlx::query!(
-        r#"
-        SELECT snapshot_id, generated_at, state_hash, version, data
-        FROM snapshots
-        ORDER BY generated_at DESC
-        LIMIT $1
-        "#,
-        limit as i64
-    )
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    let parse_cursor = |key: &str| -> Option<DateTime<Utc>> {
+        params
+            .get(key)
+            .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+            .map(|d| d.with_timezone(&Utc))
+    };
+    let before = parse_cursor("before");
+    let after = parse_cursor("after");
+
+    let base =
+        "SELECT snapshot_id, generated_at, state_hash, version, data FROM snapshots".to_string();
+    let rows = if let Some(before) = before {
+        sqlx::query(&format!(
+            "{base} WHERE generated_at < $1 ORDER BY generated_at DESC LIMIT $2"
+        ))
+        .bind(before)
+        .bind(limit)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default()
+    } else if let Some(after) = after {
+        sqlx::query(&format!(
+            "{base} WHERE generated_at > $1 ORDER BY generated_at DESC LIMIT $2"
+        ))
+        .bind(after)
+        .bind(limit)
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default()
+    } else {
+        sqlx::query(&format!("{base} ORDER BY generated_at DESC LIMIT $1"))
+            .bind(limit)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default()
+    };
 
     let snapshots: Vec<SnapshotEnvelope> = rows
         .into_iter()
         .filter_map(|r| {
-            let data: SnapshotData = serde_json::from_value(r.data).ok()?;
-            Some(SnapshotEnvelope {
+            let data: SnapshotData = serde_json::from_value(r.try_get("data").ok()?).ok()?;
+            let envelope = SnapshotEnvelope {
                 meta: SnapshotMeta {
-                    generated_at: r.generated_at,
-                    state_hash: r.state_hash,
-                    version: r.version,
-                    snapshot_id: r.snapshot_id,
+                    generated_at: r.try_get("generated_at").ok()?,
+                    state_hash: r.try_get("state_hash").ok()?,
+                    version: r.try_get("version").ok()?,
+                    snapshot_id: r.try_get("snapshot_id").ok()?,
                 },
                 data,
-            })
+            };
+            Some(envelope)
+        })
+        .map(|mut envelope| {
+            slim_historical_payload(&mut envelope.data);
+            envelope
         })
         .collect();
 
+    let returned = snapshots.len();
     Json(json!({
         "snapshots": snapshots,
         "pagination": {
             "limit": limit,
-            "returned": snapshots.len(),
-            "has_more": snapshots.len() == limit as usize,
+            "returned": returned,
+            "has_more": returned == limit as usize,
         }
     }))
+    .into_response()
+}
+
+/// Bound the historical response payload: charts only read each stored snapshot's
+/// scalar / current-point values (the `[0]` element of embedded series), never its
+/// multi-point series. Truncating the embedded counterfactual to its current point and
+/// dropping the Bollinger channel points keeps a 288-row response ~1 MB instead of
+/// ~5 MB. `/snapshot/latest` still serves the full embedded series (MCP consumers and
+/// the cold-start chart fallback rely on it; snapshot.yaml declares these fields).
+fn slim_historical_payload(data: &mut SnapshotData) {
+    let dm = &mut data.derived_metrics;
+    dm.strategy_counterfactual.time_points.truncate(1);
+    dm.strategy_counterfactual.active_portfolio_series.truncate(1);
+    dm.strategy_counterfactual.passive_baseline_series.truncate(1);
+    // Channels are recomputed by the worker each cycle from history; historical rows
+    // never need to carry them
+    dm.structural_channels.channels.clear();
 }
 
 async fn get_snapshot_metadata_handler(
@@ -1059,49 +1116,60 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     .await
     .unwrap_or(0.0);
 
-    // Compute structural channels from historical data
+    // Compute structural channels from historical data — most recent 50 snapshots,
+    // oldest first, with their real snapshot timestamps
     let historical_rows = sqlx::query(
-        r#"SELECT (data->'derived_metrics'->'global_status'->>'total_portfolio_usd')::float8 as portfolio_usd FROM snapshots ORDER BY generated_at DESC LIMIT 50"#
+        r#"SELECT generated_at, (data->'derived_metrics'->'global_status'->>'total_portfolio_usd')::float8 as portfolio_usd FROM snapshots ORDER BY generated_at DESC LIMIT 50"#
     )
     .fetch_all(&state.db)
     .await
     .unwrap_or_default();
 
-    let historical_prices: Vec<f64> = historical_rows
+    let historical_prices: Vec<(DateTime<Utc>, f64)> = historical_rows
         .iter()
         .rev()
-        .filter_map(|r| r.try_get("portfolio_usd").ok())
+        .filter_map(|r| {
+            let ts: DateTime<Utc> = r.try_get("generated_at").ok()?;
+            let v: f64 = r.try_get("portfolio_usd").ok()?;
+            Some((ts, v))
+        })
         .collect();
 
     let structural_channels = compute_structural_channels_sync(&historical_prices);
 
-    // Fetch counterfactual historical data (portfolio & native series)
+    // Fetch counterfactual historical data: the MOST RECENT 100 snapshots, collected as
+    // paired (timestamp, portfolio, native) tuples so the two series stay index-aligned,
+    // oldest first, carrying real snapshot timestamps (no fabricated spacing).
     let counterfactual_rows = sqlx::query(
-        r#"SELECT (data->'derived_metrics'->'global_status'->>'total_portfolio_usd')::float8 as portfolio_usd,
-                  (data->'derived_metrics'->'global_status'->>'total_native_usd')::float8 as native_usd
-         FROM snapshots
-         ORDER BY generated_at ASC
-         LIMIT 100"#
+        r#"
+        SELECT generated_at,
+               (data->'derived_metrics'->'global_status'->>'total_portfolio_usd')::float8 as portfolio_usd,
+               (data->'derived_metrics'->'global_status'->>'total_native_usd')::float8 as native_usd
+        FROM (
+            SELECT generated_at, data FROM snapshots ORDER BY generated_at DESC LIMIT 100
+        ) recent
+        ORDER BY generated_at ASC
+        "#
     )
     .fetch_all(&state.db)
     .await
     .unwrap_or_default();
 
-    let mut counterfactual_portfolio = Vec::new();
-    let mut counterfactual_native = Vec::new();
+    let mut counterfactual_history: Vec<(DateTime<Utc>, f64, f64)> = Vec::new();
     for row in counterfactual_rows {
-        if let Ok(Some(v)) = row.try_get::<Option<f64>, _>("portfolio_usd") {
-            counterfactual_portfolio.push(v);
-        }
-        if let Ok(Some(v)) = row.try_get::<Option<f64>, _>("native_usd") {
-            counterfactual_native.push(v);
+        if let (Ok(ts), Ok(Some(p)), Ok(Some(n))) = (
+            row.try_get::<DateTime<Utc>, _>("generated_at"),
+            row.try_get::<Option<f64>, _>("portfolio_usd"),
+            row.try_get::<Option<f64>, _>("native_usd"),
+        ) {
+            counterfactual_history.push((ts, p, n));
         }
     }
 
     // Compute derived metrics
     let profile = state.config.profile();
     let derived_metrics = compute_derived_metrics(&raw_data, prev_hwm, &profile, structural_channels,
-        &counterfactual_portfolio, &counterfactual_native);
+        &counterfactual_history);
 
     // Build snapshot data
     let snapshot_data = SnapshotData {
@@ -1579,9 +1647,9 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
         None
     };
     let net_after_gas_usd = match (&gross_usd, &estimated_gas_usd) {
-        (Some(g), Some(e)) => {
+        (g, Some(e)) if !g.is_empty() => {
             let gross: f64 = g.parse().unwrap_or(0.0);
-            Some(format!("{:.4}", gross - total_gas_usd))
+            Some(format!("{:.4}", gross - e.parse::<f64>().unwrap_or(0.0)))
         }
         _ => None,
     };
@@ -1590,12 +1658,35 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
         chain_id: 8453,
         from: wallet,
         generated_at: Utc::now().to_rfc3339(),
-        gross_usd,
+        gross_usd: Some(gross_usd),
         estimated_gas_usd,
         net_after_gas_usd,
         actions,
     };
     Json(payload).into_response()
+}
+// On-chain Uniswap V4 NOCK/USDC position tick bounds (positive on-chain orientation,
+// as passed to StateView getPositionInfo). Single source of truth for bracket prices.
+const V4_TICK_LOWER_ONCHAIN: i32 = 223200;
+const V4_TICK_UPPER_ONCHAIN: i32 = 274200;
+
+/// Displayed USDC-per-NOCK price for an on-chain tick on the NOCK (16 dec) / USDC (6 dec)
+/// V4 pool. Note the negated exponent: larger on-chain ticks map to LOWER displayed
+/// prices. Verified against live on-chain values:
+///   1.0001^(-223200) * 1e10 = 2.02788   (was hardcoded "2.02783")
+///   1.0001^(-274200) * 1e10 = 0.012366  (was hardcoded "0.01237")
+fn tick_to_display_price(tick_onchain: i32) -> f64 {
+    1.0001f64.powi(-tick_onchain) * 1e10
+}
+
+/// Signed basis-point distance from spot to the nearest bracket edge
+/// (positive when spot is below the edge, negative when above).
+fn bracket_distance_bps(spot: f64, lower: f64, upper: f64) -> i32 {
+    if spot <= 0.0 || lower <= 0.0 || upper <= 0.0 {
+        return 0;
+    }
+    let nearest_edge = if (spot - lower).abs() <= (spot - upper).abs() { lower } else { upper };
+    (((nearest_edge - spot) / spot) * 10000.0).round() as i32
 }
 
 async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
@@ -1614,7 +1705,11 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         }, "latest"],
         "id": 99
     });
-    let mut live_eth_price_usd = 2500.0f64;
+    // Zero-mock invariant (issues #11/#16): ETH spot price is a required input — it feeds
+    // gas break-even math and advice text. A failed query must fail the cycle, never fall
+    // back to a hardcoded price presented as live truth.
+    let mut live_eth_price_usd = 0.0f64;
+    let mut eth_price_found = false;
     if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &eth_reserves_payload, 2).await {
         if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
             let clean = hex_str.trim_start_matches("0x");
@@ -1627,20 +1722,25 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
                     let usdc = r1 as f64 / 1e6;
                     if weth > 0.0 {
                         live_eth_price_usd = usdc / weth;
+                        eth_price_found = true;
                     }
                 }
             }
         }
     }
+    if !eth_price_found {
+        return Err(anyhow::anyhow!("Failed to query live ETH/USD spot price from Aerodrome vAMM-WETH/USDC RPC"));
+    }
 
-    // 1. Fetch live gas price (eth_gasPrice)
+    // 1. Fetch live gas price (eth_gasPrice) — required input, fail explicitly on error
     let gas_payload = json!({
         "jsonrpc": "2.0",
         "method": "eth_gasPrice",
         "params": [],
         "id": 10
     });
-    let mut live_gas_cost_usd = 0.005f64;
+    let mut live_gas_cost_usd = 0.0f64;
+    let mut gas_price_found = false;
     if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &gas_payload, 2).await {
         if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
             let clean = hex_str.trim_start_matches("0x");
@@ -1648,8 +1748,12 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
                 let eth_gas_cost = (wei as f64 / 1e18) * 150_000.0;
                 let usd_gas_cost = (eth_gas_cost * live_eth_price_usd) + 0.002;
                 live_gas_cost_usd = usd_gas_cost.clamp(0.002, 0.05);
+                gas_price_found = true;
             }
         }
+    }
+    if !gas_price_found {
+        return Err(anyhow::anyhow!("Failed to query live gas price from RPC"));
     }
 
     // 2. Fetch live reserves from Aerodrome pool 0x85f1aa3a70fedd1c52705c15baed143e675cd626
@@ -1742,8 +1846,8 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let state_view_addr = "0xa3c0c9b65bad0b08107aa264b0f3db444b867a71";
     let pool_id_hex = "064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13";
     let pos_manager_padded = "0000000000000000000000007c5f5a4bbd8fd63184577525326123b519429bdc";
-    let tick_lower_hex = format!("{:064x}", 223200u32);
-    let tick_upper_hex = format!("{:064x}", 274200u32);
+    let tick_lower_hex = format!("{:064x}", V4_TICK_LOWER_ONCHAIN as u32);
+    let tick_upper_hex = format!("{:064x}", V4_TICK_UPPER_ONCHAIN as u32);
 
     // 4a. getPositionInfo(bytes32,address,int24,int24,bytes32) -> 0xdacf1d2f
     let get_pos_data = format!("0xdacf1d2f{}{}{}{}{}", pool_id_hex, pos_manager_padded, tick_lower_hex, tick_upper_hex, v4_pos_hex);
@@ -1952,26 +2056,22 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
             liquidity_usd: format!("{:.2}", reserve_usdc * 2.0),
             fee_accrued_usd: format!("{:.4}", aero_fee_usd),
             fee_tier_bps: 30, // 0.3%
-            tick_current: Some(if spot_price > 0.0 {
-                let raw_ratio = spot_price / 1e10;
-                (raw_ratio.ln() / 1.0001f64.ln()).round() as i32
-            } else {
-                -266743
-            }),
+            tick_current: Some(((spot_price / 1e10).ln() / 1.0001f64.ln()).round() as i32),
             sqrt_price_x96: None,
         }],
         concentrated_liquidity: vec![
             ConcentratedLiquidity {
                 range_id: "3126000".to_string(),
                 pool_id: "0x498581ff718922c3f8e6a244956af099b2652b2b".to_string(),
-                lower_tick: -274200,
-                upper_tick: -223200,
-                lower_price: "0.01237".to_string(),
-                upper_price: "2.02783".to_string(),
+                lower_tick: -V4_TICK_UPPER_ONCHAIN,
+                upper_tick: -V4_TICK_LOWER_ONCHAIN,
+                lower_price: format!("{:.5}", tick_to_display_price(V4_TICK_UPPER_ONCHAIN)),
+                upper_price: format!("{:.5}", tick_to_display_price(V4_TICK_LOWER_ONCHAIN)),
                 liquidity_amount: v4_liquidity_str,
                 tokens_owed_0: format!("{:.6}", live_uni_fee_usdc),
                 tokens_owed_1: format!("{:.4}", live_uni_fee_nock),
-                in_range: spot_price >= 0.01237 && spot_price <= 2.02783,
+                in_range: spot_price >= tick_to_display_price(V4_TICK_UPPER_ONCHAIN)
+                    && spot_price <= tick_to_display_price(V4_TICK_LOWER_ONCHAIN),
                 fee_growth_inside_0_x128: fg0_curr.to_hex_be(),
                 fee_growth_inside_1_x128: fg1_curr.to_hex_be(),
             }
@@ -2009,10 +2109,10 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     })
 }
 
-fn compute_structural_channels_sync(historical_prices: &[f64]) -> StructuralChannels {
+fn compute_structural_channels_sync(history: &[(DateTime<Utc>, f64)]) -> StructuralChannels {
     let mut channels = Vec::new();
 
-    if historical_prices.len() >= 20 {
+    if history.len() >= 20 {
         let window = 20;
         let mut center_line = Vec::new();
         let mut upper_1sd = Vec::new();
@@ -2020,16 +2120,19 @@ fn compute_structural_channels_sync(historical_prices: &[f64]) -> StructuralChan
         let mut upper_2sd = Vec::new();
         let mut lower_2sd = Vec::new();
 
-        for i in window..historical_prices.len() {
-            let window_slice = &historical_prices[i-window..i];
-            let sum: f64 = window_slice.iter().sum();
+        // `i` is the exclusive end of the window; iterating through len+1 means the final
+        // window `[len-window..len]` includes the newest sample (off-by-one otherwise).
+        for i in window..=history.len() {
+            let window_slice = &history[i-window..i];
+            let sum: f64 = window_slice.iter().map(|(_, v)| v).sum();
             let mean = sum / window as f64;
             let variance: f64 = window_slice.iter()
-                .map(|v| (v - mean).powi(2))
+                .map(|(_, v)| (v - mean).powi(2))
                 .sum::<f64>() / window as f64;
             let std_dev = variance.sqrt();
 
-            let ts = Utc::now() - chrono::Duration::minutes((historical_prices.len() - i) as i64 * 5);
+            // Label the point with the timestamp of the newest sample inside the window
+            let ts = window_slice[window_slice.len() - 1].0;
             center_line.push(LinePoint { time: ts.to_rfc3339(), value: format!("{:.2}", mean) });
             upper_1sd.push(LinePoint { time: ts.to_rfc3339(), value: format!("{:.2}", mean + std_dev) });
             lower_1sd.push(LinePoint { time: ts.to_rfc3339(), value: format!("{:.2}", mean - std_dev) });
@@ -2063,8 +2166,7 @@ fn compute_structural_channels_sync(historical_prices: &[f64]) -> StructuralChan
 }
 
 fn compute_counterfactual_sync(
-    historical_portfolio: &[f64],
-    historical_native: &[f64],
+    history: &[(DateTime<Utc>, f64, f64)],
     current_portfolio: f64,
     current_native: f64,
     now_str: &str,
@@ -2073,12 +2175,10 @@ fn compute_counterfactual_sync(
     let mut active_series = Vec::new();
     let mut passive_series = Vec::new();
 
-    let len = historical_portfolio.len().min(historical_native.len());
-    for i in 0..len {
-        let ts = Utc::now() - chrono::Duration::minutes((historical_portfolio.len() - i) as i64 * 5);
+    for (ts, portfolio, native) in history {
         time_points.push(ts.to_rfc3339());
-        active_series.push(format!("{:.2}", historical_portfolio[i]));
-        passive_series.push(format!("{:.2}", historical_native[i]));
+        active_series.push(format!("{:.2}", portfolio));
+        passive_series.push(format!("{:.2}", native));
     }
 
     // Always include current point
@@ -2093,7 +2193,20 @@ fn compute_counterfactual_sync(
     }
 }
 
-fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_portfolio: &[f64], counterfactual_native: &[f64]) -> DerivedMetrics {
+/// Claim recommendation computed from live claimable yield vs gas break-even.
+/// The 2x factor mirrors the gas_to_fee margin used elsewhere; gas <= 0 means gas is
+/// unknown (not free), so only a moderate recommendation is possible.
+fn recommended_claim_action(claimable_usd: f64, gas_break_even_usd: f64) -> &'static str {
+    if gas_break_even_usd > 0.0 && claimable_usd >= 2.0 * gas_break_even_usd {
+        "claim_now"
+    } else if claimable_usd > 0.0 {
+        "claim_recommended"
+    } else {
+        "accumulate"
+    }
+}
+
+fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_history: &[(DateTime<Utc>, f64, f64)]) -> DerivedMetrics {
     // 1. Spot price calculation
     let spot_price = if let Some(pool) = raw.pool_mechanics.first() {
         if pool.volatile_assets.len() >= 2 {
@@ -2112,7 +2225,10 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
     let uni_fee_usd = uni_fee_usdc + uni_fee_nock * spot_price;
 
     let total_fees_usd = aero_fee_usd + uni_fee_usd;
-    let gas_cost = if raw.live_gas_cost_usd > 0.0 { raw.live_gas_cost_usd } else { 0.0043 };
+    // Zero-mock invariant: no fabricated gas fallback. A zero value means the gas query
+    // was unavailable (only reachable in unit tests via default RawOnChainData) — derived
+    // efficiency/action values then treat gas as unknown, never as free.
+    let gas_cost = raw.live_gas_cost_usd;
 
     // 3. Strategic Tranches
     // Tranche 1: Uniswap V4
@@ -2148,6 +2264,9 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
     let nock_floor_delta = total_nock - floor;
     let current_hwm = prev_hwm.max(total_portfolio_usd);
 
+    // Bracket upper bound derived from ticks — same single source of truth as the chart
+    let v4_upper_price = tick_to_display_price(V4_TICK_LOWER_ONCHAIN);
+
     // Dynamic Shot Advice Engine
     let (advice_action, advice_details) = if total_nock < floor {
         (
@@ -2165,7 +2284,7 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                 spot_price, total_stable_usd
             ),
         )
-    } else if spot_price >= 2.02783 {
+    } else if spot_price >= v4_upper_price {
         (
             "RANGE EXIT FLASHPOINT (Build High Wall)".to_string(),
             format!(
@@ -2174,11 +2293,16 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
             ),
         )
     } else if total_fees_usd >= 5.00 {
+        let gas_efficiency = if gas_cost > 0.0 {
+            format!("{:.0}x", total_fees_usd / gas_cost)
+        } else {
+            "unknown".to_string()
+        };
         (
             "BATCH HARVEST SHOT (Execute Claim)".to_string(),
             format!(
-                "Accumulated yield (${:.2}) exceeds $5.00 threshold at {:.0}x gas efficiency. Harvest fees and apply 60/40 Split Rule (40% to Tax Escrow, 60% Growth Capital).",
-                total_fees_usd, total_fees_usd / gas_cost
+                "Accumulated yield (${:.2}) exceeds $5.00 threshold at {} gas efficiency. Harvest fees and apply 60/40 Split Rule (40% to Tax Escrow, 60% Growth Capital).",
+                total_fees_usd, gas_efficiency
             ),
         )
     } else {
@@ -2226,11 +2350,16 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
             current_price: format!("{:.5}", spot_price),
             brackets: vec![
                 TickBracket {
-                    lower_price: "0.01237".to_string(),
-                    upper_price: "2.02783".to_string(),
+                    lower_price: format!("{:.5}", tick_to_display_price(V4_TICK_UPPER_ONCHAIN)),
+                    upper_price: format!("{:.5}", tick_to_display_price(V4_TICK_LOWER_ONCHAIN)),
                     liquidity_usd: format!("{:.2}", t1_usd),
-                    in_range: spot_price >= 0.01237 && spot_price <= 2.02783,
-                    distance_bps: -200,
+                    in_range: spot_price >= tick_to_display_price(V4_TICK_UPPER_ONCHAIN)
+                        && spot_price <= tick_to_display_price(V4_TICK_LOWER_ONCHAIN),
+                    distance_bps: bracket_distance_bps(
+                        spot_price,
+                        tick_to_display_price(V4_TICK_UPPER_ONCHAIN),
+                        tick_to_display_price(V4_TICK_LOWER_ONCHAIN),
+                    ),
                 },
                 TickBracket {
                     lower_price: "0.00000".to_string(),
@@ -2301,8 +2430,7 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
         },
         structural_channels,
         strategy_counterfactual: compute_counterfactual_sync(
-            counterfactual_portfolio,
-            counterfactual_native,
+            counterfactual_history,
             total_portfolio_usd,
             total_native_usd,
             &now_str,
@@ -2314,16 +2442,20 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                     contract_name: "Uniswap V4 (NOCK/USDC 3%)".to_string(),
                     claimable_usd: format!("{:.2}", uni_fee_usd),
                     gas_break_even_usd: format!("{:.4}", gas_cost),
-                    efficiency_ratio: (uni_fee_usd / gas_cost * 100.0).round() / 100.0,
-                    recommended_action: "claim_now".to_string(),
+                    efficiency_ratio: if gas_cost > 0.0 {
+                        (uni_fee_usd / gas_cost * 100.0).round() / 100.0
+                    } else { 0.0 },
+                    recommended_action: recommended_claim_action(uni_fee_usd, gas_cost).to_string(),
                 },
                 FeeCollectionIndex {
                     contract_address: "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
                     contract_name: "Aerodrome (USDC/NOCK 0.3%)".to_string(),
                     claimable_usd: format!("{:.2}", aero_fee_usd),
                     gas_break_even_usd: format!("{:.4}", gas_cost),
-                    efficiency_ratio: (aero_fee_usd / gas_cost * 100.0).round() / 100.0,
-                    recommended_action: "claim_now".to_string(),
+                    efficiency_ratio: if gas_cost > 0.0 {
+                        (aero_fee_usd / gas_cost * 100.0).round() / 100.0
+                    } else { 0.0 },
+                    recommended_action: recommended_claim_action(aero_fee_usd, gas_cost).to_string(),
                 },
             ],
         },
@@ -2331,10 +2463,53 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
 }
 
 fn compute_state_hash(data: &SnapshotData) -> String {
-    // Canonical JSON: sorted keys, no whitespace
+    // Canonical JSON: sorted keys, no whitespace, wall-clock fields stripped
+    let canonical = canonical_state_json(data);
     let mut hasher = Sha256::new();
-    hasher.update(serde_json::to_vec(&data).unwrap());
+    hasher.update(serde_json::to_vec(&canonical).unwrap());
     format!("{:x}", hasher.finalize())
+}
+
+/// Canonical hash input: the snapshot payload with every wall-clock field removed.
+///
+/// Timestamps (`updated_at`, `high_water_mark_date`, series `time_points`, channel
+/// `start_time`/`end_time`/`break_point`, `LinePoint.time`) are produced fresh on every
+/// ingestion cycle and carry no state information. Including them made the hash change
+/// every cycle, defeating snapshot deduplication (`store_snapshot` would insert a new
+/// row every cycle even when on-chain state was unchanged, growing the table unboundedly
+/// and filling history charts with duplicate points).
+fn canonical_state_json(data: &SnapshotData) -> serde_json::Value {
+    let mut value = serde_json::to_value(data).expect("SnapshotData is JSON-serializable");
+    strip_volatile_time_fields(&mut value);
+    value
+}
+
+fn strip_volatile_time_fields(value: &mut serde_json::Value) {
+    const VOLATILE_KEYS: [&str; 7] = [
+        "updated_at",
+        "high_water_mark_date",
+        "time_points",
+        "time",
+        "start_time",
+        "end_time",
+        "break_point",
+    ];
+    match value {
+        serde_json::Value::Object(map) => {
+            for key in VOLATILE_KEYS {
+                map.remove(key);
+            }
+            for (_, v) in map.iter_mut() {
+                strip_volatile_time_fields(v);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                strip_volatile_time_fields(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 async fn store_snapshot(db: &PgPool, envelope: &SnapshotEnvelope) -> Result<()> {
@@ -2427,7 +2602,7 @@ mod tests {
         ];
         // Total NOCK is 80,000 < 100,000 floor
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &[]);
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[]);
         assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
     }
 
@@ -2450,7 +2625,7 @@ mod tests {
         raw.live_gas_cost_usd = 0.005;
 
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &[]);
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[]);
         assert!(metrics.global_status.shot_advice_action.contains("BATCH HARVEST SHOT"));
     }
 
@@ -2473,7 +2648,7 @@ mod tests {
         raw.live_aero_fee_nock = 8.0;
 
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &[]);
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[]);
         assert!(metrics.global_status.shot_advice_action.contains("HOLD & ACCRETE"));
     }
 
@@ -2516,7 +2691,7 @@ operator_profile:
             },
         ];
         // 120,000 is above default 100k floor, BUT below custom 150k floor!
-        let metrics = compute_derived_metrics(&raw, 3000.0, &profile, StructuralChannels { channels: vec![] }, &[], &[]);
+        let metrics = compute_derived_metrics(&raw, 3000.0, &profile, StructuralChannels { channels: vec![] }, &[]);
         assert_eq!(metrics.global_status.nock_floor_target, "150000");
         assert_eq!(metrics.global_status.nock_floor_delta, "-30000");
         assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
@@ -2538,8 +2713,149 @@ database_url: "postgresql://localhost/test"
 
     #[test]
     fn test_state_hash_determinism() {
-        let data = SnapshotData {
-            wallet_balances: vec![],
+        let data = sample_snapshot_data();
+
+        let hash1 = compute_state_hash(&data);
+        let hash2 = compute_state_hash(&data);
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash1.len(), 64);
+    }
+
+    #[test]
+    fn test_state_hash_ignores_volatile_timestamps() {
+        // Two snapshots whose ONLY differences are wall-clock fields (produced fresh each
+        // cycle) must hash identically — otherwise snapshot deduplication never fires.
+        let mut a = sample_snapshot_data();
+        let b = sample_snapshot_data();
+
+        a.wallet_balances[0].updated_at = "2027-01-01T00:00:00Z".to_string();
+        a.derived_metrics.global_status.high_water_mark_date = "2027-01-01T00:00:00Z".to_string();
+        a.derived_metrics.asset_aggregation_series.time_points = vec!["2027-01-01T00:00:00Z".to_string()];
+        a.derived_metrics.total_value_vs_baseline.time_points = vec!["2027-01-01T00:00:00Z".to_string()];
+        a.derived_metrics.strategy_counterfactual.time_points = vec!["2027-01-01T00:00:00Z".to_string(); 4];
+        a.derived_metrics.structural_channels.channels[0].start_time = "2027-01-01T00:00:00Z".to_string();
+        a.derived_metrics.structural_channels.channels[0].break_point = Some("2027-01-01T00:00:00Z".to_string());
+        for p in a.derived_metrics.structural_channels.channels[0].center_line.iter_mut() {
+            p.time = "2027-01-01T00:00:00Z".to_string();
+        }
+
+        assert_eq!(compute_state_hash(&a), compute_state_hash(&b));
+    }
+
+    #[test]
+    fn test_state_hash_changes_with_state() {
+        // Real state changes must change the hash so dedup keeps genuinely new snapshots.
+        let mut a = sample_snapshot_data();
+        let b = sample_snapshot_data();
+        a.wallet_balances[0].amount = "96004.52".to_string();
+        a.derived_metrics.global_status.total_nock_amount = "106141".to_string();
+
+        assert_ne!(compute_state_hash(&a), compute_state_hash(&b));
+    }
+
+    #[test]
+    fn test_counterfactual_series_use_real_timestamps_and_stay_aligned() {
+        let history = vec![
+            (Utc::now() - chrono::Duration::minutes(30), 2900.0f64, 2600.0f64),
+            (Utc::now() - chrono::Duration::minutes(25), 2910.0, 2602.0),
+            (Utc::now() - chrono::Duration::minutes(20), 2925.0, 2603.5),
+        ];
+        let now_str = Utc::now().to_rfc3339();
+        let cf = compute_counterfactual_sync(&history, 2950.0, 2605.0, &now_str);
+
+        assert_eq!(cf.time_points.len(), 4);
+        assert_eq!(cf.active_portfolio_series.len(), 4);
+        assert_eq!(cf.passive_baseline_series.len(), 4);
+
+        // Real snapshot timestamps, in chronological order — no fabricated spacing
+        assert_eq!(cf.time_points[0], history[0].0.to_rfc3339());
+        assert_eq!(cf.time_points[2], history[2].0.to_rfc3339());
+        assert_ne!(cf.time_points[0], cf.time_points[1]);
+
+        // Paired series values align with the same history rows
+        assert_eq!(cf.active_portfolio_series[1], "2910.00");
+        assert_eq!(cf.passive_baseline_series[1], "2602.00");
+
+        // Current point appended last
+        assert_eq!(cf.time_points[3], now_str);
+        assert_eq!(cf.active_portfolio_series[3], "2950.00");
+        assert_eq!(cf.passive_baseline_series[3], "2605.00");
+    }
+
+    #[test]
+    fn test_structural_channels_final_window_includes_newest_sample() {
+        // 21 samples: the final 20-sample window must include the newest price.
+        let base_ts = Utc::now() - chrono::Duration::minutes(60);
+        let mut history: Vec<(DateTime<Utc>, f64)> = (0..20)
+            .map(|i| (base_ts + chrono::Duration::minutes(i as i64), 100.0))
+            .collect();
+        let newest_ts = base_ts + chrono::Duration::minutes(20);
+        history.push((newest_ts, 200.0)); // outlier newest sample
+
+        let channels = compute_structural_channels_sync(&history);
+        let ch = &channels.channels[0];
+        let last_center: f64 = ch.center_line.last().unwrap().value.parse().unwrap();
+
+        // Window of the last 20 samples = nineteen 100s + one 200 → mean 105.00
+        assert!((last_center - 105.0).abs() < 0.01);
+        // Point is labeled with the timestamp of the newest sample in the window
+        assert_eq!(ch.center_line.last().unwrap().time, newest_ts.to_rfc3339());
+    }
+
+    #[test]
+    fn test_tick_to_display_price_matches_live_values() {
+        // Derived bracket prices must round-trip against the previously hardcoded (and
+        // live-verified) display values for the NOCK/USDC V4 position ticks.
+        let lower_display = tick_to_display_price(V4_TICK_UPPER_ONCHAIN);
+        let upper_display = tick_to_display_price(V4_TICK_LOWER_ONCHAIN);
+
+        assert!((lower_display - 0.01237).abs() / 0.01237 < 0.001);
+        assert!((upper_display - 2.02783).abs() / 2.02783 < 0.001);
+        assert!(lower_display < upper_display);
+
+        // The negated-exponent orientation: larger on-chain tick → lower displayed price
+        assert!(tick_to_display_price(274200) < tick_to_display_price(223200));
+    }
+
+    #[test]
+    fn test_bracket_distance_bps() {
+        // Spot inside the range: distance is to the nearest edge, sign says which side
+        let lower = tick_to_display_price(V4_TICK_UPPER_ONCHAIN); // ~0.012366
+        let upper = tick_to_display_price(V4_TICK_LOWER_ONCHAIN); // ~2.027880
+        let d = bracket_distance_bps(1.0, lower, upper);
+        // Nearest edge is the lower (~0.0124, 9876 bps away vs 10279 to the upper):
+        // (0.012366 - 1.0)/1.0 * 10000 ≈ -9876
+        assert!((d as f64 + 9876.0).abs() < 5.0);
+
+        // Spot above range → distance to upper edge is negative
+        assert!(bracket_distance_bps(2.5, lower, upper) < 0);
+        // Degenerate inputs stay zero instead of panicking on division
+        assert_eq!(bracket_distance_bps(0.0, lower, upper), 0);
+    }
+
+    #[test]
+    fn test_recommended_claim_action_thresholds() {
+        // Claimable well above 2x gas → claim now
+        assert_eq!(recommended_claim_action(0.12, 0.005), "claim_now");
+        // Claimable positive but under the 2x gas margin → moderate recommendation
+        assert_eq!(recommended_claim_action(0.008, 0.005), "claim_recommended");
+        // Nothing claimable → accumulate
+        assert_eq!(recommended_claim_action(0.0, 0.005), "accumulate");
+        // Gas unknown (0) is NOT free gas — never claim_now
+        assert_eq!(recommended_claim_action(5.0, 0.0), "claim_recommended");
+        assert_eq!(recommended_claim_action(0.0, 0.0), "accumulate");
+    }
+
+    fn sample_snapshot_data() -> SnapshotData {
+        SnapshotData {
+            wallet_balances: vec![WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "NOCK".to_string(),
+                token_address: "0xNOCK".to_string(),
+                amount: "96004.52".to_string(),
+                amount_usd: "2496.12".to_string(),
+                updated_at: "2026-10-11T00:00:00Z".to_string(),
+            }],
             pool_mechanics: vec![],
             concentrated_liquidity: vec![],
             contract_fees: vec![],
@@ -2561,12 +2877,12 @@ database_url: "postgresql://localhost/test"
                     shot_advice_details: "Steady".to_string(),
                 },
                 asset_aggregation_series: AssetAggregationSeries {
-                    time_points: vec![],
-                    safe_haven_series: vec![],
-                    active_protocol_series: vec![],
-                    tranche_1_nock: vec![],
-                    tranche_2_nock: vec![],
-                    tranche_3_nock: vec![],
+                    time_points: vec!["2026-10-11T00:00:00Z".to_string()],
+                    safe_haven_series: vec!["48.00".to_string()],
+                    active_protocol_series: vec!["2.00".to_string()],
+                    tranche_1_nock: vec!["4000".to_string()],
+                    tranche_2_nock: vec!["6000".to_string()],
+                    tranche_3_nock: vec!["96004".to_string()],
                 },
                 tick_bracket_hypervisor: TickBracketHypervisor {
                     brackets: vec![],
@@ -2579,26 +2895,38 @@ database_url: "postgresql://localhost/test"
                     allocations: vec![],
                 },
                 strategy_counterfactual: StrategyCounterfactual {
-                    time_points: vec![],
-                    active_portfolio_series: vec![],
-                    passive_baseline_series: vec![],
+                    time_points: vec![
+                        "2026-10-11T00:00:00Z".to_string(),
+                        "2026-10-11T00:05:00Z".to_string(),
+                        "2026-10-11T00:10:00Z".to_string(),
+                    ],
+                    active_portfolio_series: vec!["99.00".to_string(), "99.50".to_string(), "100.00".to_string()],
+                    passive_baseline_series: vec!["49.00".to_string(), "49.50".to_string(), "50.00".to_string()],
                 },
                 structural_channels: StructuralChannels {
-                    channels: vec![],
+                    channels: vec![RegressionChannel {
+                        start_time: "2026-10-11T00:00:00Z".to_string(),
+                        end_time: None,
+                        center_line: vec![
+                            LinePoint { time: "2026-10-11T00:00:00Z".to_string(), value: "99.00".to_string() },
+                            LinePoint { time: "2026-10-11T00:05:00Z".to_string(), value: "100.00".to_string() },
+                        ],
+                        upper_1sd: vec![],
+                        lower_1sd: vec![],
+                        upper_2sd: vec![],
+                        lower_2sd: vec![],
+                        is_active: true,
+                        break_point: None,
+                    }],
                 },
                 total_value_vs_baseline: TotalValueVsBaseline {
-                    time_points: vec![],
-                    portfolio_value_series: vec![],
-                    high_water_mark_series: vec![],
-                    token_price_series: vec![],
+                    time_points: vec!["2026-10-11T00:00:00Z".to_string()],
+                    portfolio_value_series: vec!["100.00".to_string()],
+                    high_water_mark_series: vec!["100.00".to_string()],
+                    token_price_series: vec!["0.02600".to_string()],
                 },
             },
-        };
-
-        let hash1 = compute_state_hash(&data);
-        let hash2 = compute_state_hash(&data);
-        assert_eq!(hash1, hash2);
-        assert_eq!(hash1.len(), 64);
+        }
     }
 
     #[test]

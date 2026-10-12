@@ -88,6 +88,11 @@ export function useFreshness<T = unknown>(
   const freshnessRef = useRef<FreshnessState>(freshness);
   freshnessRef.current = freshness;
   const lastStateHashRef = useRef<string>('');
+  // Callback identity must never drive effect re-runs: callers typically pass inline
+  // arrows, and having onFreshnessChange in the effect deps tore down and recreated the
+  // polling interval (plus an extra foreground fetch) on every render.
+  const onFreshnessChangeRef = useRef(onFreshnessChange);
+  onFreshnessChangeRef.current = onFreshnessChange;
 
   const log = useCallback((msg: string) => {
     if (debug) console.log(`[useFreshness] ${msg}`);
@@ -147,14 +152,16 @@ export function useFreshness<T = unknown>(
         // Notify on freshness transition
         if (newFreshness.isFresh !== lastKnownFreshRef.current) {
           lastKnownFreshRef.current = newFreshness.isFresh;
-          onFreshnessChange?.(newFreshness.isFresh);
+          onFreshnessChangeRef.current?.(newFreshness.isFresh);
           log(`Freshness changed: ${newFreshness.isFresh ? 'FRESH' : 'STALE'} (age=${newFreshness.ageSeconds}s)`);
         }
       }
       setError(null);
     } catch (err) {
       if (!mountedRef.current) return;
-      if (!isBackground || !snapshotRef.current) {
+      // Keep last-known data on transient failures: only surface an error when there is
+      // no snapshot to show at all (cold start). Otherwise the dashboard stays up.
+      if (!snapshotRef.current) {
         setError(err instanceof Error ? err : new Error(String(err)));
       }
       log(`Fetch error: ${err}`);
@@ -163,9 +170,10 @@ export function useFreshness<T = unknown>(
         setLoading(false);
       }
     }
-  }, [fetchSnapshot, computeFreshness, onFreshnessChange, log]);
+  }, [fetchSnapshot, computeFreshness, log]);
 
-  // Initial fetch and continuous background polling
+  // Initial fetch and continuous background polling. Deps stay minimal (stable per
+  // mount in practice) so the interval is not reset and no extra fetch fires per render.
   useEffect(() => {
     mountedRef.current = true;
     refresh(false);
@@ -183,7 +191,7 @@ export function useFreshness<T = unknown>(
         }
         if (newFreshness.isFresh !== lastKnownFreshRef.current) {
           lastKnownFreshRef.current = newFreshness.isFresh;
-          onFreshnessChange?.(newFreshness.isFresh);
+          onFreshnessChangeRef.current?.(newFreshness.isFresh);
         }
       }
       await refresh(true);
@@ -195,7 +203,7 @@ export function useFreshness<T = unknown>(
         clearInterval(pollTimerRef.current);
       }
     };
-  }, [refresh, computeFreshness, onFreshnessChange, pollIntervalMs]);
+  }, [refresh, pollIntervalMs]);
 
   // Re-fetch when snapshot changes externally (e.g., manual refresh button)
   const refetch = useCallback(() => {
@@ -217,97 +225,6 @@ export function useFreshness<T = unknown>(
         ? `${Math.floor(freshness.ageSeconds / 60)}m ago`
         : `${Math.floor(freshness.ageSeconds / 3600)}h ago`,
   };
-}
-
-/**
- * Lightweight freshness check for metadata-only polling.
- * Use when you only need to know if data is stale without fetching full payload.
- */
-export function useFreshnessPoll(
-  fetchMetadata: () => Promise<{ generated_at: string; state_hash: string } | null>,
-  options: UseFreshnessOptions = {}
-) {
-  const {
-    syncWindowSeconds = SYNC_WINDOW_SECONDS_DEFAULT,
-    syncGraceSeconds = SYNC_GRACE_SECONDS_DEFAULT,
-    pollIntervalMs = 10_000,
-    onFreshnessChange,
-    debug = false,
-  } = options;
-
-  const [freshness, setFreshness] = useState<FreshnessState>({
-    isFresh: true,
-    syncStatus: 'fresh',
-    ageSeconds: 0,
-    stateHash: '',
-    lastChecked: Date.now(),
-    staleSince: null,
-    syncWindowSeconds,
-    syncGraceSeconds,
-  });
-
-  const log = useCallback((msg: string) => {
-    if (debug) console.log(`[useFreshnessPoll] ${msg}`);
-  }, [debug]);
-
-  const freshnessRef = useRef(freshness);
-  freshnessRef.current = freshness;
-
-  useEffect(() => {
-    let mounted = true;
-    let timer: ReturnType<typeof setInterval>;
-
-    const check = async () => {
-      const meta = await fetchMetadata();
-      if (!mounted || !meta) return;
-
-      const generatedAt = new Date(meta.generated_at).getTime();
-      const now = Date.now();
-      const ageSeconds = Math.floor((now - generatedAt) / 1000);
-      const staleThreshold = syncWindowSeconds + syncGraceSeconds;
-
-      let syncStatus: SyncStatus = 'fresh';
-      if (ageSeconds > staleThreshold) {
-        syncStatus = 'stale';
-      } else if (ageSeconds > syncWindowSeconds) {
-        syncStatus = 'syncing';
-      }
-
-      const isFresh = syncStatus !== 'stale';
-
-      const newFreshness: FreshnessState = {
-        isFresh,
-        syncStatus,
-        ageSeconds,
-        stateHash: meta.state_hash,
-        lastChecked: now,
-        staleSince: isFresh ? null : (freshnessRef.current.staleSince ?? now),
-        syncWindowSeconds,
-        syncGraceSeconds,
-      };
-
-      // Only update state if freshness actually changed
-      if (newFreshness.isFresh !== freshnessRef.current.isFresh ||
-          newFreshness.syncStatus !== freshnessRef.current.syncStatus ||
-          newFreshness.ageSeconds !== freshnessRef.current.ageSeconds ||
-          newFreshness.stateHash !== freshnessRef.current.stateHash) {
-        setFreshness(newFreshness);
-        if (newFreshness.isFresh !== freshnessRef.current.isFresh) {
-          onFreshnessChange?.(newFreshness.isFresh);
-        }
-      }
-    };
-
-    check();
-    timer = setInterval(check, pollIntervalMs);
-
-    return () => {
-      mounted = false;
-      clearInterval(timer);
-    };
-  }, [fetchMetadata, syncWindowSeconds, pollIntervalMs, onFreshnessChange, log]);
-
-  return freshness;
 }
 
 /**

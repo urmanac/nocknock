@@ -33,15 +33,27 @@ function Dashboard() {
 
   const [history, setHistory] = React.useState<any[]>([]);
 
-  React.useEffect(() => {
-    api.historicalSnapshots({ limit: 50 })
+  // Deep history (~24h at the 5-min sync cadence) powering every chart timeline.
+  const loadHistory = React.useCallback(() => {
+    api.historicalSnapshots({ limit: 288 })
       .then(res => {
         if (res?.snapshots?.length) {
           setHistory([...res.snapshots].reverse());
         }
       })
-      .catch(() => {});
-  }, [snapshot?.meta?.snapshot_id]);
+      .catch(() => {}); // retried by the interval below while nothing has loaded
+  }, []);
+
+  React.useEffect(() => {
+    loadHistory();
+  }, [loadHistory, snapshot?.meta?.snapshot_id]);
+
+  // Retry while empty so a single failed history load doesn't leave empty charts forever
+  React.useEffect(() => {
+    if (history.length > 0) return;
+    const retry = setInterval(loadHistory, 60_000);
+    return () => clearInterval(retry);
+  }, [history.length, loadHistory]);
 
   if (loading && !snapshot) {
     return (
@@ -158,7 +170,7 @@ function Dashboard() {
   const tickData = (metrics?.tick_bracket_hypervisor?.brackets || []).map((b: any, i: number) => ({
     name: i === 0 ? 'Uniswap V4 (3%)' : 'Aerodrome (0.3%)',
     lower: parseFloat(b.lower_price),
-    upper: Math.min(parseFloat(b.upper_price), 2.5),
+    upper: parseFloat(b.upper_price),
     displayUpper: b.upper_price,
     liquidity: parseFloat(b.liquidity_usd),
     inRange: b.in_range,
@@ -172,6 +184,19 @@ function Dashboard() {
     ratio: c.efficiency_ratio,
     action: c.recommended_action,
   }));
+
+  // Bollinger structural channel (backend computes 20-period SMA ± 1σ/2σ bands)
+  const channel = metrics?.structural_channels?.channels?.[0];
+  const channelData = channel
+    ? channel.center_line.map((p: any, i: number) => ({
+        time: formatSnapshotTime(p.time, spansMultipleDays),
+        center: parseFloat(channel.center_line[i]?.value || '0'),
+        upper1: parseFloat(channel.upper_1sd?.[i]?.value || '0'),
+        lower1: parseFloat(channel.lower_1sd?.[i]?.value || '0'),
+        upper2: parseFloat(channel.upper_2sd?.[i]?.value || '0'),
+        lower2: parseFloat(channel.lower_2sd?.[i]?.value || '0'),
+      }))
+    : [];
 
   const floorTarget = global?.nock_floor_target ? parseInt(global.nock_floor_target) : 100000;
   const floorTargetFormatted = floorTarget.toLocaleString();
@@ -302,7 +327,7 @@ function Dashboard() {
         </div>
       </section>
 
-      {/* Storyboard Canvas — 7 Real Charts */}
+      {/* Storyboard Canvas — Real Charts (structural channel panel appears when band data exists) */}
       <main style={styles.grid}>
         {/* 1. Sovereign NOCK Stack & Floor Reference */}
         <CanvasPanel title={`The Sovereign NOCK Stack vs ${floorTargetFormatted} Floor (Token Units)`}>
@@ -456,8 +481,8 @@ function Dashboard() {
           </div>
         </CanvasPanel>
 
-        {/* 5. Strategy Counterfactual — Dual Line */}
-        <CanvasPanel title="Strategy Counterfactual (Active vs 100% Hold)">
+        {/* 5. Portfolio Composition — Total (Native + USDC) vs Native-Only */}
+        <CanvasPanel title="Portfolio Composition: Total (Native + USDC) vs Native-Only">
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={counterfactual} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
               <XAxis dataKey="time" stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} />
@@ -468,20 +493,21 @@ function Dashboard() {
                 itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
                 labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
               />
-              <Line type="monotone" dataKey="active" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} name="Active Portfolio ($)" />
-              <Line type="monotone" dataKey="passive" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Passive Hold ($)" />
+              <Line type="monotone" dataKey="active" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} name="Total Portfolio ($, native + USDC)" />
+              <Line type="monotone" dataKey="passive" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Native Tokens Only ($, no USDC)" />
               <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </LineChart>
           </ResponsiveContainer>
           {(() => {
-            const activeUsd = parseFloat(global?.total_portfolio_usd || '0');
-            const passiveUsd = parseFloat(global?.total_native_usd || '0');
-            const alphaUsd = activeUsd - passiveUsd;
-            const alphaPct = passiveUsd > 0 ? ((alphaUsd / passiveUsd) * 100).toFixed(1) : '0.0';
-            const alphaColor = alphaUsd >= 0 ? '#10b981' : '#ef4444';
+            const lastPoint = counterfactual[counterfactual.length - 1];
+            const activeUsd = lastPoint ? lastPoint.active : parseFloat(global?.total_portfolio_usd || '0');
+            const passiveUsd = lastPoint ? lastPoint.passive : parseFloat(global?.total_native_usd || '0');
+            const deltaUsd = activeUsd - passiveUsd;
+            const deltaPct = passiveUsd > 0 ? ((deltaUsd / passiveUsd) * 100).toFixed(1) : '0.0';
+            const deltaColor = deltaUsd >= 0 ? '#10b981' : '#ef4444';
             return (
-              <div style={{ marginTop: 8, fontSize: '0.75rem', color: alphaColor, textAlign: 'center' }}>
-                Alpha Generated: <strong>{alphaUsd >= 0 ? `+$${alphaUsd.toFixed(2)}` : `-$${Math.abs(alphaUsd).toFixed(2)}`} USD</strong> ({alphaUsd >= 0 ? `+${alphaPct}%` : `${alphaPct}%`} vs passive hold)
+              <div style={{ marginTop: 8, fontSize: '0.75rem', color: deltaColor, textAlign: 'center' }}>
+                Stable Reserve Delta (Total − Native-Only): <strong>{deltaUsd >= 0 ? `+$${deltaUsd.toFixed(2)}` : `-$${Math.abs(deltaUsd).toFixed(2)}`} USD</strong> ({deltaUsd >= 0 ? `+${deltaPct}%` : `${deltaPct}%`} of native value) — the USDC side held alongside LP positions
               </div>
             );
           })()}
@@ -513,6 +539,34 @@ function Dashboard() {
             ))}
           </div>
         </CanvasPanel>
+
+        {/* 7. Structural Channels — Bollinger Bands on Portfolio Value */}
+        {channelData.length > 0 && (
+          <CanvasPanel title="Structural Channels (20-Period SMA ± 1σ/2σ Bands)">
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={channelData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                <XAxis dataKey="time" stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} />
+                <YAxis stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => '$' + v.toLocaleString()} domain={['auto', 'auto']} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+                <Tooltip
+                  contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
+                  itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
+                  labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
+                  formatter={(v: any) => `$${Number(v).toLocaleString()}`}
+                />
+                <Line type="monotone" dataKey="upper2" stroke="#7c3aed" strokeWidth={1} strokeDasharray="2 3" dot={false} name="Upper 2σ" />
+                <Line type="monotone" dataKey="upper1" stroke="#38bdf8" strokeWidth={1} strokeDasharray="3 3" dot={false} name="Upper 1σ" />
+                <Line type="monotone" dataKey="center" stroke="#f0f6fc" strokeWidth={2} dot={false} name="SMA(20) Center" />
+                <Line type="monotone" dataKey="lower1" stroke="#38bdf8" strokeWidth={1} strokeDasharray="3 3" dot={false} name="Lower 1σ" />
+                <Line type="monotone" dataKey="lower2" stroke="#7c3aed" strokeWidth={1} strokeDasharray="2 3" dot={false} name="Lower 2σ" />
+                <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
+              </LineChart>
+            </ResponsiveContainer>
+            <div style={{ marginTop: 8, fontSize: '0.75rem', color: '#888', textAlign: 'center' }}>
+              Regression channel over historical portfolio values — band squeezes precede volatility expansion
+            </div>
+          </CanvasPanel>
+        )}
       </main>
 
       {/* Stale Banner — non-obtrusive */}
