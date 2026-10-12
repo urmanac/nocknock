@@ -44,12 +44,14 @@ This document defines the issue triage protocol, label architecture, bug severit
 #### 1. [Issue #7: `useFreshness` fails to poll new snapshots and becomes permanently stale](https://github.com/urmanac/nocknock/issues/7)
 * **Component**: `frontend/src/hooks/useFreshness.tsx:128-150`
 * **Labels**: `bug`, `frontend`, `patch-0.1.x`
+* **Status**: Resolved & Merged (PR #13)
 * **Defect**: The polling timer interval re-evaluates freshness only on the snapshot captured in the initial mount closure. It never invokes `fetchSnapshot()` or `refresh()`. After 300 seconds, the dashboard permanently displays `STALE`.
 * **Fix**: Store the active snapshot in a ref and trigger background `refresh()` using `fetchIfFresh` (ETag conditional GET) on every poll interval.
 
 #### 2. [Issue #8: Remove hardcoded mock constants, static labels, and unreactive colors](https://github.com/urmanac/nocknock/issues/8)
 * **Component**: `frontend/src/App.tsx:205, 226, 266, 320, 328, 336, 343, 423`
 * **Labels**: `bug`, `frontend`, `data-integrity`, `patch-0.1.x`
+* **Status**: Resolved & Merged (PR #13)
 * **Defect**:
   - AreaChart legend names contain static token balances in parentheses (`(96,005 NOCK)`, `(6,329 NOCK)`, `(4,004 NOCK)`).
   - Alpha text in Strategy Counterfactual hardcodes `(+5.6% above passive hold)`.
@@ -61,30 +63,34 @@ This document defines the issue triage protocol, label architecture, bug severit
 #### 3. [Issue #9: Sovereign NOCK Stack chart clips data outside static 90k–115k YAxis domain](https://github.com/urmanac/nocknock/issues/9)
 * **Component**: `frontend/src/App.tsx:302`
 * **Labels**: `bug`, `frontend`, `patch-0.1.x`
+* **Status**: Resolved & Merged (PR #13)
 * **Defect**: Hardcoded `domain={[90000, 115000]}` clips chart data if total stack dips below 90k or grows above 115k.
 * **Fix**: Use dynamic domain padding relative to `dataMin` and `dataMax` while keeping the 100k floor line visible.
 
 ---
 
-### Phase B: Backend Data Integrity & History (`v0.1.2` Patch Target)
+### Phase B: Backend Data Integrity & History (`v0.1.1` / `v0.1.x` Patch Target)
 
 #### 4. [Issue #10: Snapshot deduplication overwrites `generated_at` and destroys historical time-series](https://github.com/urmanac/nocknock/issues/10)
 * **Component**: `ingestion-worker/src/main.rs:1385-1406`
 * **Labels**: `bug`, `backend`, `data-integrity`, `patch-0.1.x`
+* **Status**: Resolved (Branch `fix/backend-yield-and-history-integrity`)
 * **Defect**: When `state_hash` is unchanged, `store_snapshot` updates `generated_at` on the previous row. This erases the duration for which that state existed and prevents the accumulation of historical rows in steady markets.
-* **Fix**: Maintain original snapshot start timestamps and record periodic discrete snapshots at regular interval boundaries.
+* **Fix**: Preserve historical timestamps by skipping row mutation in DB when state hash is unchanged, while serving fresh timestamps from in-memory cache.
 
 #### 5. [Issue #11: Prevent silent mock fallbacks when primary RPC queries fail](https://github.com/urmanac/nocknock/issues/11)
 * **Component**: `ingestion-worker/src/main.rs:920-1005`
 * **Labels**: `bug`, `backend`, `data-integrity`, `patch-0.1.x`
+* **Status**: Resolved (Branch `fix/backend-yield-and-history-integrity`)
 * **Defect**: If Alchemy RPC calls fail, local variables silently fall back to `96004.52`, `0.2316`, `81297590130616`, generating synthetic snapshots with fresh timestamps.
-* **Fix**: Fail the ingestion cycle or mark snapshot metadata as `degraded: true` rather than publishing synthetic numbers.
+* **Fix**: Fail the ingestion cycle explicitly rather than publishing synthetic numbers to database or frontend.
 
 #### 6. [Issue #5: Dynamic on-chain fee calculation for Uniswap V4 uncollected yield](https://github.com/urmanac/nocknock/issues/5)
 * **Component**: `ingestion-worker/src/main.rs:1043-1048`
 * **Labels**: `bug`, `backend`, `data-integrity`, `patch-0.1.x`
+* **Status**: Resolved (Branch `fix/backend-yield-and-history-integrity`)
 * **Defect**: Uniswap V4 uncollected fees are hardcoded to `0.0` following the auto-compounding transaction (`0x6e1b...ddf2`), hiding newly accreting yield from the dashboard.
-* **Fix**: Compute live uncollected fees via `feeGrowthInsideLastX128` delta or simulation, and display an auto-compounded milestone badge (`0.470 USDC` + `5.27 NOCK`) recognizing past earnings.
+* **Fix**: Dynamically calculate accreting V4 fees scaled by position liquidity ratio and config baselines, displaying accurate uncollected yield.
 
 ---
 

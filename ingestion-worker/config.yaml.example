@@ -35,3 +35,8 @@ sync_window_seconds: 300
 
 # API server port
 port: 8080
+
+# Uniswap V4 Position & Yield Baselines
+v4_position_id: 3126000
+v4_fee_baseline_usdc: 0.0245
+v4_fee_baseline_nock: 1.4820
