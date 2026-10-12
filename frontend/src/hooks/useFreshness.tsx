@@ -88,6 +88,11 @@ export function useFreshness<T = unknown>(
   const freshnessRef = useRef<FreshnessState>(freshness);
   freshnessRef.current = freshness;
   const lastStateHashRef = useRef<string>('');
+  // Callback identity must never drive effect re-runs: callers typically pass inline
+  // arrows, and having onFreshnessChange in the effect deps tore down and recreated the
+  // polling interval (plus an extra foreground fetch) on every render.
+  const onFreshnessChangeRef = useRef(onFreshnessChange);
+  onFreshnessChangeRef.current = onFreshnessChange;
 
   const log = useCallback((msg: string) => {
     if (debug) console.log(`[useFreshness] ${msg}`);
@@ -147,14 +152,16 @@ export function useFreshness<T = unknown>(
         // Notify on freshness transition
         if (newFreshness.isFresh !== lastKnownFreshRef.current) {
           lastKnownFreshRef.current = newFreshness.isFresh;
-          onFreshnessChange?.(newFreshness.isFresh);
+          onFreshnessChangeRef.current?.(newFreshness.isFresh);
           log(`Freshness changed: ${newFreshness.isFresh ? 'FRESH' : 'STALE'} (age=${newFreshness.ageSeconds}s)`);
         }
       }
       setError(null);
     } catch (err) {
       if (!mountedRef.current) return;
-      if (!isBackground || !snapshotRef.current) {
+      // Keep last-known data on transient failures: only surface an error when there is
+      // no snapshot to show at all (cold start). Otherwise the dashboard stays up.
+      if (!snapshotRef.current) {
         setError(err instanceof Error ? err : new Error(String(err)));
       }
       log(`Fetch error: ${err}`);
@@ -163,9 +170,10 @@ export function useFreshness<T = unknown>(
         setLoading(false);
       }
     }
-  }, [fetchSnapshot, computeFreshness, onFreshnessChange, log]);
+  }, [fetchSnapshot, computeFreshness, log]);
 
-  // Initial fetch and continuous background polling
+  // Initial fetch and continuous background polling. Deps stay minimal (stable per
+  // mount in practice) so the interval is not reset and no extra fetch fires per render.
   useEffect(() => {
     mountedRef.current = true;
     refresh(false);
@@ -183,7 +191,7 @@ export function useFreshness<T = unknown>(
         }
         if (newFreshness.isFresh !== lastKnownFreshRef.current) {
           lastKnownFreshRef.current = newFreshness.isFresh;
-          onFreshnessChange?.(newFreshness.isFresh);
+          onFreshnessChangeRef.current?.(newFreshness.isFresh);
         }
       }
       await refresh(true);
@@ -195,7 +203,7 @@ export function useFreshness<T = unknown>(
         clearInterval(pollTimerRef.current);
       }
     };
-  }, [refresh, computeFreshness, onFreshnessChange, pollIntervalMs]);
+  }, [refresh, pollIntervalMs]);
 
   // Re-fetch when snapshot changes externally (e.g., manual refresh button)
   const refetch = useCallback(() => {

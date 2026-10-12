@@ -33,15 +33,27 @@ function Dashboard() {
 
   const [history, setHistory] = React.useState<any[]>([]);
 
-  React.useEffect(() => {
-    api.historicalSnapshots({ limit: 50 })
+  // Deep history (~24h at the 5-min sync cadence) powering every chart timeline.
+  const loadHistory = React.useCallback(() => {
+    api.historicalSnapshots({ limit: 288 })
       .then(res => {
         if (res?.snapshots?.length) {
           setHistory([...res.snapshots].reverse());
         }
       })
-      .catch(() => {});
-  }, [snapshot?.meta?.snapshot_id]);
+      .catch(() => {}); // retried by the interval below while nothing has loaded
+  }, []);
+
+  React.useEffect(() => {
+    loadHistory();
+  }, [loadHistory, snapshot?.meta?.snapshot_id]);
+
+  // Retry while empty so a single failed history load doesn't leave empty charts forever
+  React.useEffect(() => {
+    if (history.length > 0) return;
+    const retry = setInterval(loadHistory, 60_000);
+    return () => clearInterval(retry);
+  }, [history.length, loadHistory]);
 
   if (loading && !snapshot) {
     return (
