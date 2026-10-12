@@ -43,9 +43,9 @@
 
 ## Phase 5 — Web cockpit: lite mobile view + WalletConnect
 
-- [ ] Integrate Reown AppKit/Wagmi in the React app; persist/reconnect WC session across refreshes (issue #31, shares Phase 1 payloads)
-- [ ] Build the lite mobile cockpit view: floor health + buffer delta, uncollected fees + gas-to-fee ROI, "EXECUTE BATCH HARVEST" button (issue #31)
-- [ ] Desktop dashboard: WalletConnect session banner with paired-wallet indicator
+- [x] Integrate WalletConnect in the React app; persist/reconnect WC session across refreshes (issue #31, shares Phase 1 payloads) — via `@walletconnect/ethereum-provider` (official low-level WC v2 SDK with built-in QR modal + deep links; lighter than the full AppKit/wagmi stack per the operator's less-code directive). Session persisted by the SDK; wrong-wallet proposals refused before signing (paired account must equal the payload's sovereign wallet); needs `VITE_WALLETCONNECT_PROJECT_ID` (free Reown project id, `.env.example` documented) — degrades to an explicit setup hint without it
+- [x] Build the lite mobile cockpit view: floor health + buffer delta, uncollected fees + gas-to-fee ROI, "EXECUTE BATCH HARVEST" button (issue #31) — `/?view=lite` route; live-verified rendering with real on-chain data (screenshots in this task dir); pending-broadcast handling built in (approved → awaiting-broadcast → receipt-verified recording, ~10 min patience with retry)
+- [x] Desktop dashboard: WalletConnect session banner with paired-wallet indicator — header badge with PAIRED/UNPAIRED state + pair/unpair action
 
 ## Phase 6 — Visual overhaul, discovery, Coinbase, CI
 
