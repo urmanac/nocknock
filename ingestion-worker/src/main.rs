@@ -4757,4 +4757,369 @@ v4_fee_baseline_nock: 1.4820
         assert_ne!(bracket.lower_price, "0.00000");
         assert_ne!(bracket.upper_price, "999.00000");
     }
+
+    // ============================================================
+    // Market price backfill & multi-timeframe regime (v0.3.0)
+    // ============================================================
+
+    /// Raw fixture above the default 100k floor so the Overextension branch is
+    /// reachable in advice tests (total NOCK = 118000, spot 0.015 dip zone).
+    fn raw_above_floor_fixture() -> RawOnChainData {
+        let mut raw = RawOnChainData::default();
+        raw.wallet_balances = vec![
+            WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "NOCK".to_string(),
+                token_address: "0xNOCK".to_string(),
+                amount: "110000.0".to_string(),
+                amount_usd: "2860.0".to_string(),
+                updated_at: "now".to_string(),
+            },
+            WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "USDC".to_string(),
+                token_address: "0xUSDC".to_string(),
+                amount: "50.0".to_string(),
+                amount_usd: "50.0".to_string(),
+                updated_at: "now".to_string(),
+            },
+        ];
+        raw.live_tranche_1_nock = 2000.0;
+        raw.live_tranche_1_usdc = 20.0;
+        raw.live_tranche_2_nock = 6000.0;
+        raw.live_tranche_2_usdc = 30.0;
+        raw.live_uni_fee_usdc = 0.0;
+        raw.live_aero_fee_usdc = 0.0;
+        raw.pool_mechanics = vec![PoolMechanic {
+            pool_id: "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
+            platform: "Aerodrome".to_string(),
+            pool_type: "volatile".to_string(),
+            volatile_assets: vec![
+                PoolAsset {
+                    token_address: "0xUSDC".to_string(),
+                    token_symbol: "USDC".to_string(),
+                    reserve_amount: "150".to_string(),
+                    reserve_usd: "150".to_string(),
+                },
+                PoolAsset {
+                    token_address: "0xNOCK".to_string(),
+                    token_symbol: "NOCK".to_string(),
+                    reserve_amount: "10000".to_string(),
+                    reserve_usd: "150".to_string(),
+                },
+            ],
+            liquidity_usd: "300".to_string(),
+            fee_accrued_usd: "0".to_string(),
+            fee_tier_bps: 30,
+            tick_current: None,
+            sqrt_price_x96: None,
+        }];
+        raw
+    }
+
+    #[test]
+    fn test_parse_geckoterminal_ohlcv_normalizes_newest_first() {
+        // Recorded fixture from the live endpoint (2026-10-12): ohlcv_list entries
+        // are [open_time_unix_secs, open, high, low, close, volume], newest first.
+        let body = json!({
+            "data": {
+                "id": "x",
+                "type": "ohlcv_request_response",
+                "attributes": {
+                    "ohlcv_list": [
+                        [1791763200, 0.0246178045182968, 0.0269877692445729, 0.022041369483387, 0.0239357572998183, 278995.4950266538],
+                        [1791676800, 0.0268425121191988, 0.0271935570968404, 0.023807436927751, 0.0246178045182968, 263160.2698464311],
+                        [1791590400, 0.0234294762339549, 0.0283541273531182, 0.0225412081009429, 0.0268425121191988],
+                        ["not-a-number", 1, 2, 3, 4],
+                        [1791504000, 1, 2, 3]
+                    ]
+                }
+            }
+        });
+        let candles = parse_geckoterminal_ohlcv(&body);
+        assert_eq!(candles.len(), 3, "malformed entries must be skipped");
+        // Newest-first input normalized to ascending close order
+        assert!(candles[0].timestamp < candles[1].timestamp);
+        assert!(candles[1].timestamp < candles[2].timestamp);
+        assert_eq!(
+            candles[2].timestamp.format("%Y-%m-%d").to_string(),
+            "2026-10-12"
+        );
+        assert!((candles[2].close - 0.0239357572998183).abs() < 1e-12);
+        assert_eq!(candles[0].volume, None, "5-element entry has no volume");
+        assert!(candles[2].volume.is_some());
+    }
+
+    #[test]
+    fn test_parse_geckoterminal_ohlcv_rejects_garbage() {
+        assert!(parse_geckoterminal_ohlcv(&json!({})).is_empty());
+        assert!(parse_geckoterminal_ohlcv(&json!({ "data": {} })).is_empty());
+        assert!(parse_geckoterminal_ohlcv(&json!({ "data": { "attributes": { "ohlcv_list": [] } } })).is_empty());
+    }
+
+    #[test]
+    fn test_parse_dexscreener_price() {
+        let body = json!({
+            "schemaVersion": "1.0.0",
+            "pairs": [
+                { "chainId": "base", "dexId": "aerodrome", "priceUsd": "0.02396" }
+            ]
+        });
+        let price = parse_dexscreener_price(&body).unwrap();
+        assert!((price - 0.02396).abs() < 1e-12);
+        // Missing/malformed shapes degrade to None, never fabricate a price
+        assert!(parse_dexscreener_price(&json!({})).is_none());
+        assert!(parse_dexscreener_price(&json!({ "pairs": [] })).is_none());
+        assert!(parse_dexscreener_price(&json!({ "pairs": [{ "priceUsd": "abc" }] })).is_none());
+        assert!(parse_dexscreener_price(&json!({ "pairs": [{ "priceUsd": "0" }] })).is_none());
+    }
+
+    #[test]
+    fn test_plan_backfill_cases() {
+        use chrono::TimeZone;
+        let at = |d: i64, m: i64| Utc.with_ymd_and_hms(2026, 10, 12, 0, 0, 0).unwrap()
+            + chrono::Duration::days(d)
+            + chrono::Duration::minutes(m);
+        let now = at(0, 0);
+
+        // Empty table (first boot): full backfill + fallback seeding allowed
+        let plan = plan_backfill(None, None, now, 15, 14);
+        assert!(plan.backfill_hourly && plan.backfill_daily && plan.seed_fallback_point);
+
+        // Fresh deep history, last point 5 minutes old: nothing to do
+        let plan = plan_backfill(Some(at(0, -5)), Some(at(-30, 0)), now, 15, 14);
+        assert_eq!(plan, BackfillPlan::default());
+
+        // Laptop slept for 3 hours: hourly gap fill (daily depth still sufficient)
+        let plan = plan_backfill(Some(at(0, -180)), Some(at(-30, 0)), now, 15, 14);
+        assert!(plan.backfill_hourly && plan.seed_fallback_point && !plan.backfill_daily);
+
+        // Fresh but shallow history: extend daily depth, no gap fill
+        let plan = plan_backfill(Some(at(0, -5)), Some(at(-7, 0)), now, 15, 14);
+        assert!(!plan.backfill_hourly && !plan.seed_fallback_point && plan.backfill_daily);
+    }
+
+    #[test]
+    fn test_daily_closes_from_points() {
+        use chrono::TimeZone;
+        let at = |d: u32, h: u32| Utc.with_ymd_and_hms(2026, 10, d, h, 0, 0).unwrap();
+        let points = vec![
+            (at(1, 0), Some(0.10), 0.10), // day-1 daily candle close
+            (at(1, 5), None, 0.105),      // day-1 spot: ignored, candle is authoritative
+            (at(2, 5), None, 0.20),       // day-2 spots only
+            (at(2, 10), None, 0.21),      // ...last spot of the day wins
+            (at(3, 0), Some(0.30), 0.30), // day-3 candle only
+        ];
+        let closes = daily_closes_from_points(&points);
+        assert_eq!(closes.len(), 3);
+        assert!((closes[0] - 0.10).abs() < 1e-12);
+        assert!((closes[1] - 0.21).abs() < 1e-12);
+        assert!((closes[2] - 0.30).abs() < 1e-12);
+        assert!(daily_closes_from_points(&[]).is_empty());
+    }
+
+    #[test]
+    fn test_daily_rsi_invariant_to_provenance_mix_and_gaps() {
+        use chrono::TimeZone;
+        let day0 = Utc.with_ymd_and_hms(2026, 9, 1, 0, 0, 0).unwrap();
+        // 16 daily closes, monotonic gains; day 5 carries spots instead of a candle
+        // (backfilled vs contemporaneous mix) and day 7 is missing entirely (gap).
+        let mut points = Vec::new();
+        let mut expected = Vec::new();
+        for i in 0..16u32 {
+            let close = 100.0 + i as f64;
+            if i == 5 {
+                points.push((day0 + chrono::Duration::days(i as i64) + chrono::Duration::hours(5), None, close));
+                points.push((day0 + chrono::Duration::days(i as i64) + chrono::Duration::hours(10), None, close + 0.001));
+                expected.push(close + 0.001); // last spot of the day
+            } else if i == 7 {
+                continue; // provider gap: no data at all for this day
+            } else {
+                points.push((day0 + chrono::Duration::days(i as i64), Some(close), close));
+                expected.push(close);
+            }
+        }
+        let closes = daily_closes_from_points(&points);
+        assert_eq!(closes, expected);
+        let rsi_actual = compute_rsi_series(&closes, RSI_PERIOD).into_iter().last().flatten().unwrap();
+        let rsi_expected = compute_rsi_series(&expected, RSI_PERIOD).into_iter().last().flatten().unwrap();
+        assert!((rsi_actual - rsi_expected).abs() < 1e-9);
+        assert!(rsi_actual > 99.0, "monotonic gains must pin daily RSI high");
+    }
+
+    #[test]
+    fn test_overextension_cooldown_ignores_micro_pulse() {
+        // The v0.2.x bug this feature fixes: a steep 4-hour intraday climb pins
+        // the 5-minute RSI(14) near 100 while the daily trend stays healthy.
+        // Deployment must NOT be suppressed — the cooldown keys on the daily RSI.
+        let micro_closes: Vec<f64> = (1..=30).map(|i| 100.0 + i as f64).collect();
+        let rsi_5m = compute_rsi_series(&micro_closes, RSI_PERIOD).into_iter().last().flatten().unwrap();
+        assert!(rsi_5m >= RSI_OVERBOUGHT, "fixture must reproduce the micro pulse: {rsi_5m}");
+        let macro_closes: Vec<f64> = vec![
+            100.0, 99.5, 101.0, 100.5, 99.0, 100.0, 101.5, 100.0,
+            99.5, 100.5, 101.0, 100.0, 99.0, 100.5, 101.0,
+        ];
+        let rsi_1d = compute_rsi_series(&macro_closes, RSI_PERIOD).into_iter().last().flatten().unwrap();
+        assert!(rsi_1d < RSI_OVERBOUGHT, "healthy daily trend: {rsi_1d}");
+
+        let regime = MarketRegime {
+            rsi_5m: Some(rsi_5m),
+            rsi_1d: Some(rsi_1d),
+            overextended: rsi_1d >= RSI_OVERBOUGHT,
+        };
+        assert!(!regime.overextended);
+        let metrics = compute_derived_metrics(
+            &raw_above_floor_fixture(),
+            0.0,
+            &OperatorProfile::default(),
+            StructuralChannels { channels: vec![] },
+            &[],
+            &LedgerAggregate::default(),
+            &regime,
+        );
+        assert!(
+            !metrics.global_status.shot_advice_action.contains("Overextension Cooldown"),
+            "micro pulse must not trigger the cooldown: {}",
+            metrics.global_status.shot_advice_action
+        );
+        assert_eq!(metrics.global_status.regime, "normal");
+        assert!(metrics.global_status.rsi_14.is_some());
+        assert!(metrics.global_status.rsi_14_1d.is_some());
+    }
+
+    #[test]
+    fn test_overextension_cooldown_fires_on_daily_rsi() {
+        // Monotonic multi-day gains pin the daily RSI(14) near 100: the cooldown
+        // fires and cites the daily series explicitly.
+        let macro_closes: Vec<f64> = (1..=20).map(|i| 100.0 + i as f64).collect();
+        let rsi_1d = compute_rsi_series(&macro_closes, RSI_PERIOD).into_iter().last().flatten().unwrap();
+        assert!(rsi_1d >= RSI_OVERBOUGHT);
+        let regime = MarketRegime {
+            rsi_5m: Some(40.0), // micro is calm; only the daily series decides
+            rsi_1d: Some(rsi_1d),
+            overextended: rsi_1d >= RSI_OVERBOUGHT,
+        };
+        let metrics = compute_derived_metrics(
+            &raw_above_floor_fixture(),
+            0.0,
+            &OperatorProfile::default(),
+            StructuralChannels { channels: vec![] },
+            &[],
+            &LedgerAggregate::default(),
+            &regime,
+        );
+        assert!(metrics.global_status.shot_advice_action.contains("Overextension Cooldown"));
+        assert!(metrics.global_status.shot_advice_details.contains("daily RSI(14)"));
+        assert_eq!(metrics.global_status.regime, "overextended");
+        assert_eq!(metrics.global_status.rsi_14.as_deref(), Some("40.0"));
+    }
+
+    // --- DB-gated integration tests (gracefully skipped without DATABASE_URL) ---
+
+    async fn integration_pool() -> Option<PgPool> {
+        let Ok(url) = std::env::var("DATABASE_URL") else {
+            eprintln!("DATABASE_URL not set; skipping DB integration test");
+            return None;
+        };
+        match PgPool::connect(&url).await {
+            Ok(pool) => Some(pool),
+            Err(e) => {
+                eprintln!("Postgres unreachable ({e}); skipping DB integration test");
+                None
+            }
+        }
+    }
+
+    async fn ensure_market_price_history_table(pool: &PgPool) {
+        let ddl = "CREATE TABLE IF NOT EXISTS market_price_history (
+                timestamp      TIMESTAMPTZ NOT NULL PRIMARY KEY,
+                price_usd      FLOAT8 NOT NULL,
+                open_usd       FLOAT8,
+                high_usd       FLOAT8,
+                low_usd        FLOAT8,
+                close_usd      FLOAT8,
+                volume_usd     FLOAT8,
+                source         VARCHAR NOT NULL,
+                is_backfilled  BOOLEAN NOT NULL DEFAULT false,
+                backfilled_at  TIMESTAMPTZ
+            )";
+        if let Err(first_err) = sqlx::query(ddl).execute(pool).await {
+            // Parallel test tasks racing CREATE TABLE IF NOT EXISTS can still lose
+            // the pg_type rowtype race inside Postgres; a single retry settles it.
+            if sqlx::query(ddl).execute(pool).await.is_err() {
+                panic!("create market_price_history: {first_err}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_candle_upsert_is_idempotent() {
+        let Some(pool) = integration_pool().await else { return };
+        ensure_market_price_history_table(&pool).await;
+        let open = Utc::now();
+        let candles = vec![PriceCandle {
+            timestamp: open,
+            open: 1.0,
+            high: 2.0,
+            low: 0.5,
+            close: 1.5,
+            volume: Some(9.0),
+        }];
+        let now = open + chrono::Duration::hours(2); // candle fully completed
+        let first = upsert_price_candles(&pool, &candles, PRICE_SOURCE_GECKOTERMINAL, chrono::Duration::hours(1), now).await.unwrap();
+        let rerun = upsert_price_candles(&pool, &candles, PRICE_SOURCE_GECKOTERMINAL, chrono::Duration::hours(1), now).await.unwrap();
+        assert_eq!(first, 1, "first insert adds one row");
+        assert_eq!(rerun, 0, "rerun must be a no-op");
+        let count: i64 = sqlx::query("SELECT COUNT(*) FROM market_price_history WHERE timestamp = $1")
+            .bind(open)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .try_get(0)
+            .unwrap();
+        assert_eq!(count, 1);
+        // In-progress candle (open < one period ago) must be skipped, not frozen
+        let partial = upsert_price_candles(
+            &pool,
+            &[PriceCandle { timestamp: now, open: 1.0, high: 1.0, low: 1.0, close: 1.0, volume: None }],
+            PRICE_SOURCE_GECKOTERMINAL,
+            chrono::Duration::hours(1),
+            now,
+        )
+        .await
+        .unwrap();
+        assert_eq!(partial, 0, "in-progress candle must not be stored");
+        sqlx::query("DELETE FROM market_price_history WHERE timestamp = $1")
+            .bind(open)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_backfill_never_overwrites_contemporaneous_row() {
+        let Some(pool) = integration_pool().await else { return };
+        ensure_market_price_history_table(&pool).await;
+        let ts = Utc::now();
+        insert_price_point(&pool, ts, 1.23, PRICE_SOURCE_RPC, false).await.unwrap();
+        insert_price_point(&pool, ts, 9.99, PRICE_SOURCE_GECKOTERMINAL, true).await.unwrap();
+        let row = sqlx::query(
+            "SELECT price_usd, source, is_backfilled FROM market_price_history WHERE timestamp = $1",
+        )
+        .bind(ts)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let price: f64 = row.try_get("price_usd").unwrap();
+        let source: String = row.try_get("source").unwrap();
+        let backfilled: bool = row.try_get("is_backfilled").unwrap();
+        assert!((price - 1.23).abs() < 1e-12, "contemporaneous observation must win");
+        assert_eq!(source, PRICE_SOURCE_RPC);
+        assert!(!backfilled);
+        sqlx::query("DELETE FROM market_price_history WHERE timestamp = $1")
+            .bind(ts)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
 }
