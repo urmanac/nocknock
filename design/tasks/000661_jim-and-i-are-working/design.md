@@ -25,7 +25,7 @@ Key principle: **the worker is the single source of truth** for on-chain math an
 
 ## Key Decisions
 
-1. **Android app = thin WalletConnect dapp client.** Kotlin, single-activity, Reown/WalletConnect **Sign** SDK + OkHttp + a tiny JSON parser. It pairs with the Uniswap mobile app (QR or same-device deep link), shows snapshot-derived fee state, and wraps pre-built payloads in `eth_sendTransaction` WC requests. No wallet import, no seed UI, no embedded WASM brain, no direct-RPC fallback in MVP (explicit degraded state instead). Rationale: the operator asked for minimal, and `moon-phase-clock`-style Tier-3 offline autonomy is a later concern. Lives in `android/` at the repo root (matches `ARCHITECTURE.md`'s assumed `android/app/...` layout).
+1. **Android app = thin WalletConnect dapp client; WC via an outside SDK.** Kotlin, single-activity, Reown/WalletConnect **Sign** SDK (we do not hand-roll the WalletConnect protocol — the operator explicitly prefers depending on a maintained library) + a small HTTP client. Pairing follows the flow the operator already exercises daily from a browser dapp: read-only + suggest-transactions permissions, on-device deep link or QR. Known quirk, designed for: the Uniswap app may hold an approved transaction unbroadcast ("pending limbo") until the operator returns to the Uniswap app — the app treats "approved but not broadcast" as its own state and only reports success when the receipt is on-chain. No wallet import, no seed UI, no embedded WASM brain, no direct-RPC fallback in MVP (explicit degraded state instead). Lives in `android/` at the repo root (matches `ARCHITECTURE.md`'s assumed `android/app/...` layout).
 
 2. **Payload generation lives in the worker, not the clients.** New worker endpoints (sketch below) emit unsigned transactions derived from the latest live snapshot. Both the Android app and web cockpit consume them; ABI/encoder logic exists once, in tested Rust. Clients only: fetch → display → dispatch → report hash.
 
@@ -39,7 +39,7 @@ Key principle: **the worker is the single source of truth** for on-chain math an
 
 7. **60/40 sub-ledger = config-driven derived accounting.** `OperatorProfile` gains `tax_reserve_ratio` (default 0.40) and the split applies to cumulative realized harvests + realized gains tracked in the ledger. Rendered as virtual balances + a tax-health flag in derived metrics (OpenAPI `specs/core/snapshot.yaml` extended). The brain consumes the virtual balances for guardrails (decision 8); it stays pure math.
 
-8. **Guardrails in the brain, signals in the worker.** Worker computes RSI/band-extension series from historical snapshots (structural channels already exist post-PR #25-era) and passes them into the brain; the brain emits regime + directive (`HOLD & ACCRETE`, `BATCH HARVEST SHOT`, `SWEEP TO STABLE / ACCUMULATE DRY POWDER`, cooldown). The worker notifies on directive *transitions* only.
+8. **Guardrails in the brain, signals in the worker.** Worker computes RSI/band-extension series from historical snapshots (structural channels already exist post-PR #25-era) and passes them into the brain; the brain emits regime + directive (`HOLD & ACCRETE`, `BATCH HARVEST SHOT`, `SWEEP TO STABLE / ACCUMULATE DRY POWDER`, cooldown). The worker notifies on directive *transitions* only. (RSI = Relative Strength Index: a 0–100 momentum score over the price series; ≳70 reads as overbought/"bought the top," ≲30 as oversold — the tripwire behind Naktoshi's "check the RSI and buy when oversold" directive.)
 
 9. **Notifications = three small adapters.** Telegram bot, Pushover, generic JSON POST; configured under `config.yaml` (`[notifications]`); transition-only dispatch with the payload from issue #28 (trigger, gross claimable, gas, net, deep link to lite cockpit).
 
@@ -48,6 +48,12 @@ Key principle: **the worker is the single source of truth** for on-chain math an
 11. **CI: `Swatinem/rust-cache@v2`** on brain/worker jobs (per `OPERATOR_GUIDANCE.md` §10). Android CI job is optional/last — a local debug APK is acceptable for MVP; if CI packaging works, attach as a 5th artifact (gated on Open Question 6).
 
 12. **Deferred to post-0.2.0:** embedded WASM brain in Android + Tier-3 RPC fallback chain, multicall aggregation, multi-tenant runtime (schema/blueprint only now), Urbit desk implementation.
+
+13. **No secrets in the APK.** The Android app embeds no Alchemy key or any credential: an APK is effectively public to anyone who installs it, embedded keys are routinely scraped, and distributing a key would also contradict the zero-custody posture. The app is a REST client of the worker (which already holds the Alchemy key server-side); a keyless public Base RPC exists if a future offline fallback ever needs one. Deployment implication: the worker must be reachable from the phone (LAN or Tailscale); worker REST is currently unauthenticated, so MVP assumes a trusted network — the MCP bearer-token pattern is available if that assumption changes.
+
+14. **The Android app is stateless about money.** It persists only non-financial preferences (server URL, WC session topic). All financial state — snapshots, harvest ledger, tax exports — lives in the worker/DB, so app and API cannot drift apart: there is nothing in the app that can become out of sync. The app probes `/v1/health` for the worker version and warns if the payload endpoints it needs are missing (capability check instead of silent breakage).
+
+15. **WASM brain code-reuse gap (documented, not built, for 0.2.0).** The long-term vision embeds `nocknock_brain.wasm` in Android assets so clients reuse the same deterministic math (`ARCHITECTURE.md` Tier 3). For 0.2.0 the Android app consumes computed values over REST, and the claim encoders are Rust-only in the worker. This is a deliberate, acknowledged gap in the "no duplicated logic across languages" goal — acceptable for a thin MVP, revisited if the app ever needs offline math or local payload construction. The reserved `android/app/src/main/assets/` path is where the brain would embed.
 
 ## Worker Endpoint Sketches (additive to existing Axum router)
 
@@ -91,6 +97,7 @@ Config: server URL + optional auth token entered once, stored in `SharedPreferen
 - The repo uses a **hand-rolled minimal `U256`** (no `alloy`/`ethers` dependency) and raw `eth_call` JSON payloads with `post_rpc_with_retry`. Follow that pattern for the posm multicall encoder instead of adding heavy deps.
 - Aerodrome fee claim is **already proven live** by the simulated `eth_call` (issue: matches mobile app to the penny). The real tx uses identical calldata with the wallet as signer.
 - Build worker with `SQLX_OFFLINE=true`; brain with `RUSTFLAGS="-C link-arg=--allow-undefined"` targeting `wasm32-wasip1` (see `AGENTS.md` §3–4).
+- Never ship secrets inside the Android APK; the app reaches the worker over LAN/Tailscale and embeds no keys.
 - Pre-flight per PR: `make test-brain` (3), `test-worker` (11), `test-frontend` (20 after PR #27), `test-mcp`, `make dist`. PRs land via `gh pr create/merge` with `unset GITHUB_TOKEN`; `main` is protected.
 - UI: dark container tooltips (`#161b22`/`#30363d`/`#f0f6fc`), sky-blue targets (`#38bdf8`), dynamic Y domains only (`OPERATOR_GUIDANCE.md` §8). Sync status pills follow PR #27 tiers (fresh/syncing/stale).
 - Frontend CPU regressions were caused by polling-dependency churn (issue #20) — new polling surfaces must follow the `useFreshness` fixed-deps pattern.

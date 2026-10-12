@@ -4,7 +4,7 @@
 
 ## Phase 1 — Golden Path payload engine (worker)
 
-- [ ] Spike: verify Uniswap mobile app pairs via WalletConnect (same-device deep link or QR) and signs an Aerodrome `claimFees()` contract-interaction tx on Base — resolves the #1 assumption before building on it
+- [ ] Smoke test: same-device Reown Sign pairing with the Uniswap app on a real phone, signing an Aerodrome `claimFees()` contract-interaction tx — the operator has proven this flow from a browser dapp; confirm the native SDK path behaves the same, including the pending-broadcast quirk
 - [ ] Add `OperatorProfile` fields: `tax_reserve_ratio` (default 0.40) to `config.yaml.example` + worker config struct with test
 - [ ] Implement `GET /v1/execute/claim-fees/payload`: build Aerodrome `claimFees()` (`0xd294f093` → `0x85f1aa3a…d626`) and Uniswap V4 PositionManager `modifyLiquidities` collect (`DECREASE_LIQUIDITY` 0-delta + `TAKE_PAIR` → sovereign wallet) unsigned txs from the live snapshot, with pre-dispatch `eth_call` simulation and explicit failure
 - [ ] Add unit tests for the V4 posm multicall encoder (action byte layout, deadline, recipient padding) mirroring the existing `U256`/hex-parsing test style
@@ -13,11 +13,13 @@
 ## Phase 2 — Minimal Android claim app
 
 - [ ] Create `android/` module: single-activity Kotlin app, dark aesthetic tokens, no wallet/credential UI
-- [ ] Integrate Reown/WalletConnect Sign SDK; implement pairing (QR + on-device deep link to Uniswap app) and persisted session reconnection
+- [ ] Integrate Reown/WalletConnect Sign SDK; implement pairing (on-device deep link + QR to Uniswap app) and persisted session reconnection
+- [ ] Handle the Uniswap-app broadcast quirk: surface an "approved, awaiting wallet broadcast" state and mark a tx complete only when its receipt is visible on-chain
+- [ ] Keep the app stateless about money: persist only the server URL + WC session; add a `/v1/health` version/capability probe that warns if required payload endpoints are missing
 - [ ] Implement `NockApi.kt`: fetch `/v1/snapshot/latest` and `/v1/execute/claim-fees/payload`; explicit degraded state when the worker is unreachable
 - [ ] Implement "EXECUTE BATCH HARVEST": simulate-first via worker, then queue the two txs sequentially as `eth_sendTransaction` WC requests; show per-tx status + Base tx hash
 - [ ] Post confirmed tx hashes to `POST /v1/execute/record-harvest`; display ledger confirmation
-- [ ] Build debug APK locally (`gradle assembleDebug`) and document sideload install in README/DEPLOYMENT
+- [ ] Build debug APK locally (`gradle assembleDebug`), verify it contains no secrets (no Alchemy key/tokens), and document sideload install in README/DEPLOYMENT
 
 ## Phase 3 — Harvest ledger, 60/40 sub-ledger, tax export
 
@@ -42,7 +44,7 @@
 
 ## Phase 6 — Visual overhaul, discovery, Coinbase, CI
 
-- [ ] Dual-dial gauges (40% tax reserve vs 60% dry powder) + tax-health indicator + live P/L dial; retire the dormant `structural_channels` panel per TRIAGE item 12 (issues: canvas overhaul)
+- [ ] Dual-dial gauges (40% tax reserve vs 60% dry powder) + tax-health indicator + at-a-glance P/L dial computed from local recorded data only (high-water marks, spot history, verified harvests — no external APIs in 0.2.0); retire the dormant `structural_channels` panel per TRIAGE item 12
 - [ ] Expand graph canvas beyond the original 7 panels for pool registry, multi-vault trajectories (follow dynamic-Y-domain and contrast rules in `OPERATOR_GUIDANCE.md` §8)
 - [ ] Config-driven multi-AMM pool registry: add ETH-related Base pools to tracking, unified NAV aggregation, historical snapshots (read-only)
 - [ ] Coinbase read-only connector: record staked ETH/cbETH balance snapshots (public endpoints or key — per open question 3); explicit degraded state on failure
@@ -54,5 +56,6 @@
 
 - [ ] Update `CHANGELOG.md` `[0.2.0]` section from `[ ]` to landed items; keep `## [Unreleased]` for post-0.2.0
 - [ ] Update `HANDOFF.md` (Golden Path now executed end-to-end), `OPERATOR_GUIDANCE.md` (Android app install + pairing runbook), `TRIAGE.md` (close related registry items)
+- [ ] Document the WASM brain code-reuse gap (Android consumes REST-computed values for 0.2.0; encoders are Rust-only) in `ARCHITECTURE.md` so the long-term reuse goal isn't silently lost
 - [ ] Playtest the full loop on the real phone: notification → lite cockpit/Android app → pair → batch harvest → biometric sign → ledger + Koinly row appear
 - [ ] Verify release packaging (`make dist`) including the APK if included; then, after all CI green on `main`, tag `v0.2.0` **only with explicit operator authorization** (standing order)

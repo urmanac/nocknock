@@ -12,18 +12,20 @@ Standing orders that bind all work: single sovereign wallet (`0xeE114cC97eC5adeB
 
 **A1 — Pair once, no credentials.**
 As the operator, I open the NockNock Android app and pair it with my Uniswap mobile app via WalletConnect so the app can propose transactions that I sign with biometrics. The Android app stores no keys, seeds, or credentials.
-- AC: Pairing succeeds via QR scan or on-device deep link to the Uniswap app; session persists across app restarts; app works if the wallet is a different WalletConnect wallet too ("at least the Uniswap app").
-- AC: There is no wallet-import, seed, or private-key UI anywhere in the app.
+- AC: Pairing succeeds via on-device deep link or QR — the operator already runs this exact flow from a browser dapp (pair to Uniswap with read-only + suggest-transactions permissions); session persists across app restarts; a different WalletConnect wallet may be paired too ("at least the Uniswap app").
+- AC: The app requests only read-only + suggest-transactions permissions; there is no wallet-import, seed, or private-key UI anywhere in the app.
 
 **A2 — See claimable fees without opening the dashboard.**
 As the operator, I see uncollected fees for both LPs (Aerodrome Tranche 2 and Uniswap V4 Tranche 1) and net value after estimated Base gas on one screen.
-- AC: Values come from the worker API `/v1/snapshot/latest`; if unreachable, the app shows an explicit degraded state, never estimated/mock numbers.
+- AC: Values come from the worker API `/v1/snapshot/latest` (server URL configurable, reachable over LAN/Tailscale); if unreachable, the app shows an explicit degraded state, never estimated/mock numbers.
+- AC: The app embeds **no secrets** (no Alchemy key, no tokens inside the APK) and persists **no financial state** locally — the worker is the single owner of state.
 - AC: Screen shows floor health delta (NOCK vs `nock_floor_target`) so I know whether harvesting is safe to act on.
 
 **A3 — Execute a batch harvest.**
 As the operator, I tap "EXECUTE BATCH HARVEST" and the app dispatches the two claim transactions (Aerodrome `claimFees()`, Uniswap V4 fee collect) to the paired Uniswap app for biometric approval.
 - AC: Each transaction is pre-simulated (`eth_call`) before dispatch; a simulated failure blocks dispatch with a clear error.
-- AC: The Uniswap app signs with one biometric confirmation per transaction; the app shows per-tx status and the Base tx hash on completion.
+- AC: The Uniswap app signs with one biometric confirmation per transaction (sequential confirms are acceptable — no multicall); the app shows per-tx status and the Base tx hash on completion.
+- AC: The app handles the known Uniswap-app broadcast quirk: an approved transaction may be held unbroadcast ("pending limbo") until the operator returns to the Uniswap app. A claim is reported complete only once its receipt is visible on-chain; while awaiting wallet broadcast the app says so plainly.
 
 **A4 — Harvests become ledger truth.**
 As the operator, after a claim confirms, the harvest is recorded so the 60/40 sub-ledger and tax exports include it.
@@ -50,9 +52,13 @@ The worker exposes an endpoint that returns ready-to-sign unsigned transactions 
 **C4 — Tie-out suite.** Automated tests prove internal ledger, on-chain balances, and exported records tie out for a harvested-fee scenario.
 - AC: `make test-worker` includes the tie-out tests and passes.
 
+**C5 — At-a-glance P/L from local data only.** As the operator, the dashboard and lite cockpit show profit/loss computed from NockNock's own recorded history — high-water marks, recorded spot prices, and receipt-verified harvest ledger — with zero external APIs in 0.2.0.
+- AC: Every displayed P/L number traces to recorded snapshots or verified ledger rows; nothing is mocked (zero-mock invariant).
+- AC: External cost-basis APIs (Moralis/Alchemy) are explicitly deferred to a future minor release — they are new-feature work under SemVer, not a 0.2.1 patch, and not a mocked shim.
+
 ### D. Anti-Top-Buying Guardrails (brain, issue #29)
 
-**D1 — Overextension regime.** When NOCK price is overextended (RSI/upper-band tests against existing structural channels), the brain suppresses buy/reinvest advice and mandates "SWEEP TO STABLE / ACCUMULATE DRY POWDER" with a cooldown.
+**D1 — Overextension regime.** When NOCK price is overextended (RSI — Relative Strength Index, a plain 0–100 momentum score; readings roughly 70+ mean "stretched/bought-the-top" territory — and upper-band tests against existing structural channels), the brain suppresses buy/reinvest advice and mandates "SWEEP TO STABLE / ACCUMULATE DRY POWDER" with a cooldown.
 - AC: Brain stays pure deterministic math (no RPC/clock); regime inputs are passed in; worker tests cover the regime transitions.
 
 ### E. Actionable Notifications (issue #28)
@@ -91,11 +97,17 @@ The worker exposes an endpoint that returns ready-to-sign unsigned transactions 
 - No embedded WASM brain in the Android app for MVP (Tier-3 offline fallback is deferred — see Open Questions).
 - No multi-tenant runtime in 0.2.0 (schema/blueprint only, per CHANGELOG); no Urbit implementation.
 
+## Resolved in Operator Review (2026-10-12)
+
+- Same-device WalletConnect pairing with the Uniswap app is proven operator practice (arbitrary contract calls included); the pending-broadcast quirk is a designed-for UX case, not a blocker.
+- Android app: worker-API-only for MVP (no offline RPC fallback, no embedded brain) and **no Alchemy key in the APK**.
+- The Android app persists no financial state; its dependency on the worker API is now explicit (design.md decision 14).
+- P/L: external cost-basis APIs deferred to a future minor release; 0.2.0 ships local-data-only P/L. No mocked P/L.
+- Multiple sequential signatures are acceptable; multicall rejected.
+
 ## Open Questions
 
-1. **Uniswap app as WC signer for arbitrary calldata**: we assume the Uniswap mobile app accepts a same-device WalletConnect pairing and signs contract-interaction txs (Aerodrome pool `claimFees`, V4 PositionManager collect) on Base. If it refuses arbitrary calldata, the MVP falls back to QR pairing from the desktop web cockpit. Can you confirm this has worked before, or should the first implementation task be a pairing spike on the real phone?
-2. **Android offline fallback**: `ARCHITECTURE.md` describes a Tier-3 fallback chain (worker API → Alchemy → public RPC + embedded WASM brain). Is worker-API-only acceptable for the MVP, with the fallback chain as a follow-up?
-3. **Coinbase API**: for staked ETH/cbETH balances, is a (free-tier) Coinbase API key available to the operator, or must we stick to public endpoints only?
-4. **Koinly format**: CSV (Koinly "custom import") assumed for `/v1/tax/export`; JSON secondary. Confirm CSV-first is right.
-5. **P/L cost basis (CHANGELOG "Dual Income Streams")**: use external P/L APIs (Moralis/Alchemy) in 0.2.0, or defer to 0.2.1 and ship only local epoch P/L vs high-water marks? (Defer is cheaper and zero-mock-safe.)
-6. **Release artifact**: should the debug APK become the 5th release artifact, or stay out of releases for 0.2.0?
+1. **Coinbase API**: for staked ETH/cbETH balances, is a (free-tier) Coinbase API key available to the operator, or must we stick to public endpoints only?
+2. **Koinly format**: CSV (Koinly "custom import") assumed for `/v1/tax/export`; JSON secondary. Confirm CSV-first is right.
+3. **Release artifact**: should the debug APK become the 5th release artifact, or stay out of releases for 0.2.0?
+4. **Worker exposure for the phone**: the worker currently runs on a local machine (tmux, `:8080`) with no REST auth. We assume LAN or Tailscale reachability with the server URL entered once in the app. Acceptable, or do you want a bearer token (same pattern as the MCP HTTP endpoint) in 0.2.0?
