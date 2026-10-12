@@ -1236,6 +1236,30 @@ impl U256 {
     }
 }
 
+// On-chain Uniswap V4 NOCK/USDC position tick bounds (positive on-chain orientation,
+// as passed to StateView getPositionInfo). Single source of truth for bracket prices.
+const V4_TICK_LOWER_ONCHAIN: i32 = 223200;
+const V4_TICK_UPPER_ONCHAIN: i32 = 274200;
+
+/// Displayed USDC-per-NOCK price for an on-chain tick on the NOCK (16 dec) / USDC (6 dec)
+/// V4 pool. Note the negated exponent: larger on-chain ticks map to LOWER displayed
+/// prices. Verified against live on-chain values:
+///   1.0001^(-223200) * 1e10 = 2.02788   (was hardcoded "2.02783")
+///   1.0001^(-274200) * 1e10 = 0.012366  (was hardcoded "0.01237")
+fn tick_to_display_price(tick_onchain: i32) -> f64 {
+    1.0001f64.powi(-tick_onchain) * 1e10
+}
+
+/// Signed basis-point distance from spot to the nearest bracket edge
+/// (positive when spot is below the edge, negative when above).
+fn bracket_distance_bps(spot: f64, lower: f64, upper: f64) -> i32 {
+    if spot <= 0.0 || lower <= 0.0 || upper <= 0.0 {
+        return 0;
+    }
+    let nearest_edge = if (spot - lower).abs() <= (spot - upper).abs() { lower } else { upper };
+    (((nearest_edge - spot) / spot) * 10000.0).round() as i32
+}
+
 async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let alchemy_key = state.config.alchemy_api_keys.first().cloned().unwrap_or_default();
     let alchemy_url = format!("https://base-mainnet.g.alchemy.com/v2/{}", alchemy_key);
@@ -1252,7 +1276,11 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         }, "latest"],
         "id": 99
     });
-    let mut live_eth_price_usd = 2500.0f64;
+    // Zero-mock invariant (issues #11/#16): ETH spot price is a required input — it feeds
+    // gas break-even math and advice text. A failed query must fail the cycle, never fall
+    // back to a hardcoded price presented as live truth.
+    let mut live_eth_price_usd = 0.0f64;
+    let mut eth_price_found = false;
     if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &eth_reserves_payload, 2).await {
         if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
             let clean = hex_str.trim_start_matches("0x");
@@ -1265,20 +1293,25 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
                     let usdc = r1 as f64 / 1e6;
                     if weth > 0.0 {
                         live_eth_price_usd = usdc / weth;
+                        eth_price_found = true;
                     }
                 }
             }
         }
     }
+    if !eth_price_found {
+        return Err(anyhow::anyhow!("Failed to query live ETH/USD spot price from Aerodrome vAMM-WETH/USDC RPC"));
+    }
 
-    // 1. Fetch live gas price (eth_gasPrice)
+    // 1. Fetch live gas price (eth_gasPrice) — required input, fail explicitly on error
     let gas_payload = json!({
         "jsonrpc": "2.0",
         "method": "eth_gasPrice",
         "params": [],
         "id": 10
     });
-    let mut live_gas_cost_usd = 0.005f64;
+    let mut live_gas_cost_usd = 0.0f64;
+    let mut gas_price_found = false;
     if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &gas_payload, 2).await {
         if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
             let clean = hex_str.trim_start_matches("0x");
@@ -1286,8 +1319,12 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
                 let eth_gas_cost = (wei as f64 / 1e18) * 150_000.0;
                 let usd_gas_cost = (eth_gas_cost * live_eth_price_usd) + 0.002;
                 live_gas_cost_usd = usd_gas_cost.clamp(0.002, 0.05);
+                gas_price_found = true;
             }
         }
+    }
+    if !gas_price_found {
+        return Err(anyhow::anyhow!("Failed to query live gas price from RPC"));
     }
 
     // 2. Fetch live reserves from Aerodrome pool 0x85f1aa3a70fedd1c52705c15baed143e675cd626
@@ -1380,8 +1417,8 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let state_view_addr = "0xa3c0c9b65bad0b08107aa264b0f3db444b867a71";
     let pool_id_hex = "064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13";
     let pos_manager_padded = "0000000000000000000000007c5f5a4bbd8fd63184577525326123b519429bdc";
-    let tick_lower_hex = format!("{:064x}", 223200u32);
-    let tick_upper_hex = format!("{:064x}", 274200u32);
+    let tick_lower_hex = format!("{:064x}", V4_TICK_LOWER_ONCHAIN as u32);
+    let tick_upper_hex = format!("{:064x}", V4_TICK_UPPER_ONCHAIN as u32);
 
     // 4a. getPositionInfo(bytes32,address,int24,int24,bytes32) -> 0xdacf1d2f
     let get_pos_data = format!("0xdacf1d2f{}{}{}{}{}", pool_id_hex, pos_manager_padded, tick_lower_hex, tick_upper_hex, v4_pos_hex);
@@ -1590,26 +1627,22 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
             liquidity_usd: format!("{:.2}", reserve_usdc * 2.0),
             fee_accrued_usd: format!("{:.4}", aero_fee_usd),
             fee_tier_bps: 30, // 0.3%
-            tick_current: Some(if spot_price > 0.0 {
-                let raw_ratio = spot_price / 1e10;
-                (raw_ratio.ln() / 1.0001f64.ln()).round() as i32
-            } else {
-                -266743
-            }),
+            tick_current: Some(((spot_price / 1e10).ln() / 1.0001f64.ln()).round() as i32),
             sqrt_price_x96: None,
         }],
         concentrated_liquidity: vec![
             ConcentratedLiquidity {
                 range_id: "3126000".to_string(),
                 pool_id: "0x498581ff718922c3f8e6a244956af099b2652b2b".to_string(),
-                lower_tick: -274200,
-                upper_tick: -223200,
-                lower_price: "0.01237".to_string(),
-                upper_price: "2.02783".to_string(),
+                lower_tick: -V4_TICK_UPPER_ONCHAIN,
+                upper_tick: -V4_TICK_LOWER_ONCHAIN,
+                lower_price: format!("{:.5}", tick_to_display_price(V4_TICK_UPPER_ONCHAIN)),
+                upper_price: format!("{:.5}", tick_to_display_price(V4_TICK_LOWER_ONCHAIN)),
                 liquidity_amount: v4_liquidity_str,
                 tokens_owed_0: format!("{:.6}", live_uni_fee_usdc),
                 tokens_owed_1: format!("{:.4}", live_uni_fee_nock),
-                in_range: spot_price >= 0.01237 && spot_price <= 2.02783,
+                in_range: spot_price >= tick_to_display_price(V4_TICK_UPPER_ONCHAIN)
+                    && spot_price <= tick_to_display_price(V4_TICK_LOWER_ONCHAIN),
                 fee_growth_inside_0_x128: fg0_curr.to_hex_be(),
                 fee_growth_inside_1_x128: fg1_curr.to_hex_be(),
             }
@@ -1731,6 +1764,19 @@ fn compute_counterfactual_sync(
     }
 }
 
+/// Claim recommendation computed from live claimable yield vs gas break-even.
+/// The 2x factor mirrors the gas_to_fee margin used elsewhere; gas <= 0 means gas is
+/// unknown (not free), so only a moderate recommendation is possible.
+fn recommended_claim_action(claimable_usd: f64, gas_break_even_usd: f64) -> &'static str {
+    if gas_break_even_usd > 0.0 && claimable_usd >= 2.0 * gas_break_even_usd {
+        "claim_now"
+    } else if claimable_usd > 0.0 {
+        "claim_recommended"
+    } else {
+        "accumulate"
+    }
+}
+
 fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_history: &[(DateTime<Utc>, f64, f64)]) -> DerivedMetrics {
     // 1. Spot price calculation
     let spot_price = if let Some(pool) = raw.pool_mechanics.first() {
@@ -1750,7 +1796,10 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
     let uni_fee_usd = uni_fee_usdc + uni_fee_nock * spot_price;
 
     let total_fees_usd = aero_fee_usd + uni_fee_usd;
-    let gas_cost = if raw.live_gas_cost_usd > 0.0 { raw.live_gas_cost_usd } else { 0.0043 };
+    // Zero-mock invariant: no fabricated gas fallback. A zero value means the gas query
+    // was unavailable (only reachable in unit tests via default RawOnChainData) — derived
+    // efficiency/action values then treat gas as unknown, never as free.
+    let gas_cost = raw.live_gas_cost_usd;
 
     // 3. Strategic Tranches
     // Tranche 1: Uniswap V4
@@ -1786,6 +1835,9 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
     let nock_floor_delta = total_nock - floor;
     let current_hwm = prev_hwm.max(total_portfolio_usd);
 
+    // Bracket upper bound derived from ticks — same single source of truth as the chart
+    let v4_upper_price = tick_to_display_price(V4_TICK_LOWER_ONCHAIN);
+
     // Dynamic Shot Advice Engine
     let (advice_action, advice_details) = if total_nock < floor {
         (
@@ -1803,7 +1855,7 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                 spot_price, total_stable_usd
             ),
         )
-    } else if spot_price >= 2.02783 {
+    } else if spot_price >= v4_upper_price {
         (
             "RANGE EXIT FLASHPOINT (Build High Wall)".to_string(),
             format!(
@@ -1812,11 +1864,16 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
             ),
         )
     } else if total_fees_usd >= 5.00 {
+        let gas_efficiency = if gas_cost > 0.0 {
+            format!("{:.0}x", total_fees_usd / gas_cost)
+        } else {
+            "unknown".to_string()
+        };
         (
             "BATCH HARVEST SHOT (Execute Claim)".to_string(),
             format!(
-                "Accumulated yield (${:.2}) exceeds $5.00 threshold at {:.0}x gas efficiency. Harvest fees and apply 60/40 Split Rule (40% to Tax Escrow, 60% Growth Capital).",
-                total_fees_usd, total_fees_usd / gas_cost
+                "Accumulated yield (${:.2}) exceeds $5.00 threshold at {} gas efficiency. Harvest fees and apply 60/40 Split Rule (40% to Tax Escrow, 60% Growth Capital).",
+                total_fees_usd, gas_efficiency
             ),
         )
     } else {
@@ -1864,11 +1921,16 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
             current_price: format!("{:.5}", spot_price),
             brackets: vec![
                 TickBracket {
-                    lower_price: "0.01237".to_string(),
-                    upper_price: "2.02783".to_string(),
+                    lower_price: format!("{:.5}", tick_to_display_price(V4_TICK_UPPER_ONCHAIN)),
+                    upper_price: format!("{:.5}", tick_to_display_price(V4_TICK_LOWER_ONCHAIN)),
                     liquidity_usd: format!("{:.2}", t1_usd),
-                    in_range: spot_price >= 0.01237 && spot_price <= 2.02783,
-                    distance_bps: -200,
+                    in_range: spot_price >= tick_to_display_price(V4_TICK_UPPER_ONCHAIN)
+                        && spot_price <= tick_to_display_price(V4_TICK_LOWER_ONCHAIN),
+                    distance_bps: bracket_distance_bps(
+                        spot_price,
+                        tick_to_display_price(V4_TICK_UPPER_ONCHAIN),
+                        tick_to_display_price(V4_TICK_LOWER_ONCHAIN),
+                    ),
                 },
                 TickBracket {
                     lower_price: "0.00000".to_string(),
@@ -1951,16 +2013,20 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                     contract_name: "Uniswap V4 (NOCK/USDC 3%)".to_string(),
                     claimable_usd: format!("{:.2}", uni_fee_usd),
                     gas_break_even_usd: format!("{:.4}", gas_cost),
-                    efficiency_ratio: (uni_fee_usd / gas_cost * 100.0).round() / 100.0,
-                    recommended_action: "claim_now".to_string(),
+                    efficiency_ratio: if gas_cost > 0.0 {
+                        (uni_fee_usd / gas_cost * 100.0).round() / 100.0
+                    } else { 0.0 },
+                    recommended_action: recommended_claim_action(uni_fee_usd, gas_cost).to_string(),
                 },
                 FeeCollectionIndex {
                     contract_address: "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
                     contract_name: "Aerodrome (USDC/NOCK 0.3%)".to_string(),
                     claimable_usd: format!("{:.2}", aero_fee_usd),
                     gas_break_even_usd: format!("{:.4}", gas_cost),
-                    efficiency_ratio: (aero_fee_usd / gas_cost * 100.0).round() / 100.0,
-                    recommended_action: "claim_now".to_string(),
+                    efficiency_ratio: if gas_cost > 0.0 {
+                        (aero_fee_usd / gas_cost * 100.0).round() / 100.0
+                    } else { 0.0 },
+                    recommended_action: recommended_claim_action(aero_fee_usd, gas_cost).to_string(),
                 },
             ],
         },
@@ -2293,6 +2359,50 @@ operator_profile:
         assert!((last_center - 105.0).abs() < 0.01);
         // Point is labeled with the timestamp of the newest sample in the window
         assert_eq!(ch.center_line.last().unwrap().time, newest_ts.to_rfc3339());
+    }
+
+    #[test]
+    fn test_tick_to_display_price_matches_live_values() {
+        // Derived bracket prices must round-trip against the previously hardcoded (and
+        // live-verified) display values for the NOCK/USDC V4 position ticks.
+        let lower_display = tick_to_display_price(V4_TICK_UPPER_ONCHAIN);
+        let upper_display = tick_to_display_price(V4_TICK_LOWER_ONCHAIN);
+
+        assert!((lower_display - 0.01237).abs() / 0.01237 < 0.001);
+        assert!((upper_display - 2.02783).abs() / 2.02783 < 0.001);
+        assert!(lower_display < upper_display);
+
+        // The negated-exponent orientation: larger on-chain tick → lower displayed price
+        assert!(tick_to_display_price(274200) < tick_to_display_price(223200));
+    }
+
+    #[test]
+    fn test_bracket_distance_bps() {
+        // Spot inside the range: distance is to the nearest edge, sign says which side
+        let lower = tick_to_display_price(V4_TICK_UPPER_ONCHAIN); // ~0.012366
+        let upper = tick_to_display_price(V4_TICK_LOWER_ONCHAIN); // ~2.027880
+        let d = bracket_distance_bps(1.0, lower, upper);
+        // Nearest edge is the lower (~0.0124, 9876 bps away vs 10279 to the upper):
+        // (0.012366 - 1.0)/1.0 * 10000 ≈ -9876
+        assert!((d as f64 + 9876.0).abs() < 5.0);
+
+        // Spot above range → distance to upper edge is negative
+        assert!(bracket_distance_bps(2.5, lower, upper) < 0);
+        // Degenerate inputs stay zero instead of panicking on division
+        assert_eq!(bracket_distance_bps(0.0, lower, upper), 0);
+    }
+
+    #[test]
+    fn test_recommended_claim_action_thresholds() {
+        // Claimable well above 2x gas → claim now
+        assert_eq!(recommended_claim_action(0.12, 0.005), "claim_now");
+        // Claimable positive but under the 2x gas margin → moderate recommendation
+        assert_eq!(recommended_claim_action(0.008, 0.005), "claim_recommended");
+        // Nothing claimable → accumulate
+        assert_eq!(recommended_claim_action(0.0, 0.005), "accumulate");
+        // Gas unknown (0) is NOT free gas — never claim_now
+        assert_eq!(recommended_claim_action(5.0, 0.0), "claim_recommended");
+        assert_eq!(recommended_claim_action(0.0, 0.0), "accumulate");
     }
 
     fn sample_snapshot_data() -> SnapshotData {
