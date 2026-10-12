@@ -121,6 +121,8 @@ struct AppConfig {
     mcp_bearer_token: Option<String>,
     #[serde(default)]
     operator_profile: OperatorProfile,
+    #[serde(default)]
+    notifications: NotificationConfig,
 }
 
 impl AppConfig {
@@ -319,6 +321,10 @@ struct GlobalStatus {
     shot_advice_action: String,
     #[serde(default)]
     shot_advice_details: String,
+    #[serde(default)]
+    regime: String,
+    #[serde(default)]
+    rsi_14: Option<String>,
 }
 
 fn default_floor_target_string() -> String {
@@ -1216,8 +1222,51 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
 
     // Compute derived metrics
     let profile = state.config.profile();
+    // Market regime: Wilder RSI(14) over the historical NOCK spot series (per-snapshot
+    // Aerodrome pool reserves, oldest first) with the live spot appended as the
+    // latest close. Overextension suppresses buy advice (issue #29).
+    let regime_rows = sqlx::query(
+        r#"SELECT (data->'pool_mechanics'->0->'volatile_assets'->0->>'reserve_amount')::float8 AS usdc,
+                  (data->'pool_mechanics'->0->'volatile_assets'->1->>'reserve_amount')::float8 AS nock
+           FROM snapshots ORDER BY generated_at DESC LIMIT 50"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    let mut closes: Vec<f64> = regime_rows
+        .iter()
+        .rev()
+        .filter_map(|r| {
+            let usdc: f64 = r.try_get("usdc").ok()?;
+            let nock: f64 = r.try_get("nock").ok()?;
+            if nock > 0.0 { Some(usdc / nock) } else { None }
+        })
+        .collect();
+    let live_spot = raw_data
+        .pool_mechanics
+        .first()
+        .and_then(|p| {
+            if p.volatile_assets.len() < 2 { return None; }
+            let r0: f64 = p.volatile_assets[0].reserve_amount.parse().ok()?;
+            let r1: f64 = p.volatile_assets[1].reserve_amount.parse().ok()?;
+            if r1 > 0.0 { Some(r0 / r1) } else { None }
+        })
+        .unwrap_or(0.0);
+    if live_spot > 0.0 {
+        closes.push(live_spot);
+    }
+    let rsi_series = compute_rsi_series(&closes, RSI_PERIOD);
+    let latest_rsi = rsi_series.iter().rev().find_map(|x| *x);
+    let regime = MarketRegime {
+        rsi: latest_rsi,
+        overextended: latest_rsi.map_or(false, |r| r >= RSI_OVERBOUGHT),
+    };
+
     let derived_metrics = compute_derived_metrics(&raw_data, prev_hwm, &profile, structural_channels,
-        &counterfactual_history, &ledger_agg);
+        &counterfactual_history, &ledger_agg, &regime);
+    // Capture directive strings before the metrics move into the snapshot envelope
+    let next_directive_action = derived_metrics.global_status.shot_advice_action.clone();
+    let next_directive_details = derived_metrics.global_status.shot_advice_details.clone();
 
     // Build snapshot data
     let snapshot_data = SnapshotData {
@@ -1233,6 +1282,24 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
 
     // Build envelope
     let now = Utc::now();
+    // Directive-transition notifications (issue #28): fire only when the tactical
+    // directive changes between cycles. First boot stays silent; delivery failures
+    // are logged, never fatal.
+    let prev_directive = state
+        .latest_snapshot
+        .lock()
+        .await
+        .as_ref()
+        .map(|s| s.data.derived_metrics.global_status.shot_advice_action.clone());
+    if let Some(text) = directive_transition_notification(
+        prev_directive.as_deref(),
+        &next_directive_action,
+        &next_directive_details,
+        state.config.notifications.cockpit_url.as_deref(),
+    ) {
+        dispatch_notifications(state, &text).await;
+    }
+
     let envelope = SnapshotEnvelope {
         meta: SnapshotMeta {
             generated_at: now,
@@ -1301,6 +1368,55 @@ async fn post_rpc_with_retry(
         }
     }
     None
+}
+
+/// Fire-and-forget directive-transition notifications (issue #28). Delivery
+/// failures are logged and never fatal to the ingestion cycle.
+async fn dispatch_notifications(state: &Arc<AppState>, text: &str) {
+    let cfg = &state.config.notifications;
+    if let (Some(token), Some(chat)) = (&cfg.telegram_bot_token, &cfg.telegram_chat_id) {
+        if !token.is_empty() && !chat.is_empty() {
+            let url = format!("https://api.telegram.org/bot{}/sendMessage", token);
+            let payload = json!({ "chat_id": chat, "text": text });
+            match state.http_client.post(&url).json(&payload).send().await {
+                Ok(r) if r.status().is_success() => {
+                    tracing::info!("Telegram notification delivered")
+                }
+                Ok(r) => tracing::warn!("Telegram notification failed: HTTP {}", r.status()),
+                Err(e) => tracing::error!("Telegram notification error: {e}"),
+            }
+        }
+    }
+    if let (Some(token), Some(user)) = (&cfg.pushover_token, &cfg.pushover_user) {
+        if !token.is_empty() && !user.is_empty() {
+            let payload = json!({ "token": token, "user": user, "message": text });
+            match state
+                .http_client
+                .post("https://api.pushover.net/1/messages.json")
+                .json(&payload)
+                .send()
+                .await
+            {
+                Ok(r) if r.status().is_success() => {
+                    tracing::info!("Pushover notification delivered")
+                }
+                Ok(r) => tracing::warn!("Pushover notification failed: HTTP {}", r.status()),
+                Err(e) => tracing::error!("Pushover notification error: {e}"),
+            }
+        }
+    }
+    if let Some(url) = &cfg.webhook_url {
+        if !url.is_empty() {
+            let payload = json!({ "text": text });
+            match state.http_client.post(url).json(&payload).send().await {
+                Ok(r) if r.status().is_success() => {
+                    tracing::info!("Webhook notification delivered")
+                }
+                Ok(r) => tracing::warn!("Webhook notification failed: HTTP {}", r.status()),
+                Err(e) => tracing::error!("Webhook notification error: {e}"),
+            }
+        }
+    }
 }
 
 /// Represents an unsigned 256-bit integer as (hi: u128, lo: u128)
@@ -1536,6 +1652,82 @@ fn format_units(amount: u128, decimals: i32) -> String {
         }
     }
     s
+}
+
+/// Wilder's RSI over a close-price series. Returns one entry per input index;
+/// `None` until `period` samples exist. Pure math (no I/O) — the anti-top-buying
+/// tripwire per issue #29 ("check the RSI and buy when oversold").
+fn compute_rsi_series(closes: &[f64], period: usize) -> Vec<Option<f64>> {
+    let mut out = vec![None; closes.len()];
+    if period == 0 || closes.len() <= period {
+        return out;
+    }
+    let mut gain_sum = 0.0f64;
+    let mut loss_sum = 0.0f64;
+    for w in 1..=period {
+        let diff = closes[w] - closes[w - 1];
+        if diff > 0.0 { gain_sum += diff; } else { loss_sum -= diff; }
+    }
+    let mut avg_gain = gain_sum / period as f64;
+    let mut avg_loss = loss_sum / period as f64;
+    let rsi = |g: f64, l: f64| {
+        if l == 0.0 { 100.0 } else { 100.0 - 100.0 / (1.0 + g / l) }
+    };
+    out[period] = Some(rsi(avg_gain, avg_loss));
+    for i in period + 1..closes.len() {
+        let diff = closes[i] - closes[i - 1];
+        let (g, l) = if diff > 0.0 { (diff, 0.0) } else { (0.0, -diff) };
+        avg_gain = (avg_gain * (period as f64 - 1.0) + g) / period as f64;
+        avg_loss = (avg_loss * (period as f64 - 1.0) + l) / period as f64;
+        out[i] = Some(rsi(avg_gain, avg_loss));
+    }
+    out
+}
+
+/// Market regime inputs consumed by the advice engine (computed by the worker
+/// from historical snapshots; the advice engine itself stays pure math).
+#[derive(Debug, Default, Clone, Copy)]
+struct MarketRegime {
+    /// Latest Wilder RSI(14) over the historical spot-price series
+    rsi: Option<f64>,
+    /// Overextension: RSI >= 70 (overbought exhaustion). At 70+, buy/deploy advice
+    /// is suppressed in favor of sweeping gains to stables.
+    overextended: bool,
+}
+
+const RSI_OVERBOUGHT: f64 = 70.0;
+const RSI_PERIOD: usize = 14;
+
+/// Notification config for directive-transition dispatch (issue #28).
+#[derive(Deserialize, Debug, Clone, Default)]
+struct NotificationConfig {
+    telegram_bot_token: Option<String>,
+    telegram_chat_id: Option<String>,
+    pushover_token: Option<String>,
+    pushover_user: Option<String>,
+    webhook_url: Option<String>,
+    cockpit_url: Option<String>,
+}
+
+/// Pure transition decision: notify only when a directive CHANGES between cycles
+/// (never on first boot, never on repeats). Returns the message text.
+fn directive_transition_notification(
+    prev: Option<&str>,
+    next: &str,
+    details: &str,
+    cockpit_url: Option<&str>,
+) -> Option<String> {
+    let prev = prev?;
+    if prev == next {
+        return None;
+    }
+    let mut text = format!("🛡️ NockNock directive change: {}\n{}", next, details);
+    if let Some(url) = cockpit_url {
+        if !url.is_empty() {
+            text.push_str(&format!("\n→ {}", url));
+        }
+    }
+    Some(text)
 }
 
 /// Extract ERC-20 Transfer logs that paid the sovereign wallet in a transaction
@@ -2665,7 +2857,7 @@ fn recommended_claim_action(claimable_usd: f64, gas_break_even_usd: f64) -> &'st
     }
 }
 
-fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_history: &[(DateTime<Utc>, f64, f64)], ledger: &LedgerAggregate) -> DerivedMetrics {
+fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_history: &[(DateTime<Utc>, f64, f64)], ledger: &LedgerAggregate, regime: &MarketRegime) -> DerivedMetrics {
     // 1. Spot price calculation
     let spot_price = if let Some(pool) = raw.pool_mechanics.first() {
         if pool.volatile_assets.len() >= 2 {
@@ -2743,6 +2935,15 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                 total_nock, floor, floor - total_nock
             ),
         )
+    } else if regime.overextended {
+        (
+            "SWEEP TO STABLE / ACCUMULATE DRY POWDER (Overextension Cooldown)".to_string(),
+            format!(
+                "NOCK spot (${:.5}) is overextended (RSI(14) {:.0} >= 70). Buying tops is how gains evaporate: suppress deployment, harvest if fees warrant it, and sweep to the stable stack until momentum cools.",
+                spot_price,
+                regime.rsi.unwrap_or(0.0)
+            ),
+        )
     } else if spot_price > 0.0 && spot_price < 0.020 && tax_guardrail_blocked {
         (
             "SWEEP TO STABLE / ACCUMULATE DRY POWDER (Tax Guardrail)".to_string(),
@@ -2806,6 +3007,8 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
             total_usdc_amount: format!("{:.2}", total_stable_usd),
             shot_advice_action: advice_action,
             shot_advice_details: advice_details,
+            regime: if regime.overextended { "overextended".to_string() } else { "normal".to_string() },
+            rsi_14: regime.rsi.map(|r| format!("{:.1}", r)),
         },
         asset_aggregation_series: AssetAggregationSeries {
             time_points: vec![now_str.clone()],
@@ -3084,7 +3287,7 @@ mod tests {
         ];
         // Total NOCK is 80,000 < 100,000 floor
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default());
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
         assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
     }
 
@@ -3107,7 +3310,7 @@ mod tests {
         raw.live_gas_cost_usd = 0.005;
 
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default());
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
         assert!(metrics.global_status.shot_advice_action.contains("BATCH HARVEST SHOT"));
     }
 
@@ -3130,7 +3333,7 @@ mod tests {
         raw.live_aero_fee_nock = 8.0;
 
         let profile = OperatorProfile::default();
-        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default());
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
         assert!(metrics.global_status.shot_advice_action.contains("HOLD & ACCRETE"));
     }
 
@@ -3173,7 +3376,7 @@ operator_profile:
             },
         ];
         // 120,000 is above default 100k floor, BUT below custom 150k floor!
-        let metrics = compute_derived_metrics(&raw, 3000.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default());
+        let metrics = compute_derived_metrics(&raw, 3000.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
         assert_eq!(metrics.global_status.nock_floor_target, "150000");
         assert_eq!(metrics.global_status.nock_floor_delta, "-30000");
         assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
@@ -3216,7 +3419,7 @@ database_url: "postgresql://localhost/test"
         let metrics = compute_derived_metrics(
             &raw, 0.0, &profile,
             StructuralChannels { channels: vec![] },
-            &[], &ledger,
+            &[], &ledger, &MarketRegime::default(),
         );
         assert_eq!(metrics.sovereign_ledger.cumulative_harvested_usd, "100.00");
         assert_eq!(metrics.sovereign_ledger.tax_reserve_usd, "40.00");
@@ -3229,7 +3432,7 @@ database_url: "postgresql://localhost/test"
         let metrics = compute_derived_metrics(
             &raw, 0.0, &profile,
             StructuralChannels { channels: vec![] },
-            &[], &ledger,
+            &[], &ledger, &MarketRegime::default(),
         );
         assert_eq!(metrics.sovereign_ledger.tax_reserve_usd, "25.00");
         assert_eq!(metrics.sovereign_ledger.growth_dry_powder_usd, "75.00");
@@ -3358,7 +3561,7 @@ database_url: "postgresql://localhost/test"
         let ledger = LedgerAggregate { total_usd: 500.0, harvest_count: 3, last_at: None };
         // tax reserve = 500 * 0.40 = 200 > stable stack (50 + 50 = 100) -> blocked
         let metrics = compute_derived_metrics(
-            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &ledger,
+            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &ledger, &MarketRegime::default(),
         );
         assert!(metrics.global_status.shot_advice_action.contains("SWEEP TO STABLE"));
         assert!(metrics.global_status.shot_advice_action.contains("Tax Guardrail"));
@@ -3368,7 +3571,7 @@ database_url: "postgresql://localhost/test"
         // with the deployable amount and the reserved figure called out.
         let small = LedgerAggregate { total_usd: 40.0, harvest_count: 1, last_at: None };
         let metrics = compute_derived_metrics(
-            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &small,
+            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &small, &MarketRegime::default(),
         );
         assert!(metrics.global_status.shot_advice_action.contains("DIP REINVESTMENT SHOT"));
         assert!(metrics.global_status.shot_advice_details.contains("Deploy $84.00"));
@@ -3376,10 +3579,50 @@ database_url: "postgresql://localhost/test"
 
         // No harvests yet: guardrail inert, full stack deployable (backward compatible)
         let metrics = compute_derived_metrics(
-            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(),
+            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default(),
         );
         assert!(metrics.global_status.shot_advice_action.contains("DIP REINVESTMENT SHOT"));
         assert!(metrics.global_status.shot_advice_details.contains("Deploy $100.00"));
+    }
+
+    #[test]
+    fn test_rsi_series_known_values() {
+        // Monotonic gains -> RSI pinned near 100 (overbought)
+        let closes: Vec<f64> = (1..=20).map(|i| 100.0 + i as f64).collect();
+        let rsi = compute_rsi_series(&closes, 14);
+        assert!(rsi[..14].iter().all(|x| x.is_none()));
+        assert!((rsi[14]).is_some());
+        let last = rsi[19].unwrap();
+        assert!(last > 95.0, "all-gain series should push RSI near 100, got {last}");
+        // Monotonic losses -> RSI near 0 (oversold)
+        let closes: Vec<f64> = (0..20).map(|i| 100.0 - i as f64).collect();
+        let rsi = compute_rsi_series(&closes, 14);
+        let last = rsi[19].unwrap();
+        assert!(last < 5.0, "all-loss series should push RSI near 0, got {last}");
+        // Too few samples -> all None
+        assert!(compute_rsi_series(&closes[..5], 14).iter().all(|x| x.is_none()));
+    }
+
+    #[test]
+    fn test_directive_transition_notification() {
+        // First boot (no previous directive): never notify
+        assert!(directive_transition_notification(None, "A", "d", None).is_none());
+        // Unchanged directive: never notify
+        assert!(directive_transition_notification(Some("A"), "A", "d", None).is_none());
+        // Changed: notify with action + details
+        let text = directive_transition_notification(
+            Some("HOLD & ACCRETE"),
+            "BATCH HARVEST SHOT",
+            "Accumulated yield ($5.20) exceeds threshold",
+            Some("https://cockpit.example/lite"),
+        )
+        .unwrap();
+        assert!(text.contains("directive change: BATCH HARVEST SHOT"));
+        assert!(text.contains("Accumulated yield"));
+        assert!(text.contains("https://cockpit.example/lite"));
+        // Changed without cockpit URL: no trailing link
+        let text = directive_transition_notification(Some("A"), "B", "d", None).unwrap();
+        assert!(!text.contains("→"));
     }
 
     #[test]
@@ -3546,6 +3789,8 @@ database_url: "postgresql://localhost/test"
                     total_usdc_amount: "50.00".to_string(),
                     shot_advice_action: "HOLD".to_string(),
                     shot_advice_details: "Steady".to_string(),
+                    regime: "normal".to_string(),
+                    rsi_14: None,
                 },
                 sovereign_ledger: Default::default(),
                 asset_aggregation_series: AssetAggregationSeries {

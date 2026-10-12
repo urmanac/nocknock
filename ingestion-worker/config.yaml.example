@@ -71,3 +71,17 @@ operator_profile:
 
 # Optional Model Context Protocol (MCP) Bearer Token for /v1/mcp endpoint
 # mcp_bearer_token: "your-secret-bearer-token"
+
+# ============================================================
+# Directive-Transition Notifications (issue #28)
+# ============================================================
+# The worker fires a notification only when the tactical directive CHANGES
+# between sync cycles (e.g. HOLD & ACCRETE -> BATCH HARVEST SHOT). Delivery
+# failures are logged, never fatal. All channels optional; leave empty to disable.
+# notifications:
+#   telegram_bot_token: "123456:ABC..."
+#   telegram_chat_id: "123456789"
+#   pushover_token: "pushover-app-token"
+#   pushover_user: "pushover-user-key"
+#   webhook_url: "https://hooks.example/nocknock"
+#   cockpit_url: "https://your-host:3000/lite"   # deep link appended to notifications

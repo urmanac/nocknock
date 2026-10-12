@@ -373,6 +373,14 @@ components:
           type: string
           description: Detailed explanation of tactical advisory status
           example: "Total NOCK held is 107,123 (+7,123 above 100k hard floor). AMMs are generating dual yield. Maintain posture."
+        regime:
+          type: string
+          description: Market regime from RSI(14) overextension detection
+          enum: [normal, overextended]
+        rsi_14:
+          type: string
+          nullable: true
+          description: Latest Wilder RSI(14) over the NOCK spot-price series
 
     AssetAggregationSeries:
       type: object
