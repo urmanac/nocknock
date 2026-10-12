@@ -7,7 +7,7 @@
 
 ## Batch 1 — Worker data integrity (BUG-B1, B2, B3, B6, B7)
 
-- [ ] Add `canonical_state_json` time-field stripping + rewrite `compute_state_hash` to use it (design D1); extend `test_state_hash_determinism` with time-invariance and value-sensitivity cases
+- [~] Add `canonical_state_json` time-field stripping + rewrite `compute_state_hash` to use it (design D1); extend `test_state_hash_determinism` with time-invariance and value-sensitivity cases
 - [ ] Rewrite counterfactual history query as DESC-100 subquery reversed, collecting `(generated_at, portfolio_usd, native_usd)` tuples; drop independent series pushes (design D2)
 - [ ] Add `generated_at` to the structural-channels history query; pass real timestamps into `compute_structural_channels_sync`
 - [ ] Update `compute_counterfactual_sync` / `compute_structural_channels_sync` signatures to consume real timestamps; delete fabricated `now − i×5min` logic
