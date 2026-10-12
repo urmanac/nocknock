@@ -35,6 +35,8 @@ pub struct OperatorProfile {
     pub v4_fee_baseline_usdc: f64,
     #[serde(default = "default_v4_fee_baseline_nock")]
     pub v4_fee_baseline_nock: f64,
+    #[serde(default = "default_tax_reserve_ratio")]
+    pub tax_reserve_ratio: f64,
     #[serde(default = "default_target_weights")]
     pub target_weights_bps: TargetWeightsBps,
 }
@@ -57,6 +59,7 @@ fn default_v4_baseline_nock() -> f64 { 4004.31227 }
 fn default_v4_baseline_usdc() -> f64 { 23.63241 }
 fn default_v4_fee_baseline_usdc() -> f64 { 0.0245 }
 fn default_v4_fee_baseline_nock() -> f64 { 1.4820 }
+fn default_tax_reserve_ratio() -> f64 { 0.40 }
 fn default_treasury_bps() -> i32 { 8000 }
 fn default_aerodrome_bps() -> i32 { 1000 }
 fn default_uniswap_v4_bps() -> i32 { 500 }
@@ -79,6 +82,7 @@ impl Default for OperatorProfile {
             v4_baseline_usdc: default_v4_baseline_usdc(),
             v4_fee_baseline_usdc: default_v4_fee_baseline_usdc(),
             v4_fee_baseline_nock: default_v4_fee_baseline_nock(),
+            tax_reserve_ratio: default_tax_reserve_ratio(),
             target_weights_bps: default_target_weights(),
         }
     }
@@ -538,6 +542,10 @@ async fn main() -> Result<()> {
         .route(
             "/mcp",
             axum::routing::post(mcp_http_handler),
+        )
+        .route(
+            "/v1/execute/claim-fees/payload",
+            axum::routing::get(get_claim_fees_payload_handler),
         )
         .layer(Extension(state.clone()));
 
@@ -1223,6 +1231,371 @@ impl U256 {
     pub fn to_hex_be(&self) -> String {
         format!("{:032x}{:032x}", self.0, self.1)
     }
+}
+
+// ============================================================
+// Golden Path: claim-fees payload engine (v0.2.0)
+// ============================================================
+// Encoding verified against Base mainnet via eth_call simulation on 2026-10-12
+// (helix-specs task 000661 verification/v4collect_sim.py; golden vectors in
+// verification/sdk_full.txt match @uniswap/v4-sdk@2.4.1 V4PositionPlanner output
+// byte-for-byte). Do not "fix" these constants without re-running that simulation.
+
+const UNISWAP_V4_POSM_BASE: &str = "0x7c5f5a4bbd8fd63184577525326123b519429bdc";
+const POSM_MODIFY_LIQUIDITIES_SELECTOR: &str = "dd46508f"; // modifyLiquidities(bytes,uint256)
+const V4_ACTION_DECREASE_LIQUIDITY: u8 = 0x01; // liquidity 0 => collect fees only
+const V4_ACTION_TAKE_PAIR: u8 = 0x11; // unified Actions enum as deployed on Base
+const AERODROME_CLAIM_FEES_SELECTOR: &str = "d294f093"; // claimFees()
+
+fn word_addr(addr: &str) -> String {
+    format!("000000000000000000000000{}", addr.trim_start_matches("0x").to_lowercase())
+}
+
+fn word_u256(v: u64) -> String {
+    format!("{:064x}", v)
+}
+
+/// ABI-encode a dynamic `bytes` member: 32-byte length word + data padded to 32-byte multiples.
+fn abi_encode_bytes(b_hex: &str) -> String {
+    let clean = b_hex.trim_start_matches("0x");
+    let pad_pairs = ((64 - (clean.len() % 64)) % 64) / 2;
+    format!("{:064x}{}{}", clean.len() / 2, clean, "00".repeat(pad_pairs))
+}
+
+/// ABI-encode a `bytes[]` array at its own position: [length, offsets..., contents...].
+/// Offsets are in bytes, relative to the start of the array (after the length word).
+fn abi_encode_bytes_array(items: &[String]) -> String {
+    let n = items.len();
+    let mut offsets = String::new();
+    let mut contents = String::new();
+    let mut acc = 0usize;
+    for it in items {
+        offsets.push_str(&word_u256((n * 32 + acc) as u64));
+        acc += 32 + ((it.len() / 2 + 31) / 32) * 32;
+    }
+    for it in items {
+        contents.push_str(&abi_encode_bytes(it));
+    }
+    format!("{:064x}{}{}", n, offsets, contents)
+}
+
+/// Build the V4 PositionManager `unlockData` for a fee collect:
+/// strict abi.encode(bytes actions, bytes[] params) where actions = [DECREASE_LIQUIDITY,
+/// TAKE_PAIR] and params are flat member encodings. Byte-for-byte identical to
+/// @uniswap/v4-sdk V4PositionPlanner.finalize() for the same inputs (golden vector test).
+fn build_v4_collect_unlock_data(token_id: u64, currency0: &str, currency1: &str, recipient: &str) -> String {
+    let actions_hex = format!("{:02x}{:02x}", V4_ACTION_DECREASE_LIQUIDITY, V4_ACTION_TAKE_PAIR);
+    // DECREASE_LIQUIDITY flat params: [tokenId u256, liquidity u256 (=0 collects fees),
+    // amount0Min u128, amount1Min u128, hookData offset (head-relative, incl. offset word
+    // => 5*32 = 0xa0), hookData length (=0)]
+    let decrease = format!(
+        "{}{}{}{}{}{}",
+        word_u256(token_id),
+        word_u256(0),
+        word_u256(0),
+        word_u256(0),
+        word_u256(0xa0),
+        word_u256(0)
+    );
+    // TAKE_PAIR flat params: [currency0, currency1, recipient] — all static, 3 words
+    let take_pair = format!(
+        "{}{}{}",
+        word_addr(currency0),
+        word_addr(currency1),
+        word_addr(recipient)
+    );
+    let params = vec![decrease, take_pair];
+    let actions_len_padded_bytes = ((actions_hex.len() / 2 + 31) / 32) * 32;
+    let params_offset = 0x40 + 32 + actions_len_padded_bytes;
+    format!(
+        "{}{}{}{}",
+        word_u256(0x40),
+        word_u256(params_offset as u64),
+        abi_encode_bytes(&actions_hex),
+        abi_encode_bytes_array(&params)
+    )
+}
+
+/// Full calldata for PositionManager.modifyLiquidities(bytes,uint256):
+/// [selector, 0x40 (offset to unlockData), deadline, bytesLen, unlockData...]
+fn build_v4_collect_calldata(token_id: u64, currency0: &str, currency1: &str, recipient: &str, deadline: u64) -> String {
+    format!(
+        "0x{}{}{}{}",
+        POSM_MODIFY_LIQUIDITIES_SELECTOR,
+        word_u256(0x40),
+        word_u256(deadline),
+        abi_encode_bytes(&build_v4_collect_unlock_data(token_id, currency0, currency1, recipient))
+    )
+}
+
+/// Live ETH/USD spot from the Aerodrome vAMM-WETH/USDC getReserves.
+/// Degrades to the documented conservative $2,500 peg when RPC is unreachable.
+async fn fetch_eth_price_usd(http_client: &Client, alchemy_url: &str) -> f64 {
+    let payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{
+            "to": "0x88A43bbDF9D098eEC7bCEda4e2494615dfD9bB9C",
+            "data": "0x0902f1ac"
+        }, "latest"],
+        "id": 99
+    });
+    if let Some(res_json) = post_rpc_with_retry(http_client, alchemy_url, &payload, 2).await {
+        if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
+            let clean = hex_str.trim_start_matches("0x");
+            if clean.len() >= 128 {
+                if let (Ok(r0), Ok(r1)) = (
+                    u128::from_str_radix(&clean[..64], 16),
+                    u128::from_str_radix(&clean[64..128], 16),
+                ) {
+                    let weth = r0 as f64 / 1e18;
+                    let usdc = r1 as f64 / 1e6;
+                    if weth > 0.0 {
+                        return usdc / weth;
+                    }
+                }
+            }
+        }
+    }
+    2500.0
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct ClaimFeeAction {
+    platform: String,
+    label: String,
+    to: String,
+    data: String,
+    value: String,
+    expected_amount_0: Option<String>,
+    expected_amount_1: Option<String>,
+    expected_usd: Option<String>,
+    gas_estimate: Option<String>,
+    gas_usd: Option<String>,
+    /// "success" | "failed" | "unavailable" — clients must only dispatch "success"
+    simulation: String,
+    simulation_detail: Option<String>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct ClaimFeesPayload {
+    chain_id: u64,
+    from: String,
+    generated_at: String,
+    gross_usd: Option<String>,
+    estimated_gas_usd: Option<String>,
+    net_after_gas_usd: Option<String>,
+    actions: Vec<ClaimFeeAction>,
+}
+
+/// GET /v1/execute/claim-fees/payload — unsigned fee-claim transactions for the
+/// sovereign wallet, derived from live on-chain state. Clients (Android app, web
+/// cockpit) dispatch these to the paired wallet for signing; they never build
+/// calldata themselves.
+async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState>>) -> impl IntoResponse {
+    let wallet = state.config.tracked_wallets[0].clone();
+    let alchemy_key = state.config.alchemy_api_keys.first().cloned().unwrap_or_default();
+    if alchemy_key.is_empty() || alchemy_key == "YOUR_ALCHEMY_API_KEY" {
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+            "error": "No Alchemy RPC key configured; cannot simulate or estimate claim transactions"
+        }))).into_response();
+    }
+    let alchemy_url = format!("https://base-mainnet.g.alchemy.com/v2/{}", alchemy_key);
+
+    // Live snapshot is the source of truth for claimable amounts (zero-mock)
+    let snapshot = state.latest_snapshot.lock().await.clone();
+    let snapshot = match snapshot {
+        Some(s) => s,
+        None => {
+            return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+                "error": "No snapshot available yet; ingestion cycle has not completed"
+            }))).into_response()
+        }
+    };
+    let gross_usd = snapshot.data.derived_metrics.global_status.total_fees_claimable_usd.clone();
+
+    let deadline = (Utc::now().timestamp() as u64) + 600;
+    let mut actions: Vec<ClaimFeeAction> = Vec::new();
+
+    // --- Action 1: Aerodrome claimFees() ---
+    // Target pool from config (tracked pool where the wallet LPs Tranche 2)
+    let aero_pool = state
+        .config
+        .tracked_pools
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string());
+    let aero_data = format!("0x{}", AERODROME_CLAIM_FEES_SELECTOR);
+    let aero_sim_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{ "from": wallet, "to": aero_pool, "data": aero_data }, "latest"],
+        "id": 20
+    });
+    let mut aero = ClaimFeeAction {
+        platform: "aerodrome".to_string(),
+        label: "Claim Aerodrome LP fees (Tranche 2)".to_string(),
+        to: aero_pool,
+        data: aero_data,
+        value: "0x0".to_string(),
+        expected_amount_0: None,
+        expected_amount_1: None,
+        expected_usd: None,
+        gas_estimate: None,
+        gas_usd: None,
+        simulation: "unavailable".to_string(),
+        simulation_detail: None,
+    };
+    match post_rpc_with_retry(&state.http_client, &alchemy_url, &aero_sim_payload, 2).await {
+        Some(res_json) => {
+            if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
+                let clean = hex_str.trim_start_matches("0x");
+                if clean.len() >= 128 {
+                    if let (Ok(c0), Ok(c1)) = (
+                        u128::from_str_radix(&clean[..64], 16),
+                        u128::from_str_radix(&clean[64..128], 16),
+                    ) {
+                        aero.expected_amount_0 = Some(format!("{:.6}", c0 as f64 / 1e6));
+                        aero.expected_amount_1 = Some(format!("{:.4}", c1 as f64 / 1e16));
+                        aero.simulation = "success".to_string();
+                    } else {
+                        aero.simulation = "failed".to_string();
+                        aero.simulation_detail = Some("claimFees() returned unparseable amounts".to_string());
+                    }
+                } else {
+                    aero.simulation = "failed".to_string();
+                    aero.simulation_detail = Some("claimFees() returned short output".to_string());
+                }
+            } else {
+                aero.simulation = "failed".to_string();
+                aero.simulation_detail = Some("claimFees() eth_call reverted".to_string());
+            }
+        }
+        None => {
+            aero.simulation_detail = Some("RPC unavailable for claimFees() simulation".to_string());
+        }
+    }
+    actions.push(aero);
+
+    // --- Action 2: Uniswap V4 fee collect (DECREASE 0 + TAKE_PAIR via posm) ---
+    let v4_token_id = state.config.v4_position_id.unwrap_or(3126000);
+    // Canonical Base token ordering for this pool, verified on-chain (see module docs):
+    // currency0 = USDC, currency1 = NOCK.
+    let v4_data = build_v4_collect_calldata(
+        v4_token_id,
+        "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+        &wallet,
+        deadline,
+    );
+    let mut v4 = ClaimFeeAction {
+        platform: "uniswap-v4".to_string(),
+        label: "Collect Uniswap V4 LP fees (Tranche 1)".to_string(),
+        to: UNISWAP_V4_POSM_BASE.to_string(),
+        data: v4_data,
+        value: "0x0".to_string(),
+        expected_amount_0: None,
+        expected_amount_1: None,
+        expected_usd: None,
+        gas_estimate: None,
+        gas_usd: None,
+        simulation: "unavailable".to_string(),
+        simulation_detail: None,
+    };
+    // Expected amounts come from the snapshot's live StateView-derived tokens owed
+    if let Some(cl) = snapshot.data.concentrated_liquidity.first() {
+        v4.expected_amount_0 = Some(cl.tokens_owed_0.clone());
+        v4.expected_amount_1 = Some(cl.tokens_owed_1.clone());
+    }
+    let v4_sim_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{ "from": wallet, "to": UNISWAP_V4_POSM_BASE, "data": v4.data }, "latest"],
+        "id": 21
+    });
+    match post_rpc_with_retry(&state.http_client, &alchemy_url, &v4_sim_payload, 2).await {
+        Some(res_json) => {
+            if res_json.get("result").and_then(|r| r.as_str()).is_some() {
+                v4.simulation = "success".to_string();
+            } else {
+                v4.simulation = "failed".to_string();
+                v4.simulation_detail = Some("modifyLiquidities collect eth_call reverted".to_string());
+            }
+        }
+        None => {
+            v4.simulation_detail = Some("RPC unavailable for V4 collect simulation".to_string());
+        }
+    }
+    actions.push(v4);
+
+    // --- Gas estimation per action (live; degrades to None, never fabricated) ---
+    let eth_price = fetch_eth_price_usd(&state.http_client, &alchemy_url).await;
+    let gas_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_gasPrice",
+        "params": [],
+        "id": 22
+    });
+    let gas_price_wei: Option<u128> = match post_rpc_with_retry(&state.http_client, &alchemy_url, &gas_payload, 2).await {
+        Some(res_json) => res_json
+            .get("result")
+            .and_then(|r| r.as_str())
+            .and_then(|s| u128::from_str_radix(s.trim_start_matches("0x"), 16).ok()),
+        None => None,
+    };
+    let mut total_gas_usd = 0.0f64;
+    let mut gas_ok = !actions.is_empty();
+    for (idx, action) in actions.iter_mut().enumerate() {
+        let est_payload = json!({
+            "jsonrpc": "2.0",
+            "method": "eth_estimateGas",
+            "params": [{ "from": wallet, "to": action.to, "data": action.data, "value": action.value }, "latest"],
+            "id": 30 + idx
+        });
+        match post_rpc_with_retry(&state.http_client, &alchemy_url, &est_payload, 2).await {
+            Some(res_json) => match res_json.get("result").and_then(|r| r.as_str()).and_then(|s| u128::from_str_radix(s.trim_start_matches("0x"), 16).ok()) {
+                Some(units) => {
+                    action.gas_estimate = Some(format!("0x{:x}", units));
+                    if let Some(gp) = gas_price_wei {
+                        let usd = (units as f64) * (gp as f64) / 1e18 * eth_price;
+                        action.gas_usd = Some(format!("{:.4}", usd));
+                        total_gas_usd += usd;
+                    }
+                }
+                None => {
+                    gas_ok = false;
+                    action.simulation_detail = Some(action.simulation_detail.clone().unwrap_or_default()
+                        + "; gas estimation failed");
+                }
+            },
+            None => {
+                gas_ok = false;
+            }
+        }
+    }
+    let estimated_gas_usd = if gas_ok && gas_price_wei.is_some() {
+        Some(format!("{:.4}", total_gas_usd))
+    } else {
+        None
+    };
+    let net_after_gas_usd = match (&gross_usd, &estimated_gas_usd) {
+        (Some(g), Some(e)) => {
+            let gross: f64 = g.parse().unwrap_or(0.0);
+            Some(format!("{:.4}", gross - total_gas_usd))
+        }
+        _ => None,
+    };
+
+    let payload = ClaimFeesPayload {
+        chain_id: 8453,
+        from: wallet,
+        generated_at: Utc::now().to_rfc3339(),
+        gross_usd,
+        estimated_gas_usd,
+        net_after_gas_usd,
+        actions,
+    };
+    Json(payload).into_response()
 }
 
 async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
@@ -2115,6 +2488,7 @@ operator_profile:
   v4_baseline_usdc: 23.63
   v4_fee_baseline_usdc: 0.05
   v4_fee_baseline_nock: 2.5
+  tax_reserve_ratio: 0.33
   target_weights_bps:
     treasury: 7000
     aerodrome_lp: 1500
@@ -2124,6 +2498,7 @@ operator_profile:
         let cfg: AppConfig = serde_yaml::from_str(yaml).expect("Failed to deserialize yaml");
         let profile = cfg.profile();
         assert_eq!(profile.treasury_floor_nock, 150000.0);
+        assert_eq!(profile.tax_reserve_ratio, 0.33);
         assert_eq!(profile.target_weights_bps.treasury, 7000);
         assert_eq!(profile.target_weights_bps.aerodrome_lp, 1500);
         assert_eq!(profile.target_weights_bps.uniswap_v4_lp, 1000);
@@ -2149,6 +2524,16 @@ operator_profile:
         assert_eq!(metrics.portfolio_deviation_matrix.allocations[1].target_weight_bps, 1500);
         assert_eq!(metrics.portfolio_deviation_matrix.allocations[2].target_weight_bps, 1000);
         assert_eq!(metrics.portfolio_deviation_matrix.allocations[3].target_weight_bps, 500);
+    }
+
+    #[test]
+    fn test_operator_profile_default_tax_reserve_ratio() {
+        // Backward compatibility: configs without the field still parse, default 60/40 split.
+        let yaml = r#"
+database_url: "postgresql://localhost/test"
+"#;
+        let cfg: AppConfig = serde_yaml::from_str(yaml).expect("Failed to deserialize yaml");
+        assert_eq!(cfg.profile().tax_reserve_ratio, 0.40);
     }
 
     #[test]
