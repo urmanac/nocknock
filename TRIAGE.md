@@ -136,7 +136,7 @@ This document defines the issue triage protocol, label architecture, bug severit
 #### 12. Defect: `structural_channels` Schema Stub
 * **Component**: `ingestion-worker/src/main.rs:1680-1720`
 * **Labels**: `enhancement`, `backend`
-* **Status**: Resolved & Merged (commit `e9e7778`)
+* **Status**: Resolved & Merged (commit `e9e7778`); 0.1.4 additionally revived the panel with live SMA channels (kept — operator values it); v0.2.0 supersedes the deprecation idea by ADDING the Sovereign 60/40 Ledger panel instead of removing this one
 * **Fix**: Implemented Bollinger Band regression channels (20-period SMA with 1σ and 2σ bands) calculated across historical price snapshots.
 
 #### 13. [Issue #20: Frontend High CPU Usage in useFreshness Hook](https://github.com/urmanac/nocknock/issues/20)
