@@ -2726,6 +2726,14 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
     // Bracket upper bound derived from ticks — same single source of truth as the chart
     let v4_upper_price = tick_to_display_price(V4_TICK_LOWER_ONCHAIN);
 
+    // Tax-reserve guardrail (virtual 60/40 sub-ledger): dip deployments may only
+    // consume growth dry powder; the tax reserve share of realized harvests is
+    // protected. If the wallet's stable stack cannot cover the reserve, deployment
+    // advice is suppressed entirely in favor of rebuilding the buffer.
+    let tax_reserve_usd = ledger.total_usd * profile.tax_reserve_ratio;
+    let deployable_usdc = (total_stable_usd - tax_reserve_usd).max(0.0);
+    let tax_guardrail_blocked = tax_reserve_usd > 0.0 && total_stable_usd < tax_reserve_usd;
+
     // Dynamic Shot Advice Engine
     let (advice_action, advice_details) = if total_nock < floor {
         (
@@ -2735,12 +2743,20 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                 total_nock, floor, floor - total_nock
             ),
         )
+    } else if spot_price > 0.0 && spot_price < 0.020 && tax_guardrail_blocked {
+        (
+            "SWEEP TO STABLE / ACCUMULATE DRY POWDER (Tax Guardrail)".to_string(),
+            format!(
+                "Spot price (${:.5}) is at accumulation territory, but the virtual tax reserve (${:.2}) exceeds the stable stack (${:.2}). Deployment suppressed: harvest fees and rebuild the 60/40 buffer before buying dips.",
+                spot_price, tax_reserve_usd, total_stable_usd
+            ),
+        )
     } else if spot_price > 0.0 && spot_price < 0.020 {
         (
             "DIP REINVESTMENT SHOT (Deploy USDC)".to_string(),
             format!(
-                "Spot price (${:.5}) has breached the $0.020 accumulation boundary! Deploy saved USDC ({:.2} available) to purchase NOCK at discount and compound buffer toward 120,000.",
-                spot_price, total_stable_usd
+                "Spot price (${:.5}) has breached the $0.020 accumulation boundary! Deploy ${:.2} of saved USDC (${:.2} available; ${:.2} protected as virtual tax reserve) to purchase NOCK at discount and compound buffer toward 120,000.",
+                spot_price, deployable_usdc, total_stable_usd, tax_reserve_usd
             ),
         )
     } else if spot_price >= v4_upper_price {
@@ -3281,6 +3297,89 @@ database_url: "postgresql://localhost/test"
             .sum();
         assert!((exported_total - total_usd).abs() < 1e-9);
         assert!((tax_reserve + dry_powder - total_usd).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_tax_guardrail_blocks_dip_deployment() {
+        // Overdrawn tax reserve: the wallet's stable stack cannot cover the virtual
+        // 40% tax reserve, so dip-deployment advice must be suppressed entirely.
+        let mut raw = RawOnChainData::default();
+        raw.wallet_balances = vec![
+            WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "NOCK".to_string(),
+                token_address: "0xNOCK".to_string(),
+                amount: "110000.0".to_string(),
+                amount_usd: "2860.0".to_string(),
+                updated_at: "now".to_string(),
+            },
+            WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "USDC".to_string(),
+                token_address: "0xUSDC".to_string(),
+                amount: "50.0".to_string(),
+                amount_usd: "50.0".to_string(),
+                updated_at: "now".to_string(),
+            },
+        ];
+        raw.live_tranche_1_nock = 2000.0;
+        raw.live_tranche_1_usdc = 20.0;
+        raw.live_tranche_2_nock = 6000.0;
+        raw.live_tranche_2_usdc = 30.0;
+        raw.live_uni_fee_usdc = 0.0;
+        raw.live_aero_fee_usdc = 0.0;
+        // Aerodrome pool reserves giving spot = 150 / 10000 = 0.015 (dip zone < 0.020)
+        raw.pool_mechanics = vec![PoolMechanic {
+            pool_id: "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
+            platform: "Aerodrome".to_string(),
+            pool_type: "volatile".to_string(),
+            volatile_assets: vec![
+                PoolAsset {
+                    token_address: "0xUSDC".to_string(),
+                    token_symbol: "USDC".to_string(),
+                    reserve_amount: "150".to_string(),
+                    reserve_usd: "150".to_string(),
+                },
+                PoolAsset {
+                    token_address: "0xNOCK".to_string(),
+                    token_symbol: "NOCK".to_string(),
+                    reserve_amount: "10000".to_string(),
+                    reserve_usd: "150".to_string(),
+                },
+            ],
+            liquidity_usd: "300".to_string(),
+            fee_accrued_usd: "0".to_string(),
+            fee_tier_bps: 30,
+            tick_current: None,
+            sqrt_price_x96: None,
+        }];
+        let profile = OperatorProfile::default(); // floor 100k; ratio 0.40
+        // total_nock = 2000 + 6000 + 110000 = 118000 (above floor) and spot 0.015 (< 0.020 dip zone)
+        let ledger = LedgerAggregate { total_usd: 500.0, harvest_count: 3, last_at: None };
+        // tax reserve = 500 * 0.40 = 200 > stable stack (50 + 50 = 100) -> blocked
+        let metrics = compute_derived_metrics(
+            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &ledger,
+        );
+        assert!(metrics.global_status.shot_advice_action.contains("SWEEP TO STABLE"));
+        assert!(metrics.global_status.shot_advice_action.contains("Tax Guardrail"));
+        assert!(metrics.global_status.shot_advice_details.contains("Deployment suppressed"));
+
+        // Small harvest ledger: reserve 40 * 0.40 = 16 <= stable 100 -> DIP advice fires
+        // with the deployable amount and the reserved figure called out.
+        let small = LedgerAggregate { total_usd: 40.0, harvest_count: 1, last_at: None };
+        let metrics = compute_derived_metrics(
+            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &small,
+        );
+        assert!(metrics.global_status.shot_advice_action.contains("DIP REINVESTMENT SHOT"));
+        assert!(metrics.global_status.shot_advice_details.contains("Deploy $84.00"));
+        assert!(metrics.global_status.shot_advice_details.contains("$16.00 protected as virtual tax reserve"));
+
+        // No harvests yet: guardrail inert, full stack deployable (backward compatible)
+        let metrics = compute_derived_metrics(
+            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(),
+        );
+        assert!(metrics.global_status.shot_advice_action.contains("DIP REINVESTMENT SHOT"));
+        assert!(metrics.global_status.shot_advice_details.contains("Deploy $100.00"));
     }
 
     #[test]
