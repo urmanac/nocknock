@@ -173,13 +173,16 @@ function Dashboard() {
     action: c.recommended_action,
   }));
 
+  const floorTarget = global?.nock_floor_target ? parseInt(global.nock_floor_target) : 100000;
+  const floorTargetFormatted = floorTarget.toLocaleString();
+  const floorTargetShort = `${(floorTarget / 1000).toFixed(0)}k`;
   const nockAmountRaw = global?.total_nock_amount ? parseInt(global.total_nock_amount) : 0;
   const totalNockVal = nockAmountRaw > 0 ? nockAmountRaw.toLocaleString() : '—';
-  const nockFloorDeltaRaw = global?.nock_floor_delta ? parseInt(global.nock_floor_delta) : (nockAmountRaw ? nockAmountRaw - 100000 : 0);
+  const nockFloorDeltaRaw = global?.nock_floor_delta ? parseInt(global.nock_floor_delta) : (nockAmountRaw ? nockAmountRaw - floorTarget : 0);
   const nockFloorDeltaVal = nockFloorDeltaRaw.toLocaleString();
   const isFloorSafe = nockFloorDeltaRaw >= 0;
   const floorHealthColor = isFloorSafe ? '#10b981' : '#ef4444';
-  const nockFloorDeltaPct = ((nockFloorDeltaRaw / 100000) * 100).toFixed(1);
+  const nockFloorDeltaPct = ((nockFloorDeltaRaw / floorTarget) * 100).toFixed(1);
 
   return (
     <div style={styles.container}>
@@ -208,7 +211,7 @@ function Dashboard() {
             label="Total NOCK Stack"
             value={totalNockVal}
             suffix=" NOCK"
-            subtitle={`${nockFloorDeltaRaw >= 0 ? '+' : ''}${nockFloorDeltaVal} above 100k floor`}
+            subtitle={`${nockFloorDeltaRaw >= 0 ? '+' : ''}${nockFloorDeltaVal} above ${floorTargetShort} floor`}
             highlightColor={floorHealthColor}
           />
           <StatCard
@@ -233,8 +236,8 @@ function Dashboard() {
             highlightColor="#f1c40f"
           />
           <StatCard
-            label="100k Floor Health"
-            value={nockAmountRaw > 0 ? `${(nockAmountRaw / 1000).toFixed(1)}%` : '—'}
+            label={`${floorTargetShort.toUpperCase()} Floor Health`}
+            value={nockAmountRaw > 0 ? `${((nockAmountRaw / floorTarget) * 100).toFixed(1)}%` : '—'}
             subtitle={isFloorSafe ? `Hard Floor Safe (+${nockFloorDeltaVal} buffer)` : `CRITICAL: ${nockFloorDeltaVal} Below Floor`}
             highlightColor={floorHealthColor}
           />
@@ -262,18 +265,18 @@ function Dashboard() {
             color: isFloorSafe ? '#a7f3d0' : '#fecaca',
             border: isFloorSafe ? '1px solid #059669' : '1px solid #dc2626',
           }}>
-            Floor Invariant: <strong>100,000 NOCK Hard Floor {isFloorSafe ? 'PROTECTED' : 'BREACHED'}</strong> ({nockFloorDeltaRaw >= 0 ? '+' : ''}{nockFloorDeltaVal} cushion)
+            Floor Invariant: <strong>{floorTargetFormatted} NOCK Hard Floor {isFloorSafe ? 'PROTECTED' : 'BREACHED'}</strong> ({nockFloorDeltaRaw >= 0 ? '+' : ''}{nockFloorDeltaVal} cushion)
           </div>
         </div>
         <p style={styles.adviceDetails}>
           {global?.shot_advice_details ||
-            `Total NOCK held is ${totalNockVal} (${nockFloorDeltaRaw >= 0 ? '+' : ''}${nockFloorDeltaVal} above 100k hard floor). AMMs are generating dual yield. Maintain posture.`}
+            `Total NOCK held is ${totalNockVal} (${nockFloorDeltaRaw >= 0 ? '+' : ''}${nockFloorDeltaVal} above ${floorTargetShort} hard floor). AMMs are generating dual yield. Maintain posture.`}
         </p>
         <div style={styles.shotPillContainer}>
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>Goal 1 (NOCK Accretion):</span>
             <span style={styles.shotPillText}>
-              {totalNockVal} NOCK total across Treasury (Tranche 3), Aerodrome LP (Tranche 2), and Uniswap V4 LP (Tranche 1). Floor lock active if total &lt; 100,000.
+              {totalNockVal} NOCK total across Treasury (Tranche 3), Aerodrome LP (Tranche 2), and Uniswap V4 LP (Tranche 1). Floor lock active if total &lt; {floorTargetFormatted}.
             </span>
           </div>
           <div style={styles.shotPill}>
@@ -294,7 +297,7 @@ function Dashboard() {
       {/* Storyboard Canvas — 7 Real Charts */}
       <main style={styles.grid}>
         {/* 1. Sovereign NOCK Stack & Floor Reference */}
-        <CanvasPanel title="The Sovereign NOCK Stack vs 100,000 Floor (Token Units)">
+        <CanvasPanel title={`The Sovereign NOCK Stack vs ${floorTargetFormatted} Floor (Token Units)`}>
           <ResponsiveContainer width="100%" height={260}>
             <AreaChart data={assetSeries} margin={{ top: 15, right: 30, left: 15, bottom: 0 }}>
               <defs>
@@ -316,8 +319,8 @@ function Dashboard() {
                 stroke="#334155"
                 tick={{ fill: '#94a3b8', fontSize: 11 }}
                 domain={[
-                  (dataMin: number) => Math.max(0, Math.floor(Math.min(dataMin, 95000) / 5000) * 5000),
-                  (dataMax: number) => Math.ceil(Math.max(dataMax, 105000) / 5000) * 5000,
+                  (dataMin: number) => Math.max(0, Math.floor(Math.min(dataMin, floorTarget - 5000) / 5000) * 5000),
+                  (dataMax: number) => Math.ceil(Math.max(dataMax, floorTarget + 5000) / 5000) * 5000,
                 ]}
                 tickFormatter={v => `${(v / 1000).toFixed(0)}k`}
               />
@@ -329,11 +332,11 @@ function Dashboard() {
                 formatter={(v: any) => `${Number(v).toLocaleString()} NOCK`}
               />
               <ReferenceLine
-                y={100000}
+                y={floorTarget}
                 stroke="#ef4444"
                 strokeDasharray="4 4"
                 strokeWidth={2}
-                label={{ value: '100k HARD FLOOR', fill: '#ef4444', fontSize: 11, position: 'insideTopLeft' }}
+                label={{ value: `${floorTargetShort.toUpperCase()} HARD FLOOR`, fill: '#ef4444', fontSize: 11, position: 'insideTopLeft' }}
               />
               <Area
                 type="monotone"
