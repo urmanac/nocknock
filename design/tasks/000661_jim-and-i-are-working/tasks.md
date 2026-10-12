@@ -10,16 +10,18 @@
 - [~] Add unit tests for the V4 posm multicall encoder (action byte layout, deadline, recipient padding) mirroring the existing `U256`/hex-parsing test style
 - [ ] Extend `specs/core/api.yaml` with the payload endpoint and run `make test-mcp` to confirm MCP/HTTP surfaces still pass
 
-## Phase 2 — Minimal Android claim app
+## Phase 2 — Minimal Android claim app — DEFERRED (operator decision, 2026-10-12)
 
-- [ ] Create `android/` module: single-activity Kotlin app, dark aesthetic tokens, no wallet/credential UI
-- [ ] Integrate Reown/WalletConnect Sign SDK; implement pairing (on-device deep link + QR to Uniswap app) and persisted session reconnection
-- [ ] Handle the Uniswap-app broadcast quirk: surface an "approved, awaiting wallet broadcast" state and mark a tx complete only when its receipt is visible on-chain
-- [ ] Keep the app stateless about money: persist only the server URL + WC session; add a `/v1/health` version/capability probe that warns if required payload endpoints are missing
-- [ ] Implement `NockApi.kt`: fetch `/v1/snapshot/latest` and `/v1/execute/claim-fees/payload`; explicit degraded state when the worker is unreachable
-- [ ] Implement "EXECUTE BATCH HARVEST": simulate-first via worker, then queue the two txs sequentially as `eth_sendTransaction` WC requests; show per-tx status + Base tx hash
-- [ ] Post confirmed tx hashes to `POST /v1/execute/record-harvest`; display ledger confirmation
-- [ ] Build debug APK locally (`gradle assembleDebug`), verify it contains no secrets (no Alchemy key/tokens), and document sideload install in README/DEPLOYMENT
+> Operator decision during implementation: 0.2.0 ships the **web QR/WalletConnect flow** (Phase 5) instead of a native Android app. The Android app stays planned but out of the 0.2.0 release; Phase 1's payload endpoint is the shared primitive both surfaces consume. Items below kept for the future task.
+
+- [ ] Create `android/` module: single-activity Kotlin app, dark aesthetic tokens, no wallet/credential UI (deferred)
+- [ ] Integrate Reown/WalletConnect Sign SDK; implement pairing (on-device deep link + QR to Uniswap app) and persisted session reconnection (deferred)
+- [ ] Handle the Uniswap-app broadcast quirk in a native app: surface an "approved, awaiting wallet broadcast" state and mark a tx complete only when its receipt is visible on-chain (deferred — the quirk is documented for the web flow too)
+- [ ] Keep the app stateless about money: persist only the server URL + WC session; add a `/v1/health` version/capability probe that warns if required payload endpoints are missing (deferred)
+- [ ] Implement `NockApi.kt`: fetch `/v1/snapshot/latest` and `/v1/execute/claim-fees/payload`; explicit degraded state when the worker is unreachable (deferred)
+- [ ] Implement "EXECUTE BATCH HARVEST": simulate-first via worker, then queue the two txs sequentially as `eth_sendTransaction` WC requests; show per-tx status + Base tx hash (deferred)
+- [ ] Post confirmed tx hashes to `POST /v1/execute/record-harvest`; display ledger confirmation (deferred — endpoint ships in Phase 3 regardless, web flow uses it too)
+- [ ] Build debug APK locally (`gradle assembleDebug`), verify it contains no secrets (no Alchemy key/tokens), and document sideload install in README/DEPLOYMENT (deferred)
 
 ## Phase 3 — Harvest ledger, 60/40 sub-ledger, tax export
 

@@ -47,7 +47,7 @@ Key principle: **the worker is the single source of truth** for on-chain math an
 
 11. **CI: `Swatinem/rust-cache@v2`** on brain/worker jobs (per `OPERATOR_GUIDANCE.md` §10). Android CI job is optional/last — a local debug APK is acceptable for MVP; if CI packaging works, attach as a 5th artifact (gated on Open Question 6).
 
-12. **Deferred to post-0.2.0:** embedded WASM brain in Android + Tier-3 RPC fallback chain, multicall aggregation, multi-tenant runtime (schema/blueprint only now), Urbit desk implementation.
+12. **Deferred to post-0.2.0:** native Android app (operator decision at implementation check-in — 0.2.0 uses the web QR/WalletConnect flow), embedded WASM brain in Android + Tier-3 RPC fallback chain, multicall aggregation, multi-tenant runtime (schema/blueprint only now), Urbit desk implementation. The on-chain-verified posm encoder (Implementation Notes below) and the shared payload endpoint serve the Android app unchanged whenever it is built.
 
 13. **No secrets in the APK.** The Android app embeds no Alchemy key or any credential: an APK is effectively public to anyone who installs it, embedded keys are routinely scraped, and distributing a key would also contradict the zero-custody posture. The app is a REST client of the worker (which already holds the Alchemy key server-side); a keyless public Base RPC exists if a future offline fallback ever needs one. Deployment implication: the worker must be reachable from the phone (LAN or Tailscale); worker REST is currently unauthenticated, so MVP assumes a trusted network — the MCP bearer-token pattern is available if that assumption changes.
 

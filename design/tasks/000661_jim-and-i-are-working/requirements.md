@@ -99,9 +99,8 @@ The worker exposes an endpoint that returns ready-to-sign unsigned transactions 
 
 ## Resolved in Operator Review (2026-10-12)
 
+- **Android app deferred out of 0.2.0** (operator decision at implementation check-in): 0.2.0 executes via the **existing web app + WalletConnect QR pairing** with the Uniswap mobile app (read-only + suggest-transactions permissions); the Android app remains planned future work. Phase 1's payload endpoint serves both surfaces.
 - Same-device WalletConnect pairing with the Uniswap app is proven operator practice (arbitrary contract calls included); the pending-broadcast quirk is a designed-for UX case, not a blocker.
-- Android app: worker-API-only for MVP (no offline RPC fallback, no embedded brain) and **no Alchemy key in the APK**.
-- The Android app persists no financial state; its dependency on the worker API is now explicit (design.md decision 14).
 - P/L: external cost-basis APIs deferred to a future minor release; 0.2.0 ships local-data-only P/L. No mocked P/L.
 - Multiple sequential signatures are acceptable; multicall rejected.
 
