@@ -547,6 +547,10 @@ async fn main() -> Result<()> {
             "/v1/execute/claim-fees/payload",
             axum::routing::get(get_claim_fees_payload_handler),
         )
+        .route(
+            "/v1/execute/record-harvest",
+            axum::routing::post(record_harvest_handler),
+        )
         .layer(Extension(state.clone()));
 
     let port = state.config.port;
@@ -1454,6 +1458,126 @@ async fn fetch_eth_price_usd(http_client: &Client, alchemy_url: &str) -> f64 {
     2500.0
 }
 
+const USDC_BASE: &str = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const NOCK_BASE: &str = "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722";
+/// keccak256("Transfer(address,address,uint256)") — verified against the repo keccak tooling.
+const TRANSFER_EVENT_TOPIC: &str =
+    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+struct ParsedHarvestTransfer {
+    token_address: String,
+    token_symbol: String,
+    from_address: String,
+    recipient: String,
+    amount_raw: String,
+    amount_human: String,
+    decimals: i32,
+}
+
+/// Exact decimal formatting: raw integer amount -> human string, no float rounding.
+/// "120033" @6dp -> "0.120033"; "54468217823004916" @16dp -> "5.4468217823004916".
+fn format_units(amount: u128, decimals: i32) -> String {
+    let digits = amount.to_string();
+    let d = decimals.max(0) as usize;
+    let s = if digits.len() <= d {
+        format!("0.{}{}", "0".repeat(d - digits.len()), digits)
+    } else {
+        format!("{}.{}", &digits[..digits.len() - d], &digits[digits.len() - d..])
+    };
+    if s.contains('.') {
+        let trimmed = s.trim_end_matches('0').trim_end_matches('.');
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    s
+}
+
+/// Extract ERC-20 Transfer logs that paid the sovereign wallet in a transaction
+/// receipt. Logs for tokens we do not track (anything other than USDC/NOCK on
+/// Base) are ignored with a warning rather than guessed at.
+fn parse_harvest_transfers(receipt: &serde_json::Value, wallet: &str) -> Vec<ParsedHarvestTransfer> {
+    let mut out = Vec::new();
+    let wallet_padded = format!(
+        "000000000000000000000000{}",
+        wallet.trim_start_matches("0x").to_lowercase()
+    );
+    let Some(logs) = receipt.get("logs").and_then(|l| l.as_array()) else {
+        return out;
+    };
+    for log in logs {
+        let Some(topics) = log.get("topics").and_then(|t| t.as_array()) else {
+            continue;
+        };
+        if topics.len() < 3 {
+            continue;
+        }
+        let (Some(t0), Some(from_word), Some(to_word)) = (
+            topics[0].as_str(),
+            topics[1].as_str(),
+            topics[2].as_str(),
+        ) else {
+            continue;
+        };
+        if !t0.eq_ignore_ascii_case(TRANSFER_EVENT_TOPIC) {
+            continue;
+        }
+        if !to_word
+            .trim_start_matches("0x")
+            .eq_ignore_ascii_case(&wallet_padded)
+        {
+            continue;
+        }
+        let Some(token_addr) = log.get("address").and_then(|a| a.as_str()) else {
+            continue;
+        };
+        let (symbol, decimals): (&str, i32) = if token_addr.eq_ignore_ascii_case(USDC_BASE) {
+            ("USDC", 6)
+        } else if token_addr.eq_ignore_ascii_case(NOCK_BASE) {
+            ("NOCK", 16)
+        } else {
+            tracing::warn!("Harvest receipt contains a Transfer of an untracked token {}; skipping", token_addr);
+            continue;
+        };
+        let Some(data) = log.get("data").and_then(|d| d.as_str()) else {
+            continue;
+        };
+        let Ok(amount) = u128::from_str_radix(data.trim_start_matches("0x"), 16) else {
+            continue;
+        };
+        out.push(ParsedHarvestTransfer {
+            token_address: token_addr.to_string(),
+            token_symbol: symbol.to_string(),
+            from_address: format!("0x{}", from_word.trim_start_matches("0x")[24..].to_lowercase()),
+            recipient: wallet.to_string(),
+            amount_raw: amount.to_string(),
+            amount_human: format_units(amount, decimals),
+            decimals,
+        });
+    }
+    out
+}
+
+fn is_valid_tx_hash(s: &str) -> bool {
+    let clean = s.trim_start_matches("0x");
+    clean.len() == 64 && clean.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// NOCK spot price derived from the Aerodrome pool reserves in the latest snapshot.
+fn nock_spot_from_snapshot(data: &SnapshotData) -> Option<f64> {
+    let pool = data.pool_mechanics.iter().find(|p| p.platform == "Aerodrome")?;
+    if pool.volatile_assets.len() < 2 {
+        return None;
+    }
+    let usdc: f64 = pool.volatile_assets[0].reserve_amount.parse().ok()?;
+    let nock: f64 = pool.volatile_assets[1].reserve_amount.parse().ok()?;
+    if usdc <= 0.0 || nock <= 0.0 {
+        return None;
+    }
+    Some(usdc / nock)
+}
+
 #[derive(Serialize, Debug, Clone)]
 struct ClaimFeeAction {
     platform: String,
@@ -1575,13 +1699,7 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
     let v4_token_id = state.config.v4_position_id.unwrap_or(3126000);
     // Canonical Base token ordering for this pool, verified on-chain (see module docs):
     // currency0 = USDC, currency1 = NOCK.
-    let v4_data = build_v4_collect_calldata(
-        v4_token_id,
-        "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-        "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
-        &wallet,
-        deadline,
-    );
+    let v4_data = build_v4_collect_calldata(v4_token_id, USDC_BASE, NOCK_BASE, &wallet, deadline);
     let mut v4 = ClaimFeeAction {
         platform: "uniswap-v4".to_string(),
         label: "Collect Uniswap V4 LP fees (Tranche 1)".to_string(),
@@ -1691,6 +1809,161 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
     };
     Json(payload).into_response()
 }
+#[derive(Deserialize, Debug)]
+struct RecordHarvestRequest {
+    platform: String,
+    tx_hash: String,
+}
+
+/// POST /v1/execute/record-harvest — receipt-verified harvest ledger entry.
+/// Clients call this after a claim transaction is confirmed by the wallet.
+/// "Receipt not found" also covers the Uniswap-app pending-broadcast quirk
+/// (approved but not yet broadcast): the client should surface that state and retry.
+async fn record_harvest_handler(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(req): Json<RecordHarvestRequest>,
+) -> impl IntoResponse {
+    if !matches!(req.platform.as_str(), "aerodrome" | "uniswap-v4") {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "INVALID_PLATFORM", "detail": "platform must be 'aerodrome' or 'uniswap-v4'" })),
+        )
+            .into_response();
+    }
+    if !is_valid_tx_hash(&req.tx_hash) {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "INVALID_TX_HASH", "detail": "tx_hash must be a 32-byte hex string" })),
+        )
+            .into_response();
+    }
+    let alchemy_key = state
+        .config
+        .alchemy_api_keys
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    if alchemy_key.is_empty() || alchemy_key == "YOUR_ALCHEMY_API_KEY" {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "NO_RPC", "detail": "No Alchemy RPC key configured; cannot verify receipts" })),
+        )
+            .into_response();
+    }
+    let alchemy_url = format!("https://base-mainnet.g.alchemy.com/v2/{}", alchemy_key);
+    let wallet = state.config.tracked_wallets[0].clone();
+
+    let receipt_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_getTransactionReceipt",
+        "params": [if req.tx_hash.starts_with("0x") { req.tx_hash.clone() } else { format!("0x{}", req.tx_hash) }],
+        "id": 40
+    });
+    let receipt = match post_rpc_with_retry(&state.http_client, &alchemy_url, &receipt_payload, 2).await {
+        Some(res) => res.get("result").cloned().unwrap_or(serde_json::Value::Null),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({ "error": "RPC_UNAVAILABLE", "detail": "Could not query receipt; not recorded" })),
+            )
+                .into_response()
+        }
+    };
+    if receipt.is_null() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": "RECEIPT_NOT_FOUND",
+                "detail": "Transaction not found on-chain. If the wallet shows it approved, it may still be pending broadcast in the wallet (Uniswap app quirk) - surface that state and retry once it broadcasts."
+            })),
+        )
+            .into_response();
+    }
+    if receipt.get("status").and_then(|s| s.as_str()) != Some("0x1") {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "TX_REVERTED", "detail": "Receipt status is not success; nothing recorded" })),
+        )
+            .into_response();
+    }
+    let transfers = parse_harvest_transfers(&receipt, &wallet);
+    if transfers.is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "NO_TRACKED_TRANSFERS", "detail": "Receipt contains no Transfer of tracked tokens (USDC/NOCK) to the sovereign wallet" })),
+        )
+            .into_response();
+    }
+
+    // USD valuation from the latest snapshot spot; explicit null when unavailable.
+    let spot = state
+        .latest_snapshot
+        .lock()
+        .await
+        .clone()
+        .and_then(|s| nock_spot_from_snapshot(&s.data));
+    let block_number: i64 = receipt
+        .get("blockNumber")
+        .and_then(|b| b.as_str())
+        .and_then(|s| i64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(0);
+
+    let mut recorded = Vec::new();
+    let mut skipped = 0usize;
+    for t in &transfers {
+        let usd_value: Option<String> = match t.token_symbol.as_str() {
+            "USDC" => Some(t.amount_human.clone()),
+            "NOCK" => spot.map(|s| format!("{:.4}", t.amount_human.parse::<f64>().unwrap_or(0.0) * s)),
+            _ => None,
+        };
+        let res = sqlx::query(
+            "INSERT INTO harvest_events (platform, tx_hash, token_address, token_symbol, from_address, recipient, amount_raw, amount_human, decimals, usd_value, block_number, confirmed_at)              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())              ON CONFLICT (tx_hash, token_address) DO NOTHING",
+        )
+        .bind(&req.platform)
+        .bind(&req.tx_hash)
+        .bind(&t.token_address)
+        .bind(&t.token_symbol)
+        .bind(&t.from_address)
+        .bind(&t.recipient)
+        .bind(&t.amount_raw)
+        .bind(&t.amount_human)
+        .bind(t.decimals)
+        .bind(&usd_value)
+        .bind(block_number)
+        .execute(&state.db)
+        .await;
+        match res {
+            Ok(r) if r.rows_affected() > 0 => {
+                recorded.push(json!({
+                    "platform": req.platform,
+                    "tx_hash": req.tx_hash,
+                    "token_symbol": t.token_symbol,
+                    "amount_human": t.amount_human,
+                    "usd_value": usd_value,
+                    "block_number": block_number,
+                }));
+            }
+            Ok(_) => skipped += 1,
+            Err(e) => {
+                tracing::error!("Failed to insert harvest event: {e}");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "DB_ERROR", "detail": "Ledger insert failed; nothing partially recorded beyond this row" })),
+                )
+                    .into_response();
+            }
+        }
+    }
+    if recorded.is_empty() {
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "ALREADY_RECORDED", "detail": "All transfers from this transaction are already in the ledger", "skipped": skipped })),
+        )
+            .into_response();
+    }
+    Json(json!({ "recorded": recorded, "already_present": skipped })).into_response()
+}
+
 // On-chain Uniswap V4 NOCK/USDC position tick bounds (positive on-chain orientation,
 // as passed to StateView getPositionInfo). Single source of truth for bracket prices.
 const V4_TICK_LOWER_ONCHAIN: i32 = 223200;
@@ -3038,6 +3311,72 @@ database_url: "postgresql://localhost/test"
         // Single-action variant (DECREASE only, actions byte 0x01), also live-verified.
         let unlock = build_v4_collect_unlock_data_decrease_only(3126000);
         assert_eq!(unlock, "0x00000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000101000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000002fb2f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000");
+    }
+
+    #[test]
+    fn test_format_units_exact_decimal() {
+        assert_eq!(format_units(120033, 6), "0.120033");
+        assert_eq!(format_units(54468217823004916, 16), "5.4468217823004916");
+        assert_eq!(format_units(1, 6), "0.000001");
+        assert_eq!(format_units(1000000, 6), "1");
+        assert_eq!(format_units(0, 16), "0");
+        assert_eq!(format_units(4000000, 6), "4");
+    }
+
+    #[test]
+    fn test_is_valid_tx_hash() {
+        assert!(is_valid_tx_hash(
+            "0xdd46508fdd46508fdd46508fdd46508fdd46508fdd46508fdd46508fdd46508f"
+        ));
+        assert!(is_valid_tx_hash(
+            "dd46508fdd46508fdd46508fdd46508fdd46508fdd46508fdd46508fdd46508f"
+        ));
+        assert!(!is_valid_tx_hash("0x1234"));
+        assert!(!is_valid_tx_hash(""));
+        assert!(!is_valid_tx_hash(
+            "zz46508fdd46508fdd46508fdd46508fdd46508fdd46508fdd46508fdd46508f"
+        ));
+    }
+
+    #[test]
+    fn test_parse_harvest_transfers_receipt_parsing() {
+        let wallet = "0xeE114cC97eC5adeB34bA5645e315B497D8487a45";
+        let from = "000000000000000000000000360e68faccca8ca495c1b759fd9eee466db9fb32";
+        let wallet_word = format!("000000000000000000000000{}", wallet.trim_start_matches("0x").to_lowercase());
+        let other_word = "0000000000000000000000001111111111111111111111111111111111111111";
+        let receipt = json!({
+            "status": "0x1",
+            "blockNumber": "0x1234",
+            "logs": [
+                // USDC Transfer -> wallet (keep)
+                { "address": USDC_BASE, "topics": [
+                    TRANSFER_EVENT_TOPIC, from, wallet_word ], "data": "0x000000000000000000000000000000000000000000000000000000000001d4af" },
+                // NOCK Transfer -> wallet (keep)
+                { "address": NOCK_BASE, "topics": [
+                    TRANSFER_EVENT_TOPIC, from, wallet_word ], "data": "0x0000000000000000000000000000000000000000000000000c1828e36e388f4" },
+                // USDC Transfer -> someone else (skip)
+                { "address": USDC_BASE, "topics": [
+                    TRANSFER_EVENT_TOPIC, from, other_word ], "data": "0x1" },
+                // Untracked token -> wallet (skip)
+                { "address": "0xdead000000000000000000000000000000000001", "topics": [
+                    TRANSFER_EVENT_TOPIC, from, wallet_word ], "data": "0x2" },
+                // wrong topic (skip)
+                { "address": USDC_BASE, "topics": [
+                    "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925", from, wallet_word ], "data": "0x3" }
+            ]
+        });
+        let transfers = parse_harvest_transfers(&receipt, wallet);
+        assert_eq!(transfers.len(), 2);
+        // 0x1d4af = 119983 raw USDC
+        assert_eq!(transfers[0].token_symbol, "USDC");
+        assert_eq!(transfers[0].amount_raw, "119983");
+        assert_eq!(transfers[0].amount_human, "0.119983");
+        assert_eq!(transfers[0].decimals, 6);
+        // 0xc1e3fd41c20874 = 54468217823004916 raw NOCK
+        assert_eq!(transfers[1].token_symbol, "NOCK");
+        assert_eq!(transfers[1].amount_raw, "54468217823004916");
+        assert_eq!(transfers[1].amount_human, "5.4468217823004916");
+        assert_eq!(transfers[1].decimals, 16);
     }
 
     #[test]

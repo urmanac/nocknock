@@ -179,6 +179,62 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /execute/record-harvest:
+    post:
+      tags: [Execution]
+      summary: Record a receipt-verified fee harvest in the ledger
+      operationId: recordHarvest
+      description: |
+        Called by clients after the paired wallet confirms a claim transaction.
+        The worker fetches the Base transaction receipt, verifies success, and
+        extracts the ERC-20 Transfer logs (USDC/NOCK) paid to the sovereign wallet.
+        Nothing is recorded without on-chain verification. A 404 RECEIPT_NOT_FOUND
+        also covers the Uniswap-app pending-broadcast quirk (approved but not yet
+        broadcast): surface "approved, awaiting wallet broadcast" and retry.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [platform, tx_hash]
+              properties:
+                platform:
+                  type: string
+                  enum: [aerodrome, uniswap-v4]
+                tx_hash:
+                  type: string
+                  description: 32-byte hex transaction hash (0x-prefixed or bare)
+      responses:
+        '200':
+          description: Ledger rows recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recorded:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        platform: { type: string }
+                        tx_hash: { type: string }
+                        token_symbol: { type: string }
+                        amount_human: { type: string }
+                        usd_value: { type: string, nullable: true }
+                        block_number: { type: integer }
+                  already_present:
+                    type: integer
+        '404':
+          description: Receipt not found on-chain (may be pending broadcast in the wallet)
+        '409':
+          description: Transfers already recorded (idempotent retry)
+        '422':
+          description: Invalid platform/hash, reverted transaction, or no tracked transfers
+        '503':
+          description: No RPC key configured
+
 components:
   parameters:
     IfNoneMatch:
