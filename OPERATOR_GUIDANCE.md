@@ -125,8 +125,11 @@
 1. **Never Release Untested Components**:
    - Do not release binaries or packages (such as `nocknock-mcp`) without installing, activating, and playtesting them in real agent environments. Unevaluated releases cause operational unease.
 2. **Transport Mechanisms**:
-   - **STDIO**: Standard stdio JSON-RPC for Claude Desktop and Antigravity CLI subprocess invocation. Does NOT need to run in a persistent tmux session.
+   - **STDIO**: Standard stdio JSON-RPC for Claude Desktop, Antigravity CLI, and Pi Harness (`pi-mcp-adapter`) subprocess invocation. Configured via repository `.mcp.json` or global `~/.gemini/config/mcp_config.json` / `~/.config/mcp/mcp.json`. Does NOT need to run in a persistent tmux session.
    - **Stateless HTTP**: Expose `/v1/mcp` on the Axum ingestion worker supporting MCP JSON-RPC over HTTP POST with optional Bearer token authentication matching required server permissions.
+3. **Agent Integration Profiles**:
+   - **Antigravity CLI**: Configured in `~/.gemini/config/mcp_config.json` pointing to `dist/nocknock-mcp`.
+   - **Pi Harness**: Uses `npm:pi-mcp-adapter` (Pi 0.99+) with `.mcp.json` and user-global `~/.config/mcp/mcp.json` (`projectServers: "allow"`). Verify with `pi-mcp-adapter doctor`.
 
 ---
 
