@@ -16,15 +16,15 @@
 
 ## Batch 2 — Worker zero-mock & derived honesty (BUG-B4, B5, B8)
 
-- [~] Remove `live_eth_price_usd = 2500.0`, `live_gas_cost_usd = 0.005`, and `gas_cost = 0.0043` fallbacks; fail the cycle explicitly when those RPC queries exhaust retries (design D3)
-- [ ] Compute `recommended_action` per fee contract from claimable vs gas (claim_now / claim_recommended / accumulate, design D4)
-- [ ] Add `tick_to_display_price` helper; derive bracket prices, `in_range`, and `distance_bps` from ticks in both `fetch_raw_data` and `compute_derived_metrics`; delete hardcoded `"0.01237"`/`"2.02783"`/`-200` (design D5)
-- [ ] Add round-trip unit test: known ticks ±223200/±274200 → `0.01237`/`2.02783`; action-threshold unit test
-- [ ] `SQLX_OFFLINE=true cargo test` green; open PR, merge
+- [x] Remove `live_eth_price_usd = 2500.0`, `live_gas_cost_usd = 0.005`, and `gas_cost = 0.0043` fallbacks; fail the cycle explicitly when those RPC queries exhaust retries (design D3)
+- [x] Compute `recommended_action` per fee contract from claimable vs gas (claim_now / claim_recommended / accumulate, design D4)
+- [x] Add `tick_to_display_price` helper; derive bracket prices, `in_range`, and `distance_bps` from ticks in both `fetch_raw_data` and `compute_derived_metrics`; delete hardcoded `"0.01237"`/`"2.02783"`/`-200` (design D5)
+- [x] Add round-trip unit test: known ticks ±223200/±274200 → `0.01237`/`2.02783`; action-threshold unit test
+- [x] `SQLX_OFFLINE=true cargo test` green; open PR, merge
 
 ## Batch 3 — Frontend resilience (BUG-F1)
 
-- [ ] Store `onFreshnessChange` in a ref; remove it from `refresh` deps and the main polling effect deps (design D6)
+- [~] Store `onFreshnessChange` in a ref; remove it from `refresh` deps and the main polling effect deps (design D6)
 - [ ] In `refresh`, only `setError` when no snapshot is available; keep last-known data on transient failures
 - [ ] Retry the historical-snapshot fetch on poll cadence instead of swallowing errors forever after one failure
 - [ ] `cd frontend && npm test` and `npm run build` green; open PR, merge
