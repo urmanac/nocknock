@@ -46,7 +46,7 @@
 
 ## Batch 6 — Release (v0.1.4)
 
-- [~] Update `CHANGELOG.md` with a populated `0.1.4` section; bump versions (`frontend/package.json`, worker `Cargo.toml`/Cargo.lock)
-- [ ] Run full pre-flight gate: `make test-brain && make test-worker && make test-frontend && make dist`
-- [ ] Confirm all PRs merged and CI green on `main`; pull latest `main`
-- [ ] Request operator authorization, then tag `v0.1.4` and push tag (release workflow attaches artifacts); update `TRIAGE.md` registry statuses
+- [x] Update `CHANGELOG.md` with a populated `0.1.4` section; bump versions (`frontend/package.json`, worker `Cargo.toml`)
+- [x] Run full pre-flight gate: `make test-brain` (3/3), `make test-worker` (18/18), `make test-frontend` (20/20), `make dist` (4 artifacts packaged)
+- [x] Merge `origin/main` into the feature branch (already up to date; branch verified mergeable) and push `feature/000662-fix-point-release-bugs`
+- [ ] Post-merge handoff (operator/platform, outside agent control): open the PR via the UI, CI green on `main`, pull latest main, then tag `v0.1.4` **with explicit operator authorization** (OPERATOR_GUIDANCE.md); update `TRIAGE.md` registry statuses; optionally file GitHub issues from the spec registry via Gemini + `gh`

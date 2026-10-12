@@ -196,6 +196,35 @@ at a 5-min cadence. Fix in two parts:
 - Payload math (BUG-F7): stored snapshots embed ≤101-point counterfactual + 31-point×5
   channel series (~20 KB/row). Historical handler truncates those embedded series; charts
   only read each row's `[0]` values, so no visual change — just bounded payloads.
+- **Cargo.lock is gitignored** in `nocknock` — don't stage it when bumping the worker
+  version (CI builds the lock fresh).
+- The `commit-msg` hook enforces conventional commits in BOTH repos (`nocknock` and
+  `helix-specs`); the pre-approved non-conventional spec-commit message from the task
+  template gets rejected — prefix with `docs(specs):`.
+- Sandbox toolchain install that made local validation possible: `rustup` (minimal
+  profile), `sudo apt-get install -y gcc libc6-dev pkg-config libssl-dev make`, then
+  `rustup target add wasm32-wasip1` for `make dist`. Baseline before changes: brain 3,
+  worker 11, frontend 20 tests green.
+- GOTCHA caught by test: in `bracket_distance_bps`, at spot $1.00 the NEAREST bracket
+  edge is the LOWER one (0.0124 → 9876 bps away vs 10279 bps to the upper) — my first
+  test expectation assumed the upper edge and failed; sign conventions matter.
+- Advice-engine policy constants (`$0.020` accumulation boundary, `$5.00` harvest
+  threshold, `120,000` target, `$5.00+` wall) were intentionally LEFT hardcoded: they are
+  stated strategy policy, not failure fallbacks — externalizing them is an enhancement
+  (issue #6 pattern), not a bug fix. The RANGE EXIT threshold, by contrast, WAS derived
+  from ticks (`v4_upper_price`) because it duplicates a bracket value.
+- Files changed (single feature branch `feature/000662-fix-point-release-bugs`, one
+  commit per batch):
+  - `ingestion-worker/src/main.rs` — canonical hash, history queries/tuples, tick
+    helpers, claim action, fail-explicit RPC, handler cursors + payload slimming, +7 tests
+  - `frontend/src/hooks/useFreshness.tsx` — ref-stabilized callbacks, last-known-data
+    error policy, removed useFreshnessPoll
+  - `frontend/src/App.tsx` — history loader (288 + retry), honest labels, unclipped
+    bracket, structural channels panel #7
+  - `frontend/src/api/client.ts` — header merge fix, dead code removal, interval typing
+  - `specs/core/api.yaml` — Interval parameter removed
+  - `CHANGELOG.md` (0.1.4 section), `frontend/package.json`, `ingestion-worker/Cargo.toml`
+    (0.1.4)
 
 ## Validation Plan
 
