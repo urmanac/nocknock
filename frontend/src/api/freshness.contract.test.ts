@@ -51,7 +51,7 @@ describe('Freshness Contract', () => {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 500);
-      const health = await fetch(`${API_BASE.replace('/v1', '')}/health`, { signal: controller.signal });
+      const health = await fetch(`${API_BASE}/health`, { signal: controller.signal });
       clearTimeout(timeoutId);
       if (health.ok) {
         latestSnapshot = await fetchLatest();
@@ -131,6 +131,15 @@ describe('Freshness Contract', () => {
     expect(latest.state_hash).toBe(latestSnapshot!.meta.state_hash);
     expect(latest.age_seconds).toBeGreaterThanOrEqual(0);
     expect(typeof latest.age_seconds).toBe('number');
+  });
+
+  it('validates /v1/health endpoint response structure when live backend is available', async () => {
+    if (!latestSnapshot) return;
+    const res = await fetch(`${API_BASE}/health`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(['ok', 'starting', 'degraded']).toContain(data.status);
+    expect(typeof data.ingestion_lag_seconds).toBe('number');
   });
 });
 
