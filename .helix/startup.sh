@@ -25,6 +25,25 @@ fi
 export PATH="$HOME/.cargo/bin:$PATH"
 cargo --version || echo "WARN: cargo still unavailable; rerun this script or install manually"
 
+
+# --- Alchemy key wiring (never echoed, never committed) ---
+# Two supported delivery channels, in priority order:
+#   1. Helix project secret injected as $ALCHEMY_API_KEY at container creation
+#      (operator: helix secret create -n ALCHEMY_API_KEY -v <key> -p <project-id>)
+#   2. A config file copied into the sandbox by the operator at
+#      /home/retro/work/nocknock/ingestion-worker/config.yaml (gitignored)
+# The worker reads ingestion-worker/config.yaml with higher priority than the
+# example config; that path is covered by ingestion-worker/.gitignore.
+CONFIG_DIR=/home/retro/work/nocknock/ingestion-worker
+if [ -n "${ALCHEMY_API_KEY:-}" ] && [ ! -f "$CONFIG_DIR/config.yaml" ]; then
+  echo "Wiring ALCHEMY_API_KEY from environment into gitignored ingestion-worker/config.yaml"
+  {
+    echo 'database_url: "postgresql://postgres:postgres@localhost:5432/nocknock"'
+    echo 'alchemy_api_keys:'
+    echo "  - "$ALCHEMY_API_KEY""
+  } > "$CONFIG_DIR/config.yaml"
+fi
+
 # --- Node frontend deps (node_modules is not committed) ---
 # Frontend deps install on demand: cd frontend && npm install --legacy-peer-deps
 
