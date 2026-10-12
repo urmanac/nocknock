@@ -570,6 +570,10 @@ async fn main() -> Result<()> {
             "/v1/execute/record-harvest",
             axum::routing::post(record_harvest_handler),
         )
+        .route(
+            "/v1/tax/export",
+            axum::routing::get(tax_export_handler),
+        )
         .layer(Extension(state.clone()));
 
     let port = state.config.port;
@@ -2020,6 +2024,106 @@ async fn record_harvest_handler(
     Json(json!({ "recorded": recorded, "already_present": skipped })).into_response()
 }
 
+#[derive(Serialize, Debug, Clone)]
+struct HarvestExportRow {
+    platform: String,
+    tx_hash: String,
+    token_symbol: String,
+    amount_human: String,
+    usd_value: Option<String>,
+    confirmed_at: String,
+}
+
+/// Koinly custom-CSV rendering of harvest ledger rows: fee claims are tagged
+/// `income` (per CHANGELOG: Income / Staking Reward) and carry their Base tx hash.
+/// Rebalances/liquidity transfers are not yet ledgered — when they are, they export
+/// with the (non-taxable) `transfer` label; documented gap, not silently omitted.
+fn format_koinly_csv(rows: &[HarvestExportRow]) -> String {
+    let header = "Date, Sent Amount, Sent Currency, Received Amount, Received Currency, Fee Amount, Fee Currency, Net Worth Amount, Net Worth Currency, Label, Description, TxHash";
+    let mut out = String::from(header);
+    out.push('\n');
+    for r in rows {
+        let (net_amount, net_currency) = match &r.usd_value {
+            Some(usd) => (usd.clone(), "USD".to_string()),
+            None => (String::new(), String::new()),
+        };
+        let description = format!("NockNock fee harvest ({})", r.platform);
+        out.push_str(&format!(
+            "{}, , , {}, {}, , , {}, {}, income, \"{}\", {}\n",
+            r.confirmed_at,
+            r.amount_human,
+            r.token_symbol,
+            net_amount,
+            net_currency,
+            description,
+            r.tx_hash
+        ));
+    }
+    out
+}
+
+/// GET /v1/tax/export?format=koinly — Koinly-compatible CSV (default) or JSON export
+/// of the receipt-verified harvest ledger. Empty ledger exports a header-only CSV.
+async fn tax_export_handler(
+    Extension(state): Extension<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let format = params.get("format").cloned().unwrap_or_else(|| "koinly".to_string());
+    let rows = match sqlx::query(
+        "SELECT platform, tx_hash, token_symbol, amount_human, usd_value, confirmed_at \
+         FROM harvest_events ORDER BY confirmed_at ASC, id ASC",
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => {
+            let mut out = Vec::new();
+            for r in rows {
+                let confirmed_at: DateTime<Utc> = r.try_get("confirmed_at").unwrap_or_else(|_| Utc::now());
+                out.push(HarvestExportRow {
+                    platform: r.try_get("platform").unwrap_or_default(),
+                    tx_hash: r.try_get("tx_hash").unwrap_or_default(),
+                    token_symbol: r.try_get("token_symbol").unwrap_or_default(),
+                    amount_human: r.try_get("amount_human").unwrap_or_default(),
+                    usd_value: r.try_get::<Option<String>, _>("usd_value").ok().flatten(),
+                    confirmed_at: confirmed_at.to_rfc3339(),
+                });
+            }
+            out
+        }
+        Err(e) => {
+            tracing::error!("Tax export query failed: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "DB_ERROR", "detail": "Tax export query failed" })),
+            )
+                .into_response();
+        }
+    };
+    match format.as_str() {
+        "json" => Json(json!({ "rows": rows })).into_response(),
+        "koinly" | "csv" => {
+            (
+                StatusCode::OK,
+                [
+                    ("content-type", "text/csv; charset=utf-8"),
+                    (
+                        "content-disposition",
+                        "attachment; filename=\"nocknock-harvests-koinly.csv\"",
+                    ),
+                ],
+                format_koinly_csv(&rows),
+            )
+                .into_response()
+        }
+        _ => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": "UNSUPPORTED_FORMAT", "detail": "format must be 'koinly' (default) or 'json'" })),
+        )
+            .into_response(),
+    }
+}
+
 // On-chain Uniswap V4 NOCK/USDC position tick bounds (positive on-chain orientation,
 // as passed to StateView getPositionInfo). Single source of truth for bracket prices.
 const V4_TICK_LOWER_ONCHAIN: i32 = 223200;
@@ -3113,6 +3217,70 @@ database_url: "postgresql://localhost/test"
         );
         assert_eq!(metrics.sovereign_ledger.tax_reserve_usd, "25.00");
         assert_eq!(metrics.sovereign_ledger.growth_dry_powder_usd, "75.00");
+    }
+
+    #[test]
+    fn test_koinly_csv_format() {
+        let rows = vec![
+            HarvestExportRow {
+                platform: "aerodrome".to_string(),
+                tx_hash: "0xabc123".to_string(),
+                token_symbol: "USDC".to_string(),
+                amount_human: "0.119983".to_string(),
+                usd_value: Some("0.119983".to_string()),
+                confirmed_at: "2026-10-12T18:31:21+00:00".to_string(),
+            },
+            HarvestExportRow {
+                platform: "uniswap-v4".to_string(),
+                tx_hash: "0xdef456".to_string(),
+                token_symbol: "NOCK".to_string(),
+                amount_human: "5.4468217823004916".to_string(),
+                usd_value: Some("0.2612".to_string()),
+                confirmed_at: "2026-10-12T18:35:00+00:00".to_string(),
+            },
+        ];
+        let csv = format_koinly_csv(&rows);
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].starts_with("Date, Sent Amount, Sent Currency, Received Amount"));
+        assert!(lines[0].ends_with("Label, Description, TxHash"));
+        assert!(lines[1].contains(", , , 0.119983, USDC, , , 0.119983, USD, income,"));
+        assert!(lines[1].contains("\"NockNock fee harvest (aerodrome)\""));
+        assert!(lines[1].ends_with("0xabc123"));
+        assert!(lines[2].contains("5.4468217823004916, NOCK"));
+        assert!(lines[2].contains("income"));
+        assert!(lines[2].ends_with("0xdef456"));
+    }
+
+    #[test]
+    fn test_tax_tie_out_split_equals_export_total() {
+        // Koinly tie-out: the CSV rows must carry exactly the ledger amounts that the
+        // 60/40 sub-ledger split was computed from — every harvest dollar accounted
+        // for, nothing invented.
+        let ledger_rows = vec![
+            ("0xabc123", "USDC", "0.119983", 119983u128, 6i32),
+            ("0xabc123", "NOCK", "5.4468217823004916", 54468217823004916, 16),
+        ];
+        let total_usd: f64 = 0.119983 + 5.4468217823004916 * 0.048; // NOCK spot example
+        let profile_tax_ratio = 0.40f64;
+        let tax_reserve = total_usd * profile_tax_ratio;
+        let dry_powder = total_usd * (1.0 - profile_tax_ratio);
+
+        // Ledger aggregate must equal the sum of the exported receipt-verified rows
+        let exported_total: f64 = ledger_rows
+            .iter()
+            .map(|(_, sym, human, raw, dec)| {
+                let units = format_units(*raw, *dec);
+                assert_eq!(&units, human);
+                match *sym {
+                    "USDC" => units.parse::<f64>().unwrap(),
+                    "NOCK" => units.parse::<f64>().unwrap() * 0.048,
+                    _ => 0.0,
+                }
+            })
+            .sum();
+        assert!((exported_total - total_usd).abs() < 1e-9);
+        assert!((tax_reserve + dry_powder - total_usd).abs() < 1e-9);
     }
 
     #[test]

@@ -235,6 +235,43 @@ paths:
         '503':
           description: No RPC key configured
 
+  /tax/export:
+    get:
+      tags: [Execution]
+      summary: Koinly-compatible tax export of the harvest ledger
+      operationId: exportTax
+      description: |
+        Exports the receipt-verified harvest ledger. Fee claims are tagged
+        `income` and carry their Base tx hash; every row ties out to on-chain
+        receipts. Rebalances/liquidity transfers are not yet ledgered (future
+        work — they will export with a non-taxable `transfer` label).
+      parameters:
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [koinly, csv, json]
+            default: koinly
+      responses:
+        '200':
+          description: Export payload (CSV attachment or JSON)
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rows:
+                    type: array
+                    items:
+                      type: object
+        '500':
+          description: Ledger query failed
+        '422':
+          description: Unsupported format requested
+
 components:
   parameters:
     IfNoneMatch:
