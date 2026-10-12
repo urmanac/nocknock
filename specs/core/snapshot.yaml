@@ -23,6 +23,25 @@ components:
           $ref: '#/components/schemas/SnapshotMeta'
         data:
           $ref: '#/components/schemas/SnapshotData'
+        data_provenance:
+          $ref: '#/components/schemas/DataProvenance'
+
+    DataProvenance:
+      type: object
+      required: [last_backfill_at, backfilled_points_count]
+      description: >-
+        Backfill telemetry for the market price history. Computed live per
+        request; deliberately excluded from `state_hash`/ETag so snapshot
+        deduplication stays stable.
+      properties:
+        last_backfill_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the most recent third-party gap fill landed (null if none)
+        backfilled_points_count:
+          type: integer
+          description: Stored price points sourced from third-party OHLCV feeds
 
     SnapshotMeta:
       type: object
@@ -375,12 +394,16 @@ components:
           example: "Total NOCK held is 107,123 (+7,123 above 100k hard floor). AMMs are generating dual yield. Maintain posture."
         regime:
           type: string
-          description: Market regime from RSI(14) overextension detection
+          description: Market regime from daily RSI(14) overextension detection (see rsi_14_1d)
           enum: [normal, overextended]
         rsi_14:
           type: string
           nullable: true
-          description: Latest Wilder RSI(14) over the NOCK spot-price series
+          description: Latest Wilder RSI(14) over the 5-minute NOCK snapshot closes (short-term momentum pulse)
+        rsi_14_1d:
+          type: string
+          nullable: true
+          description: Latest Wilder RSI(14) over daily NOCK closes (the industry-standard "daily RSI"); drives `regime` and the Overextension Cooldown
 
     AssetAggregationSeries:
       type: object
