@@ -142,12 +142,27 @@ the spec's error contract. Frontend `historicalSnapshots` param typing drops `in
   plain-fetch contract tests; nothing imports either).
 - Remove the `Math.min(..., 2.5)` cap on the displayed upper bracket.
 
-### D10 — Structural channels panel (BUG-F4, optional/low)
+### D10 — Structural channels panel (BUG-F4)
 
-If channel data exists (≥20 historical points), render a 7th panel: `ComposedChart` with
-portfolio line + center/±1σ/±2σ channel lines from `structural_channels.channels[0]`. Hide
-the panel entirely when `channels` is empty (cold start). Otherwise fix the stale
-"7 Real Charts" comment. Gate on D2 landing first (real timestamps).
+If channel data exists (≥20 historical points), render a 7th panel: `LineChart` with
+center/±1σ/±2σ channel lines from `structural_channels.channels[0]`. Hide the panel
+entirely when `channels` is empty (cold start). Fix the stale "7 Real Charts" comment
+(panel count becomes dynamic in the copy). Gate on D2 landing first (real timestamps).
+
+### D11 — Deep, bounded history window (BUG-F7, operator-reported)
+
+The operator sees only ~4h of chart timeline: the frontend requests `limit: 50` snapshots
+at a 5-min cadence. Fix in two parts:
+
+1. **Frontend**: request `limit: 288` (~24h at 5-min cadence).
+2. **Server payload bound**: each stored snapshot embeds a full counterfactual series
+   (≤101 points × 2 series) and Bollinger channels (5 lines × ≤31 points) — ~15–20 KB of
+   redundant payload per historical row that the charts never read (they only use each
+   row's `[0]` current-point values). The historical handler truncates each row's embedded
+   `strategy_counterfactual` to its first point and empties `structural_channels.channels`
+   before responding, cutting the 288-row response from ~5 MB to ~1 MB. `/snapshot/latest`
+   keeps the full series (MCP consumers rely on it; snapshot.yaml declares these fields).
+   True `interval` downsampling stays deferred to v0.2.0 if 24h is not enough.
 
 ## Learnings for Implementers
 
@@ -164,8 +179,23 @@ the panel entirely when `channels` is empty (cold start). Otherwise fix the stal
   `generated_at`/`snapshot_id` — that asymmetry is intentional (issue #10); keep it.
 - **Git protocol**: branch off `main`, PR via `unset GITHUB_TOKEN && gh pr create --fill`,
   merge with `gh pr merge <N> --merge`. Never tag without operator authorization.
-- `gh` CLI may be absent in agent sandboxes — file issues from the operator environment or
-  note it in the PR description.
+- `gh` CLI may be absent in agent sandboxes — per operator decision, GitHub issue filing
+  is not required; this spec's bug registry is the single source of truth (a post-merge
+  Gemini pass may file issues from it with `gh`).
+
+## Implementation Notes
+
+- Sandbox tooling: installed rustup + gcc + pkg-config + libssl-dev to run
+  `SQLX_OFFLINE=true cargo test --release` locally — baseline green (11 tests) before any
+  change. Frontend baseline: 20 vitest tests + tsc build green.
+- Verified tick→display-price math precisely: `1.0001^(−tick) × 1e10` gives 0.0123659
+  (hardcoded "0.01237") and 2.02788 (hardcoded "2.02783") — the derived strings differ from
+  the old hardcoded ones in the 5th significant digit only; tests assert 0.1% tolerance,
+  and the dashboard formats `{:.5}` so the displayed value may shift by ≤0.00005.
+  This is expected and honest (derived from ticks, not pasted strings).
+- Payload math (BUG-F7): stored snapshots embed ≤101-point counterfactual + 31-point×5
+  channel series (~20 KB/row). Historical handler truncates those embedded series; charts
+  only read each row's `[0]` values, so no visual change — just bounded payloads.
 
 ## Validation Plan
 

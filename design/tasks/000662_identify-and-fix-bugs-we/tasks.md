@@ -1,9 +1,9 @@
 # Implementation Tasks: Fix Point-Release Bugs: Snapshot Dedup, History Integrity, Zero-Mock
 
-## Batch 0 — Triage (pre-branching rule)
+## Batch 0 — Triage documentation
 
-- [ ] File GitHub issues for BUG-B1..B8, BUG-F1..F6, BUG-A1 (labels: `bug`, `frontend`/`backend`, `data-integrity` where applicable, `patch-0.1.x`) using `unset GITHUB_TOKEN && gh issue create ...` from the operator environment; link this spec in each issue body
-- [ ] If `gh` is unavailable, note "issues filed from operator env" in the first PR description and reference this spec's registry
+- [x] Document the full bug registry in this spec (single source of truth on `helix-specs`); GitHub issue filing deferred to the post-merge Gemini pass per operator decision (see requirements.md "Release & Process Constraints")
+- [x] Add operator-reported BUG-F7 (dashboard timeline ~4h wide) to the registry with fix design D11
 
 ## Batch 1 — Worker data integrity (BUG-B1, B2, B3, B6, B7)
 

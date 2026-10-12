@@ -31,6 +31,7 @@ GitHub issue before branching (pre-branching triage rule).
 
 | ID | Sev | Location | Defect |
 |----|-----|----------|--------|
+| BUG-F7 | P1 | `App.tsx:37` (limit 50) × 5-min ingestion cadence | **Dashboard timeline is ~4 hours wide** (operator-confirmed): charts fetch only 50 historical snapshots ≈ 50 × 5 min ≈ 4h of data. With dedup fixed (BUG-B1) each row is real state, but 50 rows still caps the visible window at ~4h of active-market data. Fix: request ~24h of history (limit 288) and bound the historical payload (design D11). |
 | BUG-F1 | P1 | `hooks/useFreshness.tsx:125-198`, `App.tsx:31` | Main effect deps include the unstable `onFreshnessChange` inline callback → effect teardown/re-run on **every render**: extra foreground fetch per state change, poll interval constantly reset. Worse: foreground `refresh(false)` sets `error` even when a last-known snapshot exists → one transient network blip replaces the entire dashboard with the error screen for up to 10s. |
 | BUG-F2 | P2 | `App.tsx:161` | `upper: Math.min(parseFloat(b.upper_price), 2.5)` — hardcoded cap clips the displayed upper bracket if it ever exceeds $2.50. |
 | BUG-F3 | P2 | `App.tsx:476-487` | "Alpha Generated ... vs passive hold" computes `total_portfolio_usd − total_native_usd`, which is just the current **USDC stack value** — not strategy alpha vs a passive hold. Misleading stat presented as live truth. |
@@ -70,6 +71,7 @@ As the operator, I want the dashboard to keep showing last-known data during bri
 
 **Acceptance criteria**
 - [ ] A transient fetch failure with existing snapshot data does **not** replace the dashboard with the error screen; the status pill/banner reflects the condition instead.
+- [ ] Charts render ~24h of history (288 snapshots at the 5-min cadence), not ~4h; the historical response payload stays bounded (embedded series truncated server-side, design D11).
 - [ ] The error screen appears only when no snapshot has ever loaded.
 - [ ] `useFreshness` effect does not re-run (no extra foreground fetch, no interval reset) on unrelated re-renders; polling cadence stays at the configured interval.
 - [ ] The historical-snapshot fetch retries on subsequent polls instead of being silently swallowed forever after one failure.
@@ -93,15 +95,16 @@ As the operator, I want chart labels to say what the numbers actually are, and t
 
 ## Release & Process Constraints
 
-- Every bug is filed as a GitHub issue with `file:line` RCA, repro, and labels **before** its fix branch (TRIAGE.md pre-branching rule). If `gh` is unavailable in the implementing sandbox, this registry serves as the issue list and issues are filed from the operator environment.
+- Every defect is documented in this spec's registry (single source of truth on the `helix-specs` branch) with `file:line` RCA, repro, and labels. Per operator decision, GitHub issue filing is **not required** from the implementing agent; the post-merge Gemini pass may file issues from this registry using `gh` from the operator environment.
 - All fixes land via PRs to `main` (branch protection; `unset GITHUB_TOKEN` for `gh`).
 - `make test-brain`, `make test-worker` (needs `SQLX_OFFLINE=true`), `make test-frontend`, `make dist` must pass before merge.
 - Tag `v0.1.4` only after merge + green CI + populated CHANGELOG section, **and only with explicit operator authorization** (OPERATOR_GUIDANCE.md standing orders).
 
 ## Open Questions
 
-1. **BUG-B4 remedy**: fail the whole ingestion cycle when the ETH-price/gas RPC fails (strict, consistent with #11/#16), or store the snapshot with a `degraded: true` flag instead? Fail-explicit is assumed — confirm if you'd prefer graceful degradation.
-2. **BUG-F3 remedy**: relabel the stat to what it actually measures (minimal), or hide it until a true counterfactual exists in v0.2.0? Relabel is assumed.
-3. **BUG-F4 remedy**: add the missing Bollinger-channels panel now (small chart), or just fix the comment? Adding the panel is assumed, marked low priority.
-4. **BUG-A1 remedy**: implement `before`/`after` cursor filters and drop `interval` from the spec, or drop all three? Implementing before/after is assumed.
-5. Single `v0.1.4` release for the whole batch, or split backend (v0.1.4) / frontend (v0.1.5)? Single release is assumed.
+1. **BUG-B4 remedy**: fail the whole ingestion cycle when the ETH-price/gas RPC fails (strict, consistent with #11/#16), or store the snapshot with a `degraded: true` flag instead? **RESOLVED (approved design)**: fail explicitly.
+2. **BUG-F3 remedy**: relabel the stat to what it actually measures (minimal), or hide it until a true counterfactual exists in v0.2.0? **RESOLVED (approved design)**: relabel.
+3. **BUG-F4 remedy**: add the missing Bollinger-channels panel now (small chart), or just fix the comment? **RESOLVED (approved design)**: add the panel (hidden when no data).
+4. **BUG-A1 remedy**: implement `before`/`after` cursor filters and drop `interval` from the spec, or drop all three? **RESOLVED (approved design)**: implement before/after, drop interval.
+5. Single `v0.1.4` release for the whole batch, or split backend (v0.1.4) / frontend (v0.1.5)? **RESOLVED (operator)**: the priority is that the bugs actually get fixed; ship as one batch, single `v0.1.4`.
+6. **BUG-F7 (operator-reported)**: dashboard timeline too narrow (~4h). Operator confirmed this is a bug and asked for it on the list. Fix approach: deepen the history window to ~24h and bound the historical payload.
