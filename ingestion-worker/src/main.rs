@@ -123,6 +123,8 @@ struct AppConfig {
     operator_profile: OperatorProfile,
     #[serde(default)]
     notifications: NotificationConfig,
+    #[serde(default)]
+    market_data: MarketDataConfig,
 }
 
 impl AppConfig {
@@ -149,6 +151,73 @@ fn default_sync_window() -> u64 {
 }
 fn default_port() -> u16 {
     8080
+}
+
+/// Market-data backfill configuration (v0.3.0). The whole section is optional;
+/// every field defaults so existing config.yaml files keep working unchanged.
+#[derive(Deserialize, Debug, Clone)]
+struct MarketDataConfig {
+    /// Master switch for the historical price backfill engine
+    #[serde(default = "default_backfill_enabled")]
+    backfill_enabled: bool,
+    #[serde(default = "default_geckoterminal_base_url")]
+    geckoterminal_base_url: String,
+    #[serde(default = "default_dexscreener_base_url")]
+    dexscreener_base_url: String,
+    /// Tracked Aerodrome pool used for third-party OHLCV lookups
+    #[serde(default = "default_tracked_pool")]
+    pool_address: String,
+    /// Newest stored price point older than this triggers an hourly backfill
+    #[serde(default = "default_gap_threshold_minutes")]
+    gap_threshold_minutes: i64,
+    /// Stored history must span at least this many days for the daily RSI
+    #[serde(default = "default_min_history_days")]
+    min_history_days: i64,
+    #[serde(default = "default_hourly_lookback")]
+    hourly_lookback: u32,
+    #[serde(default = "default_daily_lookback")]
+    daily_lookback: u32,
+}
+
+impl Default for MarketDataConfig {
+    fn default() -> Self {
+        Self {
+            backfill_enabled: default_backfill_enabled(),
+            geckoterminal_base_url: default_geckoterminal_base_url(),
+            dexscreener_base_url: default_dexscreener_base_url(),
+            pool_address: default_tracked_pool(),
+            gap_threshold_minutes: default_gap_threshold_minutes(),
+            min_history_days: default_min_history_days(),
+            hourly_lookback: default_hourly_lookback(),
+            daily_lookback: default_daily_lookback(),
+        }
+    }
+}
+
+fn default_backfill_enabled() -> bool {
+    true
+}
+fn default_geckoterminal_base_url() -> String {
+    "https://api.geckoterminal.com/api/v2".to_string()
+}
+fn default_dexscreener_base_url() -> String {
+    "https://api.dexscreener.com/latest".to_string()
+}
+fn default_tracked_pool() -> String {
+    // Aerodrome vAMM-USDC/NOCK 0.3% on Base
+    "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string()
+}
+fn default_gap_threshold_minutes() -> i64 {
+    15
+}
+fn default_min_history_days() -> i64 {
+    14
+}
+fn default_hourly_lookback() -> u32 {
+    168
+}
+fn default_daily_lookback() -> u32 {
+    30
 }
 
 // ============================================================
@@ -323,8 +392,13 @@ struct GlobalStatus {
     shot_advice_details: String,
     #[serde(default)]
     regime: String,
+    /// Wilder RSI(14) over the 5-minute snapshot series (short-term momentum)
     #[serde(default)]
     rsi_14: Option<String>,
+    /// Wilder RSI(14) over daily closes — the industry-standard "daily RSI";
+    /// drives `regime` and the Overextension Cooldown
+    #[serde(default)]
+    rsi_14_1d: Option<String>,
 }
 
 fn default_floor_target_string() -> String {
@@ -506,6 +580,11 @@ async fn main() -> Result<()> {
         latest_snapshot: Mutex::new(initial_latest),
         last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
     });
+
+    // Historical price backfill (v0.3.0): heal multi-hour/multi-day gaps left by
+    // laptop sleep or downtime before the first cycle computes the daily RSI.
+    // Fail-open by design; never blocks startup.
+    ensure_price_history(&state).await;
 
     // Start ingestion scheduler
     let state_clone = state.clone();
@@ -700,7 +779,9 @@ async fn get_latest_snapshot_handler(
             headers.insert("cache-control", value);
         }
 
-        (StatusCode::OK, headers, Json(json!(envelope)))
+        let mut body = serde_json::to_value(envelope).unwrap_or_else(|_| json!({}));
+        body["data_provenance"] = data_provenance(&state.db).await;
+        (StatusCode::OK, headers, Json(body))
     } else {
         (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1160,6 +1241,10 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     let now = Utc::now().to_rfc3339();
     tracing::info!("Starting ingestion cycle at {now}");
 
+    // Heal price-history gaps first (fail-open) so the daily RSI below sees
+    // backfilled candles for any period the worker was offline.
+    ensure_price_history(state).await;
+
     // Fetch raw data from Alchemy (parallelized on-chain calls)
     let raw_data = fetch_raw_data(state).await?;
 
@@ -1244,9 +1329,13 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
 
     // Compute derived metrics
     let profile = state.config.profile();
-    // Market regime: Wilder RSI(14) over the historical NOCK spot series (per-snapshot
-    // Aerodrome pool reserves, oldest first) with the live spot appended as the
-    // latest close. Overextension suppresses buy advice (issue #29).
+    // Market regime — two RSI(14) series per industry convention (the period is
+    // 14 bars of the underlying timeframe, not 14 days):
+    //   • Micro: RSI(14) over the 5-minute snapshot series (short-term momentum pulse).
+    //   • Macro: daily RSI(14) over one close per UTC day spanning the multi-day
+    //     lookback, backfilled from third-party OHLCV where snapshots are missing.
+    //     The Overextension Cooldown keys on the daily series so a 4-hour bounce
+    //     cannot fake a multi-day top (issue #29).
     let regime_rows = sqlx::query(
         r#"SELECT (data->'pool_mechanics'->0->'volatile_assets'->0->>'reserve_amount')::float8 AS usdc,
                   (data->'pool_mechanics'->0->'volatile_assets'->1->>'reserve_amount')::float8 AS nock
@@ -1255,7 +1344,7 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     .fetch_all(&state.db)
     .await
     .unwrap_or_default();
-    let mut closes: Vec<f64> = regime_rows
+    let mut micro_closes: Vec<f64> = regime_rows
         .iter()
         .rev()
         .filter_map(|r| {
@@ -1275,13 +1364,50 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
         })
         .unwrap_or(0.0);
     if live_spot > 0.0 {
-        closes.push(live_spot);
+        micro_closes.push(live_spot);
+        // Contemporaneous price record: the RPC-observed spot is stored before any
+        // snapshot dedup so the daily series always includes the freshest close.
+        if let Err(e) =
+            insert_price_point(&state.db, Utc::now(), live_spot, PRICE_SOURCE_RPC, false).await
+        {
+            tracing::warn!("Contemporaneous price insert failed (non-fatal): {e}");
+        }
     }
-    let rsi_series = compute_rsi_series(&closes, RSI_PERIOD);
-    let latest_rsi = rsi_series.iter().rev().find_map(|x| *x);
+    let rsi_5m = compute_rsi_series(&micro_closes, RSI_PERIOD)
+        .iter()
+        .rev()
+        .find_map(|x| *x);
+
+    // Macro (daily) series: one close per UTC day from market_price_history —
+    // daily candle closes where backfilled, else the day's last spot.
+    let macro_points: Vec<(DateTime<Utc>, Option<f64>, f64)> = sqlx::query(
+        "SELECT timestamp, close_usd, price_usd FROM market_price_history \
+         WHERE timestamp >= NOW() - make_interval(days => $1) ORDER BY timestamp ASC",
+    )
+    .bind(state.config.market_data.daily_lookback as i32)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default()
+    .iter()
+    .filter_map(|r| {
+        let ts: DateTime<Utc> = r.try_get("timestamp").ok()?;
+        let close_usd: Option<f64> = r.try_get("close_usd").ok()?;
+        let price_usd: f64 = r.try_get("price_usd").ok()?;
+        Some((ts, close_usd, price_usd))
+    })
+    .collect();
+    let mut macro_closes = daily_closes_from_points(&macro_points);
+    if live_spot > 0.0 {
+        macro_closes.push(live_spot); // the live spot closes today's partial day
+    }
+    let rsi_1d = compute_rsi_series(&macro_closes, RSI_PERIOD)
+        .iter()
+        .rev()
+        .find_map(|x| *x);
     let regime = MarketRegime {
-        rsi: latest_rsi,
-        overextended: latest_rsi.map_or(false, |r| r >= RSI_OVERBOUGHT),
+        rsi_5m,
+        rsi_1d,
+        overextended: rsi_1d.map_or(false, |r| r >= RSI_OVERBOUGHT),
     };
 
     let derived_metrics = compute_derived_metrics(&raw_data, prev_hwm, &profile, structural_channels,
@@ -1584,7 +1710,9 @@ fn build_v4_collect_calldata(token_id: u64, currency0: &str, currency1: &str, re
 
 /// Single-action variant: unlockData with only DECREASE_LIQUIDITY (collects fees to
 /// the posm ledger without sweeping them out). Live-verified companion to the full
-/// collect; useful for isolating decode vs take failures.
+/// collect; useful for isolating decode vs take failures. Kept (test-exercised via
+/// golden vector) even though production paths use the full collect variant.
+#[allow(dead_code)]
 fn build_v4_collect_unlock_data_decrease_only(token_id: u64) -> String {
     let actions_hex = format!("{:02x}", V4_ACTION_DECREASE_LIQUIDITY);
     let decrease = format!(
@@ -1708,18 +1836,458 @@ fn compute_rsi_series(closes: &[f64], period: usize) -> Vec<Option<f64>> {
 }
 
 /// Market regime inputs consumed by the advice engine (computed by the worker
-/// from historical snapshots; the advice engine itself stays pure math).
+/// from historical prices; the advice engine itself stays pure math).
+///
+/// Industry convention: RSI(14) means a 14-period lookback — 14 bars of the
+/// underlying timeframe, not 14 days. The two series below are therefore named
+/// by timeframe: `rsi_5m` is the short-term momentum pulse, `rsi_1d` is the
+/// daily RSI(14) that spans the multi-day trend.
 #[derive(Debug, Default, Clone, Copy)]
 struct MarketRegime {
-    /// Latest Wilder RSI(14) over the historical spot-price series
-    rsi: Option<f64>,
-    /// Overextension: RSI >= 70 (overbought exhaustion). At 70+, buy/deploy advice
-    /// is suppressed in favor of sweeping gains to stables.
+    /// Latest Wilder RSI(14) over the 5-minute snapshot closes (micro)
+    rsi_5m: Option<f64>,
+    /// Latest Wilder RSI(14) over daily closes (macro); drives `overextended`
+    rsi_1d: Option<f64>,
+    /// Overextension: daily RSI(14) >= 70 (overbought exhaustion). At 70+, buy/deploy
+    /// advice is suppressed in favor of sweeping gains to stables.
     overextended: bool,
 }
 
 const RSI_OVERBOUGHT: f64 = 70.0;
 const RSI_PERIOD: usize = 14;
+
+/// Provenance tags for market_price_history rows
+const PRICE_SOURCE_RPC: &str = "aerodrome_rpc";
+const PRICE_SOURCE_GECKOTERMINAL: &str = "geckoterminal";
+const PRICE_SOURCE_DEXSCREENER: &str = "dexscreener";
+
+// ============================================================
+// Market Price History & Backfill Engine (v0.3.0)
+// ============================================================
+
+/// A third-party OHLCV candle keyed by its open time (UTC).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PriceCandle {
+    timestamp: DateTime<Utc>,
+    open: f64,
+    high: f64,
+    low: f64,
+    close: f64,
+    volume: Option<f64>,
+}
+
+/// Parse a GeckoTerminal OHLCV response. `data.attributes.ohlcv_list` entries are
+/// [open_time_unix_secs, open, high, low, close, volume], newest-first; malformed
+/// entries are skipped and the result is normalized to ascending time. Pure —
+/// unit-testable against recorded fixtures.
+fn parse_geckoterminal_ohlcv(body: &serde_json::Value) -> Vec<PriceCandle> {
+    let mut out = Vec::new();
+    if let Some(list) = body
+        .get("data")
+        .and_then(|d| d.get("attributes"))
+        .and_then(|a| a.get("ohlcv_list"))
+        .and_then(|l| l.as_array())
+    {
+        for entry in list {
+            let Some(row) = entry.as_array() else { continue };
+            if row.len() < 5 {
+                continue;
+            }
+            let (Some(secs), Some(open), Some(high), Some(low), Some(close)) = (
+                row[0].as_f64(),
+                row[1].as_f64(),
+                row[2].as_f64(),
+                row[3].as_f64(),
+                row[4].as_f64(),
+            ) else {
+                continue;
+            };
+            let Some(ts) = DateTime::<Utc>::from_timestamp(secs as i64, 0) else {
+                continue;
+            };
+            if !(open.is_finite() && high.is_finite() && low.is_finite() && close.is_finite())
+                || open <= 0.0
+            {
+                continue;
+            }
+            out.push(PriceCandle {
+                timestamp: ts,
+                open,
+                high,
+                low,
+                close,
+                volume: row.get(5).and_then(|v| v.as_f64()),
+            });
+        }
+    }
+    out.sort_by_key(|c| c.timestamp);
+    out.dedup_by_key(|c| c.timestamp);
+    out
+}
+
+/// Parse DEXScreener's current pair price (fallback source; exposes no history).
+fn parse_dexscreener_price(body: &serde_json::Value) -> Option<f64> {
+    body.get("pairs")?
+        .get(0)?
+        .get("priceUsd")?
+        .as_str()?
+        .parse::<f64>()
+        .ok()
+        .filter(|p| p.is_finite() && *p > 0.0)
+}
+
+/// What the gap detector wants backfilled, decided purely from stored history
+/// bounds and wall-clock time (no I/O — unit-testable).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct BackfillPlan {
+    /// Hourly candles are missing between the newest stored point and now
+    backfill_hourly: bool,
+    /// Daily history is shallower than the multi-day RSI lookback
+    backfill_daily: bool,
+    /// A provider single-point fallback seed is allowed if OHLCV fetches fail
+    seed_fallback_point: bool,
+}
+
+/// Decide the backfill actions for this cycle. A gap exists when the table is
+/// empty or the newest point is older than `gap_threshold_minutes`; depth is
+/// insufficient when the earliest point is newer than `now - min_history_days`.
+fn plan_backfill(
+    last_point: Option<DateTime<Utc>>,
+    earliest_point: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+    gap_threshold_minutes: i64,
+    min_history_days: i64,
+) -> BackfillPlan {
+    let gap = match last_point {
+        None => true,
+        Some(last) => {
+            now.signed_duration_since(last) > chrono::Duration::minutes(gap_threshold_minutes)
+        }
+    };
+    let depth_insufficient = match earliest_point {
+        None => true,
+        Some(earliest) => earliest > now - chrono::Duration::days(min_history_days),
+    };
+    BackfillPlan {
+        backfill_hourly: gap,
+        backfill_daily: depth_insufficient,
+        seed_fallback_point: gap,
+    }
+}
+
+/// Collapse raw price points (timestamp, candle_close, spot_price) into one close
+/// per UTC day. Daily candle closes are authoritative; days without a candle take
+/// the last arriving spot (points are ordered ascending). Pure — unit-testable.
+fn daily_closes_from_points(points: &[(DateTime<Utc>, Option<f64>, f64)]) -> Vec<f64> {
+    use std::collections::BTreeMap;
+    // day -> (has_candle_close, close)
+    let mut days: BTreeMap<chrono::NaiveDate, (bool, f64)> = BTreeMap::new();
+    for &(ts, close_usd, price_usd) in points {
+        let day = ts.date_naive();
+        match close_usd {
+            Some(c) => {
+                days.insert(day, (true, c));
+            }
+            None => {
+                let entry = days.entry(day).or_insert((false, price_usd));
+                if !entry.0 {
+                    entry.1 = price_usd;
+                }
+            }
+        }
+    }
+    days.into_values().map(|(_, close)| close).collect()
+}
+
+/// Latest and earliest stored price points (both None when the table is empty).
+async fn price_history_bounds(
+    db: &PgPool,
+) -> Result<(Option<DateTime<Utc>>, Option<DateTime<Utc>>)> {
+    let row = sqlx::query(
+        "SELECT MAX(timestamp) AS last_ts, MIN(timestamp) AS earliest_ts FROM market_price_history",
+    )
+    .fetch_one(db)
+    .await?;
+    let last: Option<DateTime<Utc>> = row.try_get("last_ts").unwrap_or(None);
+    let earliest: Option<DateTime<Utc>> = row.try_get("earliest_ts").unwrap_or(None);
+    Ok((last, earliest))
+}
+
+/// Insert a single price point with explicit provenance. `ON CONFLICT DO NOTHING`
+/// keeps every write idempotent: the first row at a timestamp wins and is never
+/// rewritten by a later backfill.
+async fn insert_price_point(
+    db: &PgPool,
+    ts: DateTime<Utc>,
+    price_usd: f64,
+    source: &str,
+    is_backfilled: bool,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO market_price_history (timestamp, price_usd, source, is_backfilled) \
+         VALUES ($1, $2, $3, $4) ON CONFLICT (timestamp) DO NOTHING",
+    )
+    .bind(ts)
+    .bind(price_usd)
+    .bind(source)
+    .bind(is_backfilled)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Idempotent candle upsert. Only completed candles are accepted: an open time
+/// less than one candle period old is the provider's in-progress candle and is
+/// skipped so a partial close never gets frozen into history. Returns rows added.
+async fn upsert_price_candles(
+    db: &PgPool,
+    candles: &[PriceCandle],
+    source: &str,
+    candle_period: chrono::Duration,
+    now: DateTime<Utc>,
+) -> Result<u64> {
+    let mut added = 0u64;
+    for c in candles {
+        if now.signed_duration_since(c.timestamp) < candle_period {
+            continue;
+        }
+        let result = sqlx::query(
+            "INSERT INTO market_price_history \
+             (timestamp, price_usd, open_usd, high_usd, low_usd, close_usd, volume_usd, source, is_backfilled, backfilled_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9) ON CONFLICT (timestamp) DO NOTHING",
+        )
+        .bind(c.timestamp)
+        .bind(c.close)
+        .bind(c.open)
+        .bind(c.high)
+        .bind(c.low)
+        .bind(c.close)
+        .bind(c.volume)
+        .bind(source)
+        .bind(now)
+        .execute(db)
+        .await?;
+        added += result.rows_affected();
+    }
+    Ok(added)
+}
+
+/// GET a GeckoTerminal OHLCV series (unauthenticated public endpoint). Returns
+/// None on any network/HTTP/parse failure — the caller degrades instead of failing.
+async fn fetch_geckoterminal_ohlcv(
+    state: &Arc<AppState>,
+    timeframe: &str,
+    limit: u32,
+) -> Option<Vec<PriceCandle>> {
+    let url = format!(
+        "{}/networks/base/pools/{}/ohlcv/{}?limit={}",
+        state.config.market_data.geckoterminal_base_url.trim_end_matches('/'),
+        state.config.market_data.pool_address,
+        timeframe,
+        limit
+    );
+    let resp = match state
+        .http_client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("GeckoTerminal {timeframe} OHLCV request failed: {e}");
+            return None;
+        }
+    };
+    if !resp.status().is_success() {
+        tracing::warn!("GeckoTerminal {timeframe} OHLCV returned HTTP {}", resp.status());
+        return None;
+    }
+    match resp.json::<serde_json::Value>().await {
+        Ok(body) => Some(parse_geckoterminal_ohlcv(&body)),
+        Err(e) => {
+            tracing::warn!("GeckoTerminal {timeframe} OHLCV body parse failed: {e}");
+            None
+        }
+    }
+}
+
+/// GET DEXScreener's current pair price (fallback; no historical candles).
+async fn fetch_dexscreener_price(state: &Arc<AppState>) -> Option<f64> {
+    let url = format!(
+        "{}/dex/pairs/base/{}",
+        state.config.market_data.dexscreener_base_url.trim_end_matches('/'),
+        state.config.market_data.pool_address
+    );
+    let resp = match state
+        .http_client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("DEXScreener request failed: {e}");
+            return None;
+        }
+    };
+    if !resp.status().is_success() {
+        tracing::warn!("DEXScreener returned HTTP {}", resp.status());
+        return None;
+    }
+    match resp.json::<serde_json::Value>().await {
+        Ok(body) => parse_dexscreener_price(&body),
+        Err(e) => {
+            tracing::warn!("DEXScreener body parse failed: {e}");
+            None
+        }
+    }
+}
+
+/// Gap detection + backfill (v0.3.0). Heals multi-hour/multi-day gaps in
+/// `market_price_history` (laptop sleep, worker downtime) from free public OHLCV
+/// feeds, and extends daily depth for the multi-day RSI. Strictly fail-open: any
+/// provider or DB failure logs a warning and returns — the ingestion loop and
+/// on-chain polling are never blocked. Idempotent: reruns upsert nothing new.
+async fn ensure_price_history(state: &Arc<AppState>) {
+    if !state.config.market_data.backfill_enabled {
+        return;
+    }
+    let md = &state.config.market_data;
+    let (last_point, earliest_point) = match price_history_bounds(&state.db).await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!("Price-history bounds query failed (backfill skipped): {e}");
+            return;
+        }
+    };
+    let now = Utc::now();
+    let plan = plan_backfill(
+        last_point,
+        earliest_point,
+        now,
+        md.gap_threshold_minutes,
+        md.min_history_days,
+    );
+    if plan == BackfillPlan::default() {
+        return;
+    }
+    tracing::info!(
+        "Price backfill: hourly={} daily={} (last={:?}, earliest={:?})",
+        plan.backfill_hourly,
+        plan.backfill_daily,
+        last_point,
+        earliest_point
+    );
+
+    let mut provider_ok = true;
+    if plan.backfill_daily {
+        let candles = fetch_geckoterminal_ohlcv(state, "day", md.daily_lookback).await;
+        match candles {
+            Some(c) => match upsert_price_candles(
+                &state.db,
+                &c,
+                PRICE_SOURCE_GECKOTERMINAL,
+                chrono::Duration::days(1),
+                now,
+            )
+            .await
+            {
+                Ok(n) => tracing::info!("Backfilled {n} daily candle(s)"),
+                Err(e) => tracing::warn!("Daily candle upsert failed (non-fatal): {e}"),
+            },
+            None => provider_ok = false,
+        }
+    }
+    if plan.backfill_hourly {
+        let candles = fetch_geckoterminal_ohlcv(state, "hour", md.hourly_lookback).await;
+        match candles {
+            Some(c) => match upsert_price_candles(
+                &state.db,
+                &c,
+                PRICE_SOURCE_GECKOTERMINAL,
+                chrono::Duration::hours(1),
+                now,
+            )
+            .await
+            {
+                Ok(n) => tracing::info!("Backfilled {n} hourly candle(s)"),
+                Err(e) => tracing::warn!("Hourly candle upsert failed (non-fatal): {e}"),
+            },
+            None => provider_ok = false,
+        }
+    }
+
+    // DEXScreener fallback: it exposes only the current price, so it may seed a
+    // single point stamped at observation time — never backdated into the gap.
+    if !provider_ok && plan.seed_fallback_point {
+        match fetch_dexscreener_price(state).await {
+            Some(price) => {
+                tracing::warn!(
+                    "GeckoTerminal unavailable; seeding current DEXScreener price (degraded, single point)"
+                );
+                if let Err(e) =
+                    insert_price_point(&state.db, now, price, PRICE_SOURCE_DEXSCREENER, true).await
+                {
+                    tracing::warn!("DEXScreener seed insert failed (non-fatal): {e}");
+                }
+            }
+            None => {
+                tracing::warn!(
+                    "Both GeckoTerminal and DEXScreener unavailable; price backfill degraded this cycle"
+                )
+            }
+        }
+    }
+}
+
+/// Backfill telemetry for /v1/snapshot: how much of the stored price series came
+/// from third-party gap fills and when the last one landed. Computed live per
+/// request; never persisted into snapshots (keeps state_hash/ETag stable). Fail-open.
+async fn data_provenance(db: &PgPool) -> serde_json::Value {
+    match sqlx::query(
+        "SELECT MAX(backfilled_at) AS last_backfill_at, COUNT(*) AS points \
+         FROM market_price_history WHERE is_backfilled",
+    )
+    .fetch_one(db)
+    .await
+    {
+        Ok(r) => {
+            let last: Option<DateTime<Utc>> = r.try_get("last_backfill_at").unwrap_or(None);
+            let points: i64 = r.try_get("points").unwrap_or(0);
+            // Per-source breakdown so consumers can name the feed instead of
+            // hardcoding one (geckoterminal is the norm; dexscreener is the fallback).
+            let mut sources = serde_json::Map::new();
+            if let Ok(rows) = sqlx::query(
+                "SELECT source, COUNT(*) AS points FROM market_price_history \
+                 WHERE is_backfilled GROUP BY source ORDER BY points DESC",
+            )
+            .fetch_all(db)
+            .await
+            {
+                for row in rows {
+                    let src: String = row.try_get("source").unwrap_or_default();
+                    let n: i64 = row.try_get("points").unwrap_or(0);
+                    sources.insert(src, json!(n));
+                }
+            }
+            json!({
+                "last_backfill_at": last.map(|t| t.to_rfc3339()),
+                "backfilled_points_count": points,
+                "sources": sources,
+            })
+        }
+        Err(e) => {
+            tracing::warn!("Provenance query failed (non-fatal): {e}");
+            json!({
+                "last_backfill_at": Option::<String>::None,
+                "backfilled_points_count": 0,
+                "sources": {},
+            })
+        }
+    }
+}
 
 /// Notification config for directive-transition dispatch (issue #28).
 #[derive(Deserialize, Debug, Clone, Default)]
@@ -3010,9 +3578,9 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
         (
             "SWEEP TO STABLE / ACCUMULATE DRY POWDER (Overextension Cooldown)".to_string(),
             format!(
-                "NOCK spot (${:.5}) is overextended (RSI(14) {:.0} >= 70). Buying tops is how gains evaporate: suppress deployment, harvest if fees warrant it, and sweep to the stable stack until momentum cools.",
+                "NOCK spot (${:.5}) is overextended (daily RSI(14) {:.0} >= 70). Buying tops is how gains evaporate: suppress deployment, harvest if fees warrant it, and sweep to the stable stack until momentum cools.",
                 spot_price,
-                regime.rsi.unwrap_or(0.0)
+                regime.rsi_1d.unwrap_or(0.0)
             ),
         )
     } else if spot_price > 0.0 && spot_price < 0.020 && tax_guardrail_blocked {
@@ -3079,7 +3647,8 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
             shot_advice_action: advice_action,
             shot_advice_details: advice_details,
             regime: if regime.overextended { "overextended".to_string() } else { "normal".to_string() },
-            rsi_14: regime.rsi.map(|r| format!("{:.1}", r)),
+            rsi_14: regime.rsi_5m.map(|r| format!("{:.1}", r)),
+            rsi_14_1d: regime.rsi_1d.map(|r| format!("{:.1}", r)),
         },
         asset_aggregation_series: AssetAggregationSeries {
             time_points: vec![now_str.clone()],
@@ -3859,6 +4428,7 @@ database_url: "postgresql://localhost/test"
                     shot_advice_details: "Steady".to_string(),
                     regime: "normal".to_string(),
                     rsi_14: None,
+                    rsi_14_1d: None,
                 },
                 sovereign_ledger: Default::default(),
                 asset_aggregation_series: AssetAggregationSeries {
@@ -4206,5 +4776,370 @@ v4_fee_baseline_nock: 1.4820
         let bracket = &metrics.tick_bracket_hypervisor.brackets[0];
         assert_ne!(bracket.lower_price, "0.00000");
         assert_ne!(bracket.upper_price, "999.00000");
+    }
+
+    // ============================================================
+    // Market price backfill & multi-timeframe regime (v0.3.0)
+    // ============================================================
+
+    /// Raw fixture above the default 100k floor so the Overextension branch is
+    /// reachable in advice tests (total NOCK = 118000, spot 0.015 dip zone).
+    fn raw_above_floor_fixture() -> RawOnChainData {
+        let mut raw = RawOnChainData::default();
+        raw.wallet_balances = vec![
+            WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "NOCK".to_string(),
+                token_address: "0xNOCK".to_string(),
+                amount: "110000.0".to_string(),
+                amount_usd: "2860.0".to_string(),
+                updated_at: "now".to_string(),
+            },
+            WalletBalance {
+                wallet_address: "0x123".to_string(),
+                token_symbol: "USDC".to_string(),
+                token_address: "0xUSDC".to_string(),
+                amount: "50.0".to_string(),
+                amount_usd: "50.0".to_string(),
+                updated_at: "now".to_string(),
+            },
+        ];
+        raw.live_tranche_1_nock = 2000.0;
+        raw.live_tranche_1_usdc = 20.0;
+        raw.live_tranche_2_nock = 6000.0;
+        raw.live_tranche_2_usdc = 30.0;
+        raw.live_uni_fee_usdc = 0.0;
+        raw.live_aero_fee_usdc = 0.0;
+        raw.pool_mechanics = vec![PoolMechanic {
+            pool_id: "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
+            platform: "Aerodrome".to_string(),
+            pool_type: "volatile".to_string(),
+            volatile_assets: vec![
+                PoolAsset {
+                    token_address: "0xUSDC".to_string(),
+                    token_symbol: "USDC".to_string(),
+                    reserve_amount: "150".to_string(),
+                    reserve_usd: "150".to_string(),
+                },
+                PoolAsset {
+                    token_address: "0xNOCK".to_string(),
+                    token_symbol: "NOCK".to_string(),
+                    reserve_amount: "10000".to_string(),
+                    reserve_usd: "150".to_string(),
+                },
+            ],
+            liquidity_usd: "300".to_string(),
+            fee_accrued_usd: "0".to_string(),
+            fee_tier_bps: 30,
+            tick_current: None,
+            sqrt_price_x96: None,
+        }];
+        raw
+    }
+
+    #[test]
+    fn test_parse_geckoterminal_ohlcv_normalizes_newest_first() {
+        // Recorded fixture from the live endpoint (2026-10-12): ohlcv_list entries
+        // are [open_time_unix_secs, open, high, low, close, volume], newest first.
+        let body = json!({
+            "data": {
+                "id": "x",
+                "type": "ohlcv_request_response",
+                "attributes": {
+                    "ohlcv_list": [
+                        [1791763200, 0.0246178045182968, 0.0269877692445729, 0.022041369483387, 0.0239357572998183, 278995.4950266538],
+                        [1791676800, 0.0268425121191988, 0.0271935570968404, 0.023807436927751, 0.0246178045182968, 263160.2698464311],
+                        [1791590400, 0.0234294762339549, 0.0283541273531182, 0.0225412081009429, 0.0268425121191988],
+                        ["not-a-number", 1, 2, 3, 4],
+                        [1791504000, 1, 2, 3]
+                    ]
+                }
+            }
+        });
+        let candles = parse_geckoterminal_ohlcv(&body);
+        assert_eq!(candles.len(), 3, "malformed entries must be skipped");
+        // Newest-first input normalized to ascending close order
+        assert!(candles[0].timestamp < candles[1].timestamp);
+        assert!(candles[1].timestamp < candles[2].timestamp);
+        assert_eq!(
+            candles[2].timestamp.format("%Y-%m-%d").to_string(),
+            "2026-10-12"
+        );
+        assert!((candles[2].close - 0.0239357572998183).abs() < 1e-12);
+        assert_eq!(candles[0].volume, None, "5-element entry has no volume");
+        assert!(candles[2].volume.is_some());
+    }
+
+    #[test]
+    fn test_parse_geckoterminal_ohlcv_rejects_garbage() {
+        assert!(parse_geckoterminal_ohlcv(&json!({})).is_empty());
+        assert!(parse_geckoterminal_ohlcv(&json!({ "data": {} })).is_empty());
+        assert!(parse_geckoterminal_ohlcv(&json!({ "data": { "attributes": { "ohlcv_list": [] } } })).is_empty());
+    }
+
+    #[test]
+    fn test_parse_dexscreener_price() {
+        let body = json!({
+            "schemaVersion": "1.0.0",
+            "pairs": [
+                { "chainId": "base", "dexId": "aerodrome", "priceUsd": "0.02396" }
+            ]
+        });
+        let price = parse_dexscreener_price(&body).unwrap();
+        assert!((price - 0.02396).abs() < 1e-12);
+        // Missing/malformed shapes degrade to None, never fabricate a price
+        assert!(parse_dexscreener_price(&json!({})).is_none());
+        assert!(parse_dexscreener_price(&json!({ "pairs": [] })).is_none());
+        assert!(parse_dexscreener_price(&json!({ "pairs": [{ "priceUsd": "abc" }] })).is_none());
+        assert!(parse_dexscreener_price(&json!({ "pairs": [{ "priceUsd": "0" }] })).is_none());
+    }
+
+    #[test]
+    fn test_plan_backfill_cases() {
+        use chrono::TimeZone;
+        let at = |d: i64, m: i64| Utc.with_ymd_and_hms(2026, 10, 12, 0, 0, 0).unwrap()
+            + chrono::Duration::days(d)
+            + chrono::Duration::minutes(m);
+        let now = at(0, 0);
+
+        // Empty table (first boot): full backfill + fallback seeding allowed
+        let plan = plan_backfill(None, None, now, 15, 14);
+        assert!(plan.backfill_hourly && plan.backfill_daily && plan.seed_fallback_point);
+
+        // Fresh deep history, last point 5 minutes old: nothing to do
+        let plan = plan_backfill(Some(at(0, -5)), Some(at(-30, 0)), now, 15, 14);
+        assert_eq!(plan, BackfillPlan::default());
+
+        // Laptop slept for 3 hours: hourly gap fill (daily depth still sufficient)
+        let plan = plan_backfill(Some(at(0, -180)), Some(at(-30, 0)), now, 15, 14);
+        assert!(plan.backfill_hourly && plan.seed_fallback_point && !plan.backfill_daily);
+
+        // Fresh but shallow history: extend daily depth, no gap fill
+        let plan = plan_backfill(Some(at(0, -5)), Some(at(-7, 0)), now, 15, 14);
+        assert!(!plan.backfill_hourly && !plan.seed_fallback_point && plan.backfill_daily);
+    }
+
+    #[test]
+    fn test_daily_closes_from_points() {
+        use chrono::TimeZone;
+        let at = |d: u32, h: u32| Utc.with_ymd_and_hms(2026, 10, d, h, 0, 0).unwrap();
+        let points = vec![
+            (at(1, 0), Some(0.10), 0.10), // day-1 daily candle close
+            (at(1, 5), None, 0.105),      // day-1 spot: ignored, candle is authoritative
+            (at(2, 5), None, 0.20),       // day-2 spots only
+            (at(2, 10), None, 0.21),      // ...last spot of the day wins
+            (at(3, 0), Some(0.30), 0.30), // day-3 candle only
+        ];
+        let closes = daily_closes_from_points(&points);
+        assert_eq!(closes.len(), 3);
+        assert!((closes[0] - 0.10).abs() < 1e-12);
+        assert!((closes[1] - 0.21).abs() < 1e-12);
+        assert!((closes[2] - 0.30).abs() < 1e-12);
+        assert!(daily_closes_from_points(&[]).is_empty());
+    }
+
+    #[test]
+    fn test_daily_rsi_invariant_to_provenance_mix_and_gaps() {
+        use chrono::TimeZone;
+        let day0 = Utc.with_ymd_and_hms(2026, 9, 1, 0, 0, 0).unwrap();
+        // 16 daily closes, monotonic gains; day 5 carries spots instead of a candle
+        // (backfilled vs contemporaneous mix) and day 7 is missing entirely (gap).
+        let mut points = Vec::new();
+        let mut expected = Vec::new();
+        for i in 0..16u32 {
+            let close = 100.0 + i as f64;
+            if i == 5 {
+                points.push((day0 + chrono::Duration::days(i as i64) + chrono::Duration::hours(5), None, close));
+                points.push((day0 + chrono::Duration::days(i as i64) + chrono::Duration::hours(10), None, close + 0.001));
+                expected.push(close + 0.001); // last spot of the day
+            } else if i == 7 {
+                continue; // provider gap: no data at all for this day
+            } else {
+                points.push((day0 + chrono::Duration::days(i as i64), Some(close), close));
+                expected.push(close);
+            }
+        }
+        let closes = daily_closes_from_points(&points);
+        assert_eq!(closes, expected);
+        let rsi_actual = compute_rsi_series(&closes, RSI_PERIOD).into_iter().last().flatten().unwrap();
+        let rsi_expected = compute_rsi_series(&expected, RSI_PERIOD).into_iter().last().flatten().unwrap();
+        assert!((rsi_actual - rsi_expected).abs() < 1e-9);
+        assert!(rsi_actual > 99.0, "monotonic gains must pin daily RSI high");
+    }
+
+    #[test]
+    fn test_overextension_cooldown_ignores_micro_pulse() {
+        // The v0.2.x bug this feature fixes: a steep 4-hour intraday climb pins
+        // the 5-minute RSI(14) near 100 while the daily trend stays healthy.
+        // Deployment must NOT be suppressed — the cooldown keys on the daily RSI.
+        let micro_closes: Vec<f64> = (1..=30).map(|i| 100.0 + i as f64).collect();
+        let rsi_5m = compute_rsi_series(&micro_closes, RSI_PERIOD).into_iter().last().flatten().unwrap();
+        assert!(rsi_5m >= RSI_OVERBOUGHT, "fixture must reproduce the micro pulse: {rsi_5m}");
+        let macro_closes: Vec<f64> = vec![
+            100.0, 99.5, 101.0, 100.5, 99.0, 100.0, 101.5, 100.0,
+            99.5, 100.5, 101.0, 100.0, 99.0, 100.5, 101.0,
+        ];
+        let rsi_1d = compute_rsi_series(&macro_closes, RSI_PERIOD).into_iter().last().flatten().unwrap();
+        assert!(rsi_1d < RSI_OVERBOUGHT, "healthy daily trend: {rsi_1d}");
+
+        let regime = MarketRegime {
+            rsi_5m: Some(rsi_5m),
+            rsi_1d: Some(rsi_1d),
+            overextended: rsi_1d >= RSI_OVERBOUGHT,
+        };
+        assert!(!regime.overextended);
+        let metrics = compute_derived_metrics(
+            &raw_above_floor_fixture(),
+            0.0,
+            &OperatorProfile::default(),
+            StructuralChannels { channels: vec![] },
+            &[],
+            &LedgerAggregate::default(),
+            &regime,
+        );
+        assert!(
+            !metrics.global_status.shot_advice_action.contains("Overextension Cooldown"),
+            "micro pulse must not trigger the cooldown: {}",
+            metrics.global_status.shot_advice_action
+        );
+        assert_eq!(metrics.global_status.regime, "normal");
+        assert!(metrics.global_status.rsi_14.is_some());
+        assert!(metrics.global_status.rsi_14_1d.is_some());
+    }
+
+    #[test]
+    fn test_overextension_cooldown_fires_on_daily_rsi() {
+        // Monotonic multi-day gains pin the daily RSI(14) near 100: the cooldown
+        // fires and cites the daily series explicitly.
+        let macro_closes: Vec<f64> = (1..=20).map(|i| 100.0 + i as f64).collect();
+        let rsi_1d = compute_rsi_series(&macro_closes, RSI_PERIOD).into_iter().last().flatten().unwrap();
+        assert!(rsi_1d >= RSI_OVERBOUGHT);
+        let regime = MarketRegime {
+            rsi_5m: Some(40.0), // micro is calm; only the daily series decides
+            rsi_1d: Some(rsi_1d),
+            overextended: rsi_1d >= RSI_OVERBOUGHT,
+        };
+        let metrics = compute_derived_metrics(
+            &raw_above_floor_fixture(),
+            0.0,
+            &OperatorProfile::default(),
+            StructuralChannels { channels: vec![] },
+            &[],
+            &LedgerAggregate::default(),
+            &regime,
+        );
+        assert!(metrics.global_status.shot_advice_action.contains("Overextension Cooldown"));
+        assert!(metrics.global_status.shot_advice_details.contains("daily RSI(14)"));
+        assert_eq!(metrics.global_status.regime, "overextended");
+        assert_eq!(metrics.global_status.rsi_14.as_deref(), Some("40.0"));
+    }
+
+    // --- DB-gated integration tests (gracefully skipped without DATABASE_URL) ---
+
+    async fn integration_pool() -> Option<PgPool> {
+        let Ok(url) = std::env::var("DATABASE_URL") else {
+            eprintln!("DATABASE_URL not set; skipping DB integration test");
+            return None;
+        };
+        match PgPool::connect(&url).await {
+            Ok(pool) => Some(pool),
+            Err(e) => {
+                eprintln!("Postgres unreachable ({e}); skipping DB integration test");
+                None
+            }
+        }
+    }
+
+    async fn ensure_market_price_history_table(pool: &PgPool) {
+        let ddl = "CREATE TABLE IF NOT EXISTS market_price_history (
+                timestamp      TIMESTAMPTZ NOT NULL PRIMARY KEY,
+                price_usd      FLOAT8 NOT NULL,
+                open_usd       FLOAT8,
+                high_usd       FLOAT8,
+                low_usd        FLOAT8,
+                close_usd      FLOAT8,
+                volume_usd     FLOAT8,
+                source         VARCHAR NOT NULL,
+                is_backfilled  BOOLEAN NOT NULL DEFAULT false,
+                backfilled_at  TIMESTAMPTZ
+            )";
+        if let Err(first_err) = sqlx::query(ddl).execute(pool).await {
+            // Parallel test tasks racing CREATE TABLE IF NOT EXISTS can still lose
+            // the pg_type rowtype race inside Postgres; a single retry settles it.
+            if sqlx::query(ddl).execute(pool).await.is_err() {
+                panic!("create market_price_history: {first_err}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_candle_upsert_is_idempotent() {
+        let Some(pool) = integration_pool().await else { return };
+        ensure_market_price_history_table(&pool).await;
+        let open = Utc::now();
+        let candles = vec![PriceCandle {
+            timestamp: open,
+            open: 1.0,
+            high: 2.0,
+            low: 0.5,
+            close: 1.5,
+            volume: Some(9.0),
+        }];
+        let now = open + chrono::Duration::hours(2); // candle fully completed
+        let first = upsert_price_candles(&pool, &candles, PRICE_SOURCE_GECKOTERMINAL, chrono::Duration::hours(1), now).await.unwrap();
+        let rerun = upsert_price_candles(&pool, &candles, PRICE_SOURCE_GECKOTERMINAL, chrono::Duration::hours(1), now).await.unwrap();
+        assert_eq!(first, 1, "first insert adds one row");
+        assert_eq!(rerun, 0, "rerun must be a no-op");
+        let count: i64 = sqlx::query("SELECT COUNT(*) FROM market_price_history WHERE timestamp = $1")
+            .bind(open)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .try_get(0)
+            .unwrap();
+        assert_eq!(count, 1);
+        // In-progress candle (open < one period ago) must be skipped, not frozen
+        let partial = upsert_price_candles(
+            &pool,
+            &[PriceCandle { timestamp: now, open: 1.0, high: 1.0, low: 1.0, close: 1.0, volume: None }],
+            PRICE_SOURCE_GECKOTERMINAL,
+            chrono::Duration::hours(1),
+            now,
+        )
+        .await
+        .unwrap();
+        assert_eq!(partial, 0, "in-progress candle must not be stored");
+        sqlx::query("DELETE FROM market_price_history WHERE timestamp = $1")
+            .bind(open)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_backfill_never_overwrites_contemporaneous_row() {
+        let Some(pool) = integration_pool().await else { return };
+        ensure_market_price_history_table(&pool).await;
+        let ts = Utc::now();
+        insert_price_point(&pool, ts, 1.23, PRICE_SOURCE_RPC, false).await.unwrap();
+        insert_price_point(&pool, ts, 9.99, PRICE_SOURCE_GECKOTERMINAL, true).await.unwrap();
+        let row = sqlx::query(
+            "SELECT price_usd, source, is_backfilled FROM market_price_history WHERE timestamp = $1",
+        )
+        .bind(ts)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let price: f64 = row.try_get("price_usd").unwrap();
+        let source: String = row.try_get("source").unwrap();
+        let backfilled: bool = row.try_get("is_backfilled").unwrap();
+        assert!((price - 1.23).abs() < 1e-12, "contemporaneous observation must win");
+        assert_eq!(source, PRICE_SOURCE_RPC);
+        assert!(!backfilled);
+        sqlx::query("DELETE FROM market_price_history WHERE timestamp = $1")
+            .bind(ts)
+            .execute(&pool)
+            .await
+            .unwrap();
     }
 }

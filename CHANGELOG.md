@@ -7,12 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Deferred to 0.3.0 / Future Releases
-- [ ] **Historical Price Backfill Engine**: Retroactive OHLCV gap-filling via GeckoTerminal for multi-day macro indicators.
+### Deferred to Future Releases
+- [ ] **Koinly On-Chain Transaction Classifier (Issue #56, v0.4.0)**: reconcile on-chain fee-claim harvests directly with Koinly's Base wallet sync as ordinary income — explicitly NOT manual CSV download buttons/tooling (duplicate transactions and burns the annual 1,000-transaction budget on the $99 tier; Koinly misclassifying claims as "Liquidity Removals" corrupts LP cost basis).
 - [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).
 - [ ] **Multi-Pool Dynamic Ingestion**: Discovering and tracking secondary AMM pools on Base.
 - [ ] **Coinbase Staked-ETH Connector**: CDP API integration to monitor staked ETH balances.
 - [ ] **Urbit Native (%nocknock Desk)**: Hoon data structures and Gall agent.
+
+## [0.3.0] - 2026-10-13
+
+### Added — Market Price Backfill & Multi-Timeframe Regime Engine
+- **Historical Price Backfill Engine (`market_price_history`)**:
+  - New provenance-tagged price table: every row records `source` (`aerodrome_rpc` live RPC spot vs `geckoterminal`/`dexscreener` gap fills), `is_backfilled`, and `backfilled_at` — third-party retro data can never masquerade as contemporaneous on-chain observation.
+  - Contemporaneous snapshots record the live Aerodrome spot price each cycle (`is_backfilled: false`), even when the full snapshot is deduplicated by `state_hash`.
+  - On boot and at the start of every cycle, gap detection (newest point older than 15 minutes) backfills completed hourly candles from GeckoTerminal (limit 168) and extends daily depth to at least 14 days (limit 30) — idempotent `ON CONFLICT DO NOTHING` upserts; the provider's in-progress candle is never stored.
+  - DEXScreener fallback seeds at most a single point stamped at its observation time (never backdated into the gap); provider outages log warnings and never block the ingestion loop or on-chain polling.
+  - Optional `market_data` config section (base URLs, pool address, gap/depth thresholds, lookbacks); existing config files keep working unchanged.
+- **Multi-Timeframe Regime Engine**:
+  - The `Overextension Cooldown` directive now keys on the **daily RSI(14)** (`rsi_14_1d`), computed over one close per UTC day spanning the multi-day lookback — a 4-hour intraday bounce no longer fakes a multi-day top.
+  - The short-term series remains exposed as `rsi_14` (RSI(14) over 5-minute snapshot closes) with unchanged semantics; `regime: normal|overextended` reflects the daily series.
+  - `GET /v1/snapshot` + `/v1/snapshot/latest` expose top-level `data_provenance: { last_backfill_at, backfilled_points_count, sources }` (computed live; excluded from `state_hash`/ETag).
+- **Frontend Observability (Tactical Shot Advice banner)**:
+  - `REGIME: NORMAL` (green) / `OVEREXTENDED` (amber) badge sourced from the daily RSI.
+  - `RSI(14D)` and `RSI(5M)` readouts with honest `—` when a series lacks enough samples.
+  - Subtle `✓ N backfilled candles (GeckoTerminal)` provenance indicator fed by `data_provenance.sources` (feed named from data, never hardcoded).
 
 ## [0.2.1] - 2026-10-12
 

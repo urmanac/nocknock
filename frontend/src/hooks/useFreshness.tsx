@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import type { DataProvenance } from '../types/snapshot';
 
 const SYNC_WINDOW_SECONDS_DEFAULT = 300;
 const SYNC_GRACE_SECONDS_DEFAULT = 90; // Allowance for sync execution duration + polling cycle
@@ -19,6 +20,8 @@ export interface SnapshotMeta {
 export interface SnapshotEnvelope<T = unknown> {
   meta: SnapshotMeta;
   data: T;
+  /** Backfill telemetry (v0.3.0); computed live by the API, not part of state_hash */
+  data_provenance?: DataProvenance;
 }
 
 export interface FreshnessState {

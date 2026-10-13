@@ -20,6 +20,13 @@ import {
 } from 'recharts';
 import { api } from './api/client';
 import { useFreshness, StaleBanner } from './hooks/useFreshness.tsx';
+
+/** market_price_history provenance tags (main.rs PRICE_SOURCE_*) → display names */
+const SOURCE_LABELS: Record<string, string> = {
+  geckoterminal: 'GeckoTerminal',
+  dexscreener: 'DEXScreener',
+  aerodrome_rpc: 'Aerodrome RPC',
+};
 import type { DerivedMetrics } from './types/snapshot';
 
 function Dashboard() {
@@ -78,6 +85,13 @@ function Dashboard() {
   const rawData = snapshot?.data as any;
   const metrics = rawData?.derived_metrics ?? rawData;
   const global = metrics?.global_status;
+  // Market regime telemetry (v0.3.0): daily/micro RSI + third-party backfill provenance
+  const provenance = snapshot?.data_provenance;
+  const provenanceSources = Object.keys(provenance?.sources ?? {})
+    .map(s => SOURCE_LABELS[s] ?? s)
+    .join(', ');
+  const provenanceCandleOnly = Object.keys(provenance?.sources ?? {}).length > 0 &&
+    Object.keys(provenance?.sources ?? {}).every(s => s === 'geckoterminal');
   const hasHistory = history.length > 1;
   const spansMultipleDays = hasHistory && (
     new Date(history[history.length - 1]?.meta?.generated_at).toDateString() !== new Date(history[0]?.meta?.generated_at).toDateString()
@@ -332,6 +346,30 @@ function Dashboard() {
           }}>
             Floor Invariant: <strong>{floorTargetFormatted} NOCK Hard Floor {!nockFloorDeltaKnown ? 'UNKNOWN' : isFloorSafe ? 'PROTECTED' : 'BREACHED'}</strong>{nockFloorDeltaKnown && <> ({nockFloorDeltaRaw >= 0 ? '+' : ''}{nockFloorDeltaVal} cushion)</>}
           </div>
+        </div>
+        <div style={styles.regimeRow}>
+          {global?.regime && (
+            <span
+              style={{
+                ...styles.regimeBadge,
+                ...(global.regime === 'overextended'
+                  ? { background: '#78350f', color: '#fcd34d', border: '1px solid #d97706' }
+                  : { background: '#064e3b', color: '#a7f3d0', border: '1px solid #059669' }),
+              }}
+            >
+              REGIME: {global.regime === 'overextended' ? 'OVEREXTENDED' : 'NORMAL'}
+            </span>
+          )}
+          <span style={styles.rsiChip}>RSI(14D): <strong style={{ color: '#e6edf3' }}>{global?.rsi_14_1d ?? '—'}</strong></span>
+          <span style={styles.rsiChip}>RSI(5M): <strong style={{ color: '#e6edf3' }}>{global?.rsi_14 ?? '—'}</strong></span>
+          {provenance && provenance.backfilled_points_count > 0 && (
+            <span
+              style={styles.provenanceTag}
+              title={provenance.last_backfill_at ? `Last gap fill: ${provenance.last_backfill_at}` : undefined}
+            >
+              ✓ {provenance.backfilled_points_count} backfilled {provenanceCandleOnly ? 'candles' : 'price points'}{provenanceSources ? ` (${provenanceSources})` : ''}
+            </span>
+          )}
         </div>
         <p style={styles.adviceDetails}>
           {global?.shot_advice_details ||
@@ -790,6 +828,33 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#cbd5e1',
     lineHeight: 1.5,
     margin: '0 0 1rem 0',
+  },
+  regimeRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap',
+    marginBottom: '0.75rem',
+  },
+  regimeBadge: {
+    fontSize: '0.7rem',
+    fontWeight: 700,
+    letterSpacing: '0.1em',
+    padding: '3px 10px',
+    borderRadius: 4,
+  },
+  rsiChip: {
+    fontSize: '0.75rem',
+    color: '#94a3b8',
+    background: '#1e293b',
+    border: '1px solid #334155',
+    borderRadius: 6,
+    padding: '3px 10px',
+  },
+  provenanceTag: {
+    fontSize: '0.7rem',
+    color: '#8b949e',
+    fontStyle: 'italic',
   },
   shotPillContainer: {
     display: 'grid',

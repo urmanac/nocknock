@@ -73,6 +73,22 @@ operator_profile:
 # mcp_bearer_token: "your-secret-bearer-token"
 
 # ============================================================
+# Market Price Backfill Engine (v0.3.0)
+# ============================================================
+# Heals gaps in market_price_history from free public OHLCV feeds and extends
+# daily depth for the multi-day RSI. The whole section is optional — every
+# field defaults so existing config files keep working unchanged.
+# market_data:
+#   backfill_enabled: true
+#   geckoterminal_base_url: "https://api.geckoterminal.com/api/v2"
+#   dexscreener_base_url: "https://api.dexscreener.com/latest"
+#   pool_address: "0x85f1aa3a70fedd1c52705c15baed143e675cd626"
+#   gap_threshold_minutes: 15
+#   min_history_days: 14
+#   hourly_lookback: 168
+#   daily_lookback: 30
+
+# ============================================================
 # Directive-Transition Notifications (issue #28)
 # ============================================================
 # The worker fires a notification only when the tactical directive CHANGES

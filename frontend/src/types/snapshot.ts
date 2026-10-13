@@ -13,6 +13,15 @@ export interface SnapshotMeta {
 export interface SnapshotEnvelope<T = unknown> {
   meta: SnapshotMeta;
   data: T;
+  /** Backfill telemetry (v0.3.0); computed live by the API, not part of state_hash */
+  data_provenance?: DataProvenance;
+}
+
+export interface DataProvenance {
+  last_backfill_at: string | null;
+  backfilled_points_count: number;
+  /** Backfilled point count per provider (e.g. geckoterminal, dexscreener) */
+  sources?: Record<string, number>;
 }
 
 // ============================================================
@@ -45,6 +54,12 @@ export interface GlobalStatus {
   total_usdc_amount?: string;
   shot_advice_action?: string;
   shot_advice_details?: string;
+  /** Market regime from daily RSI(14) overextension detection (v0.3.0) */
+  regime?: 'normal' | 'overextended';
+  /** Wilder RSI(14) over 5-minute snapshot closes (short-term momentum) */
+  rsi_14?: string | null;
+  /** Wilder RSI(14) over daily closes — the "daily RSI"; drives `regime` */
+  rsi_14_1d?: string | null;
 }
 
 export interface AssetAggregationSeries {
