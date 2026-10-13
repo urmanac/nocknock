@@ -21,9 +21,8 @@ Implements the v0.3.0 Historical Price Backfill & Multi-Timeframe Regime Engine:
 - DB-gated integration tests verified against live Postgres: idempotent re-upsert (1 row), backfill cannot overwrite a contemporaneous row.
 - Pre-flight green: `make test-brain` (3/3), `make test-worker` (43/43), `make test-frontend` (25/25), `npm run build` (tsc + vite), `SQLX_OFFLINE=true cargo build --release` with zero crate warnings.
 - Live E2E (sandbox Postgres, real providers + real Alchemy config): boot on empty table backfilled **29 daily + 161 hourly candles** per boot; cycle recorded the contemporaneous spot; `rsi_14_1d` computed from 30 real daily closes (38.3–41.1 across runs); `/v1/snapshot` returned `data_provenance` with `backfilled_points_count: 190` and `sources: {geckoterminal: 190}`.
-- Visual verification of the dashboard banner against the live worker + vite stack:
+- `make validate-specs` already fails on `main` with 3 pre-existing errors/13 warnings; this branch adds zero new lint problems (identical counts before/after).
+- Visual verification of the dashboard banner against the live worker + vite stack (screenshot below).
 
 ## Screenshots
 ![Dashboard: regime badge, RSI readouts, provenance indicator](https://github.com/urmanac/nocknock/raw/helix-specs/design/tasks/000663_feature-spec-historical/screenshots/01-dashboard-regime-rsi-provenance.png)
-
-- Note: `make validate-specs` already fails on `main` with 3 pre-existing errors/13 warnings; this branch adds zero new lint problems (identical counts before/after).
