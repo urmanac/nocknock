@@ -44,3 +44,10 @@
 - [x] Lockstep version bump: `brain/Cargo.toml`, `frontend/package.json`, `frontend/package-lock.json` → 0.3.0
 - [x] Eliminate `build_v4_collect_unlock_data_decrease_only` dead-code warning — annotated `#[allow(dead_code)]` (kept: test-exercised golden vector); release build now emits zero crate warnings (only the pre-existing sqlx-postgres 0.7.4 future-incompat advisory from the dependency remains, present on main)
 - [x] Record v0.4.0 Koinly direction (Issue #56: on-chain DeFi transaction classifier; NO manual CSV download buttons/tooling — direct Base wallet sync only, duplicate-transaction + budget hazard) — documented in CHANGELOG deferred + design.md notes; nothing CSV-related built
+
+## Release Prep (post-approval, CI green on PR #57)
+
+- [x] Verify PR #57 state via GitHub API: head `0fc88f4`, `mergeable_state: clean`, PR body synced from pull_request.md
+- [x] Promote CHANGELOG `[Unreleased] → Added` to `## [0.3.0] - 2026-10-13` (tag precondition 3: version section populated); `make release-notes VERSION=0.3.0` parses exactly the Added section; Deferred items stay under `[Unreleased]`; pushed as `3830291` (PR #57 updates, CI re-runs)
+- [x] MCP playtest (standing order: never release untested components): STDIO + HTTP all checks passed against the live worker — provenance `sources: {geckoterminal: 190}`, `rsi_14_1d: 41.0`, `regime: normal`
+- [ ] OPERATOR: merge PR #57, wait for CI green on `main`, then tag `v0.3.0` — **explicit operator authorization required before tagging per OPERATOR_GUIDANCE.md §1.3** (release flow: tag push triggers `create-release` job which attaches the 4 artifacts and uses `make release-notes` output)
