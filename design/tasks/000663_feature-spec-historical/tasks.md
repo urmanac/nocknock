@@ -37,3 +37,10 @@
 - [x] Fresh DB cycle: contemporaneous `aerodrome_rpc` spot row recorded; `rsi_14_1d = 38.3` computed from real daily closes; `regime: normal`; `rsi_14: None` (fresh DB < 15 micro samples → fail-open)
 - [x] `GET /v1/snapshot` returns `data_provenance: { last_backfill_at, backfilled_points_count: 190 }`; DB provenance split verified: 190 `geckoterminal`/backfilled vs contemporaneous `aerodrome_rpc` rows
 - [x] Release binary boot with fresh (< 15 min) data: silent no-op backfill, snapshot cycle 280ms
+
+## Review Follow-up (pre-merge)
+
+- [~] Frontend observability: render regime badge (NORMAL green / OVEREXTENDED amber), `RSI(14D)` + `RSI(5M)` readouts, and a backfilled-candles provenance indicator in the top Tactical Shot Advice banner (`frontend/src/types/snapshot.ts`, `frontend/src/App.tsx`)
+- [~] Lockstep version bump: `brain/Cargo.toml`, `frontend/package.json`, `frontend/package-lock.json` → 0.3.0
+- [~] Eliminate `build_v4_collect_unlock_data_decrease_only` dead-code warning so release builds are warning-free
+- [~] Record v0.4.0 Koinly direction (Issue #56: on-chain DeFi transaction classifier; NO manual CSV download buttons/tooling — direct Base wallet sync only, duplicate-transaction + budget hazard)
