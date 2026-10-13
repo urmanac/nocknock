@@ -40,7 +40,7 @@
 
 ## Review Follow-up (pre-merge)
 
-- [~] Frontend observability: render regime badge (NORMAL green / OVEREXTENDED amber), `RSI(14D)` + `RSI(5M)` readouts, and a backfilled-candles provenance indicator in the top Tactical Shot Advice banner (`frontend/src/types/snapshot.ts`, `frontend/src/App.tsx`)
-- [~] Lockstep version bump: `brain/Cargo.toml`, `frontend/package.json`, `frontend/package-lock.json` → 0.3.0
-- [~] Eliminate `build_v4_collect_unlock_data_decrease_only` dead-code warning so release builds are warning-free
-- [~] Record v0.4.0 Koinly direction (Issue #56: on-chain DeFi transaction classifier; NO manual CSV download buttons/tooling — direct Base wallet sync only, duplicate-transaction + budget hazard)
+- [x] Frontend observability: render regime badge (NORMAL green / OVEREXTENDED amber), `RSI(14D)` + `RSI(5M)` readouts, and a backfilled-candles provenance indicator in the top Tactical Shot Advice banner (`frontend/src/types/snapshot.ts`, `frontend/src/App.tsx`; envelope field also added to the hook + api-client mirrors). Backend `data_provenance` extended with a truthful `sources` breakdown so the UI names the feed from data instead of hardcoding it. Verified visually against the live worker+vite stack: `REGIME: NORMAL`, `RSI(14D): 41.1`, `RSI(5M): —` (fresh DB fail-open), `✓ 190 backfilled candles (GeckoTerminal)` — screenshot `screenshots/01-dashboard-regime-rsi-provenance.png`
+- [x] Lockstep version bump: `brain/Cargo.toml`, `frontend/package.json`, `frontend/package-lock.json` → 0.3.0
+- [x] Eliminate `build_v4_collect_unlock_data_decrease_only` dead-code warning — annotated `#[allow(dead_code)]` (kept: test-exercised golden vector); release build now emits zero crate warnings (only the pre-existing sqlx-postgres 0.7.4 future-incompat advisory from the dependency remains, present on main)
+- [x] Record v0.4.0 Koinly direction (Issue #56: on-chain DeFi transaction classifier; NO manual CSV download buttons/tooling — direct Base wallet sync only, duplicate-transaction + budget hazard) — documented in CHANGELOG deferred + design.md notes; nothing CSV-related built
