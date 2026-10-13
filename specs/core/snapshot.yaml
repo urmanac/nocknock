@@ -42,6 +42,11 @@ components:
         backfilled_points_count:
           type: integer
           description: Stored price points sourced from third-party OHLCV feeds
+        sources:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Backfilled point count per provider (e.g. geckoterminal, dexscreener)
 
     SnapshotMeta:
       type: object

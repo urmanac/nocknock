@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `GET /v1/snapshot` + `/v1/snapshot/latest` expose top-level `data_provenance: { last_backfill_at, backfilled_points_count }` (computed live; excluded from `state_hash`/ETag).
 
 ### Deferred to Future Releases
+- [ ] **Koinly On-Chain Transaction Classifier (Issue #56, v0.4.0)**: reconcile on-chain fee-claim harvests directly with Koinly's Base wallet sync as ordinary income — explicitly NOT manual CSV download buttons/tooling (duplicate transactions and burns the annual 1,000-transaction budget on the $99 tier; Koinly misclassifying claims as "Liquidity Removals" corrupts LP cost basis).
 - [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).
 - [ ] **Multi-Pool Dynamic Ingestion**: Discovering and tracking secondary AMM pools on Base.
 - [ ] **Coinbase Staked-ETH Connector**: CDP API integration to monitor staked ETH balances.

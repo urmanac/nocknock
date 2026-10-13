@@ -1710,7 +1710,9 @@ fn build_v4_collect_calldata(token_id: u64, currency0: &str, currency1: &str, re
 
 /// Single-action variant: unlockData with only DECREASE_LIQUIDITY (collects fees to
 /// the posm ledger without sweeping them out). Live-verified companion to the full
-/// collect; useful for isolating decode vs take failures.
+/// collect; useful for isolating decode vs take failures. Kept (test-exercised via
+/// golden vector) even though production paths use the full collect variant.
+#[allow(dead_code)]
 fn build_v4_collect_unlock_data_decrease_only(token_id: u64) -> String {
     let actions_hex = format!("{:02x}", V4_ACTION_DECREASE_LIQUIDITY);
     let decrease = format!(
@@ -2254,9 +2256,26 @@ async fn data_provenance(db: &PgPool) -> serde_json::Value {
         Ok(r) => {
             let last: Option<DateTime<Utc>> = r.try_get("last_backfill_at").unwrap_or(None);
             let points: i64 = r.try_get("points").unwrap_or(0);
+            // Per-source breakdown so consumers can name the feed instead of
+            // hardcoding one (geckoterminal is the norm; dexscreener is the fallback).
+            let mut sources = serde_json::Map::new();
+            if let Ok(rows) = sqlx::query(
+                "SELECT source, COUNT(*) AS points FROM market_price_history \
+                 WHERE is_backfilled GROUP BY source ORDER BY points DESC",
+            )
+            .fetch_all(db)
+            .await
+            {
+                for row in rows {
+                    let src: String = row.try_get("source").unwrap_or_default();
+                    let n: i64 = row.try_get("points").unwrap_or(0);
+                    sources.insert(src, json!(n));
+                }
+            }
             json!({
                 "last_backfill_at": last.map(|t| t.to_rfc3339()),
                 "backfilled_points_count": points,
+                "sources": sources,
             })
         }
         Err(e) => {
@@ -2264,6 +2283,7 @@ async fn data_provenance(db: &PgPool) -> serde_json::Value {
             json!({
                 "last_backfill_at": Option::<String>::None,
                 "backfilled_points_count": 0,
+                "sources": {},
             })
         }
     }

@@ -13,9 +13,13 @@ export interface SnapshotMeta {
   snapshot_id: string;
 }
 
+import type { DataProvenance } from '../types/snapshot';
+
 export interface SnapshotEnvelope<T = unknown> {
   meta: SnapshotMeta;
   data: T;
+  /** Backfill telemetry (v0.3.0); computed live by the API, not part of state_hash */
+  data_provenance?: DataProvenance;
 }
 
 export interface HealthResponse {
