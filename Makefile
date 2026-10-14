@@ -104,7 +104,7 @@ tmux-start: build-worker
 	@tmux select-window -t $(TMUX_SESSION):0
 	@echo "=========================================================="
 	@echo "NockNock is running in tmux session '$(TMUX_SESSION)'!"
-	@echo "  • Ingestion API: http://localhost:8080"
+	@echo "  • Ingestion API: http://localhost:8081"
 	@echo "  • Frontend Web:  http://localhost:3000"
 	@echo ""
 	@echo "Commands:"

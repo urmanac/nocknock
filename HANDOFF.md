@@ -89,10 +89,10 @@ Nemotron, you must memorize and follow these four rules without exception:
  │   - Dynamic floor line & Y-axis domains driven by nock_floor_target              │
  └─────────────────────────▲──────────────────────────────▲─────────────────────────┘
                            │                              │
-                    HTTP REST (:8080)             Stateless HTTP MCP (:8080/v1/mcp)
+                    HTTP REST (:8081)             Stateless HTTP MCP (:8081/v1/mcp)
                            │                              │
  ┌─────────────────────────▼──────────────────────────────▼─────────────────────────┐
- │                           INGESTION WORKER (PORT 8080)                           │
+ │                           INGESTION WORKER (PORT 8081)                           │
  │   - Axum Web Server & Background Ingestion Daemon                                │
  │   - Alchemy Base RPC Client (Token balances, reserves, simulated claimFees)      │
  │   - Dual MCP: Stdio (nocknock-mcp) & Stateless HTTP (/v1/mcp, /mcp)              │
@@ -117,7 +117,7 @@ make dist             # Verifies packaging of all 4 release artifacts in dist/
 
 ### Tmux Background Environment
 The local development environment runs persistently inside tmux session `nocknock`:
-* **Window 0**: `nocknock-ingestion-worker` daemon on `http://localhost:8080`
+* **Window 0**: `nocknock-ingestion-worker` daemon on `http://localhost:8081`
 * **Window 1**: `frontend` Vite dev server on `http://localhost:3000`
 * **Management**:
   ```bash

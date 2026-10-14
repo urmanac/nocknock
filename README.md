@@ -129,8 +129,8 @@ docker compose up -d --build
 http://localhost:3000
 
 # REST API
-http://localhost:8080/v1/snapshot/latest
-http://localhost:8080/health
+http://localhost:8081/v1/snapshot/latest
+http://localhost:8081/health
 ```
 
 ### Running in Persistent Background with Tmux (Recommended)
@@ -177,7 +177,7 @@ cd ../ingestion-worker
 SQLX_OFFLINE=true cargo check
 
 # 4. Trigger Immediate On-Chain Sync
-curl -X POST http://localhost:8080/v1/ingest
+curl -X POST http://localhost:8081/v1/ingest
 ```
 
 ---
