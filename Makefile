@@ -92,9 +92,28 @@ test-mcp: build-worker
 # ============================================================
 TMUX_SESSION := nocknock
 
-tmux: tmux-start
+ensure-db:
+	@if ! nc -z localhost 5432 2>/dev/null; then \
+		echo "PostgreSQL port 5432 not reachable. Checking OrbStack / Docker..."; \
+		if command -v orbctl >/dev/null 2>&1 && ! orbctl status 2>/dev/null | grep -q "Running"; then \
+			echo "Starting OrbStack..."; \
+			orbctl start || true; \
+			sleep 2; \
+		fi; \
+		if command -v docker >/dev/null 2>&1; then \
+			echo "Ensuring nocknock-db container is running..."; \
+			docker compose up -d db 2>/dev/null || docker start nocknock-db 2>/dev/null || true; \
+		fi; \
+		for i in 1 2 3 4 5 6 7 8 9 10; do \
+			if nc -z localhost 5432 2>/dev/null; then \
+				echo "Database ready on localhost:5432."; \
+				break; \
+			fi; \
+			sleep 1; \
+		done; \
+	fi
 
-tmux-start: build-worker
+tmux-start: ensure-db build-worker
 	@echo "Starting NockNock in tmux session '$(TMUX_SESSION)'..."
 	@tmux has-session -t $(TMUX_SESSION) 2>/dev/null && tmux kill-session -t $(TMUX_SESSION) || true
 	@tmux new-session -d -s $(TMUX_SESSION) -n "worker" \
