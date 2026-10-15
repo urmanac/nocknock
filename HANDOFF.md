@@ -3,9 +3,40 @@
 > **"Observe and Protect"** — Sovereign Asset State Room & Dual-Growth Engine for NOCK and USDC on Base.
 
 **Custodian Transfer**: Antigravity / Google DeepMind $\longrightarrow$ **Nemotron**  
-**Effective Timestamp**: 2026-10-12T11:00:00-04:00  
-**Current Active Version**: `v0.2.1` (Shipped) $\longrightarrow$ Next Target: `v0.3.0` (Historical Price Backfill Engine, multi-timeframe macro indicators, Android APK)  
-**Main Branch Status**: Fully green, PR #51 merged, zero open bugs, all test suites passing.
+**Effective Timestamp**: 2026-10-15T09:24:00-04:00  
+**Current Active Version**: `v0.3.0` (Shipped) $\longrightarrow$ Next Target: `v0.3.1` (Issue #61 chart gap break patch)  
+**Main Branch Status**: Fully green, PR #57 / PR #58 merged.  
+**Open Pull Requests**: [PR #59](https://github.com/urmanac/nocknock/pull/59) (`refactor/vacate-port-8080-for-strata` — all CI green, awaiting operator merge).  
+**Active Issues**: [Issue #61](https://github.com/urmanac/nocknock/issues/61) (Chart timeline collapses downtime gaps into adjacent ticks).
+
+---
+
+## 0. Executive Session Summary & Morning Hand-Off (2026-10-15)
+
+Operator, here is the executive state summary before you depart for work:
+
+### 1. Infrastructure Coexistence & Local Port Strategy (PR #59)
+- **Port 8080 Vacated for Strata**: Relocated `nocknock-ingestion-worker` Axum REST API and MCP HTTP endpoint to port `8081`. This frees port `8080` for the local 24GB M2 MacBook Strata MoE daemon (`strata-server`).
+- **OrbStack / Docker Auto-Start (`ensure-db`)**: Fixed the `make tmux` 500 failure (`PoolTimedOut`). The `Makefile` now includes `ensure-db`, which tests `nc -z localhost 5432`, probes `orbctl status`, starts OrbStack / `docker compose up -d db` if stopped, and awaits a healthy socket before launching the ingestion worker.
+- **CI Status**: All 4 GitHub Actions checks on [PR #59](https://github.com/urmanac/nocknock/pull/59) are **SUCCESS** (Brain, Worker, Frontend, Release verification). In accordance with standing orders, PR #59 remains open and unmerged awaiting your explicit authorization.
+
+### 2. Strategic Research & Knowledge Base Publications (PR #59)
+- **ConfigHub vs GitOps Handover**:
+  - Authored [`docs/kb/the-gitops-handover-confighub-flux-and-source-of-truth.md`](docs/kb/the-gitops-handover-confighub-flux-and-source-of-truth.md). Proved through ConfigHub’s own documentation (`bring-flux-into-confighub.html`) that their architecture shifts the system of record away from Git into SaaS databases, breaking the core `main == production` contract. Contrast established with the **Shift-Left OCI Pattern** that preserves Git sovereignty.
+  - Authored [`docs/kb/confighub-architecture-and-strategy.md`](docs/kb/confighub-architecture-and-strategy.md). Evaluated enterprise tracking of AWS Lambda and Terraform without Kubernetes lock-in, and analyzed OCI packaging for sovereign AI weights.
+- **Local LLM Coexistence & Agentic Drift**:
+  - Authored [`docs/kb/the-hallucinated-terminal-qwen-agentic-ghosts.md`](docs/kb/the-hallucinated-terminal-qwen-agentic-ghosts.md) and [`docs/kb/how-to-pi-harness-strata-nocknock.md`](docs/kb/how-to-pi-harness-strata-nocknock.md), documenting terminal hallucination patterns and Pi CLI integration with NockNock.
+
+### 3. Data Integrity & Defect Triage: Issue #61 (Chart Gap Flattening)
+- **Defect Discovered**: Historical charts in the web portal flattened a ~19.3-hour ingestion downtime (12:38 AM EDT / 04:38 UTC to 7:58 PM EDT / 23:58 UTC) into adjacent 5-minute ticks, drawing an uninterrupted line across unrecorded time.
+- **Root Cause**:
+  1. `snapshots` table records exclusively live on-chain polling. While `ensure_price_history` backfills external GeckoTerminal candles into `market_price_history`, no synthetic snapshots are or should be generated for unpolled periods (Zero Mock Data Invariant).
+  2. Recharts `<XAxis dataKey="time" />` operates in categorical/ordinal mode by default. Consecutive array elements receive uniform pixel widths, compressing 19.3 hours into a single 5-minute slot.
+- **Issue Registered**: Filed and cataloged as [Issue #61](https://github.com/urmanac/nocknock/issues/61) with full root cause analysis in [`TRIAGE.md`](TRIAGE.md).
+- **Remediation Plan for Incoming Agent**:
+  - In `frontend/src/App.tsx`, compute $\Delta t = t_{i+1} - t_i$ across consecutive snapshots in `history`.
+  - When $\Delta t > 2 \times \text{sync_window_seconds}$ ($> 10\text{ min}$), insert a sentinel gap item with a `⚡ Telemetry Gap (Downtime)` label and `null` metrics.
+  - Configure Recharts `<Area>` and `<Line>` elements with `connectNulls={false}` so paths physically break, honestly demarcating downtime on the timeline without fabricating synthetic data.
 
 ---
 
