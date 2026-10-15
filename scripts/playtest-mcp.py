@@ -10,7 +10,7 @@ import subprocess
 import urllib.request
 import urllib.error
 
-API_URL = "http://127.0.0.1:8080/v1/mcp"
+API_URL = os.environ.get("NOCKNOCK_API_URL", f"http://127.0.0.1:{os.environ.get('PORT', '8081')}/v1/mcp")
 
 def test_stdio_mcp():
     print("==================================================")
@@ -97,7 +97,7 @@ def test_http_mcp():
             with urllib.request.urlopen(req, timeout=5) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.URLError as e:
-            print(f"  ⚠️ HTTP request failed: {e}. Is the worker running on :8080?")
+            print(f"  ⚠️ HTTP request failed: {e}. Is the worker running on port 8081?")
             return None
 
     init_res = post_mcp("initialize")

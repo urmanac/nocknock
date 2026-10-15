@@ -40,7 +40,7 @@ type Config struct {
 var defaultConfig = Config{
 	SyncWindowSec: 300,
 	Schedule:      "*/5 * * * *", // every 5 minutes
-	Port:          8080,
+	Port:          8081,
 	WASMPath:      "../../brain/target/wasm32-wasip1/release/nocknock_brain.wasm",
 }
 

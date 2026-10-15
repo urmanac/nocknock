@@ -29,6 +29,6 @@ COPY config.yaml* /app/
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
-EXPOSE 8080
+EXPOSE 8081
 
 ENTRYPOINT ["/app/nocknock-ingestion-worker"]

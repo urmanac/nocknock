@@ -34,7 +34,7 @@ lp_tokens:
 sync_window_seconds: 300
 
 # API server port
-port: 8080
+port: 8081
 
 # Uniswap V4 Position ID
 v4_position_id: 3126000
