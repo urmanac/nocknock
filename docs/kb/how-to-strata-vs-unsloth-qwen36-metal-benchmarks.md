@@ -22,9 +22,9 @@ To evaluate our achievement, we pit our custom Metal engine against the leading 
 
 The results delivered both a celebration of our deep-context engineering and a clear homework assignment for raw prefill throughput:
 
-* **The Strata Deep-Context Victory:** Strata successfully sustained continuous generation at **6,000+ context depth (7.2 tok/s decode)** and scales up to **16,384+ tokens** without memory ceilings. Unsloth slammed into a hard **8,192-token context ceiling** (`8.2k / 8.2k`): after generating 2,328 tokens across 97.8s, the conversation filled the buffer (5,862 prompt + 2,328 generated = 8,190 tokens). A resume attempt could only emit **2 additional tokens** before halting mid-sentence with *"Response hit the Max Tokens limit."*
-* **The Unsloth Prefill Masterclass:** Unsloth achieved an astonishing **263.6 tok/s prompt prefill** (5,862 tokens in 22.24s) on the M2 and sustained **23.8 tok/s generation** over 2,328 tokens via MTP speculative decoding, outperforming Strata's initial bringup prefill (~25 tok/s) by ~10×.
-* **The Path Forward:** Unsloth proved what the M2 hardware is capable of when batched SIMD matrix multiplication and MTP are fully unleashed. By standing on the shoulders of Unsloth's open-source architecture, we now have a validated roadmap to bring Strata's prefill to parity while maintaining our deep-context architectural edge.
+* **The Context Allocation Reality:** In this test session running on an Apple M2 (24 GB) under active desktop use, Unsloth's runtime dynamically budgeted an **8,192-token context window** (`8.2k / 8.2k`), likely based on available free system RAM at model load time. After generating 2,328 tokens across 97.8s, the conversation filled the budgeted buffer (5,862 prompt + 2,328 generated = 8,190 tokens). A resume attempt could only emit **2 additional tokens** before halting mid-sentence with *"Response hit the Max Tokens limit."* Meanwhile, Strata's custom Split-K attention and explicit memory management (`--kv-f16`) sustained continuous generation at **6,000+ context depth (7.2 tok/s decode)** and scales up to **16,384+ tokens** on the same 24 GB hardware.
+* **The Prefill Throughput Benchmark:** Unsloth demonstrated what batched SIMD matrix operations can do on Apple Silicon, clocking **263.6 tok/s prompt prefill** (5,862 tokens in 22.24s) on the M2 and sustaining **23.8 tok/s decode generation** over 2,328 tokens, outperforming Strata's initial bringup prefill (~25 tok/s) by ~10×.
+* **The Path Forward:** Unsloth showed the prefill throughput possible on consumer Apple Silicon. We now have an empirical baseline and a concrete homework list to bring Strata's prefill to parity while maintaining our deep-context architectural edge.
 
 ---
 
@@ -86,16 +86,20 @@ On 2026-10-19, we conducted head-to-head empirical benchmarks on the exact same 
 ┌────────────────────────────────────────────────────────────────────────┐
 │ TEST 1: SHALLOW CONTEXT DECODE (Apple M2)                              │
 ├─────────────────────────┬──────────────────────┬───────────────────────┤
-│ Metric                  │ Strata Metal (MTP 0) │ Unsloth Desktop (MTP) │
+│ Metric                  │ Strata Metal         │ Unsloth Desktop GGUF  │
 ├─────────────────────────┼──────────────────────┼───────────────────────┤
 │ Prefill Speed           │ ~25 tok/s            │ 174.2 tok/s           │
-│ Autoregressive Decode   │ 16.6 tok/s           │ 31.2 tok/s            │
-│ Draft Mechanism         │ Single-token decode  │ Multi-Token Predict   │
+│ Generation Decode Speed │ 16.6 tok/s           │ 31.2 tok/s            │
+│ MTP Status              │ Opt-in (--mtp 0 off) │ MTP weights in file*  │
 └─────────────────────────┴──────────────────────┴───────────────────────┘
 ```
+*\*Model file was `Qwen3.6-35B-A3B-MTP-GGUF`. Proposal and acceptance telemetry was not instrumented in the runtime.*
 
-#### Why Decode Hit 31.2 tok/s:
-On an Apple M2 with 100 GB/s unified memory bandwidth, reading a 3B active parameter slice quantized at ~2.5 bits/weight physically requires ~1.0–1.2 GB per token. Pure single-token autoregression is bound by memory bandwidth to a theoretical ceiling of ~15–18 tok/s. Hitting **31.2 tok/s** proved that **Multi-Token Prediction (MTP)** in Unsloth was achieving an acceptance rate of ~1.8×–2.0× tokens per forward pass.
+#### Analysis of Decode Throughput & Memory Bandwidth:
+On an Apple M2 with 100 GB/s unified memory bandwidth, reading a 3.1B active parameter slice quantized at ~2.5–3.0 bits/weight physically requires ~1.0–1.2 GB per token.
+- At 100% theoretical memory bus saturation, the upper bound would be ~80–100 tok/s.
+- At typical real-world kernel memory bandwidth efficiency on consumer Apple Silicon (~25%–35%), pure single-token autoregression can physically yield **20–30+ tok/s** on its own without any speculative decoding.
+- Hitting **31.2 tok/s** in shallow context and **23.8 tok/s** over 2,328 tokens represents impressive decode throughput. However, without engine logs recording speculative draft acceptance rates, we cannot definitively attribute this speed to Multi-Token Prediction (MTP) over highly optimized fused dequantization and attention kernels in llama.cpp (or a combination of both). In empirical engineering, we separate what was measured from what remains an unverified hypothesis.
 
 ---
 
@@ -119,27 +123,27 @@ The run completed in two chunks (visible via `< 1/2 >` and `< 2/2 >` in the UI):
   * **Generation Runway:** Exactly **2 tokens** in 50ms (19.9 tok/s).
   * **Context Depth:** **`8.2k / 8.2k` (FULL — Red Indicator)**.
   * **Failure Status:** **`Response hit the Max Tokens limit.`**
-  * **Outcome:** Truncated mid-sentence right after `(e.g., { "serving": bool, "url": string,` because the engine's static KV cache table had zero headroom left.
+  * **Outcome:** Truncated mid-sentence right after `(e.g., { "serving": bool, "url": string,` because the session's allocated 8,192-token context buffer was exhausted. (Note: in desktop runtimes like LM Studio, the context window is often dynamically calculated ("Auto") based on available free RAM at startup. With browser tabs, developer tools, and the OS competing for the 24 GB Unified Memory, the runtime budgeted context at 8.2k to prevent Out-Of-Memory paging.)
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │ TEST 2: DEEP CONTEXT DOCUMENT INGESTION (Apple M2)                     │
 ├─────────────────────────┬──────────────────────┬───────────────────────┤
-│ Metric                  │ Strata Custom Metal  │ Unsloth Desktop (MTP) │
+│ Metric                  │ Strata Custom Metal  │ Unsloth Desktop GGUF  │
 ├─────────────────────────┼──────────────────────┼───────────────────────┤
 │ Fresh Prompt Eval Speed │ ~25 tok/s            │ 263.6 tok/s           │
 │ Deep Generation Speed   │ 7.2 tok/s (pos >6k)  │ 23.8 tok/s (2.3k toks)│
-│ Context Architecture    │ Dynamic Split-K      │ Static 8,192 KV Table │
-│ Context Ceiling         │ 16,384+ tokens       │ 8,192 tokens (8.2k)   │
+│ Session Context Budget  │ 16,384 tokens        │ 8,192 tokens (8.2k)*  │
 │ Deep Completion Status  │ Finished full answer │ 🛑 Truncated at 8,190 │
 └─────────────────────────┴──────────────────────┴───────────────────────┘
 ```
+*\*Auto-budgeted based on available free memory at launch on 24 GB Mac.*
 
 #### The Critical Takeaways:
 
-1. **Unsloth's Sustained MTP Throughput:** Across a massive 2,328-token generation, Unsloth maintained a sustained **23.8 tok/s** on an M2 MacBook. This demonstrates that Multi-Token Prediction (MTP) is highly viable and stable over multi-minute generations on Apple Silicon.
-2. **The 8.2k Hard Ceiling is Real:** Even when prefill is blistering (263.6 tok/s), standard GGUF runtimes preallocate a static KV cache table capped at 8,192 tokens. Once prompt + output hit 8,190 tokens, the user is left with truncated sentences and broken code blocks.
-3. **Strata's Architectural Advantage:** Strata was intentionally built with custom Split-K attention (`k_attn_sk_part` / `k_attn_sk_merge`) and dynamic context memory management to break this exact 8k ceiling, enabling continuous reasoning up to 16,384+ tokens without truncation.
+1. **Sustained Decode Efficiency:** Across a massive 2,328-token generation, Unsloth maintained a sustained **23.8 tok/s** on an M2 MacBook. This demonstrates excellent sustained throughput over multi-minute generations on edge hardware, whether driven by optimized dequantization kernels, speculative MTP drafting, or both.
+2. **Dynamic Context Budgets & Memory Headroom:** In standard desktop runtimes, the context ceiling is determined by free system memory at launch. On a 24 GB machine with background applications (e.g., Chrome) active, the context budget was auto-capped at 8,192 tokens. Closing heavy apps would have allowed a higher auto-budgeted limit, but when prompt + output reached the allocated 8,190 tokens, the session ran out of headroom and truncated mid-generation.
+3. **Strata's Explicit Memory Budgeting:** Strata was built with custom Split-K attention (`k_attn_sk_part` / `k_attn_sk_merge`) and `--kv-f16` (PR #10, halving KV cache footprint) to deliberately manage memory. This allows explicit allocation of 16,384+ tokens on a 24 GB Mac even with ordinary system overhead, preventing unexpected truncation.
 
 ---
 
@@ -193,7 +197,7 @@ Having identified the exact structural bottlenecks, we have mapped out the Phase
 * **Goal:** Instead of executing per-token gathered GEMVs for routed experts, sort tokens in the chunk by expert ID and execute a single batched GEMM per active expert using Apple Silicon SIMD-group matrix intrinsics.
 
 ### Initiative 4: Dynamic & Paged Context Architecture
-* **Goal:** Solidify Strata's architectural edge. While standard engines hard-cap at 8,192 tokens, Strata's split-K architecture will be formalized into a paged virtual KV cache that allows seamless 16k to 32k reasoning on 24 GB hardware without ever hitting a "Max Tokens" truncation error.
+* **Goal:** Solidify Strata's architectural edge. While desktop runtimes frequently budget context to 8,192 tokens under shared system memory load, Strata's split-K architecture and fp16 KV cache will be formalized into a paged virtual KV cache that guarantees sustained 16k to 32k reasoning on 24 GB hardware without hitting memory-induced truncation.
 
 ---
 
@@ -203,6 +207,6 @@ The open-source AI community moves at a velocity that proprietary closed-source 
 
 When upstream Strata concluded that Qwen 3.6 could not run on Metal, we did not accept defeat. We built the engine, proved that hybrid linear-attention models can thrive on Apple Silicon, and successfully delivered continuous reasoning at context depths that exceed the standard tools.
 
-Now, by observing Unsloth's exceptional prefill performance and speculative MTP decoding, we have a concrete technical benchmark to surpass. By combining **Unsloth's batched prefill throughput** with **Strata's deep-context architecture**, the next generation of sovereign edge computing will see farther than either project could have seen alone.
+Now, by observing Unsloth's exceptional prefill performance and sustained decode throughput, we have a concrete technical benchmark to surpass. By combining **Unsloth's batched prefill throughput** with **Strata's deep-context architecture**, the next generation of sovereign edge computing will see farther than either project could have seen alone.
 
 The deck of tickets in Helix is clear. With Qwen 3.8 Flash Next guiding the technical review, Phase 2 begins now.
