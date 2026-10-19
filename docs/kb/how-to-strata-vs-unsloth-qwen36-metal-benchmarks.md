@@ -22,9 +22,9 @@ To evaluate our achievement, we pit our custom Metal engine against the leading 
 
 The results delivered both a celebration of our deep-context engineering and a clear homework assignment for raw prefill throughput:
 
-* **The Strata Deep-Context Victory:** Strata successfully sustained generation at **6,000+ context depth (7.2 tok/s decode)** and scales up to **16,384+ tokens** without memory ceilings. Unsloth slammed into a hard **8,192-token context ceiling**, generating only **2 tokens** before halting mid-thought with *"Response hit the Max Tokens limit."*
-* **The Unsloth Prefill Masterclass:** For fresh prompt deltas, Unsloth achieved an astonishing **236.7 tok/s prefill** on the M2 and instant **5,858-token prefix cache reuse**, outperforming Strata's initial bringup prefill (~25 tok/s) by ~9.5×.
-* **The Path Forward:** Unsloth proved what the M2 hardware is capable of when batched SIMD matrix multiplication is fully unleashed. By standing on the shoulders of Unsloth's open-source architecture, we now have a validated roadmap to bring Strata's prefill to parity while maintaining our deep-context architectural edge.
+* **The Strata Deep-Context Victory:** Strata successfully sustained continuous generation at **6,000+ context depth (7.2 tok/s decode)** and scales up to **16,384+ tokens** without memory ceilings. Unsloth slammed into a hard **8,192-token context ceiling** (`8.2k / 8.2k`): after generating 2,328 tokens across 97.8s, the conversation filled the buffer (5,862 prompt + 2,328 generated = 8,190 tokens). A resume attempt could only emit **2 additional tokens** before halting mid-sentence with *"Response hit the Max Tokens limit."*
+* **The Unsloth Prefill Masterclass:** Unsloth achieved an astonishing **263.6 tok/s prompt prefill** (5,862 tokens in 22.24s) on the M2 and sustained **23.8 tok/s generation** over 2,328 tokens via MTP speculative decoding, outperforming Strata's initial bringup prefill (~25 tok/s) by ~10×.
+* **The Path Forward:** Unsloth proved what the M2 hardware is capable of when batched SIMD matrix multiplication and MTP are fully unleashed. By standing on the shoulders of Unsloth's open-source architecture, we now have a validated roadmap to bring Strata's prefill to parity while maintaining our deep-context architectural edge.
 
 ---
 
@@ -101,36 +101,45 @@ On an Apple M2 with 100 GB/s unified memory bandwidth, reading a 3B active param
 
 ### Test 2: Deep Context Document Ingestion (`docs/AI_SETUP.md`)
 
-In the second test, we ingested a multi-turn session containing system prompts and the full [`docs/AI_SETUP.md`](file:///Users/yebyen/w/Strata/docs/AI_SETUP.md) documentation (~3,100 words, ~2,331 fresh tokens).
+In the second test, we ingested a multi-turn session containing system instructions and the full [`docs/AI_SETUP.md`](file:///Users/yebyen/w/Strata/docs/AI_SETUP.md) documentation (~5,862 total prompt tokens).
 
-* **Unsloth Telemetry (Screenshot 2):**
-  * Prompt Eval: **9.85s @ 236.7 tok/s**
-  * **Cache Hits:** **5,858 tokens** (Reused instantly with zero compute overhead)
-  * Fresh Evaluated Tokens: 2,331 tokens
-  * Generation Speed: 19.9 tok/s
-  * **Tokens Generated:** **2 tokens**
-  * **Context Depth:** **`8.2k / 8.2k` (FULL — Red Indicator)**
+The run completed in two chunks (visible via `< 1/2 >` and `< 2/2 >` in the UI):
+
+#### Chunk 1: The Full-Throttle Generation (Screenshot `3.25.01 PM`)
+* **Prompt Eval:** **22.24s @ 263.6 tok/s** (~5,862 prompt tokens evaluated in bulk).
+* **Generation:** **97.81s for 2,328 tokens @ 23.8 tok/s**.
+* **First Token Latency:** 22.24s.
+* **Content Generated:** The model generated an in-depth, production-grade 2,328-token architectural breakdown of the documentation, thoroughly reviewing Agent-First Design, Security Boundaries, Platform Routing, Operational Readiness, Token Efficiency, and OS-Level Interactivity.
+
+#### Chunk 2: The Hard Context Wall (Screenshot `2.46.32 PM`)
+* At the conclusion of Chunk 1, cumulative context reached:
+  $$\text{Total Context} = 5,862 \text{ prompt tokens} + 2,328 \text{ generated tokens} = 8,190 \text{ tokens}$$
+* When attempting to resume generation to complete Section 2 (*"JSON Output Schema"*):
+  * **Prompt Eval:** 9.85s @ 236.7 tok/s (**5,858 Cache Hits** reused instantly).
+  * **Generation Runway:** Exactly **2 tokens** in 50ms (19.9 tok/s).
+  * **Context Depth:** **`8.2k / 8.2k` (FULL — Red Indicator)**.
   * **Failure Status:** **`Response hit the Max Tokens limit.`**
+  * **Outcome:** Truncated mid-sentence right after `(e.g., { "serving": bool, "url": string,` because the engine's static KV cache table had zero headroom left.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │ TEST 2: DEEP CONTEXT DOCUMENT INGESTION (Apple M2)                     │
 ├─────────────────────────┬──────────────────────┬───────────────────────┤
-│ Metric                  │ Strata Custom Metal  │ Unsloth Desktop       │
+│ Metric                  │ Strata Custom Metal  │ Unsloth Desktop (MTP) │
 ├─────────────────────────┼──────────────────────┼───────────────────────┤
-│ Cache Hits              │ 0 (Fresh prefill)    │ 5,858 tokens (0 ms)   │
-│ Fresh Prefill Speed     │ ~25 tok/s            │ 236.7 tok/s           │
-│ Context Ceiling         │ 16,384+ tokens (Dyn) │ 8,192 tokens (Hard)   │
-│ Decode at 6,000+ Depth  │ 7.2 tok/s sustained  │ 19.9 tok/s (2 toks)   │
-│ Completion Status       │ Completed full answer│ 🛑 Truncated at 2 toks│
+│ Fresh Prompt Eval Speed │ ~25 tok/s            │ 263.6 tok/s           │
+│ Deep Generation Speed   │ 7.2 tok/s (pos >6k)  │ 23.8 tok/s (2.3k toks)│
+│ Context Architecture    │ Dynamic Split-K      │ Static 8,192 KV Table │
+│ Context Ceiling         │ 16,384+ tokens       │ 8,192 tokens (8.2k)   │
+│ Deep Completion Status  │ Finished full answer │ 🛑 Truncated at 8,190 │
 └─────────────────────────┴──────────────────────┴───────────────────────┘
 ```
 
 #### The Critical Takeaways:
 
-1. **Unsloth's Blistering Speed:** For the 2,331 fresh tokens, Unsloth clocked **236.7 tok/s**. It also demonstrated the power of **Prompt Caching**, instantly skipping 5,858 already-seen prefix tokens.
-2. **The Hard Context Wall:** Unsloth's static KV cache table choked at 8,192 tokens. Because the cached history (5,858) plus document (2,331) equaled 8,189 tokens, the engine literally ran out of memory runway after generating **only 2 tokens**. It completely failed to complete the task.
-3. **Strata's Superior Runway:** In Strata, our custom Split-K attention and dynamic context memory management successfully digested the 5,760-token prefill, sailed past 6,000 tokens of cumulative context, and sustained **7.2 tok/s decode** to completion without truncating.
+1. **Unsloth's Sustained MTP Throughput:** Across a massive 2,328-token generation, Unsloth maintained a sustained **23.8 tok/s** on an M2 MacBook. This demonstrates that Multi-Token Prediction (MTP) is highly viable and stable over multi-minute generations on Apple Silicon.
+2. **The 8.2k Hard Ceiling is Real:** Even when prefill is blistering (263.6 tok/s), standard GGUF runtimes preallocate a static KV cache table capped at 8,192 tokens. Once prompt + output hit 8,190 tokens, the user is left with truncated sentences and broken code blocks.
+3. **Strata's Architectural Advantage:** Strata was intentionally built with custom Split-K attention (`k_attn_sk_part` / `k_attn_sk_merge`) and dynamic context memory management to break this exact 8k ceiling, enabling continuous reasoning up to 16,384+ tokens without truncation.
 
 ---
 
