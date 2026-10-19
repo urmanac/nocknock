@@ -25,8 +25,8 @@ To evaluate our achievement, we pit our custom Metal engine against the leading 
 
 The results delivered both a celebration of our deep-context engineering and a clear homework assignment for raw prefill throughput:
 
-* **Context Allocation & The 32k Reality:** In our initial test session running on an Apple M2 (24 GB) under active desktop use, Unsloth's runtime dynamically budgeted an **8,192-token context window** (`8.2k / 8.2k`). After generating 2,328 tokens across 97.8s, the conversation filled the budgeted buffer (5,862 prompt + 2,328 generated = 8,190 tokens) and halted mid-sentence with *"Response hit the Max Tokens limit."* However, subsequent testing revealed this was a conservative Auto-fit allocation under concurrent memory load rather than an immutable engine ceiling: with background apps closed, manually setting context to **32.8k loaded and ran cleanly** with zero failures on the same 24 GB M2. Strata's differentiator is an explicit working-set gate (`STRATA_Q36M_MEM_OK=1`) that refuses overcommit instead of guessing, paired with `--kv-f16` and Split-K attention to guarantee 16k+ context in under 0.35 GB of KV memory.
-* **Prefill Throughput & Batch Scaling:** Unsloth demonstrated what whole-ubatch matrix execution can do on Apple Silicon, clocking **263.6 tok/s prompt prefill** on a bulk batch of 5,862 tokens (and 259.9 tok/s in a 32k window), scaling down to 136.0 tok/s on a smaller batch of ~447 tokens due to fixed launch overheads. This compares against Strata's bringup baseline of ~22.3–25 tok/s (measured token-by-token; full all-levers matrix pending T12 re-baseline).
+* **Context Allocation & The 32k Reality:** In our initial test session running on an Apple M2 (24 GB) under active desktop use, Unsloth's runtime dynamically budgeted an **8,192-token context window** (`8.2k / 8.2k`). After generating 2,328 tokens across 97.8s, the conversation filled the budgeted buffer (5,862 prompt + 2,328 generated = 8,190 tokens) and halted mid-sentence with *"Response hit the Max Tokens limit."* However, subsequent testing revealed this was a conservative Auto-fit allocation under concurrent memory load rather than an immutable engine ceiling: with background apps closed, manually setting context to **32.8k loaded and ran cleanly** with zero failures on the same 24 GB M2. Strata's differentiator is an explicit working-set gate (`STRATA_Q36M_MEM_OK=1`) that refuses overcommit instead of guessing, paired with `--kv-f16` and Split-K attention to enable 16k+ context at a measured 0.34 GB of KV memory.
+* **Prefill Throughput & Batch Scaling:** Unsloth demonstrated what whole-ubatch matrix execution can do on Apple Silicon, clocking **263.6 tok/s prompt prefill** on a bulk batch of 5,862 tokens (and 259.9 tok/s in a 32k window), scaling down to 136.0 tok/s on a smaller batch of ~447 tokens due to fixed launch overheads. This compares against Strata's bringup baseline (~25 tok/s token-by-token, or 22.3 tok/s at 2K chunk-512 pre-levers; full all-levers matrix pending T12 re-baseline).
 * **Sustained Decode at Depth:** Unsloth sustained **23.8 tok/s** over 2,328 tokens at 8k context, and maintained **21.2 tok/s sustained from 6.3k to 11.3k depth** over 5,020 generated tokens. Deep decode on llama.cpp does not fall off a cliff, maintaining ~26–30% memory bus efficiency.
 * **The Path Forward:** Unsloth established a concrete prefill throughput baseline. Guided by Qwen-3.8-Flash-Next's referee audit, Strata's Phase 2 roadmap is measurement-first: re-baselining current all-levers prefill (T12), instrumenting dispatch counts (T13), measuring the GQA fold A/B for deep decode (T6), and fusing chunk attention (T9) and MoE GEMM (T10) to achieve parity while preserving our deep-context architectural edge.
 
@@ -66,7 +66,7 @@ Dense projections in the attention and feed-forward blocks previously used naive
 * **Speedup (Source: `docs/QWEN36_METAL.md` §10):** Reduced dense projection latency from **110.2 ms to 7.2 ms** per chunk at the `attn_qkv` shape (**15.3× faster**).
 
 ### Layer 3: Split-K Attention & Memory Budgeting
-To allow context to expand beyond the default 8,192 limit, we implemented `k_attn_sk_part` and `k_attn_sk_merge`. These kernels partition the KV cache into 256-cell blocks, compute online-softmax partial accumulators across parallel threadgroups, and merge them in a reduction pass. Combined with `--kv-f16` (PR #10), this enabled 16k context on a 24 GB Mac in less than 0.35 GB of KV memory.
+To allow context to expand beyond the default 8,192 limit, we implemented `k_attn_sk_part` and `k_attn_sk_merge`. These kernels partition the KV cache into 256-cell blocks, compute online-softmax partial accumulators across parallel threadgroups, and merge them in a reduction pass. Combined with `--kv-f16` (PR #10), this enabled 16k context on a 24 GB Mac at a measured 0.34 GB of KV memory (0.17 GB at 8k, 0.67 GB at 32k; `docs/QWEN36_METAL.md` §9).
 
 ### Layer 4: Multi-Token Prediction (MTP) Speculative Heads
 By loading the auxiliary `blk.40` nextn draft weights and implementing an in-place draft-vocab subset head (`--draft-vocab N`), we laid the groundwork for speculative decoding directly on Apple Silicon. In initial M2 testing (T4/T4.5), full-vocab verify window overheads dominated without window calibration, leaving `--mtp` opt-in. A calibrated window sweep remains an active research path in Phase 2.
@@ -137,12 +137,12 @@ The run completed in two chunks (visible via `< 1/2 >` and `< 2/2 >` in the UI):
 │ Metric                  │ Strata Custom Metal  │ Unsloth Desktop GGUF  │
 ├─────────────────────────┼──────────────────────┼───────────────────────┤
 │ Bulk Prompt Eval Speed  │ ~25 tok/s (bringup)* │ 263.6 tok/s (N=5,862) │
-│ Deep Generation Speed   │ 7.2 tok/s (pos >6k)  │ 23.8 tok/s (2.3k toks)│
+│ Deep Generation Speed   │ 7.2 tok/s (bringup)* │ 23.8 tok/s (2.3k toks)│
 │ Session Context Budget  │ 16,384 tokens        │ 8,192 tokens (8.2k)†  │
 │ Deep Completion Status  │ Finished full answer │ 🛑 Truncated at 8,190 │
 └─────────────────────────┴──────────────────────┴───────────────────────┘
 ```
-*\*Bringup baseline; fresh all-levers matrix pending T12.*  
+*\*Strata bringup baselines: ~25 tok/s prompt prefill, 7.2 tok/s deep generation at pos >6k (pre-lever; recorded equivalents: 8 tok/s at pos ~4,100 pre-fold, 12.2–16.3 tok/s all-levers at ≤4k depth; all-levers deep matrix pending T12/T6).*  
 *†Auto-budgeted based on available free memory under concurrent desktop load.*
 
 ---
@@ -177,7 +177,7 @@ Per output token at depth $L$, reading weights requires ~0.97–1.16 GB, GDN rec
 
 ## 4. Architectural Analysis: Why Unsloth Prefills Faster
 
-Why did Unsloth evaluate fresh tokens at 236.7 tok/s while Strata clocked ~25 tok/s?
+Why did Unsloth evaluate bulk prompts at 263.6 tok/s ($N=5,862$) and fresh delta tokens at 236.7 tok/s ($N=2,331$) while Strata's bringup baseline clocked ~25 tok/s (evaluated token-by-token)?
 
 A code audit of [`metal/src/engine/q36_metal.cpp`](file:///Users/yebyen/w/Strata/metal/src/engine/q36_metal.cpp#L1274-L1278) reveals the root cause:
 
@@ -234,7 +234,7 @@ Following peer review and technical audit by Qwen-3.8-Flash-Next ([`docs/QWEN36_
 
 ### Initiative 2: T9 — Batched 2D FlashAttention for QSA Chunk Prefill
 * **Scope:** Replace the per-row `push_qsa_attention` dispatch loop with a fused causal FlashAttention kernel on Metal behind an opt-in knob (`STRATA_Q36M_ATTN_FLASH=1`).
-* **Parity Contract:** Because fused online-softmax attention alters accumulation order, gate acceptance on a measured rel-bound envelope (1e-3), 10-prompt ladder token-identity, byte-identical default, and a measured $\ge 5\times$ speedup bar across all chunk sizes.
+* **Parity Contract:** Because fused online-softmax attention alters accumulation order, gate acceptance on a measured rel-bound envelope (measured; the §10 MMA precedent was 1e-3), 10-prompt ladder token-identity, byte-identical default, and a measured $\ge 5\times$ speedup bar across all chunk sizes.
 
 ### Initiative 3: T10 — Batched MoE GEMM for Routed Experts
 * **Scope:** Group chunk tokens by routed expert ID and execute batched GEMMs using the `q36_dense.metal` donor. Because pinned upstream PR #264 (+16.4–17.8% MoE prefill) is CUDA-only, this represents a unique differentiator for Strata on Metal.
