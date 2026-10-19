@@ -5,7 +5,8 @@ use std::io::{self, BufRead, Write};
 use std::time::Duration;
 
 const DEFAULT_BASE_RPC: &str = "https://mainnet.base.org";
-const LOCAL_API_URL: &str = "http://127.0.0.1:8080/v1/snapshot/latest";
+#[allow(dead_code)]
+const LOCAL_API_URL: &str = "http://127.0.0.1:8081/v1/snapshot/latest";
 const WALLET_ADDR: &str = "0xeE114cC97eC5adeB34bA5645e315B497D8487a45";
 #[allow(dead_code)]
 const WALLET_PADDED: &str = "000000000000000000000000ee114cc97ec5adeb34ba5645e315b497d8487a45";
@@ -152,6 +153,13 @@ async fn main() -> Result<()> {
 }
 
 async fn handle_tool_call(client: &Client, tool_name: &str) -> String {
+    let port = std::env::var("PORT").unwrap_or_else(|_| "8081".to_string());
+    let api_base = std::env::var("NOCKNOCK_API_URL")
+        .or_else(|_| std::env::var("API_URL"))
+        .unwrap_or_else(|_| format!("http://127.0.0.1:{port}/v1"));
+    let mcp_url = format!("{api_base}/mcp");
+    let snapshot_url = format!("{api_base}/snapshot/latest");
+
     // 1. Try local Tier 1 HTTP MCP endpoint first
     let mcp_payload = json!({
         "jsonrpc": "2.0",
@@ -161,7 +169,7 @@ async fn handle_tool_call(client: &Client, tool_name: &str) -> String {
             "name": tool_name
         }
     });
-    if let Ok(resp) = client.post("http://127.0.0.1:8080/v1/mcp").json(&mcp_payload).timeout(Duration::from_secs(2)).send().await {
+    if let Ok(resp) = client.post(&mcp_url).json(&mcp_payload).timeout(Duration::from_secs(2)).send().await {
         if resp.status().is_success() {
             if let Ok(mcp_val) = resp.json::<Value>().await {
                 if let Some(text) = mcp_val.pointer("/result/content/0/text").and_then(|t| t.as_str()) {
@@ -172,7 +180,7 @@ async fn handle_tool_call(client: &Client, tool_name: &str) -> String {
     }
 
     // Fallback: try snapshot API
-    if let Ok(resp) = client.get(LOCAL_API_URL).timeout(Duration::from_secs(2)).send().await {
+    if let Ok(resp) = client.get(&snapshot_url).timeout(Duration::from_secs(2)).send().await {
         if resp.status().is_success() {
             if let Ok(snap) = resp.json::<Value>().await {
                 if let Some(data) = snap.get("data") {

@@ -76,7 +76,7 @@ This guide captures the operational rules, environment quirks, toolchain configu
     cd ingestion-worker && SQLX_OFFLINE=true cargo build --release
     ```
 - **Binaries Produced**:
-  - `nocknock-ingestion-worker`: Background ingestion daemon and Axum REST API (port 8080).
+  - `nocknock-ingestion-worker`: Background ingestion daemon and Axum REST API (port 8081; port 8080 reserved for Strata sovereign LLM).
   - `nocknock-mcp`: Stdio Model Context Protocol (MCP) server for Claude Desktop, Gemini Antigravity, and AI agents.
 
 ---
@@ -86,7 +86,7 @@ This guide captures the operational rules, environment quirks, toolchain configu
 - **Contract Tests (`frontend/src/api/freshness.contract.test.ts`)**:
   - Vitest runs both unit staleness tests and live API schema validation.
   - In CI containers without the backend daemon running, tests MUST NOT hang.
-  - Uses an `AbortController` (500ms timeout) in `beforeAll` to detect whether `localhost:8080` is reachable. If unreachable, live network tests are gracefully skipped while contract assertions and timestamp math tests run.
+  - Uses an `AbortController` (500ms timeout) in `beforeAll` to detect whether `localhost:8081` is reachable. If unreachable, live network tests are gracefully skipped while contract assertions and timestamp math tests run.
 - **Node Toolchain**:
   - Configured for Node 22+ (local runtime is Node 26).
   - Build command: `cd frontend && npm run build` (tsc + vite).
@@ -123,7 +123,7 @@ This guide captures the operational rules, environment quirks, toolchain configu
 
 - The project uses persistent tmux sessions for local running:
   - `make tmux` starts session `nocknock`:
-    - Window 0: `ingestion-worker` daemon on `:8080`
+    - Window 0: `ingestion-worker` daemon on `:8081`
     - Window 1: `frontend` Vite dev server on `:3000`
   - `make tmux-status`: Verify session is alive.
   - `make tmux-attach`: Attach to interactive session (detach with `Ctrl-b d`).
