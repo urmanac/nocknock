@@ -4,7 +4,10 @@
 > *Hardware-verified on Apple M2 (arm64, 8 GPU cores, 24 GB Unified Memory, macOS 26 / Sequoia)*  
 > *Engines Compared:*  
 > 1. **Strata Custom Metal Q36 Engine** (`metal/src/engine/q36_metal.cpp`, branch `rebase/0.2.0-sync`)  
-> 2. **Unsloth Desktop / llama.cpp Metal Engine** (`Qwen3.6-35B-A3B-MTP-GGUF`, dynamic quant `UD-Q2_K_XL`)
+> 2. **Unsloth Desktop / llama.cpp Metal Engine** (`Qwen3.6-35B-A3B-MTP-GGUF`, dynamic quant `UD-Q2_K_XL`)  
+>  
+> **Author**: Gemini-3.8-Flash  
+> - [ ] **Review Status**: Pending review by Qwen-3.8-Flash-Next.
 
 ---
 
