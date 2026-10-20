@@ -193,7 +193,7 @@ And in the MoE routed experts ([`q36_metal.cpp#L1336-L1376`](file:///Users/yebye
 // Routed experts. The gate/up products at n_in = 2048 run the DECODE k_gemv_lpr8 per entry...
 ```
 
-* **The Parity Tax:** During our initial bringup, our highest priority was proving that our Metal port was 100% mathematically correct. To ensure bit-for-bit parity with decode, `forward_prompt_chunk` dispatched attention **row-by-row** (`nt = 512` dispatches per layer) and executed expert routing via **gathered GEMV**. For attention alone, 512 rows across 10 QSA layers with several sub-kernels generate an estimated ~20,480 dispatches per chunk (*unconfirmed static analysis estimate pending ticket T13 instrumentation*).
+* **The Parity Tax:** During our initial bringup, our highest priority was proving that our Metal port was 100% mathematically correct. To ensure bit-for-bit parity with decode, `forward_prompt_chunk` dispatched attention **row-by-row** (`nt = 512` dispatches per layer) and executed expert routing via **gathered GEMV**. For attention alone, 512 rows across 10 QSA layers with several sub-kernels generated an initial baseline of **10,250 attention dispatches and 11,210 total dispatches per 512-token chunk** (measured on M2 via ticket T13 instrumentation in PR #13, replacing the bringup static estimate of ~20,480). Under the multi-row split-K block lever (`STRATA_Q36M_ATTN_ROWS=16`), this collapsed to **650 attention dispatches and 1,610 total dispatches per chunk** ($16.0\times$ exact attention reduction, $7.0\times$ overall).
 * **What llama.cpp / ggml-metal Does:** Upstream llama.cpp executes **whole-ubatch batched GEMM** and **fused chunk attention** over the prompt in consolidated kernel dispatches, amortizing fixed command encoder launch overheads. (Note: Unsloth's 20 pinned commits in `b11724-mix-c208e5f` are CUDA/HIP/Vulkan—e.g. #264 MoE prefill is CUDA-only—so on Apple Silicon, the engine is running upstream `ggml-metal`).
 
 ---
@@ -220,9 +220,9 @@ Following peer review and technical audit by Qwen-3.8-Flash-Next ([`docs/QWEN36_
 * **Scope:** Before claiming comparative multiples, execute `tools/qwen35/q36_prefill_bench.py` on the M2 with all landed levers enabled (`STRATA_Q36M_GDN_WY=1`, `STRATA_Q36M_DENSE_MMA=1`, `STRATA_Q36M_ATTN_GQA=1`, and `--kv-f16`).
 * **Target:** Establish Strata's verified post-bringup baseline across 2048 and 4098 prompt lengths.
 
-### Prerequisite 2: T13 — Dispatch-Count Instrumentation (Second)
-* **Scope:** Add an explicit counter in `q36_metal.cpp` recording total command encoder dispatches per chunk across attention, MoE GEMV, and GDN recurrence.
-* **Target:** Replace static estimates with exact measurements; quantify the dispatch reduction achieved by T9 and T10.
+### Prerequisite 2: T13 — Dispatch-Count Instrumentation (Delivered in Strata PR #13)
+* **Scope:** Add an explicit counter in `Context::run_graph` recording total command encoder dispatches per chunk across attention, MoE GEMV, and GDN recurrence via `STRATA_Q36M_DISPATCH_LOG=1`.
+* **Hardware Measurement (Apple M2, 2026-10-20):** Replaced static estimates with verified runtime telemetry. Baseline 512-token chunk dispatches measured at **10,250 attention** (512 rows × 2 [part + merge] × 10 QSA layers + 10 prep), 749 MoE GEMV, and 211 other (11,210 total).
 
 ### Prerequisite 3: T6 A/B — GQA-Folded Attention Deep-Decode Gate
 * **Scope:** Measure decode throughput at position ≈4,100 and prompt read time at 16k context with the GQA fold on vs. off.
@@ -232,8 +232,9 @@ Following peer review and technical audit by Qwen-3.8-Flash-Next ([`docs/QWEN36_
 * **Clarification:** Basic multi-turn prefix matching and KV/SSM state reuse already shipped in T0 (`q36_metal.cpp` L2419–2429; `docs/QWEN36_METAL.md` §2.2).
 * **Scope:** (a) Measure existing reuse over multi-turn sessions (confirming delta-only evaluation), and (b) refine divergence handling to retain the shared common prefix rather than resetting fully.
 
-### Initiative 2: T9 — Batched 2D FlashAttention for QSA Chunk Prefill
-* **Scope:** Replace the per-row `push_qsa_attention` dispatch loop with a fused causal FlashAttention kernel on Metal behind an opt-in knob (`STRATA_Q36M_ATTN_FLASH=1`).
+### Initiative 2: T9 — Batched 2D FlashAttention for QSA Chunk Prefill (Fallback Rung Delivered in Strata PR #13)
+* **Fallback Rung Delivered (PR #13):** Implemented multi-row split-K attention blocks (`STRATA_Q36M_ATTN_ROWS=B`) using 3D grid indexing in `k_attn_sk_part_gqa`. Verified bit-identical across 44/44 harness stages and 10/10 parity prompt ladders with `--prefill 512` (unfolded and GQA-folded). At $B=16$, attention dispatches collapsed from **10,250 to 650** ($16.0\times$ exact reduction), and total chunk dispatches dropped from **11,210 to 1,610** ($7.0\times$ reduction).
+* **Speedup Follow-Up Scope:** Replace the remaining block-dispatch sequence with a fused causal 2D FlashAttention kernel on Metal behind `STRATA_Q36M_ATTN_FLASH=1`.
 * **Parity Contract:** Because fused online-softmax attention alters accumulation order, gate acceptance on a measured rel-bound envelope (measured; the §10 MMA precedent was 1e-3), 10-prompt ladder token-identity, byte-identical default, and a measured $\ge 5\times$ speedup bar across all chunk sizes.
 
 ### Initiative 3: T10 — Batched MoE GEMM for Routed Experts
