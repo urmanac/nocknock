@@ -8,27 +8,28 @@
 - [x] Verify ETH/USD source: both Chainlink candidates empty → adopted approved fallback: canonical v3 WETH/USDC 0.05% pool 0xd0b53d92… (factory-resolved, price-verified $2,373)
 - [x] Record all identifiers in design.md + ONCHAIN_INTEGRATION.md (Phase-2 docs task)
 
-## Phase 2 — Data model & specs
-- [ ] `specs/core/snapshot.yaml`: add `Position` schema + `positions` array on `SnapshotData`; platform enums gain real `UniswapV3`; deprecate `ConcentratedLiquidity`; replace `tranche_N_nock` series with `positions_nock`; bump `meta.version` to 2.0.0
-- [ ] `specs/core/api.yaml`: update envelope docs; `ClaimFeeAction.platform` + record-harvest `platform` enums gain `uniswap-v3`; remove Aerodrome examples/labels from `/execute/claim-fees/payload`
-- [ ] `frontend/src/types/snapshot.ts`: mirror `Position`, series change, enum additions, `uniswap-v3` platform
-- [ ] `ingestion-worker/config.yaml.example`: add `positions:` section (discovered ids), drop Aerodrome `tracked_pools`/`lp_tokens`, re-point `market_data.pool_address`, rename `uniswap_v4_lp` → `uniswap_lp`
-- [ ] `CHANGELOG.md`: Unreleased entry with migration notes for removed field names
+## Phase 2 — Data model & specs — DONE
+- [x] `specs/core/snapshot.yaml`: add `Position` schema + `positions` array on `SnapshotData`; platform enums gain real `UniswapV3`; deprecate `ConcentratedLiquidity`; replace `tranche_N_nock` series with `positions_nock`; bump `meta.version` to 2.0.0
+- [x] `specs/core/api.yaml`: update envelope docs; `ClaimFeeAction.platform` + record-harvest `platform` enums gain `uniswap-v3`; remove Aerodrome examples/labels from `/execute/claim-fees/payload`
+- [x] `frontend/src/types/snapshot.ts`: mirror `Position`, series change, enum additions, `uniswap-v3` platform
+- [x] `ingestion-worker/config.yaml.example`: add `positions:` section (discovered ids), drop Aerodrome `tracked_pools`/`lp_tokens`, re-point `market_data.pool_address`, rename `uniswap_v4_lp` → `uniswap_lp`
+- [x] `CHANGELOG.md`: Unreleased entry with migration notes for removed field names
 
-## Phase 2 — Ingestion worker
-- [ ] Config structs: parse new `positions:` section (network, protocol, nft_id, pool_id/npm_address, currency ordering, is_price_source); retain serde tolerance for old configs
-- [ ] `fetch_raw_data()`: remove Aerodrome getReserves/LP-share/claimFees logic and the `0x88A43…bB9C` ETH/USD source; add per-position v4 reads (PositionLiquidity, PoolAndPositionInfo, StateView getPositionInfo/getFeeGrowthInside, getSlot0) and v3 reads (positions decode, factory getPool, slot0)
-- [ ] Implement exact per-position amount math (liquidity + sqrtP + ticks), in_range check, unclaimed fees (v4 fee-growth math; v3 tokensOwed); replace `RawOnChainData.live_tranche_*` with `positions: Vec<RawPosition>`
-- [ ] Price pipeline: NOCK/USD spot from the designated `is_price_source` pool slot0; ETH/USD from the verified Chainlink feed with 1h staleness check; rename `PRICE_SOURCE_RPC` to `"uniswap_rpc"`; switch regime RSI SQL to `token_price_series[0]`
-- [ ] `compute_derived_metrics()`: aggregate wallet + Σ positions; deviation matrix buckets Treasury / uniswap_lp / Cash; advice engine text de-Aerodromed; RANGE EXIT FLASHPOINT keyed on price-source range; `tick_bracket_hypervisor` emits one bracket per position
-- [ ] `pool_mechanics`: emit per tracked Uniswap pool (slot0 tick + sqrtPrice, real fee tier, wallet's amounts as volatile_assets); remove Aerodrome entry
-- [ ] `get_claim_fees_payload_handler()`: drop Aerodrome action; emit one V4 collect per tracked position with non-dust fees using per-position currency ordering (v3 collect only if confirmed in Phase 1)
-- [ ] `src/bin/mcp.rs`: update tool descriptions and the direct-RPC fallback to stop presenting Aerodrome state as live
+## Phase 2 — Ingestion worker — DONE (live-validated 2026-10-24)
+- [x] Config structs: parse new `positions:` section (network, protocol, nft_id, pool_id/npm_address, currency ordering, is_price_source); retain serde tolerance for old configs
+- [x] `fetch_raw_data()`: remove Aerodrome getReserves/LP-share/claimFees logic and the `0x88A43…bB9C` ETH/USD source; add per-position v4 reads (PositionLiquidity, poolKeys validation, StateView getPositionInfo/getFeeGrowthInside, getSlot0) and v3 reads (positions decode, slot0, feeGrowthGlobal + tick outsides)
+- [x] Implement exact per-position amount math (liquidity + sqrtP + ticks), in_range check, unclaimed fees (v4 fee-growth math; v3 inside-delta + tokensOwed); replace `RawOnChainData.live_tranche_*` with `positions: Vec<RawPosition>`
+- [x] Price pipeline: NOCK/USD spot from the designated `is_price_source` pool slot0; ETH/USD from the verified canonical v3 WETH/USDC pool; rename `PRICE_SOURCE_RPC` to `"uniswap_rpc"`; switch regime RSI SQL to `token_price_series[0]`
+- [x] `compute_derived_metrics()`: aggregate wallet + Σ positions; deviation matrix buckets Treasury / uniswap_lp / Cash; advice engine de-Aerodromed; RANGE EXIT keyed on price-source range; `tick_bracket_hypervisor` emits one bracket per position
+- [x] `pool_mechanics`: emit per tracked Uniswap pool (slot0 tick + sqrtPrice, real fee tier, wallet's amounts as volatile_assets); remove Aerodrome entry
+- [x] `get_claim_fees_payload_handler()`: drop Aerodrome action; emit one V4 collect per tracked position with per-position currency ordering (live-validated: both simulate success on Base)
+- [x] `src/bin/mcp.rs`: update tool descriptions and the direct-RPC fallback to stop presenting Aerodrome state as live
+- [x] Live-run bugfixes found during validation: v3 fee-delta used the wrong TickInfo word (fixed via NPM collect staticcall ground truth: 0.165434 NOCK exact match); lower/upper price orientation; adaptive bracket price precision; meta.version bumped
 
 ## Phase 2 — Frontend
-- [ ] `App.tsx`: Positions panel rendering N cards (pair, protocol badge, fee tier, range, split, value, fees, in-range pill); NOCK-stack chart from per-position series + safe haven; iterate N brackets in the hypervisor; de-Aerodrome labels/pills; `SOURCE_LABELS` + `uniswap_rpc`
+- [~] `App.tsx`: Positions panel rendering N cards (pair, protocol badge, fee tier, range, split, value, fees, in-range pill); NOCK-stack chart from per-position series + safe haven; iterate N brackets in the hypervisor; de-Aerodrome labels/pills; `SOURCE_LABELS` + `uniswap_rpc`
 - [ ] `LiteCockpit.tsx`: relabel "UNCOLLECTED FEES (BOTH LPs)" → "(ALL POSITIONS)"; verify generic action rendering still works with per-position labels
-- [ ] `walletconnect.ts`: add non-Base chain support only if Phase 1 confirmed a position on another network
+- [ ] `walletconnect.ts`: no change needed — Phase 1 confirmed all positions on Base
 
 ## Phase 2 — Docs
 - [ ] `ONCHAIN_INTEGRATION.md`: mark §2 HISTORICAL (liquidated 2026-10-23); add new Uniswap-only portfolio section with discovered identifiers, selectors, and price-source decision
