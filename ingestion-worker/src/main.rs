@@ -1525,7 +1525,7 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
         meta: SnapshotMeta {
             generated_at: now,
             state_hash: state_hash.clone(),
-            version: "1.0.0".to_string(),
+            version: "2.0.0".to_string(),
             snapshot_id: Uuid::new_v4(),
         },
         data: snapshot_data,
@@ -1825,6 +1825,17 @@ fn parse_hex_word_i32(hex_word: &str) -> Result<i32> {
     let clean = hex_word.trim_start_matches("0x");
     let v = u32::from_str_radix(clean, 16).map_err(|e| anyhow::anyhow!("bad hex word: {e}"))?;
     Ok(v as i32)
+}
+
+/// Adaptive-precision price formatting: 5 decimals for readable values, 8 for
+/// sub-cent ones (e.g. ETH-per-NOCK ≈ 0.0000081) so brackets never collapse to
+/// "0.00001".
+fn fmt_price(v: f64) -> String {
+    if v != 0.0 && v.abs() < 0.001 {
+        format!("{:.8}", v)
+    } else {
+        format!("{:.5}", v)
+    }
 }
 
 // ============================================================
@@ -3403,13 +3414,14 @@ fn build_position_snapshots(raw_positions: &[RawPosition], nock_usd: f64, eth_us
                 fees_usd: format!("{:.6}", fees_usd),
                 lower_tick: p.tick_lower,
                 upper_tick: p.tick_upper,
+                // Display orientation: bigger tick -> lower price (token0-per-token1).
                 lower_price: format!(
-                    "{:.10}",
-                    tick_to_display_price_dec(p.tick_lower, p.token0.decimals, p.token1.decimals)
+                    "{}",
+                    fmt_price(tick_to_display_price_dec(p.tick_upper, p.token0.decimals, p.token1.decimals))
                 ),
                 upper_price: format!(
-                    "{:.10}",
-                    tick_to_display_price_dec(p.tick_upper, p.token0.decimals, p.token1.decimals)
+                    "{}",
+                    fmt_price(tick_to_display_price_dec(p.tick_lower, p.token0.decimals, p.token1.decimals))
                 ),
                 liquidity_amount: p.liquidity.to_string(),
                 in_range: p.in_range,
@@ -3486,8 +3498,8 @@ fn build_contract_fees(positions: &[Position], live_gas_cost_usd: f64) -> Vec<Co
                     p.token0.symbol,
                     p.tokens_owed_1.parse::<f64>().unwrap_or(0.0),
                     p.token1.symbol,
-                    p0 = p.token0.decimals as usize,
-                    p1 = p.token1.decimals as usize,
+                    p0 = (p.token0.decimals as usize).min(8),
+                    p1 = (p.token1.decimals as usize).min(8),
                 ),
                 amount_usd: p.fees_usd.clone(),
                 claimable: p.fees_usd.parse::<f64>().unwrap_or(0.0) > 0.0,
@@ -3782,26 +3794,15 @@ async fn fetch_v3_position(
     //    (this pool returns an 8-word struct; words 4+ are fork extras we ignore).
     let fg0_g = post_rpc_word(http_client, alchemy_url, pool.as_str(), V3_FEE_GROWTH_GLOBAL0, 0, 62).await?;
     let fg1_g = post_rpc_word(http_client, alchemy_url, pool.as_str(), V3_FEE_GROWTH_GLOBAL1, 0, 63).await?;
-    let tl = post_rpc_word(
-        http_client,
-        alchemy_url,
-        pool.as_str(),
-        &format!("{}{:064x}", V3_TICKS, decoded.tick_lower as u32),
-        2,
-        64,
-    )
-    .await?;
-    let tu = post_rpc_word(
-        http_client,
-        alchemy_url,
-        pool.as_str(),
-        &format!("{}{:064x}", V3_TICKS, decoded.tick_upper as u32),
-        2,
-        65,
-    )
-    .await?;
-    let inside0 = fg0_g.wrapping_sub(&tl).wrapping_sub(&tu);
-    let inside1 = fg1_g.wrapping_sub(&tl).wrapping_sub(&tu);
+    // TickInfo words: [2] feeGrowthOutside0, [3] feeGrowthOutside1 — BOTH bounds, BOTH legs.
+    let tl_lower_tick_data = format!("{}{:064x}", V3_TICKS, decoded.tick_lower as u32);
+    let tu_upper_tick_data = format!("{}{:064x}", V3_TICKS, decoded.tick_upper as u32);
+    let fgo0_l = post_rpc_word(http_client, alchemy_url, pool.as_str(), &tl_lower_tick_data, 2, 64).await?;
+    let fgo1_l = post_rpc_word(http_client, alchemy_url, pool.as_str(), &tl_lower_tick_data, 3, 66).await?;
+    let fgo0_u = post_rpc_word(http_client, alchemy_url, pool.as_str(), &tu_upper_tick_data, 2, 67).await?;
+    let fgo1_u = post_rpc_word(http_client, alchemy_url, pool.as_str(), &tu_upper_tick_data, 3, 68).await?;
+    let inside0 = fg0_g.wrapping_sub(&fgo0_l).wrapping_sub(&fgo0_u);
+    let inside1 = fg1_g.wrapping_sub(&fgo1_l).wrapping_sub(&fgo1_u);
     // Uncollected = (inside - insideLast) * L / 2^128 + tokensOwed (the settled part).
     let fee0_raw = inside0
         .wrapping_sub(&decoded.fee_growth_inside0_last)
@@ -4061,11 +4062,12 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                 UNISWAP_V4_POSM_BASE.to_string()
             },
             format!(
-                "{} ({}/{} {:.2}%) ",
+                "{} ({}/{} {:.2}%, #{})",
                 if p.protocol == "uniswap-v4" { "Uniswap V4" } else { "Uniswap V3" },
                 p.token0.symbol,
                 p.token1.symbol,
-                p.fee_tier_bps as f64 / 100.0
+                p.fee_tier_bps as f64 / 100.0,
+                p.nft_id
             ),
             fee_usd,
         ));
@@ -4243,8 +4245,8 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                     let lower_disp = tick_to_display_price_dec(p.tick_upper, p.token0.decimals, p.token1.decimals);
                     let upper_disp = tick_to_display_price_dec(p.tick_lower, p.token0.decimals, p.token1.decimals);
                     TickBracket {
-                        lower_price: format!("{:.5}", lower_disp),
-                        upper_price: format!("{:.5}", upper_disp),
+                        lower_price: fmt_price(lower_disp),
+                        upper_price: fmt_price(upper_disp),
                         liquidity_usd: format!("{:.2}", pos_usd),
                         in_range: p.in_range,
                         distance_bps: bracket_distance_bps(spot_price, lower_disp, upper_disp),
