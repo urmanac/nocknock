@@ -292,8 +292,11 @@ frontend 28/28, validate-specs green; live payload = 3 actions (2× v4 + 1× v3)
 simulation=success, gross $0.04, net +$0.0348; hypervisor renders all 3 brackets on the
 shared axis (screenshot `04-hypervisor-shared-axis.png`).
 
-**Range-edge reading for the operator (from the converted brackets, spot $0.02062):**
-NOCK/ETH spot sits near the strength-side edge of BOTH ETH pools — C exits on a ~1%
-NOCK strengthening vs ETH, A on ~7%; the weakening side has large cushions (C ~35%, A
-~70%). B (USDC) is mid-range: exits at +13.4% (strength) or −17.8% (weakness). A NOCK
-rally takes C out of range first; a NOCK dump threatens B first.
+**Range-edge reading for the operator (arithmetic-verified, spot $0.02062 ≈ 115,300
+NOCK per ETH, NOCK-per-ETH lens matching the cards):** the ETH pools bracket NOCK/ETH
+from opposite sides. C's band [114,155–177,305 NOCK/WETH] — spot hugs its strength
+floor: C exits on ~1% further NOCK **strengthening** vs ETH (its weak-side cushion is
++54%). A's band [67,843–123,609 NOCK/ETH] — spot sits 7.2% below its weak ceiling: A
+exits on ~7% NOCK **weakening** vs ETH (strength-side cushion −41%). B (USDC) is
+mid-range: exits at −17.8% (weak) or +13.4% (strong). Net: a NOCK rally takes C out of
+range first; a NOCK dip takes A out first, then B.
