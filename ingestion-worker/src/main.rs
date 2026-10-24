@@ -1711,7 +1711,6 @@ impl U256 {
 // discovery; see ONCHAIN_INTEGRATION.md §5). Selectors were recomputed from
 // canonical signatures and cross-checked against the responses they produce.
 
-const UNISWAP_V3_NPM_BASE: &str = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1";
 const UNISWAP_V4_STATE_VIEW_BASE: &str = "0xa3c0c9b65bad0b08107aa264b0f3db444b867a71";
 /// Canonical Uniswap v3 WETH/USDC 0.05% pool on Base — the ETH/USD spot source.
 /// Resolved via factory getPool(WETH, USDC, 500) and price-verified ($2,373 at
@@ -4433,6 +4432,10 @@ async fn store_snapshot(db: &PgPool, envelope: &SnapshotEnvelope) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Canonical Uniswap v3 NonfungiblePositionManager on Base — used by fixtures to
+    // mirror the npm_address configured for the live v3 position (ONCHAIN_INTEGRATION.md §5).
+    const UNISWAP_V3_NPM_BASE: &str = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1";
 
     #[test]
     fn test_claim_fees_hex_parsing() {
