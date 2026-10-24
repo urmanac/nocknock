@@ -44,7 +44,7 @@ export interface MetadataResponse {
 
 
 export interface ClaimFeeAction {
-  platform: 'aerodrome' | 'uniswap-v4';
+  platform: 'aerodrome' | 'uniswap-v4' | 'uniswap-v3';
   label: string;
   to: string;
   data: string;

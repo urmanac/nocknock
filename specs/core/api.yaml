@@ -155,16 +155,17 @@ paths:
   /execute/claim-fees/payload:
     get:
       tags: [Execution]
-      summary: Build unsigned fee-claim transactions (Aerodrome + Uniswap V4)
+      summary: Build unsigned fee-claim transactions (Uniswap v4 positions)
       operationId: getClaimFeesPayload
       description: |
         Golden Path payload engine. Returns ready-to-sign unsigned transactions that
-        collect accrued LP fees for the sovereign wallet on both AMMs:
-        Aerodrome `claimFees()` and Uniswap V4 PositionManager collect
-        (DECREASE_LIQUIDITY with 0 liquidity + TAKE_PAIR). Amounts derive from the
-        latest live snapshot and each action is pre-simulated via eth_call; clients
-        (web cockpit WalletConnect flow, future Android app) MUST only dispatch
-        actions whose `simulation` is "success" and never build calldata themselves.
+        collect accrued LP fees for the sovereign wallet on the tracked Uniswap v4
+        positions (DECREASE_LIQUIDITY with 0 liquidity + TAKE_PAIR per position).
+        The Aerodrome tranche was liquidated on 2026-10-23; no Aerodrome actions are
+        built anymore. Amounts derive from the latest live snapshot and each action is
+        pre-simulated via eth_call; clients (web cockpit WalletConnect flow, future
+        Android app) MUST only dispatch actions whose `simulation` is "success" and
+        never build calldata themselves.
       responses:
         '200':
           description: Unsigned claim transactions with live amounts, gas estimate and simulation status
@@ -201,7 +202,8 @@ paths:
               properties:
                 platform:
                   type: string
-                  enum: [aerodrome, uniswap-v4]
+                  enum: [aerodrome, uniswap-v4, uniswap-v3]
+                  description: aerodrome retained for historical ledger rows (tranche liquidated 2026-10-23)
                 tx_hash:
                   type: string
                   description: 32-byte hex transaction hash (0x-prefixed or bare)
@@ -452,13 +454,14 @@ components:
     properties:
       platform:
         type: string
-        enum: [aerodrome, uniswap-v4]
+        enum: [aerodrome, uniswap-v4, uniswap-v3]
+        description: aerodrome retained for historical ledger rows; new payloads are uniswap-v4 (and uniswap-v3 if a reachable canonical NPM is confirmed)
       label:
         type: string
-        example: "Claim Aerodrome LP fees (Tranche 2)"
+        example: "Collect Uniswap V4 LP fees (NOCK/USDC #3163431)"
       to:
         type: string
-        description: Contract address (Aerodrome pool or Uniswap V4 PositionManager)
+        description: Contract address (Uniswap PositionManager)
       data:
         type: string
         description: Full unsigned calldata (0x-prefixed)
@@ -468,11 +471,11 @@ components:
       expected_amount_0:
         type: string
         nullable: true
-        description: Expected USDC amount (human units) from simulation/snapshot
+        description: Expected token0 amount (human units) from simulation/snapshot
       expected_amount_1:
         type: string
         nullable: true
-        description: Expected NOCK amount (human units)
+        description: Expected token1 amount (human units)
       expected_usd:
         type: string
         nullable: true
