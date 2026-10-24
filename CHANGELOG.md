@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — Uniswap-Only Portfolio (Aerodrome tranche liquidated 2026-10-23)
+- **Snapshot model v2.0.0 (breaking)**: `SnapshotData.positions` is an N-capable list
+  (network, wallet, protocol incl. real `uniswap-v3`, nft_id, pool, fee tier, tokens,
+  amounts, unclaimed fees, range, in_range) replacing the retired two-tranche shape.
+  Removed fields (migration notes):
+  - `asset_aggregation_series.tranche_1_nock` / `tranche_2_nock` / `tranche_3_nock` →
+    `positions_nock: [{ position_id, series }]`; `safe_haven_series` (wallet NOCK) and
+    `active_protocol_series` (LP USD) keep their semantics.
+  - `concentrated_liquidity` is deprecated and now emitted as an empty array (schema
+    retained so historical rows stay readable); per-position range/fee detail moved to
+    `positions`.
+  - Worker inputs `live_tranche_1_*` / `live_tranche_2_*` / `live_aero_fee_*` /
+    `live_uni_fee_*` replaced by per-position reads; the `v4_baseline_*` scaling
+    heuristic is gone (amounts are now exact on-chain math).
+  - `meta.version` → `2.0.0`; `PoolMechanic.platform` gains real `UniswapV3`;
+    `ClaimFeeAction.platform` / record-harvest gain `uniswap-v3`.
+- **Ingestion pipeline**: per-position reads for N Uniswap-v4 + M Uniswap-v3 positions
+  (POSM `getPositionLiquidity`/`poolKeys`, StateView slot0/positionInfo/feeGrowth,
+  v3 NPM `positions(uint256)` decode + pool fee-growth math — validated against an
+  NPM `collect` staticcall ground truth). NOCK/USD spot comes from the designated
+  price-source position pool (v4 NOCK/USDC); ETH/USD moved off the liquidated
+  Aerodrome pool to the canonical v3 WETH/USDC 0.05% pool (`0xd0b53d92…f224`,
+  factory-resolved and price-verified); price provenance tag `aerodrome_rpc` →
+  `uniswap_rpc` for new rows. Both price reads fail the cycle explicitly (zero-mock).
+- **Config**: new `positions:` registry + `eth_price_pool` (discovery-verified
+  identifiers in `config.yaml.example`); `target_weights_bps.uniswap_v4_lp` →
+  `uniswap_lp` (legacy keys still parse but are ignored); `v4_position_id` and the
+  `v4_baseline_*` profile anchors retired.
+- **Golden Path**: claim-fees payload builds one pre-simulated Uniswap-v4 collect per
+  tracked position (no Aerodrome `claimFees()` anymore); token-aware USD valuation.
+- **Frontend**: one card per tracked position (pair, protocol badge, fee tier,
+  readable range, split, value, unclaimed fees, in-range pill); stacked NOCK chart
+  built from per-position series; tick hypervisor renders one bracket per position.
+- **Docs**: ONCHAIN_INTEGRATION.md §2/§4 marked HISTORICAL with the full Uniswap-only
+  discovery record in §5; README portfolio section rewritten.
+
 ### Deferred to Future Releases
 - [ ] **Koinly On-Chain Transaction Classifier (Issue #56, v0.4.0)**: reconcile on-chain fee-claim harvests directly with Koinly's Base wallet sync as ordinary income — explicitly NOT manual CSV download buttons/tooling (duplicate transactions and burns the annual 1,000-transaction budget on the $99 tier; Koinly misclassifying claims as "Liquidity Removals" corrupts LP cost basis).
 - [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).
