@@ -94,19 +94,24 @@ When called as a read-only `eth_call` with `from: <wallet_address>` and `to: <po
 Phase-1 RPC discovery (2026-10-24, Base mainnet). All identifiers below were read from
 chain responses (mint logs joined to PoolManager `ModifyLiquidity` events by tx hash,
 POSM `poolKeys`, StateView reads, NPM decodes) — none are guessed. The tracked wallet
-holds 42 V4 POSM NFTs (2 active + 40 zero-liquidity dust) and 60 Base V3 NPM NFTs
+holds 43 V4 POSM NFTs (3 active + 40 zero-liquidity dust) and 60 Base V3 NPM NFTs
 (1 active + 59 dust); old V4 NFT #3126000 is owned but liquidity = 0.
 
-| | Position A | Position B | Position C |
-|---|---|---|---|
-| protocol | uniswap-v4 | uniswap-v4 | uniswap-v3 |
-| wallet | `0xeE114cC97eC5adeB34bA5645e315B497D8487a45` | same | same |
-| NFT id | **3163432** | **3163431** | **6336662** |
-| pool | v4 poolId `0xd316152008e12105594c32686b9d0401fd2c60ca4805c84f280069d218b771a8` | v4 poolId `0x91a9ef0a8dd231b99fa53a2a145a9e8bca7897e0d85852107abb997916f9f99c` | pool `0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a` |
-| fee tier | 2% (tickSpacing 400) | 0.75% (tickSpacing 75) | 1% |
-| tokens | currency0 = native ETH (`0x0`, 18 dec) / currency1 = NOCK (16) | currency0 = USDC (6) / currency1 = NOCK (16) | token0 = WETH (18) / token1 = NOCK (16) |
-| ticks | [65200, 71200] | [267825, 271050] | [70400, 74800] |
-| v4 mint tx | `0x0a001ce91d08089c4a4b8529548de5220ffb1415653ee5b9c20658b97d214319` (2026-10-24 01:14:47 UTC) | `0x2613657172d6bec2c2d9585e5ce05203ec1f4f2958696f2935952ac2d95ba221` (2026-10-24 01:12:37 UTC) | (pre-existing NFT) |
+| | Position A | Position B | Position C | Position D |
+|---|---|---|---|---|
+| protocol | uniswap-v4 | uniswap-v4 | uniswap-v3 | uniswap-v4 |
+| wallet | `0xeE114cC97eC5adeB34bA5645e315B497D8487a45` | same | same | same |
+| NFT id | **3163432** | **3163431** | **6336662** | **3163450** |
+| pool | v4 poolId `0xd316152008e12105594c32686b9d0401fd2c60ca4805c84f280069d218b771a8` | v4 poolId `0x91a9ef0a8dd231b99fa53a2a145a9e8bca7897e0d85852107abb997916f9f99c` | pool `0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a` | v4 poolId `0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13` |
+| fee tier | 2% (tickSpacing 400) | 0.75% (tickSpacing 75) | 1% | 3.00% (fee 30000, tickSpacing 300) |
+| tokens | currency0 = native ETH (`0x0`, 18 dec) / currency1 = NOCK (16) | currency0 = USDC (6) / currency1 = NOCK (16) | token0 = WETH (18) / token1 = NOCK (16) | currency0 = USDC (6) / currency1 = NOCK (16) |
+| ticks | [65200, 71200] | [267825, 271050] | [70400, 74800] | [262200, 282300] (wide raft) |
+| v4 mint tx | `0x0a001ce91d08089c4a4b8529548de5220ffb1415653ee5b9c20658b97d214319` (2026-10-24 01:14:47 UTC) | `0x2613657172d6bec2c2d9585e5ce05203ec1f4f2958696f2935952ac2d95ba221` (2026-10-24 01:12:37 UTC) | (pre-existing NFT) | `0x6cdabada1ff062b6d3b4ba87bfe04158dd8b14a91e93cabe11dc3e35b587e89e` (block 53008241); operator compounded post-mint (+143.7e12 add, +1.2e12, −7.7e12 partial remove → L = 185,454,734,478,733 at 02:37 UTC) |
+
+Position D (added by the 2026-10-24 change request): identified via the mint's
+`ModifyLiquidity` event (poolId + ticks) and cross-checked against POSM
+`getPoolAndPositionInfo` (fee 30000 = 3.00%, tickSpacing 300, packed poolId/ticks) and
+`ownerOf` (tracked wallet). NOT a price source — B stays the single NOCK/USD source.
 
 ### Per-position read pipeline (all reads fail the cycle explicitly — zero-mock)
 

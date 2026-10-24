@@ -49,6 +49,7 @@ ONCHAIN_INTEGRATION.md §5):
    - Tracked live per position (protocol, fee tier, range, unclaimed fees):
      - ETH/NOCK — Uniswap v4, 2% fee (NFT #3163432)
      - USDC/NOCK — Uniswap v4, 0.75% fee (NFT #3163431; NOCK/USD price source)
+     - USDC/NOCK — Uniswap v4, 3% fee, wide raft (NFT #3163450)
      - WETH/NOCK — Uniswap v3, 1% fee (NFT #6336662)
    - Function: concentrated-liquidity fee accumulation. Yield is harvested and recycled.
 3. **Liquid USDC Buffer (~5% Target Allocation)**

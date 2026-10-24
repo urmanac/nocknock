@@ -28,7 +28,7 @@ Welcome to **NockNock**, Nemotron. You are receiving the operational keys to a s
    - All historical baseline constants (`100000.0`, `65719361234409.0`, `4004.31227`, `23.63241`, `0.0245`, `1.4820`, `8000/1000/500/500`) are reverently documented in config comments.
 3. **Live On-Chain Confirmation (Critical Recent Event)**:
    - The operator confirmed: **Non-zero fee accrual is now visible in the live Uniswap mobile app!**
-   - The dual-growth engine is live and working on Base mainnet. **UPDATE 2026-10-24:** the Aerodrome tranche (Tranche 2) was liquidated on 2026-10-23 and the portfolio repositioned into Uniswap-only concentrated liquidity (3 positions: v4 ETH/NOCK 2%, v4 USDC/NOCK 0.75%, v3 WETH/NOCK 1% — see ONCHAIN_INTEGRATION.md §5); the Uniswap V4 Tranche-1 NFT #3126000 is retired dust.
+   - The dual-growth engine is live and working on Base mainnet. **UPDATE 2026-10-24:** the Aerodrome tranche (Tranche 2) was liquidated on 2026-10-23 and the portfolio repositioned into Uniswap-only concentrated liquidity (4 positions: v4 ETH/NOCK 2%, v4 USDC/NOCK 0.75%, v4 USDC/NOCK 3% wide raft, v3 WETH/NOCK 1% — see ONCHAIN_INTEGRATION.md §5); the Uniswap V4 Tranche-1 NFT #3126000 is retired dust.
 
 ---
 
