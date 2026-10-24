@@ -11,24 +11,56 @@ alchemy_api_keys:
 tracked_wallets:
   - "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
 
-# AMM pool addresses (Aerodrome vAMM-USDC/NOCK 0.3%)
-tracked_pools:
-  - "0x85f1aa3a70fedd1c52705c15baed143e675cd626"
-
 # Token contracts on Base
 token_addresses:
   - "0x4200000000000000000000000000000000000006"  # WETH
   - "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"  # USDC
   - "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"  # NOCK
 
-tracked_ranges: []
+# ============================================================
+# Tracked LP positions (v2.0.0) — real Uniswap portfolio
+# ============================================================
+# Identifiers below are RPC-discovery-verified (2026-10-24; ONCHAIN_INTEGRATION.md §5).
+# The portfolio is Uniswap-only: the Aerodrome tranche was liquidated 2026-10-23.
+# After a repositioning, re-run the Phase-1 discovery runbook and update this list.
+positions:
+  # Position B — NOCK/USDC, Uniswap v4, 0.75% fee (the NOCK/USD price source)
+  - id: "uniswap-v4-nock-usdc"
+    protocol: "uniswap-v4"
+    network: "base"
+    nft_id: 3163431
+    pool_id: "0x91a9ef0a8dd231b99fa53a2a145a9e8bca7897e0d85852107abb997916f9f99c"
+    currency0: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"   # USDC
+    currency1: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"   # NOCK
+    tick_lower: 267825
+    tick_upper: 271050
+    is_price_source: true
 
-# Fee & LP contract references
-fee_contracts:
-  - "0x4CbB6188C6101CAcd4eb1126Cc14882Bd93dc3DB"
+  # Position A — ETH/NOCK, Uniswap v4, 2% fee (currency0 = native ETH)
+  - id: "uniswap-v4-nock-eth"
+    protocol: "uniswap-v4"
+    network: "base"
+    nft_id: 3163432
+    pool_id: "0xd316152008e12105594c32686b9d0401fd2c60ca4805c84f280069d218b771a8"
+    currency0: "0x0000000000000000000000000000000000000000"   # native ETH
+    currency1: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"   # NOCK
+    tick_lower: 65200
+    tick_upper: 71200
+    is_price_source: false
 
-lp_tokens:
-  - "0x85f1aa3a70fedd1c52705c15baed143e675cd626"
+  # Position C — WETH/NOCK, Uniswap v3, 1% fee (Base canonical NPM; pool resolved
+  # via the v3 factory getPool(WETH, NOCK, 10000))
+  - id: "uniswap-v3-weth-nock"
+    protocol: "uniswap-v3"
+    network: "base"
+    nft_id: 6336662
+    npm_address: "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1"
+    pool_address: "0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a"
+    is_price_source: false
+
+# Canonical Uniswap v3 WETH/USDC 0.05% pool (Base) for the live ETH/USD spot (slot0).
+# Resolved via the verified v3 factory getPool and price-checked at discovery.
+eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
 
 # Sync interval in seconds
 sync_window_seconds: 300
@@ -36,37 +68,25 @@ sync_window_seconds: 300
 # API server port
 port: 8080
 
-# Uniswap V4 Position ID
-v4_position_id: 3126000
-
 # ============================================================
-# Operator Strategic Profile & Baseline Parameters
+# Operator Strategic Profile
 # ============================================================
-# These parameters capture operator baselines, invariant targets, and LP scaling anchors.
 operator_profile:
   # Hard floor invariant: Minimum sovereign NOCK holding required before capital deployment.
   treasury_floor_nock: 100000.0
-
-  # Uniswap V4 Position NFT #3126000 scaling anchors:
-  # Baseline liquidity value recorded at position creation / initial compounding (65,719,361,234,409)
-  v4_baseline_liquidity: 65719361234409.0
-  # Baseline token balances in V4 position corresponding to baseline liquidity
-  v4_baseline_nock: 4004.31227
-  v4_baseline_usdc: 23.63241
-  # Baseline uncollected fee harvest anchors for dynamic V4 yield extrapolation
-  v4_fee_baseline_usdc: 0.0245
-  v4_fee_baseline_nock: 1.4820
 
   # Virtual 60/40 split rule: fraction of realized fee harvests (and measurable net
   # capital gains) earmarked to the virtual tax reserve buffer. The remainder is
   # liquid growth dry powder. Purely internal accounting — no on-chain address change.
   tax_reserve_ratio: 0.40
 
-  # Target allocation weights in Portfolio Deviation Matrix (basis points, sum = 10000 bps / 100%)
+  # Target allocation weights in Portfolio Deviation Matrix (basis points, sum = 10000).
+  # v2.0.0: Aerodrome tranche liquidated — the LP bucket is the aggregate across all
+  # tracked Uniswap positions. Legacy `aerodrome_lp`/`uniswap_v4_lp` keys still parse
+  # but are ignored.
   target_weights_bps:
     treasury: 8000        # 80.00% Sovereign Treasury floor
-    aerodrome_lp: 1000    # 10.00% Aerodrome volatile LP tranche
-    uniswap_v4_lp: 500    #  5.00% Uniswap V4 concentrated LP tranche
+    uniswap_lp: 1500      # 15.00% Uniswap LP (all tracked positions)
     cash: 500             #  5.00% Liquid USDC cash & tax escrow buffer
 
 # Optional Model Context Protocol (MCP) Bearer Token for /v1/mcp endpoint
@@ -78,11 +98,13 @@ operator_profile:
 # Heals gaps in market_price_history from free public OHLCV feeds and extends
 # daily depth for the multi-day RSI. The whole section is optional — every
 # field defaults so existing config files keep working unchanged.
+# pool_address defaults to the tracked v4 NOCK/USDC pool (0.75%); providers
+# without coverage for it degrade fail-open (warnings only).
 # market_data:
 #   backfill_enabled: true
 #   geckoterminal_base_url: "https://api.geckoterminal.com/api/v2"
 #   dexscreener_base_url: "https://api.dexscreener.com/latest"
-#   pool_address: "0x85f1aa3a70fedd1c52705c15baed143e675cd626"
+#   pool_address: "0x91a9ef0a8dd231b99fa53a2a145a9e8bca7897e0d85852107abb997916f9f99c"
 #   gap_threshold_minutes: 15
 #   min_history_days: 14
 #   hourly_lookback: 168
@@ -98,6 +120,6 @@ operator_profile:
 #   telegram_bot_token: "123456:ABC..."
 #   telegram_chat_id: "123456789"
 #   pushover_token: "pushover-app-token"
-#   pushover_user: "pushover-user-key"
+#   pushover_user_key: "pushover-user-key"
 #   webhook_url: "https://hooks.example/nocknock"
 #   cockpit_url: "https://your-host:3000/lite"   # deep link appended to notifications
