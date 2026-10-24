@@ -1,4 +1,4 @@
-openapi 3.0.3
+openapi: 3.0.3
 info:
   title: NockNock Snapshot Data Model
   version: 2.0.0
