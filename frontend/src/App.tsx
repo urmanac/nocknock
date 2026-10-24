@@ -25,9 +25,11 @@ import { useFreshness, StaleBanner } from './hooks/useFreshness.tsx';
 const SOURCE_LABELS: Record<string, string> = {
   geckoterminal: 'GeckoTerminal',
   dexscreener: 'DEXScreener',
-  aerodrome_rpc: 'Aerodrome RPC',
+  uniswap_rpc: 'Uniswap RPC',
+  aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
+import { POSITION_COLORS, positionLabel, positionRangeText } from './positions.ts';
 
 function Dashboard() {
   const { snapshot, loading, error, freshness, refetch, ageDisplay } = useFreshness<
@@ -99,41 +101,37 @@ function Dashboard() {
 
   // Transform all chart data inline (single pass, no useMemo order issues)
   const assetTimePoints: string[] = metrics?.asset_aggregation_series?.time_points || [];
-  const assetSafeHaven: string[] = metrics?.asset_aggregation_series?.safe_haven_series || [];
-  const assetActiveProtocol: string[] = metrics?.asset_aggregation_series?.active_protocol_series || [];
-  
+  const positionsList: any[] = rawData?.positions || [];
+  // Per-position NOCK series defs (v2.0.0) — the stacked chart is built dynamically
+  // from whatever positions the worker tracks.
+  const positionSeriesDefs = (metrics?.asset_aggregation_series?.positions_nock || []).map((s: any, i: number) => ({
+    key: `pos${i}`,
+    name: positionLabel(positionsList.find((p: any) => p.position_id === s.position_id)),
+  }));
+  const rowFromAg = (ag: any, i: number, time: string) => {
+    const row: any = {
+      time,
+      safeHaven: parseFloat(ag?.safe_haven_series?.[i] || '0'),
+      activeProtocol: parseFloat(ag?.active_protocol_series?.[i] || '0'),
+    };
+    let lpTotal = 0;
+    (ag?.positions_nock || []).forEach((s: any, j: number) => {
+      const v = parseFloat(s.series?.[i] || '0');
+      row[`pos${j}`] = Math.round(v);
+      lpTotal += v;
+    });
+    row.totalNock = Math.round(lpTotal + row.safeHaven);
+    return row;
+  };
+
   const assetSeries = hasHistory
     ? history.map(s => {
         const dm = s.data?.derived_metrics ?? s.data;
-        const ag = dm?.asset_aggregation_series;
-        const t3 = parseFloat(ag?.tranche_3_nock?.[0] || '0');
-        const t2 = parseFloat(ag?.tranche_2_nock?.[0] || '0');
-        const t1 = parseFloat(ag?.tranche_1_nock?.[0] || '0');
-        return {
-          time: formatSnapshotTime(s.meta?.generated_at, spansMultipleDays),
-          tranche3Vault: Math.round(t3),
-          tranche2Aero: Math.round(t2),
-          tranche1V4: Math.round(t1),
-          totalNock: Math.round(t3 + t2 + t1),
-          safeHaven: parseFloat(ag?.safe_haven_series?.[0] || '0'),
-          activeProtocol: parseFloat(ag?.active_protocol_series?.[0] || '0'),
-        };
+        return rowFromAg(dm?.asset_aggregation_series, 0, formatSnapshotTime(s.meta?.generated_at, spansMultipleDays));
       })
-    : assetTimePoints.map((t: string, i: number) => {
-        const ag = metrics?.asset_aggregation_series;
-        const t3 = parseFloat(ag?.tranche_3_nock?.[i] || '0');
-        const t2 = parseFloat(ag?.tranche_2_nock?.[i] || '0');
-        const t1 = parseFloat(ag?.tranche_1_nock?.[i] || '0');
-        return {
-          time: formatSnapshotTime(t, false),
-          tranche3Vault: Math.round(t3),
-          tranche2Aero: Math.round(t2),
-          tranche1V4: Math.round(t1),
-          totalNock: Math.round(t3 + t2 + t1),
-          safeHaven: parseFloat(assetSafeHaven[i] || '0'),
-          activeProtocol: parseFloat(assetActiveProtocol[i] || '0'),
-        };
-      });
+    : assetTimePoints.map((t: string, i: number) =>
+        rowFromAg(metrics?.asset_aggregation_series, i, formatSnapshotTime(t, false)),
+      );
 
   const valueTimePoints: string[] = metrics?.total_value_vs_baseline?.time_points || [];
   const valuePortfolio: string[] = metrics?.total_value_vs_baseline?.portfolio_value_series || [];
@@ -182,15 +180,51 @@ function Dashboard() {
     status: a.status,
   }));
 
-  const tickData = (metrics?.tick_bracket_hypervisor?.brackets || []).map((b: any, i: number) => ({
-    name: i === 0 ? 'Uniswap V4 (3%)' : 'Aerodrome (0.3%)',
-    lower: parseFloat(b.lower_price),
-    upper: parseFloat(b.upper_price),
-    displayUpper: b.upper_price,
-    liquidity: parseFloat(b.liquidity_usd),
-    inRange: b.in_range,
-    distance: b.distance_bps / 100,
-  }));
+  // Live ETH/USD derived from the same on-chain pool reads the worker used for USD
+  // valuation (ETH/WETH volatile_assets reserve_usd / reserve_amount). Null when no
+  // ETH leg exists or amounts are zero — zero-mock: never valued at a made-up price.
+  // NB: pool_mechanics is a sibling of derived_metrics on the snapshot data object.
+  const ethUsd = (() => {
+    for (const pm of rawData?.pool_mechanics || []) {
+      const eth = (pm.volatile_assets || []).find((a: any) => ['ETH', 'WETH'].includes(a.token_symbol));
+      if (eth) {
+        const amt = parseFloat(eth.reserve_amount);
+        const usd = parseFloat(eth.reserve_usd);
+        if (amt > 0 && usd > 0) return usd / amt;
+      }
+    }
+    return null;
+  })();
+
+  const tickData = (metrics?.tick_bracket_hypervisor?.brackets || []).map((b: any, i: number) => {
+    const pos = positionsList[i];
+    // Bracket prices are quoted in token0 units per NOCK (USDC or ETH). ETH-denominated
+    // brackets are converted to USD so every row shares one legible axis; without a live
+    // ETH/USD the row keeps native units (collapsed, honest) instead of a fabricated price.
+    const ethDenominated = pos && ['ETH', 'WETH'].includes(pos.token0?.symbol);
+    const converted = !!ethDenominated && ethUsd != null;
+    const fx = converted ? (ethUsd as number) : 1;
+    const lower = parseFloat(b.lower_price) * fx;
+    const upper = parseFloat(b.upper_price) * fx;
+    const spot = parseFloat(metrics?.tick_bracket_hypervisor?.current_price || '0');
+    // Distance to the nearest bracket edge in the same (USD/NOCK) units; falls back to
+    // the worker's bps when a row stays in native units (its sentinel is meaningless
+    // across denominations).
+    const distance = converted && spot > 0 && lower > 0
+      ? Math.min(Math.max(spot - lower, 0), Math.max(upper - spot, 0)) / spot * 100
+      : (b.distance_bps != null ? b.distance_bps / 100 : null);
+    return {
+      name: positionLabel(pos),
+      lower,
+      upper,
+      displayLower: b.lower_price,
+      displayUpper: b.upper_price,
+      liquidity: parseFloat(b.liquidity_usd),
+      inRange: b.in_range,
+      distance,
+      converted,
+    };
+  });
 
   const gasData = (metrics?.velocity_gas_sandbox?.contracts || []).map((c: any) => ({
     name: c.contract_name,
@@ -379,7 +413,7 @@ function Dashboard() {
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>Goal 1 (NOCK Accretion):</span>
             <span style={styles.shotPillText}>
-              {totalNockVal} NOCK total across Treasury (Tranche 3), Aerodrome LP (Tranche 2), and Uniswap V4 LP (Tranche 1). Floor lock active if total &lt; {floorTargetFormatted}.
+              {totalNockVal} NOCK total across the Sovereign Treasury wallet and {positionsList.length} tracked Uniswap LP position{positionsList.length === 1 ? '' : 's'}. Floor lock active if total &lt; {floorTargetFormatted}.
             </span>
           </div>
           <div style={styles.shotPill}>
@@ -391,9 +425,54 @@ function Dashboard() {
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>Impermanent Loss / Risk:</span>
             <span style={styles.shotPillText}>
-              0% realized losses. Uniswap V4 concentrated range is active ({metrics?.tick_bracket_hypervisor?.brackets?.[0]?.lower_price ? `$${metrics.tick_bracket_hypervisor.brackets[0].lower_price} – $${metrics.tick_bracket_hypervisor.brackets[0].upper_price}` : '—'}). Aerodrome fees live-tracked on-chain.
+              0% realized losses. {positionsList.length} concentrated Uniswap position{positionsList.length === 1 ? '' : 's'} tracked live ({positionsList.filter((p: any) => p.in_range).length} in range). Unclaimed fees live-tracked on-chain.
             </span>
           </div>
+        </div>
+      </section>
+
+      {/* Tracked Positions — one card per live Uniswap position (v2.0.0) */}
+      <section style={styles.positionsSection}>
+        <div style={styles.positionsHeader}>TRACKED POSITIONS ({positionsList.length})</div>
+        <div style={styles.positionsGrid}>
+          {positionsList.map((p: any) => (
+            <div key={p.position_id} style={styles.positionCard}>
+              <div style={styles.positionCardTop}>
+                <span style={styles.positionPair}>{p.token0.symbol}/{p.token1.symbol}</span>
+                <span style={{
+                  ...styles.positionBadge,
+                  ...(p.protocol === 'uniswap-v4'
+                    ? { background: '#0c4a6e22', color: '#38bdf8', border: '1px solid #0284c7' }
+                    : { background: '#3b076422', color: '#c084fc', border: '1px solid #7e22ce' }),
+                }}>
+                  {p.protocol === 'uniswap-v4' ? 'UNISWAP V4' : 'UNISWAP V3'} · {p.fee_tier_bps / 100}%
+                </span>
+              </div>
+              <div style={styles.positionCardMid}>
+                <span style={styles.positionValue}>${p.amount_usd}</span>
+                <span style={{
+                  ...styles.rangePill,
+                  ...(p.in_range
+                    ? { background: '#064e3b', color: '#a7f3d0', border: '1px solid #059669' }
+                    : { background: '#78350f', color: '#fcd34d', border: '1px solid #d97706' }),
+                }}>
+                  {p.in_range ? '● IN RANGE' : '● OUT OF RANGE'}
+                </span>
+              </div>
+              <div style={styles.positionCardMeta}>
+                Range: {positionRangeText(p)}
+              </div>
+              <div style={styles.positionCardMeta}>
+                {p.token0.symbol}: {p.amount0} ({p.token1.symbol}: {p.amount1}) · Fees: ${p.fees_usd}
+              </div>
+              <div style={styles.positionCardMeta}>
+                #{p.nft_id} · {p.network}{p.is_price_source ? ' · price source' : ''}
+              </div>
+            </div>
+          ))}
+          {positionsList.length === 0 && (
+            <div style={styles.positionCardMeta}>No tracked positions configured.</div>
+          )}
         </div>
       </section>
 
@@ -445,28 +524,24 @@ function Dashboard() {
               )}
               <Area
                 type="monotone"
-                dataKey="tranche3Vault"
+                dataKey="safeHaven"
                 stackId="1"
                 fill="url(#colorVault)"
                 stroke="#10b981"
-                name="Tranche 3: Sovereign Vault"
+                name="Sovereign Vault (wallet NOCK)"
               />
-              <Area
-                type="monotone"
-                dataKey="tranche2Aero"
-                stackId="1"
-                fill="url(#colorAero)"
-                stroke="#38bdf8"
-                name="Tranche 2: Aerodrome LP"
-              />
-              <Area
-                type="monotone"
-                dataKey="tranche1V4"
-                stackId="1"
-                fill="url(#colorV4)"
-                stroke="#a855f7"
-                name="Tranche 1: Uniswap V4"
-              />
+              {positionSeriesDefs.map((def: any, i: number) => (
+                <Area
+                  key={def.key}
+                  type="monotone"
+                  dataKey={def.key}
+                  stackId="1"
+                  fill={POSITION_COLORS[i % POSITION_COLORS.length]}
+                  fillOpacity={0.35}
+                  stroke={POSITION_COLORS[i % POSITION_COLORS.length]}
+                  name={def.name}
+                />
+              ))}
               <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </AreaChart>
           </ResponsiveContainer>
@@ -496,34 +571,40 @@ function Dashboard() {
           </ResponsiveContainer>
         </CanvasPanel>
 
-        {/* 3. Tick Bracket Hypervisor — Horizontal Ranges */}
-        <CanvasPanel title="Tick Bracket Hypervisor (Uniswap V4 vs Aero)">
+        {/* 3. Tick Bracket Hypervisor — Horizontal Ranges (one bar per tracked position,
+            all brackets converted to USD per NOCK so cross-protocol rows share one axis) */}
+        <CanvasPanel title="Tick Bracket Hypervisor (all tracked positions)">
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={tickData} layout="vertical" margin={{ top: 10, right: 30, left: 110, bottom: 0 }}>
-              <XAxis type="number" tickFormatter={v => '$' + v.toLocaleString()} stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+              <XAxis type="number" tickFormatter={v => '$' + v.toFixed(4)} stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} domain={[0, 'dataMax']} />
               <YAxis type="category" dataKey="name" width={110} stroke="#334155" tick={{ fill: '#cbd5e1', fontSize: 11 }} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
+              <ReferenceLine x={parseFloat(metrics?.tick_bracket_hypervisor?.current_price || '0')} stroke="#e2b714" strokeDasharray="4 4" label={{ value: 'Spot', fill: '#e2b714', fontSize: 11, position: 'top' }} />
               <Tooltip
                 contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
                 itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
                 labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
-                formatter={v => '$' + v.toLocaleString()}
+                formatter={(v: any, name: any) => ['$' + Number(v).toFixed(5), name]}
               />
               <Bar dataKey="upper" fill="#f59e0b" fillOpacity={0.6} name="Upper Bracket ($)" />
               <Bar dataKey="lower" fill="#10b981" fillOpacity={0.6} name="Lower Bracket ($)" />
               <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </BarChart>
           </ResponsiveContainer>
-          <div style={{ marginTop: 12, fontSize: '0.75rem', color: '#aaa', fontFamily: 'monospace', display: 'flex', justifyContent: 'space-between' }}>
+          <div style={{ marginTop: 12, fontSize: '0.75rem', color: '#aaa', fontFamily: 'monospace', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span>Spot Price: <strong>${metrics?.tick_bracket_hypervisor?.current_price || '0.00'}</strong></span>
+            {tickData.some((t: any) => t.converted) && (
+              <span style={{ color: '#8b949e' }}>ETH-denominated brackets converted to USD @ ${ethUsd ? ethUsd.toFixed(2) : '—'}/ETH (live pool-derived)</span>
+            )}
             {(() => {
-              const v4Bracket = metrics?.tick_bracket_hypervisor?.brackets?.[0];
-              if (!v4Bracket?.lower_price) {
-                return <span style={{ color: '#8b949e' }}>Uniswap V4 Range: —</span>;
+              const bracket = metrics?.tick_bracket_hypervisor?.brackets?.[0];
+              if (!bracket?.lower_price) {
+                return <span style={{ color: '#8b949e' }}>Price-source position range: —</span>;
               }
+              const src = positionsList.find((p: any) => p.is_price_source);
               return (
-                <span style={{ color: v4Bracket.in_range ? '#10b981' : '#f59e0b' }}>
-                  Uniswap V4 Range: ${v4Bracket.lower_price} – ${v4Bracket.upper_price} ({v4Bracket.in_range ? 'IN RANGE' : 'OUT OF RANGE'})
+                <span style={{ color: bracket.in_range ? '#10b981' : '#f59e0b' }}>
+                  {src ? positionLabel(src) : 'Price source'} range: {src ? positionRangeText(src) : '—'} ({bracket.in_range ? 'IN RANGE' : 'OUT OF RANGE'})
                 </span>
               );
             })()}
@@ -886,6 +967,63 @@ const styles: Record<string, React.CSSProperties> = {
   panelTitle: { margin: '0 0 0.75rem', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#94a3b8', borderBottom: '1px solid #22262d', paddingBottom: '0.5rem' },
   panelContent: { minHeight: '240px' },
   emptyState: { color: '#555', fontSize: '0.8rem', textAlign: 'center', fontStyle: 'italic' },
+  positionsSection: {
+    margin: '20px 24px 0',
+    padding: 16,
+    background: '#0d1117',
+    border: '1px solid #1c2128',
+    borderRadius: 12,
+  },
+  positionsHeader: {
+    fontSize: '0.7rem',
+    letterSpacing: 2,
+    color: '#8b949e',
+    marginBottom: 12,
+  },
+  positionsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+    gap: 12,
+  },
+  positionCard: {
+    background: '#161b22',
+    border: '1px solid #30363d',
+    borderRadius: 10,
+    padding: 14,
+  },
+  positionCardTop: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    gap: 8,
+  },
+  positionPair: { fontSize: '1rem', fontWeight: 700, color: '#f0f6fc' },
+  positionBadge: {
+    fontSize: '0.6rem',
+    fontWeight: 700,
+    letterSpacing: 1,
+    borderRadius: 999,
+    padding: '3px 8px',
+    whiteSpace: 'nowrap' as const,
+  },
+  positionCardMid: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+    gap: 8,
+  },
+  positionValue: { fontSize: '1.3rem', fontWeight: 700, color: '#10b981' },
+  rangePill: {
+    fontSize: '0.62rem',
+    fontWeight: 700,
+    letterSpacing: 1,
+    borderRadius: 999,
+    padding: '3px 8px',
+    whiteSpace: 'nowrap' as const,
+  },
+  positionCardMeta: { fontSize: '0.72rem', color: '#8b949e', lineHeight: 1.6 },
 };
 
 function formatSnapshotTime(dateStr: string, spansMultipleDays: boolean = false): string {

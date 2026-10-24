@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: NockNock Snapshot Data Model
-  version: 1.0.0
+  version: 2.0.0
   description: Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
   license:
     name: ISC
@@ -80,6 +80,7 @@ components:
       type: object
       required:
         - wallet_balances
+        - positions
         - pool_mechanics
         - concentrated_liquidity
         - contract_fees
@@ -90,16 +91,26 @@ components:
           items:
             $ref: '#/components/schemas/WalletBalance'
           description: Liquid wallet balances (native tokens, stablecoins)
+        positions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Position'
+          description: |
+            Tracked LP positions (v2.0.0). Replaces the retired two-tranche shape
+            (live_tranche_1_* / live_tranche_2_* inputs and the tranche_N_nock series);
+            one entry per operator-configured position.
         pool_mechanics:
           type: array
           items:
             $ref: '#/components/schemas/PoolMechanic'
-          description: AMM pool mechanics (Aerodrome volatile pools, etc.)
+          description: AMM pool mechanics for the tracked pools (Uniswap v3/v4; Aerodrome historical)
         concentrated_liquidity:
           type: array
           items:
             $ref: '#/components/schemas/ConcentratedLiquidity'
-          description: Uniswap v4 range allocations and tick data
+          description: |
+            DEPRECATED since v2.0.0 — superseded by `positions`. Kept in the schema so
+            historical snapshot rows remain readable; the worker emits an empty array.
         contract_fees:
           type: array
           items:
@@ -140,18 +151,113 @@ components:
           format: date-time
           description: When this balance was last observed on-chain
 
+    Position:
+      type: object
+      description: One tracked LP position, read live from its NFT position manager.
+      required: [position_id, network, wallet, protocol, nft_id, pool_id, fee_tier_bps, token0, token1, amount0, amount1, amount_usd, tokens_owed_0, tokens_owed_1, fees_usd, lower_tick, upper_tick, lower_price, upper_price, liquidity_amount, in_range]
+      properties:
+        position_id:
+          type: string
+          description: Stable identifier ("{protocol}:{network}:{nft_id}")
+          example: "uniswap-v4:base:3163431"
+        network:
+          type: string
+          description: Chain the position lives on
+          example: "base"
+        wallet:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{40}$'
+          description: Owning wallet
+        protocol:
+          type: string
+          enum: [uniswap-v4, uniswap-v3, aerodrome]
+          description: AMM family (aerodrome retained for historical rows only)
+        nft_id:
+          type: integer
+          description: Position NFT token id on the position manager
+          example: 3163431
+        pool_id:
+          type: string
+          description: Uniswap v4 bytes32 poolId or v3 pool contract address
+        npm_address:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{40}$'
+          nullable: true
+          description: v3 NonfungiblePositionManager (v3 positions only)
+        fee_tier_bps:
+          type: integer
+          description: Fee tier in basis points (200 = 2%, 75 = 0.75%)
+          example: 75
+        token0:
+          $ref: '#/components/schemas/PositionToken'
+        token1:
+          $ref: '#/components/schemas/PositionToken'
+        amount0:
+          type: string
+          description: Current position amount of token0 (human units, decimal string)
+        amount1:
+          type: string
+          description: Current position amount of token1 (human units, decimal string)
+        amount_usd:
+          type: string
+          description: Total position value in USD (decimal string)
+        tokens_owed_0:
+          type: string
+          description: Unclaimed fees of token0 (human units)
+        tokens_owed_1:
+          type: string
+          description: Unclaimed fees of token1 (human units)
+        fees_usd:
+          type: string
+          description: Unclaimed fees in USD (decimal string)
+        lower_tick:
+          type: integer
+        upper_tick:
+          type: integer
+        lower_price:
+          type: string
+          description: Range bound in human token0-per-token1 units
+        upper_price:
+          type: string
+          description: Range bound in human token0-per-token1 units
+        liquidity_amount:
+          type: string
+          description: Raw on-chain liquidity L (decimal string)
+        in_range:
+          type: boolean
+          description: Whether the current tick is within the position range
+        is_price_source:
+          type: boolean
+          description: True for the one position whose pool supplies the NOCK/USD spot
+
+    PositionToken:
+      type: object
+      required: [address, symbol, decimals]
+      properties:
+        address:
+          type: string
+          description: Token contract (zero address = native ETH in v4)
+          pattern: '^0x[a-fA-F0-9]{40}$'
+        symbol:
+          type: string
+          example: "NOCK"
+        decimals:
+          type: integer
+          example: 16
+
     PoolMechanic:
       type: object
       required: [pool_id, platform, pool_type, volatile_assets, liquidity_usd, fee_accrued_usd, fee_tier_bps]
       properties:
         pool_id:
           type: string
-          pattern: '^0x[a-fA-F0-9]{40}$'
-          example: "0x8ad599c3a0ff1de082011efddc58f1908eb6e6d8"
+          pattern: '^0x[a-fA-F0-9]{40,64}$'
+          description: Pool contract address (v3) or bytes32 poolId (v4)
+          example: "0x91a9ef0a8dd231b99fa53a2a145a9e8bca7897e0d85852107abb997916f9f99c"
         platform:
           type: string
-          enum: [Aerodrome, UniswapV4, Velodrome, Other]
-          example: "Aerodrome"
+          enum: [Aerodrome, UniswapV4, UniswapV3, Velodrome, Other]
+          example: "UniswapV4"
         pool_type:
           type: string
           enum: [volatile, stable, concentrated]
@@ -160,7 +266,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PoolAsset'
-          description: The two assets in this volatile pool
+          description: The tracked wallet's amounts in this pool (not pool-wide reserves)
         liquidity_usd:
           type: string
           description: Total liquidity in USD (decimal string)
@@ -412,7 +518,7 @@ components:
 
     AssetAggregationSeries:
       type: object
-      required: [time_points, safe_haven_series, active_protocol_series]
+      required: [time_points, safe_haven_series, active_protocol_series, positions_nock]
       properties:
         time_points:
           type: array
@@ -430,6 +536,19 @@ components:
           items:
             type: string
           description: USD value in active ranges/pools at each point
+        positions_nock:
+          type: array
+          description: NOCK units per tracked position at each point (replaces the retired tranche_1/2/3_nock series; v2.0.0)
+          items:
+            type: object
+            required: [position_id, series]
+            properties:
+              position_id:
+                type: string
+              series:
+                type: array
+                items:
+                  type: string
 
     TotalValueVsBaseline:
       type: object
@@ -483,7 +602,12 @@ components:
           type: boolean
         distance_bps:
           type: integer
-          description: Distance from current price to bracket edge (basis points)
+          nullable: true
+          description: >-
+            Signed basis-point distance from the current (USD/NOCK) price to the
+            nearest bracket edge. Null for brackets denominated in a different unit
+            (e.g. ETH-per-NOCK), where a cross-unit distance would be meaningless —
+            clients convert via a live ETH/USD rate before charting.
 
     PortfolioDeviationMatrix:
       type: object

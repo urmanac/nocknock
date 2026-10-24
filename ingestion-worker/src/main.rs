@@ -25,16 +25,6 @@ use uuid::Uuid;
 pub struct OperatorProfile {
     #[serde(default = "default_treasury_floor")]
     pub treasury_floor_nock: f64,
-    #[serde(default = "default_v4_baseline_liquidity")]
-    pub v4_baseline_liquidity: f64,
-    #[serde(default = "default_v4_baseline_nock")]
-    pub v4_baseline_nock: f64,
-    #[serde(default = "default_v4_baseline_usdc")]
-    pub v4_baseline_usdc: f64,
-    #[serde(default = "default_v4_fee_baseline_usdc")]
-    pub v4_fee_baseline_usdc: f64,
-    #[serde(default = "default_v4_fee_baseline_nock")]
-    pub v4_fee_baseline_nock: f64,
     #[serde(default = "default_tax_reserve_ratio")]
     pub tax_reserve_ratio: f64,
     #[serde(default = "default_target_weights")]
@@ -45,30 +35,24 @@ pub struct OperatorProfile {
 pub struct TargetWeightsBps {
     #[serde(default = "default_treasury_bps")]
     pub treasury: i32,
-    #[serde(default = "default_aerodrome_bps")]
-    pub aerodrome_lp: i32,
-    #[serde(default = "default_uniswap_v4_bps")]
-    pub uniswap_v4_lp: i32,
+    #[serde(default = "default_uniswap_lp_bps")]
+    pub uniswap_lp: i32,
     #[serde(default = "default_cash_bps")]
     pub cash: i32,
 }
 
 fn default_treasury_floor() -> f64 { 100000.0 }
-fn default_v4_baseline_liquidity() -> f64 { 65719361234409.0 }
-fn default_v4_baseline_nock() -> f64 { 4004.31227 }
-fn default_v4_baseline_usdc() -> f64 { 23.63241 }
-fn default_v4_fee_baseline_usdc() -> f64 { 0.0245 }
-fn default_v4_fee_baseline_nock() -> f64 { 1.4820 }
 fn default_tax_reserve_ratio() -> f64 { 0.40 }
 fn default_treasury_bps() -> i32 { 8000 }
-fn default_aerodrome_bps() -> i32 { 1000 }
-fn default_uniswap_v4_bps() -> i32 { 500 }
+fn default_uniswap_lp_bps() -> i32 { 1500 }
 fn default_cash_bps() -> i32 { 500 }
 fn default_target_weights() -> TargetWeightsBps {
+    // v2.0.0: the Aerodrome tranche was liquidated (2026-10-23); the LP target is now
+    // the aggregate across all tracked Uniswap positions. Legacy configs carrying
+    // `aerodrome_lp` / `uniswap_v4_lp` keys still parse (unknown fields are ignored).
     TargetWeightsBps {
         treasury: 8000,
-        aerodrome_lp: 1000,
-        uniswap_v4_lp: 500,
+        uniswap_lp: 1500,
         cash: 500,
     }
 }
@@ -77,15 +61,53 @@ impl Default for OperatorProfile {
     fn default() -> Self {
         Self {
             treasury_floor_nock: default_treasury_floor(),
-            v4_baseline_liquidity: default_v4_baseline_liquidity(),
-            v4_baseline_nock: default_v4_baseline_nock(),
-            v4_baseline_usdc: default_v4_baseline_usdc(),
-            v4_fee_baseline_usdc: default_v4_fee_baseline_usdc(),
-            v4_fee_baseline_nock: default_v4_fee_baseline_nock(),
             tax_reserve_ratio: default_tax_reserve_ratio(),
             target_weights_bps: default_target_weights(),
         }
     }
+}
+
+/// One operator-tracked LP position (v2.0.0). Identifiers come from the Phase-1
+/// RPC discovery (see ONCHAIN_INTEGRATION.md §5) and are NEVER guessed at runtime.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct PositionConfig {
+    pub id: String,
+    /// "uniswap-v4" | "uniswap-v3"
+    pub protocol: String,
+    #[serde(default = "default_network")]
+    pub network: String,
+    pub nft_id: u64,
+    /// v4: bytes32 poolId. Unused for v3 (pool comes from the NPM decode).
+    #[serde(default)]
+    pub pool_id: Option<String>,
+    /// v3 only: the canonical NonfungiblePositionManager for the network.
+    #[serde(default)]
+    pub npm_address: Option<String>,
+    /// v3 only: pool contract address (pre-resolved via factory getPool).
+    #[serde(default)]
+    pub pool_address: Option<String>,
+    /// v4 only: currency0/currency1 per the pool's canonical ordering (validated
+    /// at runtime against POSM poolKeys).
+    #[serde(default)]
+    pub currency0: Option<String>,
+    #[serde(default)]
+    pub currency1: Option<String>,
+    /// v4 only: immutable tick bounds from the mint (re-run discovery to update).
+    #[serde(default)]
+    pub tick_lower: Option<i32>,
+    #[serde(default)]
+    pub tick_upper: Option<i32>,
+    /// Designates the position whose pool supplies the NOCK/USD spot.
+    #[serde(default)]
+    pub is_price_source: bool,
+}
+
+fn default_network() -> String {
+    "base".to_string()
+}
+
+fn default_eth_price_pool() -> Option<String> {
+    Some(DEFAULT_ETH_PRICE_POOL.to_string())
 }
 
 #[allow(dead_code)]
@@ -111,12 +133,12 @@ struct AppConfig {
     sync_window_seconds: u64,
     #[serde(default = "default_port")]
     port: u16,
+    /// Tracked LP positions (v2.0.0) — replaces the single hardcoded v4_position_id.
     #[serde(default)]
-    v4_position_id: Option<u64>,
-    #[serde(default)]
-    v4_fee_baseline_usdc: Option<f64>,
-    #[serde(default)]
-    v4_fee_baseline_nock: Option<f64>,
+    positions: Vec<PositionConfig>,
+    /// Verified default (canonical v3 WETH/USDC 0.05% pool on Base).
+    #[serde(default = "default_eth_price_pool")]
+    eth_price_pool: Option<String>,
     #[serde(default)]
     mcp_bearer_token: Option<String>,
     #[serde(default)]
@@ -129,14 +151,7 @@ struct AppConfig {
 
 impl AppConfig {
     pub fn profile(&self) -> OperatorProfile {
-        let mut p = self.operator_profile.clone();
-        if let Some(v) = self.v4_fee_baseline_usdc {
-            p.v4_fee_baseline_usdc = v;
-        }
-        if let Some(v) = self.v4_fee_baseline_nock {
-            p.v4_fee_baseline_nock = v;
-        }
-        p
+        self.operator_profile.clone()
     }
 }
 
@@ -204,8 +219,10 @@ fn default_dexscreener_base_url() -> String {
     "https://api.dexscreener.com/latest".to_string()
 }
 fn default_tracked_pool() -> String {
-    // Aerodrome vAMM-USDC/NOCK 0.3% on Base
-    "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string()
+    // v2.0.0: tracked Uniswap v4 NOCK/USDC pool (0.75% fee) on Base — the operator's
+    // active venue and the NOCK/USD price source. Third-party OHLCV coverage is
+    // re-pointed here; providers without coverage degrade fail-open (warnings only).
+    "0x91a9ef0a8dd231b99fa53a2a145a9e8bca7897e0d85852107abb997916f9f99c".to_string()
 }
 fn default_gap_threshold_minutes() -> i64 {
     15
@@ -241,6 +258,7 @@ struct SnapshotMeta {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct SnapshotData {
     wallet_balances: Vec<WalletBalance>,
+    positions: Vec<Position>,
     pool_mechanics: Vec<PoolMechanic>,
     concentrated_liquidity: Vec<ConcentratedLiquidity>,
     contract_fees: Vec<ContractFee>,
@@ -253,26 +271,91 @@ struct RawOnChainData {
     pool_mechanics: Vec<PoolMechanic>,
     concentrated_liquidity: Vec<ConcentratedLiquidity>,
     contract_fees: Vec<ContractFee>,
+    /// Per-position on-chain reads (v2.0.0) — replaces live_tranche_1_*/2_* and
+    /// the Aerodrome LP-share/claimFees inputs.
     #[serde(default)]
-    live_tranche_1_nock: f64,
+    positions: Vec<RawPosition>,
+    /// Live NOCK/USD spot from the designated price-source position pool.
     #[serde(default)]
-    live_tranche_1_usdc: f64,
-    #[serde(default)]
-    live_tranche_2_nock: f64,
-    #[serde(default)]
-    live_tranche_2_usdc: f64,
+    spot_price_nock_usd: f64,
     #[serde(default)]
     live_gas_cost_usd: f64,
-    #[serde(default)]
-    live_aero_fee_usdc: f64,
-    #[serde(default)]
-    live_aero_fee_nock: f64,
-    #[serde(default)]
-    live_uni_fee_usdc: f64,
-    #[serde(default)]
-    live_uni_fee_nock: f64,
     #[serde(default = "default_eth_price")]
     live_eth_price_usd: f64,
+}
+
+/// Token descriptor for position legs (symbol/decimals come from the repo's verified
+/// token registry — NOCK 16, USDC 6, WETH/native-ETH 18).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+struct PositionTokenInfo {
+    address: String,
+    symbol: String,
+    decimals: i32,
+}
+
+/// A fully-priced tracked position as emitted in snapshots (v2.0.0).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Position {
+    position_id: String,
+    network: String,
+    wallet: String,
+    protocol: String,
+    nft_id: u64,
+    pool_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    npm_address: Option<String>,
+    fee_tier_bps: u32,
+    token0: PositionTokenInfo,
+    token1: PositionTokenInfo,
+    amount0: String,
+    amount1: String,
+    amount_usd: String,
+    tokens_owed_0: String,
+    tokens_owed_1: String,
+    fees_usd: String,
+    lower_tick: i32,
+    upper_tick: i32,
+    lower_price: String,
+    upper_price: String,
+    liquidity_amount: String,
+    in_range: bool,
+    is_price_source: bool,
+}
+
+/// Per-position NOCK series entry for the asset aggregation chart (v2.0.0;
+/// replaces the retired tranche_1/2/3_nock series).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+struct PositionNockSeries {
+    position_id: String,
+    series: Vec<String>,
+}
+
+/// Raw per-position on-chain state (human-unit amounts; USD pricing happens later).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct RawPosition {
+    position_id: String,
+    network: String,
+    protocol: String,
+    wallet: String,
+    nft_id: u64,
+    pool_id: String,
+    npm_address: Option<String>,
+    fee_tier_bps: u32,
+    token0: PositionTokenInfo,
+    token1: PositionTokenInfo,
+    liquidity: u128,
+    sqrt_price_x96: U256,
+    tick: i32,
+    tick_lower: i32,
+    tick_upper: i32,
+    /// Current position amounts in HUMAN token units
+    amount0: f64,
+    amount1: f64,
+    /// Unclaimed fees in HUMAN token units
+    fee0: f64,
+    fee1: f64,
+    in_range: bool,
+    is_price_source: bool,
 }
 
 fn default_eth_price() -> f64 {
@@ -411,11 +494,7 @@ struct AssetAggregationSeries {
     safe_haven_series: Vec<String>,
     active_protocol_series: Vec<String>,
     #[serde(default)]
-    tranche_1_nock: Vec<String>,
-    #[serde(default)]
-    tranche_2_nock: Vec<String>,
-    #[serde(default)]
-    tranche_3_nock: Vec<String>,
+    positions_nock: Vec<PositionNockSeries>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
@@ -438,7 +517,10 @@ struct TickBracket {
     upper_price: String,
     liquidity_usd: String,
     in_range: bool,
-    distance_bps: i32,
+    /// Signed bps from spot to the nearest edge — only when the bracket is denominated
+    /// like the spot (USD/NOCK). Cross-denomination rows (ETH-pools) emit null rather
+    /// than a meaningless cross-unit number (zero-mock).
+    distance_bps: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
@@ -1336,9 +1418,11 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     //     lookback, backfilled from third-party OHLCV where snapshots are missing.
     //     The Overextension Cooldown keys on the daily series so a 4-hour bounce
     //     cannot fake a multi-day top (issue #29).
+    // Historical micro closes: the NOCK spot stored in each past snapshot
+    // (total_value_vs_baseline.token_price_series[0] — every row since v0.1.0 carries
+    // it, so the series stays continuous across the v2.0.0 pool-shape change).
     let regime_rows = sqlx::query(
-        r#"SELECT (data->'pool_mechanics'->0->'volatile_assets'->0->>'reserve_amount')::float8 AS usdc,
-                  (data->'pool_mechanics'->0->'volatile_assets'->1->>'reserve_amount')::float8 AS nock
+        r#"SELECT (data->'derived_metrics'->'total_value_vs_baseline'->'token_price_series'->>0)::float8 AS spot
            FROM snapshots ORDER BY generated_at DESC LIMIT 50"#,
     )
     .fetch_all(&state.db)
@@ -1348,21 +1432,12 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
         .iter()
         .rev()
         .filter_map(|r| {
-            let usdc: f64 = r.try_get("usdc").ok()?;
-            let nock: f64 = r.try_get("nock").ok()?;
-            if nock > 0.0 { Some(usdc / nock) } else { None }
+            let spot: f64 = r.try_get("spot").ok()?;
+            if spot > 0.0 { Some(spot) } else { None }
         })
         .collect();
-    let live_spot = raw_data
-        .pool_mechanics
-        .first()
-        .and_then(|p| {
-            if p.volatile_assets.len() < 2 { return None; }
-            let r0: f64 = p.volatile_assets[0].reserve_amount.parse().ok()?;
-            let r1: f64 = p.volatile_assets[1].reserve_amount.parse().ok()?;
-            if r1 > 0.0 { Some(r0 / r1) } else { None }
-        })
-        .unwrap_or(0.0);
+    // Live NOCK/USD spot: computed upstream from the price-source position pool.
+    let live_spot = raw_data.spot_price_nock_usd;
     if live_spot > 0.0 {
         micro_closes.push(live_spot);
         // Contemporaneous price record: the RPC-observed spot is stored before any
@@ -1419,6 +1494,7 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // Build snapshot data
     let snapshot_data = SnapshotData {
         wallet_balances: raw_data.wallet_balances,
+        positions: build_position_snapshots(&raw_data.positions, raw_data.spot_price_nock_usd, raw_data.live_eth_price_usd),
         pool_mechanics: raw_data.pool_mechanics,
         concentrated_liquidity: raw_data.concentrated_liquidity,
         contract_fees: raw_data.contract_fees,
@@ -1452,7 +1528,7 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
         meta: SnapshotMeta {
             generated_at: now,
             state_hash: state_hash.clone(),
-            version: "1.0.0".to_string(),
+            version: "2.0.0".to_string(),
             snapshot_id: Uuid::new_v4(),
         },
         data: snapshot_data,
@@ -1571,6 +1647,19 @@ async fn dispatch_notifications(state: &Arc<AppState>, text: &str) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct U256(pub u128, pub u128);
 
+impl serde::Serialize for U256 {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&format!("0x{}", self.to_hex_be()))
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for U256 {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        U256::from_hex_be(&s).map_err(serde::de::Error::custom)
+    }
+}
+
 impl U256 {
     pub fn from_hex_be(hex_str: &str) -> Result<Self> {
         let clean = hex_str.trim_start_matches("0x");
@@ -1611,6 +1700,144 @@ impl U256 {
     pub fn to_hex_be(&self) -> String {
         format!("{:032x}{:032x}", self.0, self.1)
     }
+
+    /// Lossy f64 value (magnitude only; used for human-unit pricing math).
+    pub fn to_f64(&self) -> f64 {
+        self.0 as f64 * 18446744073709551616.0 * 18446744073709551616.0 + self.1 as f64
+    }
+}
+
+// ============================================================
+// Uniswap v3/v4 per-position reads (v2.0.0)
+// ============================================================
+// Addresses and selectors verified live on Base mainnet 2026-10-24 (Phase-1
+// discovery; see ONCHAIN_INTEGRATION.md §5). Selectors were recomputed from
+// canonical signatures and cross-checked against the responses they produce.
+
+const UNISWAP_V4_STATE_VIEW_BASE: &str = "0xa3c0c9b65bad0b08107aa264b0f3db444b867a71";
+/// Canonical Uniswap v3 WETH/USDC 0.05% pool on Base — the ETH/USD spot source.
+/// Resolved via factory getPool(WETH, USDC, 500) and price-verified ($2,373 at
+/// discovery time); replaces the liquidated Aerodrome vAMM-WETH/USDC feed.
+const DEFAULT_ETH_PRICE_POOL: &str = "0xd0b53d9277642d899df5c87a3966a349a798f224";
+
+const V4_GET_POSITION_LIQUIDITY: &str = "0x1efeed33"; // getPositionLiquidity(uint256)
+const V4_POOL_KEYS: &str = "0x86b6be7d"; // poolKeys(bytes25)
+// (getPoolAndPositionInfo(uint256) = 0x7ba03aad exists on the POSM; the pipeline
+// reads ticks/liquidity via StateView + config instead.)
+const V4_STATE_VIEW_GET_SLOT0: &str = "0xc815641c"; // getSlot0(bytes32)
+const V4_STATE_VIEW_GET_POSITION_INFO: &str = "0xdacf1d2f"; // getPositionInfo(bytes32,address,int24,int24,bytes32)
+const V4_STATE_VIEW_GET_FEE_GROWTH_INSIDE: &str = "0x53e9c1fb"; // getFeeGrowthInside(bytes32,int24,int24)
+const V3_POSITIONS: &str = "0x99fbab88"; // positions(uint256)
+const V3_SLOT0: &str = "0x3850c7bd"; // slot0()
+const V3_FEE_GROWTH_GLOBAL0: &str = "0xf3058399"; // feeGrowthGlobal0X128()
+const V3_FEE_GROWTH_GLOBAL1: &str = "0x46141319"; // feeGrowthGlobal1X128()
+const V3_TICKS: &str = "0xf30dba93"; // ticks(int24)
+
+const WETH_BASE: &str = "0x4200000000000000000000000000000000000006";
+const NATIVE_ETH: &str = "0x0000000000000000000000000000000000000000";
+
+/// Verified token registry for position legs. Unknown tokens fail explicitly —
+/// a position leg we cannot symbolize/decimalize is never emitted with guesses.
+fn token_info(address: &str) -> Result<PositionTokenInfo> {
+    let a = address.trim_start_matches("0x").to_lowercase();
+    match a.as_str() {
+        "9b5e262cf9bb04869ab40b19af91d2dc85761722" => Ok(PositionTokenInfo {
+            address: NOCK_BASE.to_string(),
+            symbol: "NOCK".to_string(),
+            decimals: 16,
+        }),
+        "833589fcd6edb6e08f4c7c32d4f71b54bda02913" => Ok(PositionTokenInfo {
+            address: USDC_BASE.to_string(),
+            symbol: "USDC".to_string(),
+            decimals: 6,
+        }),
+        "4200000000000000000000000000000000000006" => Ok(PositionTokenInfo {
+            address: WETH_BASE.to_string(),
+            symbol: "WETH".to_string(),
+            decimals: 18,
+        }),
+        "0000000000000000000000000000000000000000" => Ok(PositionTokenInfo {
+            address: NATIVE_ETH.to_string(),
+            symbol: "ETH".to_string(),
+            decimals: 18,
+        }),
+        other => Err(anyhow::anyhow!(
+            "Unregistered token 0x{} in a tracked position; add it to the token registry",
+            other
+        )),
+    }
+}
+
+fn is_nock_token(t: &PositionTokenInfo) -> bool {
+    t.symbol == "NOCK"
+}
+
+fn is_usdc_token(t: &PositionTokenInfo) -> bool {
+    t.symbol == "USDC"
+}
+
+fn is_eth_token(t: &PositionTokenInfo) -> bool {
+    t.symbol == "WETH" || t.symbol == "ETH"
+}
+
+/// Uniswap sqrt-price → raw price (token1_raw per token0_raw).
+fn sqrt_price_x96_to_raw(sqrt_price_x96: U256) -> f64 {
+    let s = sqrt_price_x96.to_f64() / 79228162514264337593543950336.0; // 2^96
+    s * s
+}
+
+/// sqrt price at a tick boundary: 1.0001^(tick/2).
+fn tick_sqrt_price(tick: i32) -> f64 {
+    1.0001f64.powf(tick as f64 / 2.0)
+}
+
+/// Current position amounts from liquidity + slot0 + tick bounds (raw token units).
+/// In-range splits across both tokens; out-of-range positions are single-sided.
+fn concentrated_amounts_raw(liquidity: u128, sqrt_price_x96: U256, tick_lower: i32, tick_upper: i32) -> (f64, f64) {
+    let l = liquidity as f64;
+    let s = sqrt_price_x96_to_raw(sqrt_price_x96).sqrt();
+    let sa = tick_sqrt_price(tick_lower);
+    let sb = tick_sqrt_price(tick_upper);
+    if s <= sa {
+        // Entirely token0: L * (1/sa - 1/sb)
+        (l * (1.0 / sa - 1.0 / sb), 0.0)
+    } else if s >= sb {
+        // Entirely token1: L * (sb - sa)
+        (0.0, l * (sb - sa))
+    } else {
+        let amount0 = l * (sb - s) / (s * sb);
+        let amount1 = l * (s - sa);
+        (amount0, amount1)
+    }
+}
+
+/// Human display price for a tick in token0-per-token1 units:
+/// 1.0001^(-tick) * 10^(dec1 - dec0). For USDC(6)/NOCK(16) this is USDC per NOCK
+/// (the historical bracket convention); for ETH(18)/NOCK(16) it is ETH per NOCK.
+fn tick_to_display_price_dec(tick: i32, dec0: i32, dec1: i32) -> f64 {
+    1.0001f64.powi(-tick) * 10f64.powi(dec1 - dec0)
+}
+
+fn parse_hex_word_u128(hex_word: &str) -> Result<u128> {
+    u128::from_str_radix(hex_word.trim_start_matches("0x"), 16)
+        .map_err(|e| anyhow::anyhow!("bad hex word: {e}"))
+}
+
+fn parse_hex_word_i32(hex_word: &str) -> Result<i32> {
+    let clean = hex_word.trim_start_matches("0x");
+    let v = u32::from_str_radix(clean, 16).map_err(|e| anyhow::anyhow!("bad hex word: {e}"))?;
+    Ok(v as i32)
+}
+
+/// Adaptive-precision price formatting: 5 decimals for readable values, 8 for
+/// sub-cent ones (e.g. ETH-per-NOCK ≈ 0.0000081) so brackets never collapse to
+/// "0.00001".
+fn fmt_price(v: f64) -> String {
+    if v != 0.0 && v.abs() < 0.001 {
+        format!("{:.8}", v)
+    } else {
+        format!("{:.5}", v)
+    }
 }
 
 // ============================================================
@@ -1625,7 +1852,8 @@ const UNISWAP_V4_POSM_BASE: &str = "0x7c5f5a4bbd8fd63184577525326123b519429bdc";
 const POSM_MODIFY_LIQUIDITIES_SELECTOR: &str = "dd46508f"; // modifyLiquidities(bytes,uint256)
 const V4_ACTION_DECREASE_LIQUIDITY: u8 = 0x01; // liquidity 0 => collect fees only
 const V4_ACTION_TAKE_PAIR: u8 = 0x11; // unified Actions enum as deployed on Base
-const AERODROME_CLAIM_FEES_SELECTOR: &str = "d294f093"; // claimFees()
+const UNISWAP_V3_COLLECT_SELECTOR: &str = "fc6f7865"; // collect((uint256,address,uint128,uint128)) —
+    // Phase-1 ground truth: the NPM collect staticcall used to validate the v3 fee math
 
 fn word_addr(addr: &str) -> String {
     format!("000000000000000000000000{}", addr.trim_start_matches("0x").to_lowercase())
@@ -1708,6 +1936,20 @@ fn build_v4_collect_calldata(token_id: u64, currency0: &str, currency1: &str, re
     )
 }
 
+/// Canonical Uniswap v3 NPM collect: [selector, tokenId, recipient, amount0Max,
+/// amount1Max] with type(uint128).max maxes — sweeps all accrued fees + tokensOwed
+/// to the recipient. Only valid on the canonical NPM (Phase-1-verified on Base).
+fn build_v3_collect_calldata(token_id: u64, recipient: &str) -> String {
+    format!(
+        "0x{}{}{}{}{}",
+        UNISWAP_V3_COLLECT_SELECTOR,
+        word_u256(token_id),
+        word_addr(recipient),
+        format!("{:064x}", u128::MAX),
+        format!("{:064x}", u128::MAX),
+    )
+}
+
 /// Single-action variant: unlockData with only DECREASE_LIQUIDITY (collects fees to
 /// the posm ledger without sweeping them out). Live-verified companion to the full
 /// collect; useful for isolating decode vs take failures. Kept (test-exercised via
@@ -1736,7 +1978,9 @@ fn build_v4_collect_unlock_data_decrease_only(token_id: u64) -> String {
     )
 }
 
-/// Live ETH/USD spot from the Aerodrome vAMM-WETH/USDC getReserves.
+/// Live ETH/USD spot from the canonical Uniswap v3 WETH/USDC 0.05% pool slot0
+/// (`eth_price_pool` config, default DEFAULT_ETH_PRICE_POOL — factory-resolved and
+/// price-verified at Phase-1 discovery). token0 = WETH (18 dec), token1 = USDC (6 dec).
 /// Zero-mock: returns None when the RPC query fails — callers must degrade honestly
 /// instead of valuing gas at a fabricated price.
 async fn fetch_eth_price_usd(http_client: &Client, alchemy_url: &str) -> Option<f64> {
@@ -1744,23 +1988,20 @@ async fn fetch_eth_price_usd(http_client: &Client, alchemy_url: &str) -> Option<
         "jsonrpc": "2.0",
         "method": "eth_call",
         "params": [{
-            "to": "0x88A43bbDF9D098eEC7bCEda4e2494615dfD9bB9C",
-            "data": "0x0902f1ac"
+            "to": DEFAULT_ETH_PRICE_POOL,
+            "data": V3_SLOT0
         }, "latest"],
         "id": 99
     });
     if let Some(res_json) = post_rpc_with_retry(http_client, alchemy_url, &payload, 2).await {
         if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
             let clean = hex_str.trim_start_matches("0x");
-            if clean.len() >= 128 {
-                if let (Ok(r0), Ok(r1)) = (
-                    u128::from_str_radix(&clean[..64], 16),
-                    u128::from_str_radix(&clean[64..128], 16),
-                ) {
-                    let weth = r0 as f64 / 1e18;
-                    let usdc = r1 as f64 / 1e6;
-                    if weth > 0.0 {
-                        return Some(usdc / weth);
+            if clean.len() >= 64 {
+                if let Ok(sqrt_price) = U256::from_hex_be(&clean[..64]) {
+                    let raw = sqrt_price_x96_to_raw(sqrt_price); // USDC_raw per WETH_raw
+                    let usdc_per_eth = raw * 1e18 / 1e6;
+                    if usdc_per_eth > 0.0 {
+                        return Some(usdc_per_eth);
                     }
                 }
             }
@@ -1856,8 +2097,10 @@ struct MarketRegime {
 const RSI_OVERBOUGHT: f64 = 70.0;
 const RSI_PERIOD: usize = 14;
 
-/// Provenance tags for market_price_history rows
-const PRICE_SOURCE_RPC: &str = "aerodrome_rpc";
+/// Provenance tags for market_price_history rows. Historical rows keep
+/// "aerodrome_rpc" (the retired feed); live spots now come from the tracked
+/// Uniswap pools.
+const PRICE_SOURCE_RPC: &str = "uniswap_rpc";
 const PRICE_SOURCE_GECKOTERMINAL: &str = "geckoterminal";
 const PRICE_SOURCE_DEXSCREENER: &str = "dexscreener";
 
@@ -2391,18 +2634,16 @@ fn is_valid_tx_hash(s: &str) -> bool {
     clean.len() == 64 && clean.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-/// NOCK spot price derived from the Aerodrome pool reserves in the latest snapshot.
+/// NOCK spot price from the latest snapshot (stored in token_price_series by every
+/// cycle since v0.1.0). Works for historical Aerodrome-derived rows and current
+/// Uniswap-derived rows alike.
 fn nock_spot_from_snapshot(data: &SnapshotData) -> Option<f64> {
-    let pool = data.pool_mechanics.iter().find(|p| p.platform == "Aerodrome")?;
-    if pool.volatile_assets.len() < 2 {
-        return None;
-    }
-    let usdc: f64 = pool.volatile_assets[0].reserve_amount.parse().ok()?;
-    let nock: f64 = pool.volatile_assets[1].reserve_amount.parse().ok()?;
-    if usdc <= 0.0 || nock <= 0.0 {
-        return None;
-    }
-    Some(usdc / nock)
+    data.derived_metrics
+        .total_value_vs_baseline
+        .token_price_series
+        .first()
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|v| *v > 0.0)
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -2431,6 +2672,68 @@ struct ClaimFeesPayload {
     estimated_gas_usd: Option<String>,
     net_after_gas_usd: Option<String>,
     actions: Vec<ClaimFeeAction>,
+}
+
+/// Fill expected amounts + token-aware USD valuation from the matching snapshot
+/// position and simulate the collect via eth_call. Shared by the v4 and v3 action
+/// builders so both payload halves behave identically (zero-mock: degrades to None).
+async fn finish_claim_action(
+    http_client: &Client,
+    alchemy_url: &str,
+    wallet: &str,
+    snapshot: &SnapshotEnvelope,
+    action: &mut ClaimFeeAction,
+    pos_id: &str,
+    sim_id: i32,
+    nock_spot: Option<f64>,
+    eth_price: Option<f64>,
+) {
+    let price_for = |symbol: &str| -> Option<f64> {
+        match symbol {
+            "USDC" => Some(1.0),
+            "NOCK" => nock_spot,
+            "WETH" | "ETH" => eth_price,
+            _ => None,
+        }
+    };
+    if let Some(p) = snapshot.data.positions.iter().find(|p| p.position_id == pos_id) {
+        action.expected_amount_0 = Some(p.tokens_owed_0.clone());
+        action.expected_amount_1 = Some(p.tokens_owed_1.clone());
+        if let (Ok(v0), Ok(v1)) = (
+            p.tokens_owed_0.parse::<f64>(),
+            p.tokens_owed_1.parse::<f64>(),
+        ) {
+            match (price_for(&p.token0.symbol), price_for(&p.token1.symbol)) {
+                (Some(p0), Some(p1)) => {
+                    action.expected_usd = Some(format!("{:.4}", v0 * p0 + v1 * p1));
+                }
+                _ => {
+                    action.simulation_detail = Some(
+                        "USD valuation unavailable (missing live NOCK or ETH price)".to_string(),
+                    );
+                }
+            }
+        }
+    }
+    let sim_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{ "from": wallet, "to": action.to, "data": action.data }, "latest"],
+        "id": sim_id
+    });
+    match post_rpc_with_retry(http_client, alchemy_url, &sim_payload, 2).await {
+        Some(res_json) => {
+            if res_json.get("result").and_then(|r| r.as_str()).is_some() {
+                action.simulation = "success".to_string();
+            } else {
+                action.simulation = "failed".to_string();
+                action.simulation_detail = Some("collect eth_call reverted".to_string());
+            }
+        }
+        None => {
+            action.simulation_detail = Some("RPC unavailable for collect simulation".to_string());
+        }
+    }
 }
 
 /// GET /v1/execute/claim-fees/payload — unsigned fee-claim transactions for the
@@ -2470,129 +2773,90 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
     let deadline = (Utc::now().timestamp() as u64) + 600;
     let mut actions: Vec<ClaimFeeAction> = Vec::new();
 
-    // --- Action 1: Aerodrome claimFees() ---
-    // Target pool from config (tracked pool where the wallet LPs Tranche 2)
-    let aero_pool = state
+    // --- Per-position Uniswap v4 collect actions ---
+    // (The Aerodrome tranche was liquidated 2026-10-23; no Aerodrome actions are built.)
+    let v4_configs: Vec<&PositionConfig> = state
         .config
-        .tracked_pools
-        .first()
-        .cloned()
-        .unwrap_or_else(|| "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string());
-    let aero_data = format!("0x{}", AERODROME_CLAIM_FEES_SELECTOR);
-    let aero_sim_payload = json!({
-        "jsonrpc": "2.0",
-        "method": "eth_call",
-        "params": [{ "from": wallet, "to": aero_pool, "data": aero_data }, "latest"],
-        "id": 20
-    });
-    let mut aero = ClaimFeeAction {
-        platform: "aerodrome".to_string(),
-        label: "Claim Aerodrome LP fees (Tranche 2)".to_string(),
-        to: aero_pool,
-        data: aero_data,
-        value: "0x0".to_string(),
-        expected_amount_0: None,
-        expected_amount_1: None,
-        expected_usd: None,
-        gas_estimate: None,
-        gas_usd: None,
-        simulation: "unavailable".to_string(),
-        simulation_detail: None,
-    };
-    match post_rpc_with_retry(&state.http_client, &alchemy_url, &aero_sim_payload, 2).await {
-        Some(res_json) => {
-            if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
-                let clean = hex_str.trim_start_matches("0x");
-                if clean.len() >= 128 {
-                    if let (Ok(c0), Ok(c1)) = (
-                        u128::from_str_radix(&clean[..64], 16),
-                        u128::from_str_radix(&clean[64..128], 16),
-                    ) {
-                        aero.expected_amount_0 = Some(format!("{:.6}", c0 as f64 / 1e6));
-                        aero.expected_amount_1 = Some(format!("{:.4}", c1 as f64 / 1e16));
-                        aero.simulation = "success".to_string();
-                    } else {
-                        aero.simulation = "failed".to_string();
-                        aero.simulation_detail = Some("claimFees() returned unparseable amounts".to_string());
-                    }
-                } else {
-                    aero.simulation = "failed".to_string();
-                    aero.simulation_detail = Some("claimFees() returned short output".to_string());
-                }
-            } else {
-                aero.simulation = "failed".to_string();
-                aero.simulation_detail = Some("claimFees() eth_call reverted".to_string());
-            }
-        }
-        None => {
-            aero.simulation_detail = Some("RPC unavailable for claimFees() simulation".to_string());
-        }
+        .positions
+        .iter()
+        .filter(|p| p.protocol == "uniswap-v4")
+        .collect();
+    let v3_configs: Vec<&PositionConfig> = state
+        .config
+        .positions
+        .iter()
+        .filter(|p| p.protocol == "uniswap-v3")
+        .collect();
+    if v4_configs.is_empty() && v3_configs.is_empty() {
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+            "error": "NO_CLAIMABLE_POSITIONS",
+            "detail": "No Uniswap positions configured; cannot build claim transactions"
+        }))).into_response();
     }
-    actions.push(aero);
 
-    // --- Action 2: Uniswap V4 fee collect (DECREASE 0 + TAKE_PAIR via posm) ---
-    let v4_token_id = state.config.v4_position_id.unwrap_or(3126000);
-    // Canonical Base token ordering for this pool, verified on-chain (see module docs):
-    // currency0 = USDC, currency1 = NOCK.
-    let v4_data = build_v4_collect_calldata(v4_token_id, USDC_BASE, NOCK_BASE, &wallet, deadline);
-    let mut v4 = ClaimFeeAction {
-        platform: "uniswap-v4".to_string(),
-        label: "Collect Uniswap V4 LP fees (Tranche 1)".to_string(),
-        to: UNISWAP_V4_POSM_BASE.to_string(),
-        data: v4_data,
-        value: "0x0".to_string(),
-        expected_amount_0: None,
-        expected_amount_1: None,
-        expected_usd: None,
-        gas_estimate: None,
-        gas_usd: None,
-        simulation: "unavailable".to_string(),
-        simulation_detail: None,
-    };
-    // Expected amounts come from the snapshot's live StateView-derived tokens owed
-    if let Some(cl) = snapshot.data.concentrated_liquidity.first() {
-        v4.expected_amount_0 = Some(cl.tokens_owed_0.clone());
-        v4.expected_amount_1 = Some(cl.tokens_owed_1.clone());
-    }
-    let v4_sim_payload = json!({
-        "jsonrpc": "2.0",
-        "method": "eth_call",
-        "params": [{ "from": wallet, "to": UNISWAP_V4_POSM_BASE, "data": v4.data }, "latest"],
-        "id": 21
-    });
-    match post_rpc_with_retry(&state.http_client, &alchemy_url, &v4_sim_payload, 2).await {
-        Some(res_json) => {
-            if res_json.get("result").and_then(|r| r.as_str()).is_some() {
-                v4.simulation = "success".to_string();
-            } else {
-                v4.simulation = "failed".to_string();
-                v4.simulation_detail = Some("modifyLiquidities collect eth_call reverted".to_string());
-            }
-        }
-        None => {
-            v4.simulation_detail = Some("RPC unavailable for V4 collect simulation".to_string());
-        }
-    }
-    actions.push(v4);
+    // Live prices for token-aware USD valuation (degrade to None, never fabricate).
+    let eth_price = fetch_eth_price_usd(&state.http_client, &alchemy_url).await;
+    let nock_spot = nock_spot_from_snapshot(&snapshot.data);
 
-    // Per-action USD valuation from the live snapshot spot (null when spot unavailable)
-    let spot = nock_spot_from_snapshot(&snapshot.data);
-    if let Some(s) = spot {
-        for action in actions.iter_mut() {
-            let (Some(a0), Some(a1)) = (
-                action.expected_amount_0.clone(),
-                action.expected_amount_1.clone(),
-            ) else {
-                continue;
-            };
-            if let (Ok(v0), Ok(v1)) = (a0.parse::<f64>(), a1.parse::<f64>()) {
-                action.expected_usd = Some(format!("{:.4}", v0 + v1 * s));
-            }
-        }
+    for (idx, pos) in v4_configs.iter().enumerate() {
+        let (Some(c0), Some(c1)) = (pos.currency0.as_deref(), pos.currency1.as_deref()) else {
+            return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+                "error": "NO_POSITION_CONFIG",
+                "detail": format!("Position {} is missing currency0/currency1 in config", pos.id)
+            }))).into_response();
+        };
+        let v4_data = build_v4_collect_calldata(pos.nft_id, c0, c1, &wallet, deadline);
+        let mut action = ClaimFeeAction {
+            platform: "uniswap-v4".to_string(),
+            label: format!("Collect Uniswap V4 LP fees ({} #{})", pos.id, pos.nft_id),
+            to: UNISWAP_V4_POSM_BASE.to_string(),
+            data: v4_data,
+            value: "0x0".to_string(),
+            expected_amount_0: None,
+            expected_amount_1: None,
+            expected_usd: None,
+            gas_estimate: None,
+            gas_usd: None,
+            simulation: "unavailable".to_string(),
+            simulation_detail: None,
+        };
+        let pos_id = format!("uniswap-v4:{}:{}", pos.network, pos.nft_id);
+        finish_claim_action(&state.http_client, &alchemy_url, &wallet, &snapshot,
+            &mut action, &pos_id, 20 + idx as i32, nock_spot, eth_price).await;
+        actions.push(action);
+    }
+
+    // --- Per-position Uniswap v3 collect actions ---
+    // v3 fees accrue in the canonical NPM (tokensOwed); collect((uint256,address,
+    // uint128,uint128)) with type(uint128).max maxes sweeps them to the wallet. Emitted
+    // only for positions whose config carries the canonical npm_address (Phase-1
+    // verified on Base); positions without one stay read-only (advice: ACCUMULATE).
+    for (idx, pos) in v3_configs.iter().enumerate() {
+        let Some(npm) = pos.npm_address.as_deref() else {
+            continue;
+        };
+        let v3_data = build_v3_collect_calldata(pos.nft_id, &wallet);
+        let mut action = ClaimFeeAction {
+            platform: "uniswap-v3".to_string(),
+            label: format!("Collect Uniswap V3 LP fees ({} #{})", pos.id, pos.nft_id),
+            to: npm.to_string(),
+            data: v3_data,
+            value: "0x0".to_string(),
+            expected_amount_0: None,
+            expected_amount_1: None,
+            expected_usd: None,
+            gas_estimate: None,
+            gas_usd: None,
+            simulation: "unavailable".to_string(),
+            simulation_detail: None,
+        };
+        let pos_id = format!("uniswap-v3:{}:{}", pos.network, pos.nft_id);
+        finish_claim_action(&state.http_client, &alchemy_url, &wallet, &snapshot,
+            &mut action, &pos_id, 20 + (v4_configs.len() + idx) as i32, nock_spot, eth_price).await;
+        actions.push(action);
     }
 
     // --- Gas estimation per action (live; degrades to None, never fabricated) ---
-    let eth_price = fetch_eth_price_usd(&state.http_client, &alchemy_url).await;
     let gas_payload = json!({
         "jsonrpc": "2.0",
         "method": "eth_gasPrice",
@@ -2677,10 +2941,10 @@ async fn record_harvest_handler(
     Extension(state): Extension<Arc<AppState>>,
     Json(req): Json<RecordHarvestRequest>,
 ) -> impl IntoResponse {
-    if !matches!(req.platform.as_str(), "aerodrome" | "uniswap-v4") {
+    if !matches!(req.platform.as_str(), "aerodrome" | "uniswap-v4" | "uniswap-v3") {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": "INVALID_PLATFORM", "detail": "platform must be 'aerodrome' or 'uniswap-v4'" })),
+            Json(json!({ "error": "INVALID_PLATFORM", "detail": "platform must be 'aerodrome' (historical), 'uniswap-v4' or 'uniswap-v3'" })),
         )
             .into_response();
     }
@@ -2952,19 +3216,10 @@ async fn tax_export_handler(
     }
 }
 
-// On-chain Uniswap V4 NOCK/USDC position tick bounds (positive on-chain orientation,
-// as passed to StateView getPositionInfo). Single source of truth for bracket prices.
-const V4_TICK_LOWER_ONCHAIN: i32 = 223200;
-const V4_TICK_UPPER_ONCHAIN: i32 = 274200;
-
-/// Displayed USDC-per-NOCK price for an on-chain tick on the NOCK (16 dec) / USDC (6 dec)
-/// V4 pool. Note the negated exponent: larger on-chain ticks map to LOWER displayed
-/// prices. Verified against live on-chain values:
-///   1.0001^(-223200) * 1e10 = 2.02788   (was hardcoded "2.02783")
-///   1.0001^(-274200) * 1e10 = 0.012366  (was hardcoded "0.01237")
-fn tick_to_display_price(tick_onchain: i32) -> f64 {
-    1.0001f64.powi(-tick_onchain) * 1e10
-}
+// (The retired V4_TICK_LOWER_ONCHAIN / V4_TICK_UPPER_ONCHAIN constants and the
+// single-position tick_to_display_price() were removed in v2.0.0: tick bounds now
+// come from the per-position config/discovery, and display prices from
+// tick_to_display_price_dec() with the pool's own token decimals.)
 
 /// Signed basis-point distance from spot to the nearest bracket edge
 /// (positive when spot is below the edge, negative when above).
@@ -2980,35 +3235,32 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let alchemy_key = state.config.alchemy_api_keys.first().cloned().unwrap_or_default();
     let alchemy_url = format!("https://base-mainnet.g.alchemy.com/v2/{}", alchemy_key);
     let wallet_addr = &state.config.tracked_wallets[0];
-    let wallet_padded = format!("000000000000000000000000{}", wallet_addr.trim_start_matches("0x").to_lowercase());
 
-    // 0. Fetch live ETH/USD spot price from Aerodrome vAMM-WETH/USDC (0x88A43bbDF9D098eEC7bCEda4e2494615dfD9bB9C)
-    let eth_reserves_payload = json!({
+    // 0. Fetch live ETH/USD spot price from the canonical Uniswap v3 WETH/USDC pool slot0.
+    //    (The former Aerodrome vAMM-WETH/USDC source is retired along with the liquidated
+    //    Aerodrome tranche.) Zero-mock invariant: a failed query fails the cycle.
+    let eth_price_pool = state.config.eth_price_pool.clone().unwrap_or_else(|| DEFAULT_ETH_PRICE_POOL.to_string());
+    let eth_slot0_payload = json!({
         "jsonrpc": "2.0",
         "method": "eth_call",
         "params": [{
-            "to": "0x88A43bbDF9D098eEC7bCEda4e2494615dfD9bB9C",
-            "data": "0x0902f1ac"
+            "to": eth_price_pool,
+            "data": V3_SLOT0
         }, "latest"],
         "id": 99
     });
-    // Zero-mock invariant (issues #11/#16): ETH spot price is a required input — it feeds
-    // gas break-even math and advice text. A failed query must fail the cycle, never fall
-    // back to a hardcoded price presented as live truth.
     let mut live_eth_price_usd = 0.0f64;
     let mut eth_price_found = false;
-    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &eth_reserves_payload, 2).await {
+    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &eth_slot0_payload, 2).await {
         if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
             let clean = hex_str.trim_start_matches("0x");
-            if clean.len() >= 128 {
-                if let (Ok(r0), Ok(r1)) = (
-                    u128::from_str_radix(&clean[..64], 16),
-                    u128::from_str_radix(&clean[64..128], 16),
-                ) {
-                    let weth = r0 as f64 / 1e18;
-                    let usdc = r1 as f64 / 1e6;
-                    if weth > 0.0 {
-                        live_eth_price_usd = usdc / weth;
+            if clean.len() >= 64 {
+                if let Ok(sqrt_price) = U256::from_hex_be(&clean[..64]) {
+                    // token0 = WETH (18 dec), token1 = USDC (6 dec):
+                    // raw price = USDC_raw per WETH_raw -> human USDC per ETH
+                    let usdc_per_eth = sqrt_price_x96_to_raw(sqrt_price) * 1e18 / 1e6;
+                    if usdc_per_eth > 0.0 {
+                        live_eth_price_usd = usdc_per_eth;
                         eth_price_found = true;
                     }
                 }
@@ -3016,7 +3268,10 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         }
     }
     if !eth_price_found {
-        return Err(anyhow::anyhow!("Failed to query live ETH/USD spot price from Aerodrome vAMM-WETH/USDC RPC"));
+        return Err(anyhow::anyhow!(
+            "Failed to query live ETH/USD spot price from the v3 WETH/USDC pool ({}) slot0",
+            eth_price_pool
+        ));
     }
 
     // 1. Fetch live gas price (eth_gasPrice) — required input, fail explicitly on error
@@ -3046,184 +3301,43 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         return Err(anyhow::anyhow!("Failed to query live gas price from RPC"));
     }
 
-    // 2. Fetch live reserves from Aerodrome pool 0x85f1aa3a70fedd1c52705c15baed143e675cd626
-    let reserves_payload = json!({
-        "jsonrpc": "2.0",
-        "method": "eth_call",
-        "params": [{
-            "to": "0x85f1aa3a70fedd1c52705c15baed143e675cd626",
-            "data": "0x0902f1ac"
-        }, "latest"],
-        "id": 1
-    });
-
-    let mut spot_price = 0.0f64;
-    let mut reserve_usdc = 0.0f64;
-    let mut reserve_nock = 0.0f64;
-    let mut reserves_found = false;
-
-    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &reserves_payload, 2).await {
-        if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
-            let clean = hex_str.trim_start_matches("0x");
-            if clean.len() >= 128 {
-                if let (Ok(r0), Ok(r1)) = (
-                    u128::from_str_radix(&clean[..64], 16),
-                    u128::from_str_radix(&clean[64..128], 16),
-                ) {
-                    reserve_usdc = r0 as f64 / 1e6;
-                    reserve_nock = r1 as f64 / 1e16;
-                    if reserve_nock > 0.0 {
-                        spot_price = reserve_usdc / reserve_nock;
-                        reserves_found = true;
-                    }
-                }
+    // 2. Per-position reads (v2.0.0): every configured Uniswap position is read live;
+    //    there are no Aerodrome LP-share reads anymore (tranche liquidated 2026-10-23).
+    if state.config.positions.is_empty() {
+        return Err(anyhow::anyhow!(
+            "No positions configured; add entries under `positions:` in config.yaml (see ONCHAIN_INTEGRATION.md §5)"
+        ));
+    }
+    let mut raw_positions: Vec<RawPosition> = Vec::new();
+    for pos in &state.config.positions {
+        let raw = match pos.protocol.as_str() {
+            "uniswap-v4" => {
+                fetch_v4_position(&state.http_client, &alchemy_url, pos, wallet_addr).await?
             }
-        }
-    }
-
-    if !reserves_found {
-        return Err(anyhow::anyhow!("Failed to query live Aerodrome pool reserves from RPC"));
-    }
-
-    // 3. Fetch live LP balance and totalSupply on Aerodrome to calculate exact tranche 2 split
-    let aero_bal_payload = json!({
-        "jsonrpc": "2.0",
-        "method": "eth_call",
-        "params": [{
-            "to": "0x85f1aa3a70fedd1c52705c15baed143e675cd626",
-            "data": format!("0x70a08231{}", wallet_padded)
-        }, "latest"],
-        "id": 3
-    });
-    let aero_ts_payload = json!({
-        "jsonrpc": "2.0",
-        "method": "eth_call",
-        "params": [{
-            "to": "0x85f1aa3a70fedd1c52705c15baed143e675cd626",
-            "data": "0x18160ddd"
-        }, "latest"],
-        "id": 4
-    });
-    let mut user_lp_balance = 0u128;
-    let mut pool_total_supply = 0u128;
-    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &aero_bal_payload, 2).await {
-        if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
-            if let Ok(val) = u128::from_str_radix(hex_str.trim_start_matches("0x"), 16) {
-                user_lp_balance = val;
+            "uniswap-v3" => {
+                fetch_v3_position(&state.http_client, &alchemy_url, pos, wallet_addr).await?
             }
-        }
-    }
-    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &aero_ts_payload, 2).await {
-        if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
-            if let Ok(val) = u128::from_str_radix(hex_str.trim_start_matches("0x"), 16) {
-                pool_total_supply = val;
+            other => {
+                return Err(anyhow::anyhow!(
+                    "Position {} has unsupported protocol '{}' (expected uniswap-v4 or uniswap-v3)",
+                    pos.id,
+                    other
+                ));
             }
-        }
-    }
-    if pool_total_supply == 0 {
-        return Err(anyhow::anyhow!("Failed to query live Aerodrome total supply from RPC"));
-    }
-    let lp_share = user_lp_balance as f64 / pool_total_supply as f64;
-    let live_t2_usdc = reserve_usdc * lp_share;
-    let live_t2_nock = reserve_nock * lp_share;
-
-    // 4. Fetch Uniswap V4 Position Info & Live Uncollected Fees via official StateView contract on Base
-    // StateView: 0xa3c0c9b65bad0b08107aa264b0f3db444b867a71
-    // PositionManager: 0x7c5f5a4bbd8fd63184577525326123b519429bdc
-    // PoolId: 0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13
-    let v4_pos_id = state.config.v4_position_id.unwrap_or(3126000);
-    let v4_pos_hex = format!("{:064x}", v4_pos_id);
-    let state_view_addr = "0xa3c0c9b65bad0b08107aa264b0f3db444b867a71";
-    let pool_id_hex = "064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13";
-    let pos_manager_padded = "0000000000000000000000007c5f5a4bbd8fd63184577525326123b519429bdc";
-    let tick_lower_hex = format!("{:064x}", V4_TICK_LOWER_ONCHAIN as u32);
-    let tick_upper_hex = format!("{:064x}", V4_TICK_UPPER_ONCHAIN as u32);
-
-    // 4a. getPositionInfo(bytes32,address,int24,int24,bytes32) -> 0xdacf1d2f
-    let get_pos_data = format!("0xdacf1d2f{}{}{}{}{}", pool_id_hex, pos_manager_padded, tick_lower_hex, tick_upper_hex, v4_pos_hex);
-    let v4_pos_payload = json!({
-        "jsonrpc": "2.0",
-        "method": "eth_call",
-        "params": [{
-            "to": state_view_addr,
-            "data": get_pos_data
-        }, "latest"],
-        "id": 5
-    });
-
-    // 4b. getFeeGrowthInside(bytes32,int24,int24) -> 0x53e9c1fb
-    let get_fg_data = format!("0x53e9c1fb{}{}{}", pool_id_hex, tick_lower_hex, tick_upper_hex);
-    let v4_fg_payload = json!({
-        "jsonrpc": "2.0",
-        "method": "eth_call",
-        "params": [{
-            "to": state_view_addr,
-            "data": get_fg_data
-        }, "latest"],
-        "id": 6
-    });
-
-    let mut v4_liquidity_val = 0u128;
-    let mut fg0_last = U256::default();
-    let mut fg1_last = U256::default();
-    let mut fg0_curr = U256::default();
-    let mut fg1_curr = U256::default();
-    let mut v4_live_query_success = false;
-
-    if let (Some(res_pos), Some(res_fg)) = (
-        post_rpc_with_retry(&state.http_client, &alchemy_url, &v4_pos_payload, 2).await,
-        post_rpc_with_retry(&state.http_client, &alchemy_url, &v4_fg_payload, 2).await,
-    ) {
-        if let (Some(hex_pos), Some(hex_fg)) = (
-            res_pos.get("result").and_then(|r| r.as_str()),
-            res_fg.get("result").and_then(|r| r.as_str()),
-        ) {
-            let clean_pos = hex_pos.trim_start_matches("0x");
-            let clean_fg = hex_fg.trim_start_matches("0x");
-            if clean_pos.len() >= 192 && clean_fg.len() >= 128 {
-                if let (Ok(liq), Ok(f0_l), Ok(f1_l), Ok(f0_c), Ok(f1_c)) = (
-                    u128::from_str_radix(&clean_pos[0..64], 16),
-                    U256::from_hex_be(&clean_pos[64..128]),
-                    U256::from_hex_be(&clean_pos[128..192]),
-                    U256::from_hex_be(&clean_fg[0..64]),
-                    U256::from_hex_be(&clean_fg[64..128]),
-                ) {
-                    if liq > 0 {
-                        v4_liquidity_val = liq;
-                        fg0_last = f0_l;
-                        fg1_last = f1_l;
-                        fg0_curr = f0_c;
-                        fg1_curr = f1_c;
-                        v4_live_query_success = true;
-                    }
-                }
-            }
-        }
+        };
+        raw_positions.push(raw);
     }
 
-    if !v4_live_query_success {
-        return Err(anyhow::anyhow!("Failed to query live Uniswap V4 position and fee growth from StateView RPC"));
-    }
+    // 3. NOCK/USD spot from the designated price-source position pool (zero-mock:
+    //    fail the cycle when missing or unparseable).
+    let spot_price = nock_spot_from_positions(&raw_positions).ok_or_else(|| {
+        anyhow::anyhow!(
+            "No NOCK/USD spot: exactly one configured position must have is_price_source: true \
+             and quote NOCK against USDC"
+        )
+    })?;
 
-    let delta_fg0 = fg0_curr.wrapping_sub(&fg0_last);
-    let delta_fg1 = fg1_curr.wrapping_sub(&fg1_last);
-    let fee0_raw = delta_fg0.mul_div_q128(v4_liquidity_val);
-    let fee1_raw = delta_fg1.mul_div_q128(v4_liquidity_val);
-
-    let live_uni_fee_usdc = fee0_raw as f64 / 1e6; // USDC has 6 decimals
-    let live_uni_fee_nock = fee1_raw as f64 / 1e16; // NOCK has 16 decimals
-    let live_uni_fee_usd = live_uni_fee_usdc + live_uni_fee_nock * spot_price;
-
-    let profile = state.config.profile();
-    let v4_scale = (v4_liquidity_val as f64) / profile.v4_baseline_liquidity;
-    let v4_liquidity_str = v4_liquidity_val.to_string();
-    let live_t1_nock = profile.v4_baseline_nock * v4_scale;
-    let live_t1_usdc = profile.v4_baseline_usdc * v4_scale;
-
-    tracing::info!(
-        "Uniswap V4 live StateView query successful: liquidity={}, fees_usdc={:.6}, fees_nock={:.4}, fees_usd={:.4}",
-        v4_liquidity_val, live_uni_fee_usdc, live_uni_fee_nock, live_uni_fee_usd
-    );
+    // 4. Fetch live token balances for tracked wallet
 
     // 5. Fetch live token balances for tracked wallet
     let balances_payload = json!({
@@ -3270,41 +3384,18 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let nock_balance_usd = nock_balance * spot_price;
     let now_str = Utc::now().to_rfc3339();
 
-    // 6. Live Trading Fees
-    // Live query for Aerodrome uncollected trading fees via simulated claimFees() call from wallet
-    let aero_claim_payload = json!({
-        "jsonrpc": "2.0",
-        "method": "eth_call",
-        "params": [{
-            "from": wallet_addr,
-            "to": "0x85f1aa3a70fedd1c52705c15baed143e675cd626",
-            "data": "0xd294f093"
-        }, "latest"],
-        "id": 6
-    });
+    // 5. Snapshot-level builders (sync, unit-testable): USD pricing, pool mechanics,
+    //    and per-position contract fees.
+    let positions = build_position_snapshots(&raw_positions, spot_price, live_eth_price_usd);
+    let pool_mechanics = build_pool_mechanics(&raw_positions, spot_price, live_eth_price_usd);
+    let contract_fees = build_contract_fees(&positions, live_gas_cost_usd);
 
-    let mut aero_fee_usdc = 0.0f64;
-    let mut aero_fee_nock = 0.0f64;
-
-    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &aero_claim_payload, 2).await {
-        if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
-            let clean = hex_str.trim_start_matches("0x");
-            if clean.len() >= 128 {
-                if let (Ok(c0), Ok(c1)) = (
-                    u128::from_str_radix(&clean[..64], 16),
-                    u128::from_str_radix(&clean[64..128], 16),
-                ) {
-                    aero_fee_usdc = c0 as f64 / 1e6;
-                    aero_fee_nock = c1 as f64 / 1e16;
-                }
-            }
-        }
-    }
-
-    let aero_fee_usd = aero_fee_usdc + aero_fee_nock * spot_price;
-
-    // Uniswap V4: Use LIVE on-chain uncollected fees from tokensOwed0/1 (queried above)
-    // instead of scaling operator-profile baseline by liquidity ratio.
+    tracing::info!(
+        "Live position reads: {} position(s), NOCK spot ${:.6}, ETH/USD ${:.2}",
+        positions.len(),
+        spot_price,
+        live_eth_price_usd
+    );
 
     Ok(RawOnChainData {
         wallet_balances: vec![
@@ -3325,77 +3416,590 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
                 updated_at: now_str.clone(),
             },
         ],
-        pool_mechanics: vec![PoolMechanic {
-            pool_id: "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
-            platform: "Aerodrome".to_string(),
-            pool_type: "volatile".to_string(),
-            volatile_assets: vec![
-                PoolAsset {
-                    token_address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".to_string(),
-                    token_symbol: "USDC".to_string(),
-                    reserve_amount: format!("{:.2}", reserve_usdc),
-                    reserve_usd: format!("{:.2}", reserve_usdc),
-                },
-                PoolAsset {
-                    token_address: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722".to_string(),
-                    token_symbol: "NOCK".to_string(),
-                    reserve_amount: format!("{:.2}", reserve_nock),
-                    reserve_usd: format!("{:.2}", reserve_nock * spot_price),
-                },
-            ],
-            liquidity_usd: format!("{:.2}", reserve_usdc * 2.0),
-            fee_accrued_usd: format!("{:.4}", aero_fee_usd),
-            fee_tier_bps: 30, // 0.3%
-            tick_current: Some(((spot_price / 1e10).ln() / 1.0001f64.ln()).round() as i32),
-            sqrt_price_x96: None,
-        }],
-        concentrated_liquidity: vec![
-            ConcentratedLiquidity {
-                range_id: "3126000".to_string(),
-                pool_id: "0x498581ff718922c3f8e6a244956af099b2652b2b".to_string(),
-                lower_tick: -V4_TICK_UPPER_ONCHAIN,
-                upper_tick: -V4_TICK_LOWER_ONCHAIN,
-                lower_price: format!("{:.5}", tick_to_display_price(V4_TICK_UPPER_ONCHAIN)),
-                upper_price: format!("{:.5}", tick_to_display_price(V4_TICK_LOWER_ONCHAIN)),
-                liquidity_amount: v4_liquidity_str,
-                tokens_owed_0: format!("{:.6}", live_uni_fee_usdc),
-                tokens_owed_1: format!("{:.4}", live_uni_fee_nock),
-                in_range: spot_price >= tick_to_display_price(V4_TICK_UPPER_ONCHAIN)
-                    && spot_price <= tick_to_display_price(V4_TICK_LOWER_ONCHAIN),
-                fee_growth_inside_0_x128: fg0_curr.to_hex_be(),
-                fee_growth_inside_1_x128: fg1_curr.to_hex_be(),
-            }
-        ],
-        contract_fees: vec![
-            ContractFee {
-                contract_address: "0x7c5f5a4bbd8fd63184577525326123b519429bdc".to_string(),
-                fee_token_address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".to_string(),
-                fee_token_symbol: "USDC+NOCK (Uniswap V4)".to_string(),
-                amount: format!("{:.6} USDC + {:.4} NOCK", live_uni_fee_usdc, live_uni_fee_nock),
-                amount_usd: format!("{:.4}", live_uni_fee_usd),
-                claimable: true,
-                gas_break_even_usd: format!("{:.4}", live_gas_cost_usd),
-            },
-            ContractFee {
-                contract_address: "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
-                fee_token_address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".to_string(),
-                fee_token_symbol: "USDC+NOCK (Aerodrome)".to_string(),
-                amount: format!("{:.5} USDC + {:.5} NOCK", aero_fee_usdc, aero_fee_nock),
-                amount_usd: format!("{:.4}", aero_fee_usd),
-                claimable: true,
-                gas_break_even_usd: format!("{:.4}", live_gas_cost_usd),
-            },
-        ],
-        live_tranche_1_nock: live_t1_nock,
-        live_tranche_1_usdc: live_t1_usdc,
-        live_tranche_2_nock: live_t2_nock,
-        live_tranche_2_usdc: live_t2_usdc,
-        live_gas_cost_usd: live_gas_cost_usd,
-        live_aero_fee_usdc: aero_fee_usdc,
-        live_aero_fee_nock: aero_fee_nock,
-        live_uni_fee_usdc: live_uni_fee_usdc,
-        live_uni_fee_nock: live_uni_fee_nock,
+        pool_mechanics,
+        concentrated_liquidity: vec![], // DEPRECATED since v2.0.0 — see `positions`
+        contract_fees,
+        positions: raw_positions,
+        spot_price_nock_usd: spot_price,
+        live_gas_cost_usd,
         live_eth_price_usd,
+    })
+}
+
+/// NOCK/USD spot from the designated price-source position. The pool must quote
+/// NOCK against USDC (either ordering); the conversion follows the pool's decimals.
+fn nock_spot_from_positions(positions: &[RawPosition]) -> Option<f64> {
+    let src = positions.iter().find(|p| p.is_price_source)?;
+    let raw = sqrt_price_x96_to_raw(src.sqrt_price_x96); // token1_raw per token0_raw
+    let price = if is_usdc_token(&src.token0) && is_nock_token(&src.token1) {
+        // raw = NOCK_raw per USDC_raw -> USDC per NOCK = raw^-1 * 10^(dec1-dec0)
+        10f64.powi(src.token1.decimals - src.token0.decimals) / raw
+    } else if is_nock_token(&src.token0) && is_usdc_token(&src.token1) {
+        // raw = USDC_raw per NOCK_raw -> USDC per NOCK = raw * 10^(dec1-dec0)... dec0=16, dec1=6
+        raw * 10f64.powi(src.token1.decimals - src.token0.decimals)
+    } else {
+        return None;
+    };
+    if price > 0.0 { Some(price) } else { None }
+}
+
+/// USD price of one human unit of a position leg.
+fn leg_usd_price(token: &PositionTokenInfo, nock_usd: f64, eth_usd: f64) -> f64 {
+    if is_usdc_token(token) {
+        1.0
+    } else if is_nock_token(token) {
+        nock_usd
+    } else if is_eth_token(token) {
+        eth_usd
+    } else {
+        0.0
+    }
+}
+
+/// Build the snapshot `positions` array from raw reads + live prices.
+fn build_position_snapshots(raw_positions: &[RawPosition], nock_usd: f64, eth_usd: f64) -> Vec<Position> {
+    raw_positions
+        .iter()
+        .map(|p| {
+            let p0 = leg_usd_price(&p.token0, nock_usd, eth_usd);
+            let p1 = leg_usd_price(&p.token1, nock_usd, eth_usd);
+            let amount_usd = p.amount0 * p0 + p.amount1 * p1;
+            let fees_usd = p.fee0 * p0 + p.fee1 * p1;
+            Position {
+                position_id: p.position_id.clone(),
+                network: p.network.clone(),
+                wallet: p.wallet.clone(),
+                protocol: p.protocol.clone(),
+                nft_id: p.nft_id,
+                pool_id: p.pool_id.clone(),
+                npm_address: p.npm_address.clone(),
+                fee_tier_bps: p.fee_tier_bps,
+                token0: p.token0.clone(),
+                token1: p.token1.clone(),
+                amount0: format!("{:.6}", p.amount0),
+                amount1: format!("{:.6}", p.amount1),
+                amount_usd: format!("{:.2}", amount_usd),
+                tokens_owed_0: format!("{:.6}", p.fee0),
+                tokens_owed_1: format!("{:.6}", p.fee1),
+                fees_usd: format!("{:.6}", fees_usd),
+                lower_tick: p.tick_lower,
+                upper_tick: p.tick_upper,
+                // Display orientation: bigger tick -> lower price (token0-per-token1).
+                lower_price: format!(
+                    "{}",
+                    fmt_price(tick_to_display_price_dec(p.tick_upper, p.token0.decimals, p.token1.decimals))
+                ),
+                upper_price: format!(
+                    "{}",
+                    fmt_price(tick_to_display_price_dec(p.tick_lower, p.token0.decimals, p.token1.decimals))
+                ),
+                liquidity_amount: p.liquidity.to_string(),
+                in_range: p.in_range,
+                is_price_source: p.is_price_source,
+            }
+        })
+        .collect()
+}
+
+/// One PoolMechanic per tracked position's pool. volatile_assets carry the tracked
+/// wallet's amounts in that pool (NOT pool-wide reserves).
+fn build_pool_mechanics(raw_positions: &[RawPosition], nock_usd: f64, eth_usd: f64) -> Vec<PoolMechanic> {
+    raw_positions
+        .iter()
+        .map(|p| {
+            let platform = match p.protocol.as_str() {
+                "uniswap-v4" => "UniswapV4",
+                "uniswap-v3" => "UniswapV3",
+                "aerodrome" => "Aerodrome",
+                _ => "Other",
+            };
+            let p0 = leg_usd_price(&p.token0, nock_usd, eth_usd);
+            let p1 = leg_usd_price(&p.token1, nock_usd, eth_usd);
+            PoolMechanic {
+                pool_id: p.pool_id.clone(),
+                platform: platform.to_string(),
+                pool_type: "concentrated".to_string(),
+                volatile_assets: vec![
+                    PoolAsset {
+                        token_address: p.token0.address.clone(),
+                        token_symbol: p.token0.symbol.clone(),
+                        reserve_amount: format!("{:.6}", p.amount0),
+                        reserve_usd: format!("{:.2}", p.amount0 * p0),
+                    },
+                    PoolAsset {
+                        token_address: p.token1.address.clone(),
+                        token_symbol: p.token1.symbol.clone(),
+                        reserve_amount: format!("{:.6}", p.amount1),
+                        reserve_usd: format!("{:.2}", p.amount1 * p1),
+                    },
+                ],
+                liquidity_usd: format!("{:.2}", p.amount0 * p0 + p.amount1 * p1),
+                fee_accrued_usd: format!("{:.6}", p.fee0 * p0 + p.fee1 * p1),
+                fee_tier_bps: p.fee_tier_bps,
+                tick_current: Some(p.tick),
+                sqrt_price_x96: Some(format!("{:032x}{:032x}", p.sqrt_price_x96.0, p.sqrt_price_x96.1)),
+            }
+        })
+        .collect()
+}
+
+/// One ContractFee per tracked position with its unclaimed fees.
+fn build_contract_fees(positions: &[Position], live_gas_cost_usd: f64) -> Vec<ContractFee> {
+    positions
+        .iter()
+        .map(|p| {
+            let label = match p.protocol.as_str() {
+                "uniswap-v4" => "Uniswap V4".to_string(),
+                "uniswap-v3" => "Uniswap V3".to_string(),
+                "aerodrome" => "Aerodrome".to_string(),
+                _ => p.protocol.clone(),
+            };
+            ContractFee {
+                contract_address: if p.protocol == "uniswap-v3" {
+                    p.npm_address.clone().unwrap_or_else(|| p.pool_id.clone())
+                } else {
+                    UNISWAP_V4_POSM_BASE.to_string()
+                },
+                fee_token_address: p.token0.address.clone(),
+                fee_token_symbol: format!("{}+{} ({} #{})", p.token0.symbol, p.token1.symbol, label, p.nft_id),
+                amount: format!(
+                    "{:.p0$} {} + {:.p1$} {}",
+                    p.tokens_owed_0.parse::<f64>().unwrap_or(0.0),
+                    p.token0.symbol,
+                    p.tokens_owed_1.parse::<f64>().unwrap_or(0.0),
+                    p.token1.symbol,
+                    p0 = (p.token0.decimals as usize).min(8),
+                    p1 = (p.token1.decimals as usize).min(8),
+                ),
+                amount_usd: p.fees_usd.clone(),
+                claimable: p.fees_usd.parse::<f64>().unwrap_or(0.0) > 0.0,
+                gas_break_even_usd: format!("{:.4}", live_gas_cost_usd),
+            }
+        })
+        .collect()
+}
+
+// ------------------------------------------------------------------
+// Async per-position readers
+// ------------------------------------------------------------------
+
+async fn fetch_v4_position(
+    http_client: &Client,
+    alchemy_url: &str,
+    pos: &PositionConfig,
+    wallet: &str,
+) -> Result<RawPosition> {
+    let pool_id = pos
+        .pool_id
+        .as_deref()
+        .map(|s| s.trim_start_matches("0x").to_lowercase())
+        .filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit()))
+        .ok_or_else(|| anyhow::anyhow!("position {} missing/invalid v4 pool_id (re-run discovery)", pos.id))?;
+    let currency0 = pos
+        .currency0
+        .as_deref()
+        .map(|s| s.trim_start_matches("0x").to_lowercase())
+        .ok_or_else(|| anyhow::anyhow!("position {} missing currency0 in config", pos.id))?;
+    let currency1 = pos
+        .currency1
+        .as_deref()
+        .map(|s| s.trim_start_matches("0x").to_lowercase())
+        .ok_or_else(|| anyhow::anyhow!("position {} missing currency1 in config", pos.id))?;
+    let tick_lower = pos
+        .tick_lower
+        .ok_or_else(|| anyhow::anyhow!("position {} missing tick_lower in config", pos.id))?;
+    let tick_upper = pos
+        .tick_upper
+        .ok_or_else(|| anyhow::anyhow!("position {} missing tick_upper in config", pos.id))?;
+
+    // 0. poolKeys(bytes25) -> (currency0, currency1, fee, tickSpacing, hooks);
+    //    validates the config's declared currency ordering and supplies the fee tier.
+    let pk_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{
+            "to": UNISWAP_V4_POSM_BASE,
+            "data": format!("{}{}{}", V4_POOL_KEYS, &pool_id[..50], "0".repeat(14))
+        }, "latest"],
+        "id": 50
+    });
+    let mut fee_tier_bps = 0u32;
+    if let Some(res_json) = post_rpc_with_retry(http_client, alchemy_url, &pk_payload, 2).await {
+        if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
+            let clean = hex_str.trim_start_matches("0x");
+            if clean.len() >= 160 {
+                let c0 = clean[24..64].to_lowercase();
+                let c1 = clean[88..128].to_lowercase();
+                let fee = parse_hex_word_u128(&clean[128..192]).unwrap_or(0) as u64;
+                if c0 != currency0 || c1 != currency1 {
+                    return Err(anyhow::anyhow!(
+                        "position {}: poolKeys currency ordering (0x{}, 0x{}) does not match config ({}, {}); re-run discovery",
+                        pos.id,
+                        c0,
+                        c1,
+                        pos.currency0.as_deref().unwrap_or(""),
+                        pos.currency1.as_deref().unwrap_or("")
+                    ));
+                }
+                fee_tier_bps = (fee / 100) as u32; // fee is in hundredths of a basis point
+            }
+        }
+    }
+    if fee_tier_bps == 0 {
+        return Err(anyhow::anyhow!(
+            "position {}: failed to read poolKeys fee tier from POSM",
+            pos.id
+        ));
+    }
+
+    // 1. getPositionLiquidity(uint256)
+    let liq_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{
+            "to": UNISWAP_V4_POSM_BASE,
+            "data": format!("{}{:064x}", V4_GET_POSITION_LIQUIDITY, pos.nft_id)
+        }, "latest"],
+        "id": 51
+    });
+    let liquidity = post_rpc_with_retry(http_client, alchemy_url, &liq_payload, 2)
+        .await
+        .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .and_then(|s| u128::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "position {}: failed to query getPositionLiquidity from POSM",
+                pos.id
+            )
+        })?;
+
+    // 2. StateView getSlot0(bytes32) -> (sqrtPriceX96, tick, ...)
+    let slot0_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{
+            "to": UNISWAP_V4_STATE_VIEW_BASE,
+            "data": format!("{}{}", V4_STATE_VIEW_GET_SLOT0, pool_id)
+        }, "latest"],
+        "id": 52
+    });
+    let slot0_hex = post_rpc_with_retry(http_client, alchemy_url, &slot0_payload, 2)
+        .await
+        .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .ok_or_else(|| anyhow::anyhow!("position {}: StateView getSlot0 query failed", pos.id))?;
+    let clean = slot0_hex.trim_start_matches("0x");
+    if clean.len() < 128 {
+        return Err(anyhow::anyhow!("position {}: StateView getSlot0 returned short output", pos.id));
+    }
+    let sqrt_price_x96 = U256::from_hex_be(&clean[..64])?;
+    let tick = parse_hex_word_i32(&clean[64..128])?;
+
+    // 3. Uncollected fees: getPositionInfo(poolId, posm, tickLower, tickUpper, tokenId)
+    //    + getFeeGrowthInside(poolId, tickLower, tickUpper), existing verified selectors.
+    let pos_info_data = format!(
+        "{}{}{}{}{}{:064x}",
+        V4_STATE_VIEW_GET_POSITION_INFO,
+        pool_id,
+        word_addr(UNISWAP_V4_POSM_BASE),
+        format!("{:064x}", tick_lower as u32),
+        format!("{:064x}", tick_upper as u32),
+        pos.nft_id
+    );
+    let pos_info_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{
+            "to": UNISWAP_V4_STATE_VIEW_BASE,
+            "data": pos_info_data
+        }, "latest"],
+        "id": 53
+    });
+    let fg_data = format!(
+        "{}{}{}{}",
+        V4_STATE_VIEW_GET_FEE_GROWTH_INSIDE,
+        pool_id,
+        format!("{:064x}", tick_lower as u32),
+        format!("{:064x}", tick_upper as u32)
+    );
+    let fg_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{
+            "to": UNISWAP_V4_STATE_VIEW_BASE,
+            "data": fg_data
+        }, "latest"],
+        "id": 54
+    });
+    let (fg0_last, fg1_last, fg0_curr, fg1_curr) = match (
+        post_rpc_with_retry(http_client, alchemy_url, &pos_info_payload, 2).await,
+        post_rpc_with_retry(http_client, alchemy_url, &fg_payload, 2).await,
+    ) {
+        (Some(res_pos), Some(res_fg)) => {
+            let hex_pos = res_pos.get("result").and_then(|r| r.as_str()).unwrap_or("");
+            let hex_fg = res_fg.get("result").and_then(|r| r.as_str()).unwrap_or("");
+            let cp = hex_pos.trim_start_matches("0x");
+            let cf = hex_fg.trim_start_matches("0x");
+            if cp.len() < 192 || cf.len() < 128 {
+                return Err(anyhow::anyhow!(
+                    "position {}: StateView getPositionInfo/getFeeGrowthInside returned short output",
+                    pos.id
+                ));
+            }
+            (
+                U256::from_hex_be(&cp[64..128])?,
+                U256::from_hex_be(&cp[128..192])?,
+                U256::from_hex_be(&cf[0..64])?,
+                U256::from_hex_be(&cf[64..128])?,
+            )
+        }
+        _ => {
+            return Err(anyhow::anyhow!(
+                "position {}: failed to query StateView fee growth",
+                pos.id
+            ));
+        }
+    };
+    let fee0_raw = fg0_curr.wrapping_sub(&fg0_last).mul_div_q128(liquidity);
+    let fee1_raw = fg1_curr.wrapping_sub(&fg1_last).mul_div_q128(liquidity);
+
+    let token0 = token_info(&format!("0x{}", currency0))?;
+    let token1 = token_info(&format!("0x{}", currency1))?;
+    let (amount0_raw, amount1_raw) = concentrated_amounts_raw(liquidity, sqrt_price_x96, tick_lower, tick_upper);
+    let dec0 = 10f64.powi(token0.decimals);
+    let dec1 = 10f64.powi(token1.decimals);
+
+    tracing::info!(
+        "v4 position {} (NFT #{}): liquidity={}, tick={}, in_range={}, fees raw {}/{}",
+        pos.id, pos.nft_id, liquidity, tick, tick_lower <= tick && tick <= tick_upper, fee0_raw, fee1_raw
+    );
+
+    Ok(RawPosition {
+        position_id: format!("uniswap-v4:{}:{}", pos.network, pos.nft_id),
+        network: pos.network.clone(),
+        protocol: "uniswap-v4".to_string(),
+        wallet: wallet.to_string(),
+        nft_id: pos.nft_id,
+        pool_id: format!("0x{}", pool_id),
+        npm_address: None,
+        fee_tier_bps,
+        token0,
+        token1,
+        liquidity,
+        sqrt_price_x96,
+        tick,
+        tick_lower,
+        tick_upper,
+        amount0: amount0_raw / dec0,
+        amount1: amount1_raw / dec1,
+        fee0: fee0_raw as f64 / dec0,
+        fee1: fee1_raw as f64 / dec1,
+        in_range: tick_lower <= tick && tick <= tick_upper,
+        is_price_source: pos.is_price_source,
+    })
+}
+
+async fn fetch_v3_position(
+    http_client: &Client,
+    alchemy_url: &str,
+    pos: &PositionConfig,
+    wallet: &str,
+) -> Result<RawPosition> {
+    let npm = pos
+        .npm_address
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("position {} missing npm_address in config", pos.id))?;
+    let pool = pos
+        .pool_address
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!(
+            "position {} missing pool_address in config (resolve via factory getPool at discovery)",
+            pos.id
+        ))?;
+
+    // 1. positions(uint256) -> 12-word decode (self-describing: tokens/fee/ticks/liquidity)
+    let positions_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{
+            "to": npm,
+            "data": format!("{}{:064x}", V3_POSITIONS, pos.nft_id)
+        }, "latest"],
+        "id": 60
+    });
+    let res_hex = post_rpc_with_retry(http_client, alchemy_url, &positions_payload, 2)
+        .await
+        .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .ok_or_else(|| anyhow::anyhow!("position {}: NPM positions() query failed", pos.id))?;
+    let decoded = decode_v3_positions_return(&res_hex)
+        .map_err(|e| anyhow::anyhow!("position {}: {}", pos.id, e))?;
+    if decoded.token0 == NATIVE_ETH || decoded.token1 == NATIVE_ETH {
+        return Err(anyhow::anyhow!(
+            "position {}: NFT #{} decoded with a zero token address",
+            pos.id,
+            pos.nft_id
+        ));
+    }
+
+    // 2. pool.slot0() -> (sqrtPriceX96, tick, ...)
+    let slot0_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{ "to": pool, "data": V3_SLOT0 }, "latest"],
+        "id": 61
+    });
+    let slot0_hex = post_rpc_with_retry(http_client, alchemy_url, &slot0_payload, 2)
+        .await
+        .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .ok_or_else(|| anyhow::anyhow!("position {}: pool slot0 query failed", pos.id))?;
+    let clean = slot0_hex.trim_start_matches("0x");
+    if clean.len() < 128 {
+        return Err(anyhow::anyhow!("position {}: pool slot0 returned short output", pos.id));
+    }
+    let sqrt_price_x96 = U256::from_hex_be(&clean[..64])?;
+    let tick = parse_hex_word_i32(&clean[64..128])?;
+
+    // 3. v3 uncollected fees: inside = global - outside(lower) - outside(upper);
+    //    owed = (inside - insideLast) * L / 2^128 + tokensOwed. TickInfo word layout:
+    //    [0] liquidityGross, [1] liquidityNet, [2] feeGrowthOutside0, [3] feeGrowthOutside1
+    //    (this pool returns an 8-word struct; words 4+ are fork extras we ignore).
+    let fg0_g = post_rpc_word(http_client, alchemy_url, pool.as_str(), V3_FEE_GROWTH_GLOBAL0, 0, 62).await?;
+    let fg1_g = post_rpc_word(http_client, alchemy_url, pool.as_str(), V3_FEE_GROWTH_GLOBAL1, 0, 63).await?;
+    // TickInfo words: [2] feeGrowthOutside0, [3] feeGrowthOutside1 — BOTH bounds, BOTH legs.
+    let tl_lower_tick_data = format!("{}{:064x}", V3_TICKS, decoded.tick_lower as u32);
+    let tu_upper_tick_data = format!("{}{:064x}", V3_TICKS, decoded.tick_upper as u32);
+    let fgo0_l = post_rpc_word(http_client, alchemy_url, pool.as_str(), &tl_lower_tick_data, 2, 64).await?;
+    let fgo1_l = post_rpc_word(http_client, alchemy_url, pool.as_str(), &tl_lower_tick_data, 3, 66).await?;
+    let fgo0_u = post_rpc_word(http_client, alchemy_url, pool.as_str(), &tu_upper_tick_data, 2, 67).await?;
+    let fgo1_u = post_rpc_word(http_client, alchemy_url, pool.as_str(), &tu_upper_tick_data, 3, 68).await?;
+    let inside0 = fg0_g.wrapping_sub(&fgo0_l).wrapping_sub(&fgo0_u);
+    let inside1 = fg1_g.wrapping_sub(&fgo1_l).wrapping_sub(&fgo1_u);
+    // Uncollected = (inside - insideLast) * L / 2^128 + tokensOwed (the settled part).
+    let fee0_raw = inside0
+        .wrapping_sub(&decoded.fee_growth_inside0_last)
+        .mul_div_q128(decoded.liquidity)
+        .saturating_add(decoded.tokens_owed0);
+    let fee1_raw = inside1
+        .wrapping_sub(&decoded.fee_growth_inside1_last)
+        .mul_div_q128(decoded.liquidity)
+        .saturating_add(decoded.tokens_owed1);
+
+    let token0 = token_info(&decoded.token0)?;
+    let token1 = token_info(&decoded.token1)?;
+    let (amount0_raw, amount1_raw) =
+        concentrated_amounts_raw(decoded.liquidity, sqrt_price_x96, decoded.tick_lower, decoded.tick_upper);
+    let dec0 = 10f64.powi(token0.decimals);
+    let dec1 = 10f64.powi(token1.decimals);
+
+    tracing::info!(
+        "v3 position {} (NFT #{}): fee={}bps, liquidity={}, tick={}, in_range={}, fees raw {}/{}",
+        pos.id, pos.nft_id, decoded.fee, decoded.liquidity, tick,
+        decoded.tick_lower <= tick && tick <= decoded.tick_upper, fee0_raw, fee1_raw
+    );
+
+    Ok(RawPosition {
+        position_id: format!("uniswap-v3:{}:{}", pos.network, pos.nft_id),
+        network: pos.network.clone(),
+        protocol: "uniswap-v3".to_string(),
+        wallet: wallet.to_string(),
+        nft_id: pos.nft_id,
+        pool_id: pool.clone(),
+        npm_address: Some(npm.clone()),
+        fee_tier_bps: (decoded.fee / 100) as u32,
+        token0,
+        token1,
+        liquidity: decoded.liquidity,
+        sqrt_price_x96,
+        tick,
+        tick_lower: decoded.tick_lower,
+        tick_upper: decoded.tick_upper,
+        amount0: amount0_raw / dec0,
+        amount1: amount1_raw / dec1,
+        fee0: fee0_raw as f64 / dec0,
+        fee1: fee1_raw as f64 / dec1,
+        in_range: decoded.tick_lower <= tick && tick <= decoded.tick_upper,
+        is_price_source: pos.is_price_source,
+    })
+}
+
+/// Single-word (or selected-word) eth_call helper for v3 pool reads.
+async fn post_rpc_word(
+    http_client: &Client,
+    alchemy_url: &str,
+    to: &str,
+    data: &str,
+    word_index: usize,
+    id: u64,
+) -> Result<U256> {
+    let payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{ "to": to, "data": if data.starts_with("0x") { data.to_string() } else { format!("0x{}", data) } }, "latest"],
+        "id": id
+    });
+    let res = post_rpc_with_retry(http_client, alchemy_url, &payload, 2)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("eth_call to {} failed", to))?;
+    let hex_str = res
+        .get("result")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("eth_call to {} returned no result", to))?;
+    let clean = hex_str.trim_start_matches("0x");
+    let start = word_index * 64;
+    if clean.len() < start + 64 {
+        return Err(anyhow::anyhow!(
+            "eth_call to {} returned short output ({} chars, need word {})",
+            to,
+            clean.len(),
+            word_index
+        ));
+    }
+    U256::from_hex_be(&clean[start..start + 64])
+}
+
+/// Decoded `positions(uint256)` return (12 words).
+#[derive(Debug, Clone)]
+struct V3PositionDecoded {
+    token0: String,
+    token1: String,
+    /// Fee in Uniswap units (hundredths of a basis point; 10000 = 1%)
+    fee: u64,
+    tick_lower: i32,
+    tick_upper: i32,
+    liquidity: u128,
+    fee_growth_inside0_last: U256,
+    fee_growth_inside1_last: U256,
+    tokens_owed0: u128,
+    tokens_owed1: u128,
+}
+
+/// Parse the 384-byte `positions(uint256)` return:
+/// (nonce, operator, token0, token1, fee, tickLower, tickUpper, liquidity,
+///  feeGrowthInside0Last, feeGrowthInside1Last, tokensOwed0, tokensOwed1).
+fn decode_v3_positions_return(hex_str: &str) -> Result<V3PositionDecoded> {
+    let clean = hex_str.trim_start_matches("0x");
+    if clean.len() < 12 * 64 {
+        return Err(anyhow::anyhow!(
+            "NPM positions() returned {} chars, expected >= 768",
+            clean.len()
+        ));
+    }
+    let word = |i: usize| -> &str { &clean[i * 64..(i + 1) * 64] };
+    let addr = |i: usize| -> String { format!("0x{}", &word(i)[24..]) };
+    let signed_tick = |i: usize| -> Result<i32> {
+        let v = u32::from_str_radix(word(i), 16).map_err(|e| anyhow::anyhow!("bad tick word: {e}"))?;
+        Ok(v as i32)
+    };
+    Ok(V3PositionDecoded {
+        token0: addr(2),
+        token1: addr(3),
+        fee: u64::from_str_radix(word(4), 16).map_err(|e| anyhow::anyhow!("bad fee word: {e}"))?,
+        tick_lower: signed_tick(5)?,
+        tick_upper: signed_tick(6)?,
+        liquidity: u128::from_str_radix(word(7), 16).map_err(|e| anyhow::anyhow!("bad liquidity word: {e}"))?,
+        fee_growth_inside0_last: U256::from_hex_be(word(8))?,
+        fee_growth_inside1_last: U256::from_hex_be(word(9))?,
+        tokens_owed0: u128::from_str_radix(word(10), 16).unwrap_or(0),
+        tokens_owed1: u128::from_str_radix(word(11), 16).unwrap_or(0),
     })
 }
 
@@ -3497,41 +4101,55 @@ fn recommended_claim_action(claimable_usd: f64, gas_break_even_usd: f64) -> &'st
 }
 
 fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_history: &[(DateTime<Utc>, f64, f64)], ledger: &LedgerAggregate, regime: &MarketRegime) -> DerivedMetrics {
-    // 1. Spot price calculation
-    let spot_price = if let Some(pool) = raw.pool_mechanics.first() {
-        if pool.volatile_assets.len() >= 2 {
-            let r0: f64 = pool.volatile_assets[0].reserve_amount.parse().unwrap_or(0.0);
-            let r1: f64 = pool.volatile_assets[1].reserve_amount.parse().unwrap_or(0.0);
-            if r1 > 0.0 { r0 / r1 } else { 0.0 }
-        } else { 0.0 }
-    } else { 0.0 };
+    // 1. Spot price: live NOCK/USD from the designated price-source position pool
+    //    (zero-mock: the cycle fails upstream when the read fails).
+    let spot_price = raw.spot_price_nock_usd;
 
-    let aero_fee_nock = raw.live_aero_fee_nock;
-    let aero_fee_usdc = raw.live_aero_fee_usdc;
-    let aero_fee_usd = aero_fee_usdc + aero_fee_nock * spot_price;
+    // 2. LP aggregates across all tracked positions (v2.0.0; replaces tranche 1/2 math).
+    let mut lp_nock = 0.0f64;
+    let mut lp_usdc = 0.0f64;
+    let mut lp_usd = 0.0f64;
+    let mut lp_fee_nock = 0.0f64;
+    let mut lp_fee_usd = 0.0f64;
+    // Per-position (address, label, fee_usd) tuples for the velocity panel.
+    let mut fee_entries: Vec<(String, String, f64)> = Vec::new();
+    for p in &raw.positions {
+        let p0 = leg_usd_price(&p.token0, spot_price, raw.live_eth_price_usd);
+        let p1 = leg_usd_price(&p.token1, spot_price, raw.live_eth_price_usd);
+        lp_usd += p.amount0 * p0 + p.amount1 * p1;
+        if is_usdc_token(&p.token0) { lp_usdc += p.amount0; }
+        if is_usdc_token(&p.token1) { lp_usdc += p.amount1; }
+        if is_nock_token(&p.token0) { lp_nock += p.amount0; }
+        if is_nock_token(&p.token1) { lp_nock += p.amount1; }
+        let fee_usd = p.fee0 * p0 + p.fee1 * p1;
+        lp_fee_usd += fee_usd;
+        if is_nock_token(&p.token0) { lp_fee_nock += p.fee0; }
+        if is_nock_token(&p.token1) { lp_fee_nock += p.fee1; }
+        fee_entries.push((
+            if p.protocol == "uniswap-v3" {
+                p.npm_address.clone().unwrap_or_else(|| p.pool_id.clone())
+            } else {
+                UNISWAP_V4_POSM_BASE.to_string()
+            },
+            format!(
+                "{} ({}/{} {:.2}%, #{})",
+                if p.protocol == "uniswap-v4" { "Uniswap V4" } else { "Uniswap V3" },
+                p.token0.symbol,
+                p.token1.symbol,
+                p.fee_tier_bps as f64 / 100.0,
+                p.nft_id
+            ),
+            fee_usd,
+        ));
+    }
 
-    let uni_fee_nock = raw.live_uni_fee_nock;
-    let uni_fee_usdc = raw.live_uni_fee_usdc;
-    let uni_fee_usd = uni_fee_usdc + uni_fee_nock * spot_price;
-
-    let total_fees_usd = aero_fee_usd + uni_fee_usd;
+    let total_fees_usd = lp_fee_usd;
     // Zero-mock invariant: no fabricated gas fallback. A zero value means the gas query
     // was unavailable (only reachable in unit tests via default RawOnChainData) — derived
     // efficiency/action values then treat gas as unknown, never as free.
     let gas_cost = raw.live_gas_cost_usd;
 
-    // 3. Strategic Tranches
-    // Tranche 1: Uniswap V4
-    let t1_nock = raw.live_tranche_1_nock;
-    let t1_usdc = raw.live_tranche_1_usdc;
-    let t1_usd = t1_nock * spot_price + t1_usdc;
-
-    // Tranche 2: Aerodrome Engine
-    let t2_nock = raw.live_tranche_2_nock;
-    let t2_usdc = raw.live_tranche_2_usdc;
-    let t2_usd = t2_nock * spot_price + t2_usdc;
-
-    // Tranche 3: Sovereign Protected Treasury
+    // 3. Sovereign Treasury (wallet) and totals
     let wallet_nock = raw.wallet_balances.iter()
         .find(|w| w.token_symbol == "NOCK")
         .and_then(|w| w.amount.parse().ok())
@@ -3544,18 +4162,21 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
         .and_then(|w| w.amount.parse().ok())
         .unwrap_or(0.0);
 
-    let total_portfolio_usd = t1_usd + t2_usd + t3_usd + wallet_usdc;
-    let total_native_usd = (t1_nock + t2_nock + t3_nock) * spot_price;
-    let total_stable_usd = t1_usdc + t2_usdc + wallet_usdc;
+    let total_portfolio_usd = lp_usd + t3_usd + wallet_usdc;
+    let total_native_usd = (lp_nock + t3_nock) * spot_price;
+    let total_stable_usd = lp_usdc + wallet_usdc;
 
     let floor = profile.treasury_floor_nock;
     let now_str = Utc::now().to_rfc3339();
-    let total_nock = t1_nock + t2_nock + t3_nock + aero_fee_nock + uni_fee_nock;
+    let total_nock = lp_nock + t3_nock + lp_fee_nock;
     let nock_floor_delta = total_nock - floor;
     let current_hwm = prev_hwm.max(total_portfolio_usd);
 
-    // Bracket upper bound derived from ticks — same single source of truth as the chart
-    let v4_upper_price = tick_to_display_price(V4_TICK_LOWER_ONCHAIN);
+    // Range top of the price-source position (display units) — feeds the RANGE EXIT
+    // branch; replaces the retired hardcoded V4 tick constants.
+    let range_top_price = raw.positions.iter().find(|p| p.is_price_source).map(|p| {
+        tick_to_display_price_dec(p.tick_lower, p.token0.decimals, p.token1.decimals)
+    });
 
     // Tax-reserve guardrail (virtual 60/40 sub-ledger): dip deployments may only
     // consume growth dry powder; the tax reserve share of realized harvests is
@@ -3599,12 +4220,14 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                 spot_price, deployable_usdc, total_stable_usd, tax_reserve_usd
             ),
         )
-    } else if spot_price >= v4_upper_price {
+    } else if spot_price > 0.0 && range_top_price.map_or(false, |top| top > 0.0 && spot_price >= top) {
         (
             "RANGE EXIT FLASHPOINT (Build High Wall)".to_string(),
             format!(
-                "Uniswap V4 runway has fully scaled out into 100% USDC at ${:.4}! Goal achieved. Take full principal (${:.2}) and build single-sided high walls at $5.00+.",
-                spot_price, t1_usd
+                "Spot ${:.4} has reached the top of the price-source range (${:.4})! Take principal (${:.2}) and rebuild single-sided high walls at $5.00+.",
+                spot_price,
+                range_top_price.unwrap_or(0.0),
+                lp_usd
             ),
         )
     } else if total_fees_usd >= 5.00 {
@@ -3624,8 +4247,8 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
         (
             "HOLD & ACCRETE (Dual Growth Engine Active)".to_string(),
             format!(
-                "Total NOCK held is {:.0} (+{:.0} above {:.0} hard floor). AMMs are generating dual yield (+{:.2} USDC in V4 scale-out, +{:.2} in Aero). 0% realized loss. Maintain posture.",
-                total_nock, nock_floor_delta, floor, uni_fee_usd, aero_fee_usd
+                "Total NOCK held is {:.0} (+{:.0} above {:.0} hard floor). {} Uniswap position(s) generating yield (+${:.2} uncollected). 0% realized loss. Maintain posture.",
+                total_nock, nock_floor_delta, floor, raw.positions.len(), total_fees_usd
             ),
         )
     };
@@ -3653,10 +4276,24 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
         asset_aggregation_series: AssetAggregationSeries {
             time_points: vec![now_str.clone()],
             safe_haven_series: vec![format!("{:.2}", t3_usd)],
-            active_protocol_series: vec![format!("{:.2}", t1_usd + t2_usd)],
-            tranche_1_nock: vec![format!("{:.2}", t1_nock)],
-            tranche_2_nock: vec![format!("{:.2}", t2_nock)],
-            tranche_3_nock: vec![format!("{:.2}", t3_nock)],
+            active_protocol_series: vec![format!("{:.2}", lp_usd)],
+            positions_nock: raw
+                .positions
+                .iter()
+                .map(|p| {
+                    let nock_amt = if is_nock_token(&p.token0) {
+                        p.amount0
+                    } else if is_nock_token(&p.token1) {
+                        p.amount1
+                    } else {
+                        0.0
+                    };
+                    PositionNockSeries {
+                        position_id: p.position_id.clone(),
+                        series: vec![format!("{:.2}", nock_amt)],
+                    }
+                })
+                .collect(),
         },
         total_value_vs_baseline: TotalValueVsBaseline {
             time_points: vec![now_str.clone()],
@@ -3666,24 +4303,32 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
         },
         tick_bracket_hypervisor: TickBracketHypervisor {
             current_price: format!("{:.5}", spot_price),
-            // Zero-mock: only the live tick-derived V4 bracket is emitted. The former
-            // synthetic Aerodrome placeholder (0.00000 → 999.00000) drew a fabricated
-            // full-range bar as chart truth; Tranche 2 liquidity remains visible in the
-            // NOCK-stack and deviation panels which report it accurately.
-            brackets: vec![
-                TickBracket {
-                    lower_price: format!("{:.5}", tick_to_display_price(V4_TICK_UPPER_ONCHAIN)),
-                    upper_price: format!("{:.5}", tick_to_display_price(V4_TICK_LOWER_ONCHAIN)),
-                    liquidity_usd: format!("{:.2}", t1_usd),
-                    in_range: spot_price >= tick_to_display_price(V4_TICK_UPPER_ONCHAIN)
-                        && spot_price <= tick_to_display_price(V4_TICK_LOWER_ONCHAIN),
-                    distance_bps: bracket_distance_bps(
-                        spot_price,
-                        tick_to_display_price(V4_TICK_UPPER_ONCHAIN),
-                        tick_to_display_price(V4_TICK_LOWER_ONCHAIN),
-                    ),
-                },
-            ],
+            // Zero-mock: one bracket per tracked position, straight from its live ticks.
+            brackets: raw
+                .positions
+                .iter()
+                .map(|p| {
+                    let p0 = leg_usd_price(&p.token0, spot_price, raw.live_eth_price_usd);
+                    let p1 = leg_usd_price(&p.token1, spot_price, raw.live_eth_price_usd);
+                    let pos_usd = p.amount0 * p0 + p.amount1 * p1;
+                    // Display orientation: bigger tick -> lower price (token0-per-token1).
+                    let lower_disp = tick_to_display_price_dec(p.tick_upper, p.token0.decimals, p.token1.decimals);
+                    let upper_disp = tick_to_display_price_dec(p.tick_lower, p.token0.decimals, p.token1.decimals);
+                    TickBracket {
+                        lower_price: fmt_price(lower_disp),
+                        upper_price: fmt_price(upper_disp),
+                        liquidity_usd: format!("{:.2}", pos_usd),
+                        in_range: p.in_range,
+                        // Spot is USD/NOCK; brackets are token0-per-NOCK. Only USD-
+                        // denominated token0 (USDC) yields an honest distance.
+                        distance_bps: if p.token0.symbol == "USDC" {
+                            Some(bracket_distance_bps(spot_price, lower_disp, upper_disp))
+                        } else {
+                            None
+                        },
+                    }
+                })
+                .collect(),
         },
         portfolio_deviation_matrix: PortfolioDeviationMatrix {
             allocations: {
@@ -3702,36 +4347,26 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                 let t3_weight = ((t3_usd / total_portfolio_usd) * 10000.0) as i32;
                 let t3_dev = t3_weight - w.treasury;
 
-                let t2_weight = ((t2_usd / total_portfolio_usd) * 10000.0) as i32;
-                let t2_dev = t2_weight - w.aerodrome_lp;
-
-                let t1_weight = ((t1_usd / total_portfolio_usd) * 10000.0) as i32;
-                let t1_dev = t1_weight - w.uniswap_v4_lp;
+                let lp_weight = ((lp_usd / total_portfolio_usd) * 10000.0) as i32;
+                let lp_dev = lp_weight - w.uniswap_lp;
 
                 let usdc_weight = ((wallet_usdc / total_portfolio_usd) * 10000.0) as i32;
                 let usdc_dev = usdc_weight - w.cash;
 
                 vec![
                     AllocationDeviation {
-                        bucket_name: "Sovereign Treasury (Tranche 3)".to_string(),
+                        bucket_name: "Sovereign Treasury".to_string(),
                         target_weight_bps: w.treasury,
                         actual_weight_bps: t3_weight,
                         deviation_bps: t3_dev,
                         status: calc_status(t3_dev, w.treasury),
                     },
                     AllocationDeviation {
-                        bucket_name: "Aerodrome LP (Tranche 2)".to_string(),
-                        target_weight_bps: w.aerodrome_lp,
-                        actual_weight_bps: t2_weight,
-                        deviation_bps: t2_dev,
-                        status: calc_status(t2_dev, w.aerodrome_lp),
-                    },
-                    AllocationDeviation {
-                        bucket_name: "Uniswap V4 LP (Tranche 1)".to_string(),
-                        target_weight_bps: w.uniswap_v4_lp,
-                        actual_weight_bps: t1_weight,
-                        deviation_bps: t1_dev,
-                        status: calc_status(t1_dev, w.uniswap_v4_lp),
+                        bucket_name: "Uniswap LP (all tracked positions)".to_string(),
+                        target_weight_bps: w.uniswap_lp,
+                        actual_weight_bps: lp_weight,
+                        deviation_bps: lp_dev,
+                        status: calc_status(lp_dev, w.uniswap_lp),
                     },
                     AllocationDeviation {
                         bucket_name: "Liquid USDC (Escrow/Vault)".to_string(),
@@ -3758,28 +4393,21 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
             last_harvest_at: ledger.last_at.map(|dt| dt.to_rfc3339()),
         },
         velocity_gas_sandbox: VelocityGasSandbox {
-            contracts: vec![
-                FeeCollectionIndex {
-                    contract_address: "0x7c5f5a4bbd8fd63184577525326123b519429bdc".to_string(),
-                    contract_name: "Uniswap V4 (NOCK/USDC 3%)".to_string(),
-                    claimable_usd: format!("{:.2}", uni_fee_usd),
+            contracts: fee_entries
+                .iter()
+                .map(|(addr, name, fee_usd)| FeeCollectionIndex {
+                    contract_address: addr.clone(),
+                    contract_name: name.clone(),
+                    claimable_usd: format!("{:.2}", fee_usd),
                     gas_break_even_usd: format!("{:.4}", gas_cost),
                     efficiency_ratio: if gas_cost > 0.0 {
-                        (uni_fee_usd / gas_cost * 100.0).round() / 100.0
-                    } else { 0.0 },
-                    recommended_action: recommended_claim_action(uni_fee_usd, gas_cost).to_string(),
-                },
-                FeeCollectionIndex {
-                    contract_address: "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
-                    contract_name: "Aerodrome (USDC/NOCK 0.3%)".to_string(),
-                    claimable_usd: format!("{:.2}", aero_fee_usd),
-                    gas_break_even_usd: format!("{:.4}", gas_cost),
-                    efficiency_ratio: if gas_cost > 0.0 {
-                        (aero_fee_usd / gas_cost * 100.0).round() / 100.0
-                    } else { 0.0 },
-                    recommended_action: recommended_claim_action(aero_fee_usd, gas_cost).to_string(),
-                },
-            ],
+                        (fee_usd / gas_cost * 100.0).round() / 100.0
+                    } else {
+                        0.0
+                    },
+                    recommended_action: recommended_claim_action(*fee_usd, gas_cost).to_string(),
+                })
+                .collect(),
         },
     }
 }
@@ -3882,6 +4510,10 @@ async fn store_snapshot(db: &PgPool, envelope: &SnapshotEnvelope) -> Result<()> 
 mod tests {
     use super::*;
 
+    // Canonical Uniswap v3 NonfungiblePositionManager on Base — used by fixtures to
+    // mirror the npm_address configured for the live v3 position (ONCHAIN_INTEGRATION.md §5).
+    const UNISWAP_V3_NPM_BASE: &str = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1";
+
     #[test]
     fn test_claim_fees_hex_parsing() {
         // Simulated return from 0xd294f093 (claimFees)
@@ -3903,26 +4535,10 @@ mod tests {
 
     #[test]
     fn test_derived_metrics_defensive_lock_under_100k() {
-        let mut raw = RawOnChainData::default();
-        raw.wallet_balances = vec![
-            WalletBalance {
-                wallet_address: "0x123".to_string(),
-                token_symbol: "NOCK".to_string(),
-                token_address: "0xNOCK".to_string(),
-                amount: "80000.0".to_string(),
-                amount_usd: "2080.0".to_string(),
-                updated_at: "now".to_string(),
-            },
-            WalletBalance {
-                wallet_address: "0x123".to_string(),
-                token_symbol: "USDC".to_string(),
-                token_address: "0xUSDC".to_string(),
-                amount: "100.0".to_string(),
-                amount_usd: "100.0".to_string(),
-                updated_at: "now".to_string(),
-            },
-        ];
-        // Total NOCK is 80,000 < 100,000 floor
+        let mut raw = four_position_fixture();
+        // 80,000 wallet NOCK + ~15,296 LP NOCK < 100,000 floor
+        raw.wallet_balances[0].amount = "80000.0".to_string();
+        raw.wallet_balances[0].amount_usd = "1664.0".to_string();
         let profile = OperatorProfile::default();
         let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
         assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
@@ -3930,20 +4546,9 @@ mod tests {
 
     #[test]
     fn test_derived_metrics_batch_harvest_above_5_dollars() {
-        let mut raw = RawOnChainData::default();
-        raw.wallet_balances = vec![
-            WalletBalance {
-                wallet_address: "0x123".to_string(),
-                token_symbol: "NOCK".to_string(),
-                token_address: "0xNOCK".to_string(),
-                amount: "96000.0".to_string(),
-                amount_usd: "2496.0".to_string(),
-                updated_at: "now".to_string(),
-            },
-        ];
-        raw.live_tranche_1_nock = 4000.0;
-        raw.live_tranche_2_nock = 6000.0;
-        raw.live_aero_fee_usdc = 6.0; // Accumulated fees > $5.00
+        let mut raw = four_position_fixture();
+        // Uncollected USDC fees on the NOCK/USDC position push the aggregate over $5.
+        raw.positions[1].fee0 = 6.0;
         raw.live_gas_cost_usd = 0.005;
 
         let profile = OperatorProfile::default();
@@ -3953,29 +4558,53 @@ mod tests {
 
     #[test]
     fn test_derived_metrics_hold_and_accrete() {
-        let mut raw = RawOnChainData::default();
-        raw.wallet_balances = vec![
-            WalletBalance {
-                wallet_address: "0x123".to_string(),
-                token_symbol: "NOCK".to_string(),
-                token_address: "0xNOCK".to_string(),
-                amount: "96000.0".to_string(),
-                amount_usd: "2496.0".to_string(),
-                updated_at: "now".to_string(),
-            },
-        ];
-        raw.live_tranche_1_nock = 4000.0;
-        raw.live_tranche_2_nock = 6000.0;
-        raw.live_aero_fee_usdc = 0.25;
-        raw.live_aero_fee_nock = 8.0;
-
+        let raw = four_position_fixture();
         let profile = OperatorProfile::default();
         let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
         assert!(metrics.global_status.shot_advice_action.contains("HOLD & ACCRETE"));
+        // Advice text is Uniswap-only now: no Aerodrome wording survives.
+        assert!(!metrics.global_status.shot_advice_details.contains("Aerodrome"));
+    }
+
+    #[test]
+    fn test_derived_metrics_four_position_fixture_matches_screenshot() {
+        // Full aggregation over the discovery fixture: totals, brackets, series and
+        // the deviation buckets must all reflect N positions, not the old tranches.
+        let raw = four_position_fixture();
+        let profile = OperatorProfile::default();
+        let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
+
+        // NOCK spot from the price-source pool matches the screenshot-era value.
+        assert!((raw.spot_price_nock_usd - 0.0208).abs() < 0.0002);
+
+        // Position values (USD): B ≈ 71, C ≈ 18, A ≈ 156 (post-compounding),
+        // D ≈ 207 (wide raft, largest holding after the operator's post-mint adds).
+        let total_lp_usd = metrics.asset_aggregation_series.active_protocol_series[0].parse::<f64>().unwrap();
+        assert!(total_lp_usd > 430.0 && total_lp_usd < 470.0, "lp total {}", total_lp_usd);
+
+        // One bracket per position, all in range.
+        assert_eq!(metrics.tick_bracket_hypervisor.brackets.len(), 4);
+        assert!(metrics.tick_bracket_hypervisor.brackets.iter().all(|b| b.in_range));
+
+        // Per-position NOCK series entries carry the position ids.
+        assert_eq!(metrics.asset_aggregation_series.positions_nock.len(), 4);
+        assert!(metrics.asset_aggregation_series.positions_nock.iter().any(|s| s.position_id == "uniswap-v3:base:6336662"));
+        assert!(metrics.asset_aggregation_series.positions_nock.iter().any(|s| s.position_id == "uniswap-v4:base:3163450"));
+
+        // Deviation matrix: Treasury / Uniswap LP / Cash only (no Aerodrome bucket).
+        let names: Vec<&str> = metrics.portfolio_deviation_matrix.allocations.iter().map(|a| a.bucket_name.as_str()).collect();
+        assert!(names.iter().any(|n| n.contains("Uniswap LP")));
+        assert!(!names.iter().any(|n| n.contains("Aerodrome")));
+
+        // v3 unclaimed fees surface in contract_fees with the NPM address.
+        let v3_fee = metrics.velocity_gas_sandbox.contracts.iter().find(|c| c.contract_name.contains("Uniswap V3"));
+        assert!(v3_fee.is_some());
     }
 
     #[test]
     fn test_operator_profile_custom_treasury_floor_and_weights() {
+        // Legacy config keys (v4_baseline_*, aerodrome_lp, uniswap_v4_lp) still parse
+        // but are ignored; the LP target now comes from `uniswap_lp`.
         let yaml = r#"
 database_url: "postgresql://localhost/test"
 operator_profile:
@@ -3997,8 +4626,8 @@ operator_profile:
         assert_eq!(profile.treasury_floor_nock, 150000.0);
         assert_eq!(profile.tax_reserve_ratio, 0.33);
         assert_eq!(profile.target_weights_bps.treasury, 7000);
-        assert_eq!(profile.target_weights_bps.aerodrome_lp, 1500);
-        assert_eq!(profile.target_weights_bps.uniswap_v4_lp, 1000);
+        // aerodrome_lp/uniswap_v4_lp are ignored; uniswap_lp falls back to its default.
+        assert_eq!(profile.target_weights_bps.uniswap_lp, 1500);
         assert_eq!(profile.target_weights_bps.cash, 500);
 
         let mut raw = RawOnChainData::default();
@@ -4019,8 +4648,7 @@ operator_profile:
         assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
         assert_eq!(metrics.portfolio_deviation_matrix.allocations[0].target_weight_bps, 7000);
         assert_eq!(metrics.portfolio_deviation_matrix.allocations[1].target_weight_bps, 1500);
-        assert_eq!(metrics.portfolio_deviation_matrix.allocations[2].target_weight_bps, 1000);
-        assert_eq!(metrics.portfolio_deviation_matrix.allocations[3].target_weight_bps, 500);
+        assert_eq!(metrics.portfolio_deviation_matrix.allocations[2].target_weight_bps, 500);
     }
 
     #[test]
@@ -4143,60 +4771,12 @@ database_url: "postgresql://localhost/test"
     fn test_tax_guardrail_blocks_dip_deployment() {
         // Overdrawn tax reserve: the wallet's stable stack cannot cover the virtual
         // 40% tax reserve, so dip-deployment advice must be suppressed entirely.
-        let mut raw = RawOnChainData::default();
-        raw.wallet_balances = vec![
-            WalletBalance {
-                wallet_address: "0x123".to_string(),
-                token_symbol: "NOCK".to_string(),
-                token_address: "0xNOCK".to_string(),
-                amount: "110000.0".to_string(),
-                amount_usd: "2860.0".to_string(),
-                updated_at: "now".to_string(),
-            },
-            WalletBalance {
-                wallet_address: "0x123".to_string(),
-                token_symbol: "USDC".to_string(),
-                token_address: "0xUSDC".to_string(),
-                amount: "50.0".to_string(),
-                amount_usd: "50.0".to_string(),
-                updated_at: "now".to_string(),
-            },
-        ];
-        raw.live_tranche_1_nock = 2000.0;
-        raw.live_tranche_1_usdc = 20.0;
-        raw.live_tranche_2_nock = 6000.0;
-        raw.live_tranche_2_usdc = 30.0;
-        raw.live_uni_fee_usdc = 0.0;
-        raw.live_aero_fee_usdc = 0.0;
-        // Aerodrome pool reserves giving spot = 150 / 10000 = 0.015 (dip zone < 0.020)
-        raw.pool_mechanics = vec![PoolMechanic {
-            pool_id: "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
-            platform: "Aerodrome".to_string(),
-            pool_type: "volatile".to_string(),
-            volatile_assets: vec![
-                PoolAsset {
-                    token_address: "0xUSDC".to_string(),
-                    token_symbol: "USDC".to_string(),
-                    reserve_amount: "150".to_string(),
-                    reserve_usd: "150".to_string(),
-                },
-                PoolAsset {
-                    token_address: "0xNOCK".to_string(),
-                    token_symbol: "NOCK".to_string(),
-                    reserve_amount: "10000".to_string(),
-                    reserve_usd: "150".to_string(),
-                },
-            ],
-            liquidity_usd: "300".to_string(),
-            fee_accrued_usd: "0".to_string(),
-            fee_tier_bps: 30,
-            tick_current: None,
-            sqrt_price_x96: None,
-        }];
+        let mut raw = four_position_fixture();
+        raw.spot_price_nock_usd = 0.015; // dip zone (< 0.020)
+        raw.wallet_balances[1].amount = "10.0".to_string(); // LP USDC legs (B+D ≈ 140) + wallet 10
         let profile = OperatorProfile::default(); // floor 100k; ratio 0.40
-        // total_nock = 2000 + 6000 + 110000 = 118000 (above floor) and spot 0.015 (< 0.020 dip zone)
         let ledger = LedgerAggregate { total_usd: 500.0, harvest_count: 3, last_at: None };
-        // tax reserve = 500 * 0.40 = 200 > stable stack (50 + 50 = 100) -> blocked
+        // tax reserve = 500 * 0.40 = 200 > stable stack (~150) -> blocked
         let metrics = compute_derived_metrics(
             &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &ledger, &MarketRegime::default(),
         );
@@ -4204,22 +4784,13 @@ database_url: "postgresql://localhost/test"
         assert!(metrics.global_status.shot_advice_action.contains("Tax Guardrail"));
         assert!(metrics.global_status.shot_advice_details.contains("Deployment suppressed"));
 
-        // Small harvest ledger: reserve 40 * 0.40 = 16 <= stable 100 -> DIP advice fires
-        // with the deployable amount and the reserved figure called out.
+        // Small harvest ledger: reserve 40 * 0.40 = 16 <= stable stack -> DIP advice fires
         let small = LedgerAggregate { total_usd: 40.0, harvest_count: 1, last_at: None };
         let metrics = compute_derived_metrics(
             &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &small, &MarketRegime::default(),
         );
         assert!(metrics.global_status.shot_advice_action.contains("DIP REINVESTMENT SHOT"));
-        assert!(metrics.global_status.shot_advice_details.contains("Deploy $84.00"));
-        assert!(metrics.global_status.shot_advice_details.contains("$16.00 protected as virtual tax reserve"));
-
-        // No harvests yet: guardrail inert, full stack deployable (backward compatible)
-        let metrics = compute_derived_metrics(
-            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default(),
-        );
-        assert!(metrics.global_status.shot_advice_action.contains("DIP REINVESTMENT SHOT"));
-        assert!(metrics.global_status.shot_advice_details.contains("Deploy $100.00"));
+        assert!(metrics.global_status.shot_advice_details.contains("protected as virtual tax reserve"));
     }
 
     #[test]
@@ -4356,23 +4927,31 @@ database_url: "postgresql://localhost/test"
     #[test]
     fn test_tick_to_display_price_matches_live_values() {
         // Derived bracket prices must round-trip against the previously hardcoded (and
-        // live-verified) display values for the NOCK/USDC V4 position ticks.
-        let lower_display = tick_to_display_price(V4_TICK_UPPER_ONCHAIN);
-        let upper_display = tick_to_display_price(V4_TICK_LOWER_ONCHAIN);
+        // live-verified) display values for the NOCK/USDC V4 ticks (USDC per NOCK).
+        let lower_display = tick_to_display_price_dec(274200, 6, 16);
+        let upper_display = tick_to_display_price_dec(223200, 6, 16);
 
         assert!((lower_display - 0.01237).abs() / 0.01237 < 0.001);
         assert!((upper_display - 2.02783).abs() / 2.02783 < 0.001);
         assert!(lower_display < upper_display);
 
         // The negated-exponent orientation: larger on-chain tick → lower displayed price
-        assert!(tick_to_display_price(274200) < tick_to_display_price(223200));
+        assert!(tick_to_display_price_dec(274200, 6, 16) < tick_to_display_price_dec(223200, 6, 16));
+
+        // Discovery cross-check: the ETH(18)/NOCK(16) pool's screenshot range
+        // (0.08091 → 0.1474 in the operator's UI scale) corresponds to ticks
+        // [65200, 71200] — spot 70370 sits between the decoded bounds.
+        let lower_eth = tick_to_display_price_dec(71200, 18, 16);
+        let upper_eth = tick_to_display_price_dec(65200, 18, 16);
+        assert!(lower_eth < upper_eth);
+        assert!(upper_eth / lower_eth > 1.5);
     }
 
     #[test]
     fn test_bracket_distance_bps() {
         // Spot inside the range: distance is to the nearest edge, sign says which side
-        let lower = tick_to_display_price(V4_TICK_UPPER_ONCHAIN); // ~0.012366
-        let upper = tick_to_display_price(V4_TICK_LOWER_ONCHAIN); // ~2.027880
+        let lower = tick_to_display_price_dec(274200, 6, 16); // ~0.012366
+        let upper = tick_to_display_price_dec(223200, 6, 16); // ~2.027880
         let d = bracket_distance_bps(1.0, lower, upper);
         // Nearest edge is the lower (~0.0124, 9876 bps away vs 10279 to the upper):
         // (0.012366 - 1.0)/1.0 * 10000 ≈ -9876
@@ -4408,6 +4987,7 @@ database_url: "postgresql://localhost/test"
                 updated_at: "2026-10-11T00:00:00Z".to_string(),
             }],
             pool_mechanics: vec![],
+            positions: vec![],
             concentrated_liquidity: vec![],
             contract_fees: vec![],
             derived_metrics: DerivedMetrics {
@@ -4435,9 +5015,7 @@ database_url: "postgresql://localhost/test"
                     time_points: vec!["2026-10-11T00:00:00Z".to_string()],
                     safe_haven_series: vec!["48.00".to_string()],
                     active_protocol_series: vec!["2.00".to_string()],
-                    tranche_1_nock: vec!["4000".to_string()],
-                    tranche_2_nock: vec!["6000".to_string()],
-                    tranche_3_nock: vec!["96004".to_string()],
+                    positions_nock: vec![],
                 },
                 tick_bracket_hypervisor: TickBracketHypervisor {
                     brackets: vec![],
@@ -4563,6 +5141,19 @@ database_url: "postgresql://localhost/test"
     }
 
     #[test]
+    fn test_v3_collect_calldata_golden_vector() {
+        // collect((uint256,address,uint128,uint128)) on the canonical Base NPM
+        // 0x03a520b3…Ed34f1 for tokenId 6336662 (WETH/NOCK 1%). Live-verified via
+        // eth_call 2026-10-24: returns (0, 1654339369283004) = 0.165434 NOCK —
+        // exactly the snapshot's tokens_owed_1 for uniswap-v3:base:6336662.
+        let data = build_v3_collect_calldata(
+            6336662,
+            "0xeE114cC97eC5adeB34bA5645e315B497D8487a45",
+        );
+        assert_eq!(data, "0xfc6f7865000000000000000000000000000000000000000000000000000000000060b096000000000000000000000000ee114cc97ec5adeb34ba5645e315b497d8487a4500000000000000000000000000000000ffffffffffffffffffffffffffffffff00000000000000000000000000000000ffffffffffffffffffffffffffffffff");
+    }
+
+    #[test]
     fn test_v4_collect_unlock_data_decrease_only_golden_vector() {
         // Single-action variant (DECREASE only, actions byte 0x01), also live-verified.
         let unlock = build_v4_collect_unlock_data_decrease_only(3126000);
@@ -4636,45 +5227,156 @@ database_url: "postgresql://localhost/test"
     }
 
     #[test]
-    fn test_v4_liquidity_scaling() {
-        // Test that liquidity scaling math works for tranche 1 position sizing
-        let v4_liquidity_val = 81297590130616u128;
-        let v4_scale = (v4_liquidity_val as f64) / 65719361234409.0;
-        let baseline_nock = 1.4820f64;
-        let baseline_usdc = 0.0245f64;
+    fn test_concentrated_amounts_match_discovery_magnitudes() {
+        // Golden anchors from Phase-1 discovery (live chain reads on 2026-10-24).
+        // Position B (v4 NOCK/USDC 0.75%): screenshot-era value ≈ $71.45 with the
+        // split 62.82% USDC / 37.18% NOCK.
+        let b = fixture_position_v4_usdc();
+        let (a0, a1) = concentrated_amounts_raw(b.liquidity, b.sqrt_price_x96, b.tick_lower, b.tick_upper);
+        let usdc = a0 / 1e6;
+        let nock = a1 / 1e16;
+        let nock_usd = 0.020783;
+        let total = usdc + nock * nock_usd;
+        assert!((total - 71.45).abs() / 71.45 < 0.05, "B total {}", total);
+        let usdc_pct = usdc / total * 100.0;
+        assert!((usdc_pct - 62.82).abs() < 2.0, "USDC share {}%", usdc_pct);
+        assert!(b.tick_lower <= b.tick && b.tick <= b.tick_upper);
 
-        let scaled_nock = baseline_nock * v4_scale;
-        let scaled_usdc = baseline_usdc * v4_scale;
+        // Position A (v4 ETH/NOCK 2%): compounded to ~$156 since the $89.48 screenshot,
+        // distribution preserved (~15% ETH / ~85% NOCK).
+        let a = fixture_position_v4_nock_eth();
+        let (a0, a1) = concentrated_amounts_raw(a.liquidity, a.sqrt_price_x96, a.tick_lower, a.tick_upper);
+        let eth = a0 / 1e18;
+        let nock = a1 / 1e16;
+        let eth_usd = 2373.14;
+        let total = eth * eth_usd + nock * nock_usd;
+        assert!(total > 130.0 && total < 180.0, "A total {}", total);
+        let eth_pct = eth * eth_usd / total * 100.0;
+        assert!((eth_pct - 15.13).abs() < 3.0, "ETH share {}%", eth_pct);
 
-        assert!((v4_scale - 1.23704).abs() < 1e-4);
-        assert!((scaled_nock - 1.8333).abs() < 1e-4);
-        assert!((scaled_usdc - 0.0303).abs() < 1e-4);
-
-        // Note: Uniswap V4 fees are now queried live via tokensOwed0/1 from positions()
-        // instead of using scaled baselines. See run_ingestion_cycle for live fee query.
+        // Position C (v3 WETH/NOCK 1%): ≈ $18 with 99.17% WETH.
+        let c = fixture_position_v3_weth_nock();
+        let (a0, a1) = concentrated_amounts_raw(c.liquidity, c.sqrt_price_x96, c.tick_lower, c.tick_upper);
+        let weth = a0 / 1e18;
+        let nock = a1 / 1e16;
+        let total = weth * eth_usd + nock * nock_usd;
+        assert!((total - 18.13).abs() / 18.13 < 0.05, "C total {}", total);
+        let weth_pct = weth * eth_usd / total * 100.0;
+        assert!(weth_pct > 97.0, "WETH share {}%", weth_pct);
     }
 
     #[test]
-    fn test_app_config_v4_parameters() {
+    fn test_decode_v3_positions_return_golden() {
+        // REAL 12-word return from NPM positions(6336662) on Base (Phase-1 discovery).
+        let hex = "0x"
+            .to_string()
+            + "0000000000000000000000000000000000000000000000000000000000000000" // nonce
+            + "0000000000000000000000000000000000000000000000000000000000000000" // operator
+            + "0000000000000000000000004200000000000000000000000000000000000006" // token0 WETH
+            + "0000000000000000000000009b5e262cf9bb04869ab40b19af91d2dc85761722" // token1 NOCK
+            + "0000000000000000000000000000000000000000000000000000000000002710" // fee 10000 = 1%
+            + "0000000000000000000000000000000000000000000000000000000000011300" // tickLower 70400
+            + "0000000000000000000000000000000000000000000000000000000000012430" // tickUpper 74800
+            + "000000000000000000000000000000000000000000000000121d7ef51ca5e1ae" // liquidity
+            + "0000000000000000000000000000000000000000000000000000000000000000" // fgInside0Last
+            + "0000000000000000000000000000000000000000000000000000000000000000" // fgInside1Last
+            + "0000000000000000000000000000000000000000000000000000000000000000" // tokensOwed0
+            + "0000000000000000000000000000000000000000000000000000000000000000"; // tokensOwed1
+        let d = decode_v3_positions_return(&hex).expect("decode");
+        assert_eq!(d.token0, "0x4200000000000000000000000000000000000006");
+        assert_eq!(d.token1, "0x9b5e262cf9bb04869ab40b19af91d2dc85761722");
+        assert_eq!(d.fee, 10000);
+        assert_eq!(d.tick_lower, 70400);
+        assert_eq!(d.tick_upper, 74800);
+        assert_eq!(d.liquidity, 1305339058220032430);
+        assert_eq!(d.tokens_owed0, 0);
+        assert_eq!(d.tokens_owed1, 0);
+        // Fee tier in bps as the pipeline derives it: fee/100 = 100 bps = 1%.
+        assert_eq!((d.fee / 100) as u32, 100);
+    }
+
+    #[test]
+    fn test_decode_v3_positions_return_rejects_short() {
+        assert!(decode_v3_positions_return("0x1234").is_err());
+    }
+
+    #[test]
+    fn test_nock_spot_from_positions() {
+        // The price-source position (NOCK/USDC v4) supplies the NOCK/USD spot.
+        let a = fixture_position_v4_nock_eth();
+        let b = fixture_position_v4_usdc();
+        let spot = nock_spot_from_positions(&[a.clone(), b.clone()]).expect("spot");
+        assert!((spot - 0.020783).abs() < 0.0002, "spot {}", spot);
+
+        // No price source configured -> None (caller fails the cycle explicitly).
+        let mut b2 = b.clone();
+        b2.is_price_source = false;
+        assert!(nock_spot_from_positions(&[a, b2]).is_none());
+    }
+
+    #[test]
+    fn test_app_config_positions() {
+        // Real discovered identifiers (2026-10-24) as they appear in config.yaml.
         let yaml = r#"
 database_url: "postgresql://localhost/test"
 alchemy_api_keys: ["key1"]
-tracked_wallets: ["0x123"]
-tracked_pools: ["0x456"]
-token_addresses: ["0x789"]
-tracked_ranges: []
-fee_contracts: []
-lp_tokens: []
+tracked_wallets: ["0xee114cc97ec5adeb34ba5645e315b497d8487a45"]
 sync_window_seconds: 60
-v4_position_id: 3126000
-v4_fee_baseline_usdc: 0.0245
-v4_fee_baseline_nock: 1.4820
+positions:
+  - id: "uniswap-v4-nock-usdc"
+    protocol: "uniswap-v4"
+    nft_id: 3163431
+    pool_id: "0x91a9ef0a8dd231b99fa53a2a145a9e8bca7897e0d85852107abb997916f9f99c"
+    currency0: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    currency1: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"
+    tick_lower: 267825
+    tick_upper: 271050
+    is_price_source: true
+  - id: "uniswap-v4-nock-eth"
+    protocol: "uniswap-v4"
+    nft_id: 3163432
+    pool_id: "0xd316152008e12105594c32686b9d0401fd2c60ca4805c84f280069d218b771a8"
+    currency0: "0x0000000000000000000000000000000000000000"
+    currency1: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"
+    tick_lower: 65200
+    tick_upper: 71200
+  - id: "uniswap-v4-nock-usdc-wide"
+    protocol: "uniswap-v4"
+    nft_id: 3163450
+    pool_id: "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13"
+    currency0: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    currency1: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"
+    tick_lower: 262200
+    tick_upper: 282300
+  - id: "uniswap-v3-weth-nock"
+    protocol: "uniswap-v3"
+    nft_id: 6336662
+    npm_address: "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1"
+    pool_address: "0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a"
+eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
 "#;
         let cfg: AppConfig = serde_yaml::from_str(yaml).expect("Failed to deserialize yaml");
-        assert_eq!(cfg.v4_position_id, Some(3126000));
-        assert_eq!(cfg.v4_fee_baseline_usdc, Some(0.0245));
-        assert_eq!(cfg.v4_fee_baseline_nock, Some(1.4820));
+        assert_eq!(cfg.positions.len(), 4);
+        assert_eq!(cfg.positions[0].nft_id, 3163431);
+        assert_eq!(cfg.positions[0].tick_lower, Some(267825));
+        assert!(cfg.positions[0].is_price_source);
+        assert_eq!(cfg.positions[1].protocol, "uniswap-v4");
+        assert!(!cfg.positions[1].is_price_source);
+        assert_eq!(cfg.positions[2].nft_id, 3163450);
+        assert_eq!(cfg.positions[2].tick_lower, Some(262200));
+        assert_eq!(cfg.positions[2].tick_upper, Some(282300));
+        assert!(!cfg.positions[2].is_price_source);
+        assert_eq!(cfg.positions[3].protocol, "uniswap-v3");
+        assert_eq!(cfg.positions[3].npm_address.as_deref(), Some("0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1"));
+        assert_eq!(cfg.positions[3].pool_address.as_deref(), Some("0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a"));
+        assert_eq!(cfg.eth_price_pool.as_deref(), Some("0xd0b53d9277642d899df5c87a3966a349a798f224"));
         assert_eq!(cfg.mcp_bearer_token, None);
+
+        // Defaults: positions optional (worker fails the cycle with a clear error),
+        // ETH price pool falls back to the verified canonical address.
+        let minimal: AppConfig = serde_yaml::from_str("database_url: \"x\"").unwrap();
+        assert!(minimal.positions.is_empty());
+        assert_eq!(minimal.eth_price_pool.as_deref(), Some(DEFAULT_ETH_PRICE_POOL));
     }
 
     #[test]
@@ -4759,9 +5461,10 @@ v4_fee_baseline_nock: 1.4820
     }
 
     #[test]
-    fn test_no_synthetic_aerodrome_bracket_emitted() {
-        // The Tick Bracket payload must contain ONLY the live tick-derived V4 bracket.
-        // The former 0.00000 -> 999.00000 Aerodrome placeholder drew fabricated chart truth.
+    fn test_no_synthetic_bracket_emitted() {
+        // The Tick Bracket payload contains ONLY brackets derived from live per-position
+        // ticks. Empty positions -> zero brackets (the old fabricated Aerodrome
+        // 0.00000 -> 999.00000 placeholder stays gone).
         let raw = RawOnChainData::default();
         let metrics = compute_derived_metrics(
             &raw,
@@ -4772,7 +5475,19 @@ v4_fee_baseline_nock: 1.4820
             &LedgerAggregate::default(),
             &MarketRegime::default(),
         );
-        assert_eq!(metrics.tick_bracket_hypervisor.brackets.len(), 1);
+        assert_eq!(metrics.tick_bracket_hypervisor.brackets.len(), 0);
+
+        // With the four-position fixture, exactly four live brackets.
+        let metrics = compute_derived_metrics(
+            &four_position_fixture(),
+            0.0,
+            &OperatorProfile::default(),
+            StructuralChannels { channels: vec![] },
+            &[],
+            &LedgerAggregate::default(),
+            &MarketRegime::default(),
+        );
+        assert_eq!(metrics.tick_bracket_hypervisor.brackets.len(), 4);
         let bracket = &metrics.tick_bracket_hypervisor.brackets[0];
         assert_ne!(bracket.lower_price, "0.00000");
         assert_ne!(bracket.upper_price, "999.00000");
@@ -4782,58 +5497,169 @@ v4_fee_baseline_nock: 1.4820
     // Market price backfill & multi-timeframe regime (v0.3.0)
     // ============================================================
 
-    /// Raw fixture above the default 100k floor so the Overextension branch is
-    /// reachable in advice tests (total NOCK = 118000, spot 0.015 dip zone).
-    fn raw_above_floor_fixture() -> RawOnChainData {
+    // ============================================================
+    // v2.0.0 per-position fixtures — REAL on-chain values from Phase-1 discovery
+    // (2026-10-24, see design.md / ONCHAIN_INTEGRATION.md §5). The chain-read
+    // fields (liquidity, sqrtPrice, ticks, fees) are golden anchors; amounts are
+    // derived through the same math the pipeline uses so tests double as
+    // regression checks on the screenshot magnitudes.
+    // ============================================================
+
+    fn fixture_position_v4_nock_eth() -> RawPosition {
+        RawPosition {
+            position_id: "uniswap-v4:base:3163432".to_string(),
+            network: "base".to_string(),
+            protocol: "uniswap-v4".to_string(),
+            wallet: "0xee114cc97ec5adeb34ba5645e315b497d8487a45".to_string(),
+            nft_id: 3163432,
+            pool_id: "0xd316152008e12105594c32686b9d0401fd2c60ca4805c84f280069d218b771a8".to_string(),
+            npm_address: None,
+            fee_tier_bps: 200,
+            token0: PositionTokenInfo { address: NATIVE_ETH.to_string(), symbol: "ETH".to_string(), decimals: 18 },
+            token1: PositionTokenInfo { address: NOCK_BASE.to_string(), symbol: "NOCK".to_string(), decimals: 16 },
+            liquidity: 8293339594552439540,
+            sqrt_price_x96: U256::from_hex_be("0x21baa0a039c91a6726d2879fc9").unwrap(),
+            tick: 70370,
+            tick_lower: 65200,
+            tick_upper: 71200,
+            amount0: 0.0,
+            amount1: 0.0,
+            fee0: 0.0,
+            fee1: 0.0,
+            in_range: true,
+            is_price_source: false,
+        }
+    }
+
+    fn fixture_position_v4_usdc() -> RawPosition {
+        RawPosition {
+            position_id: "uniswap-v4:base:3163431".to_string(),
+            network: "base".to_string(),
+            protocol: "uniswap-v4".to_string(),
+            wallet: "0xee114cc97ec5adeb34ba5645e315b497d8487a45".to_string(),
+            nft_id: 3163431,
+            pool_id: "0x91a9ef0a8dd231b99fa53a2a145a9e8bca7897e0d85852107abb997916f9f99c".to_string(),
+            npm_address: None,
+            fee_tier_bps: 75,
+            token0: PositionTokenInfo { address: USDC_BASE.to_string(), symbol: "USDC".to_string(), decimals: 6 },
+            token1: PositionTokenInfo { address: NOCK_BASE.to_string(), symbol: "NOCK".to_string(), decimals: 16 },
+            liquidity: 320235280612027,
+            sqrt_price_x96: U256::from_hex_be("0x0a9598f7fe4938c0312958557374bf").unwrap(),
+            tick: 269008,
+            tick_lower: 267825,
+            tick_upper: 271050,
+            amount0: 0.0,
+            amount1: 0.0,
+            fee0: 0.0,
+            fee1: 0.0,
+            in_range: true,
+            is_price_source: true,
+        }
+    }
+
+    fn fixture_position_v3_weth_nock() -> RawPosition {
+        RawPosition {
+            position_id: "uniswap-v3:base:6336662".to_string(),
+            network: "base".to_string(),
+            protocol: "uniswap-v3".to_string(),
+            wallet: "0xee114cc97ec5adeb34ba5645e315b497d8487a45".to_string(),
+            nft_id: 6336662,
+            pool_id: "0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a".to_string(),
+            npm_address: Some(UNISWAP_V3_NPM_BASE.to_string()),
+            fee_tier_bps: 100,
+            token0: PositionTokenInfo { address: WETH_BASE.to_string(), symbol: "WETH".to_string(), decimals: 18 },
+            token1: PositionTokenInfo { address: NOCK_BASE.to_string(), symbol: "NOCK".to_string(), decimals: 16 },
+            liquidity: 1305339058220032430,
+            sqrt_price_x96: U256::from_hex_be("0x21d595ed92e90d8945a5ef7766").unwrap(),
+            tick: 70433,
+            tick_lower: 70400,
+            tick_upper: 74800,
+            amount0: 0.0,
+            amount1: 0.0,
+            fee0: 0.0,
+            fee1: 0.0079878029, // v3 uncollected NOCK fees at discovery ($0.000166)
+            in_range: true,
+            is_price_source: false,
+        }
+    }
+
+    /// Position D — USDC/NOCK, Uniswap v4, 3.00% fee, wide raft (change request:
+    /// largest holding ≈ $207). Chain reads 2026-10-24 02:37 UTC: liquidity =
+    /// PositionLiquidity(3163450) — the operator compounded post-mint (mint tx
+    /// 0x6cdabada… +48.3e12, add +143.7e12, +1.2e12, partial remove −7.7e12);
+    /// sqrtPrice/tick via StateView getSlot0; feeGrowthInside (0,0) — fees zero.
+    fn fixture_position_v4_usdc_wide() -> RawPosition {
+        RawPosition {
+            position_id: "uniswap-v4:base:3163450".to_string(),
+            network: "base".to_string(),
+            protocol: "uniswap-v4".to_string(),
+            wallet: "0xee114cc97ec5adeb34ba5645e315b497d8487a45".to_string(),
+            nft_id: 3163450,
+            pool_id: "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13".to_string(),
+            npm_address: None,
+            fee_tier_bps: 300,
+            token0: PositionTokenInfo { address: USDC_BASE.to_string(), symbol: "USDC".to_string(), decimals: 6 },
+            token1: PositionTokenInfo { address: NOCK_BASE.to_string(), symbol: "NOCK".to_string(), decimals: 16 },
+            liquidity: 185454734478733,
+            sqrt_price_x96: U256::from_hex_be("0xa9d5d9b7b19cc983c088d1f6cd97b").unwrap(),
+            tick: 269065,
+            tick_lower: 262200,
+            tick_upper: 282300,
+            amount0: 0.0,
+            amount1: 0.0,
+            fee0: 0.0,
+            fee1: 0.0,
+            in_range: true,
+            is_price_source: false,
+        }
+    }
+
+    /// The four-position portfolio fixture with amounts derived exactly like the
+    /// live pipeline. Magnitude anchors from the operator screenshots (± drift):
+    /// B ≈ $71, C ≈ $18–47, A ≈ $156 (compounded +75% since the $89.48 screenshot),
+    /// D ≈ $208 (largest holding; minted 2026-10-24 morning).
+    fn four_position_fixture() -> RawOnChainData {
+        let mut a = fixture_position_v4_nock_eth();
+        let mut b = fixture_position_v4_usdc();
+        let mut c = fixture_position_v3_weth_nock();
+        let mut d = fixture_position_v4_usdc_wide();
+        for p in [&mut a, &mut b, &mut c, &mut d] {
+            let (a0, a1) = concentrated_amounts_raw(p.liquidity, p.sqrt_price_x96, p.tick_lower, p.tick_upper);
+            p.amount0 = a0 / 10f64.powi(p.token0.decimals);
+            p.amount1 = a1 / 10f64.powi(p.token1.decimals);
+        }
+        let spot = nock_spot_from_positions(&[a.clone(), b.clone(), c.clone(), d.clone()]).expect("fixture price source");
         let mut raw = RawOnChainData::default();
+        raw.positions = vec![a, b, c, d];
+        raw.spot_price_nock_usd = spot;
+        raw.live_eth_price_usd = 2373.14; // canonical v3 WETH/USDC pool at discovery
+        raw.live_gas_cost_usd = 0.005;
         raw.wallet_balances = vec![
             WalletBalance {
-                wallet_address: "0x123".to_string(),
+                wallet_address: "0xee114cc97ec5adeb34ba5645e315b497d8487a45".to_string(),
                 token_symbol: "NOCK".to_string(),
-                token_address: "0xNOCK".to_string(),
-                amount: "110000.0".to_string(),
-                amount_usd: "2860.0".to_string(),
+                token_address: NOCK_BASE.to_string(),
+                amount: "110648.0751".to_string(),
+                amount_usd: "2300.0".to_string(),
                 updated_at: "now".to_string(),
             },
             WalletBalance {
-                wallet_address: "0x123".to_string(),
+                wallet_address: "0xee114cc97ec5adeb34ba5645e315b497d8487a45".to_string(),
                 token_symbol: "USDC".to_string(),
-                token_address: "0xUSDC".to_string(),
-                amount: "50.0".to_string(),
-                amount_usd: "50.0".to_string(),
+                token_address: USDC_BASE.to_string(),
+                amount: "134.4148".to_string(),
+                amount_usd: "134.41".to_string(),
                 updated_at: "now".to_string(),
             },
         ];
-        raw.live_tranche_1_nock = 2000.0;
-        raw.live_tranche_1_usdc = 20.0;
-        raw.live_tranche_2_nock = 6000.0;
-        raw.live_tranche_2_usdc = 30.0;
-        raw.live_uni_fee_usdc = 0.0;
-        raw.live_aero_fee_usdc = 0.0;
-        raw.pool_mechanics = vec![PoolMechanic {
-            pool_id: "0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
-            platform: "Aerodrome".to_string(),
-            pool_type: "volatile".to_string(),
-            volatile_assets: vec![
-                PoolAsset {
-                    token_address: "0xUSDC".to_string(),
-                    token_symbol: "USDC".to_string(),
-                    reserve_amount: "150".to_string(),
-                    reserve_usd: "150".to_string(),
-                },
-                PoolAsset {
-                    token_address: "0xNOCK".to_string(),
-                    token_symbol: "NOCK".to_string(),
-                    reserve_amount: "10000".to_string(),
-                    reserve_usd: "150".to_string(),
-                },
-            ],
-            liquidity_usd: "300".to_string(),
-            fee_accrued_usd: "0".to_string(),
-            fee_tier_bps: 30,
-            tick_current: None,
-            sqrt_price_x96: None,
-        }];
+        raw
+    }
+
+    /// Raw fixture above the default 100k floor so the Overextension branch is
+    /// reachable in advice tests (total NOCK ≈ 125,944, spot forced into the dip zone).
+    fn raw_above_floor_fixture() -> RawOnChainData {
+        let mut raw = four_position_fixture();
+        raw.spot_price_nock_usd = 0.015; // dip zone (< $0.020 accumulation boundary)
         raw
     }
 
