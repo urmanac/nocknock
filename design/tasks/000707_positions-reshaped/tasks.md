@@ -48,6 +48,13 @@
 - [x] Data integrity: worker now emits `distance_bps: null` for cross-denomination rows (was a meaningless -9993/-9996 cross-unit number); schema field is `nullable: true` (v2.0.0 unreleased); TS type `number | null`
 - [x] Tests: worker 48/48 (new v3 collect golden vector), frontend 28/28, `make validate-specs` green; live payload = 3 actions all sim=success
 
+## Change request (2nd review, 2026-10-24): FOURTH live position
+- [~] Discovery via RPC: ownerOf(3163450) → confirm tracked wallet; POSM getPoolAndPositionInfo(3163450) → poolId + raw ticks + poolKey (fee); poolKeys cross-check; PositionLiquidity → confirm active (record identifiers in ONCHAIN_INTEGRATION §5)
+- [ ] Config: add position D to `ingestion-worker/config.yaml` (live) + `config.yaml.example` (USDC/NOCK, fee tier 30bps, wide raft, NOT price source — B stays the single source)
+- [ ] Fixtures/tests: extend worker three-position fixtures + count assertions to four; frontend contract-test fixture to four positions
+- [ ] Live validation: worker ingests 4 positions; claim payload = 4 v4 actions all sim=success; cockpit renders FOUR cards (screenshot); totals reconcile with operator's ~$477 screenshot
+- [ ] Re-propose PR (approved on sight per reviewer)
+
 ## Post-implementation fixes
 - [x] Drive-by: `specs/core/snapshot.yaml` was missing the colon in `openapi: 3.0.3` (pre-existing on main — redocly treated the file as invalid); `specs/core/api.yaml` had `ClaimFeesPayload`/`ClaimFeeAction` at the `components:` root instead of `components.schemas:` (unresolved-ref errors)
 - [x] Drive-by: Makefile's `cargo install wit-bindgen` targets the library crate (binary lives in `wit-bindgen-cli`); installed `wit-bindgen-cli v0.63.0` in-sandbox to run the WIT half of `validate-specs` (Makefile left as-is — out of scope)
