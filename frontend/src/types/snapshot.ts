@@ -87,7 +87,8 @@ export interface TickBracket {
   upper_price: string;
   liquidity_usd: string;
   in_range: boolean;
-  distance_bps: number;
+  /** Null when the bracket's denomination differs from the USD/NOCK spot (ETH-pools). */
+  distance_bps: number | null;
 }
 
 export interface PortfolioDeviationMatrix {

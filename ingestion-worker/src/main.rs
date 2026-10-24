@@ -517,7 +517,10 @@ struct TickBracket {
     upper_price: String,
     liquidity_usd: String,
     in_range: bool,
-    distance_bps: i32,
+    /// Signed bps from spot to the nearest edge — only when the bracket is denominated
+    /// like the spot (USD/NOCK). Cross-denomination rows (ETH-pools) emit null rather
+    /// than a meaningless cross-unit number (zero-mock).
+    distance_bps: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
@@ -1849,6 +1852,8 @@ const UNISWAP_V4_POSM_BASE: &str = "0x7c5f5a4bbd8fd63184577525326123b519429bdc";
 const POSM_MODIFY_LIQUIDITIES_SELECTOR: &str = "dd46508f"; // modifyLiquidities(bytes,uint256)
 const V4_ACTION_DECREASE_LIQUIDITY: u8 = 0x01; // liquidity 0 => collect fees only
 const V4_ACTION_TAKE_PAIR: u8 = 0x11; // unified Actions enum as deployed on Base
+const UNISWAP_V3_COLLECT_SELECTOR: &str = "fc6f7865"; // collect((uint256,address,uint128,uint128)) —
+    // Phase-1 ground truth: the NPM collect staticcall used to validate the v3 fee math
 
 fn word_addr(addr: &str) -> String {
     format!("000000000000000000000000{}", addr.trim_start_matches("0x").to_lowercase())
@@ -1928,6 +1933,20 @@ fn build_v4_collect_calldata(token_id: u64, currency0: &str, currency1: &str, re
         word_u256(0x40),
         word_u256(deadline),
         abi_encode_bytes(&build_v4_collect_unlock_data(token_id, currency0, currency1, recipient))
+    )
+}
+
+/// Canonical Uniswap v3 NPM collect: [selector, tokenId, recipient, amount0Max,
+/// amount1Max] with type(uint128).max maxes — sweeps all accrued fees + tokensOwed
+/// to the recipient. Only valid on the canonical NPM (Phase-1-verified on Base).
+fn build_v3_collect_calldata(token_id: u64, recipient: &str) -> String {
+    format!(
+        "0x{}{}{}{}{}",
+        UNISWAP_V3_COLLECT_SELECTOR,
+        word_u256(token_id),
+        word_addr(recipient),
+        format!("{:064x}", u128::MAX),
+        format!("{:064x}", u128::MAX),
     )
 }
 
@@ -2655,6 +2674,68 @@ struct ClaimFeesPayload {
     actions: Vec<ClaimFeeAction>,
 }
 
+/// Fill expected amounts + token-aware USD valuation from the matching snapshot
+/// position and simulate the collect via eth_call. Shared by the v4 and v3 action
+/// builders so both payload halves behave identically (zero-mock: degrades to None).
+async fn finish_claim_action(
+    http_client: &Client,
+    alchemy_url: &str,
+    wallet: &str,
+    snapshot: &SnapshotEnvelope,
+    action: &mut ClaimFeeAction,
+    pos_id: &str,
+    sim_id: i32,
+    nock_spot: Option<f64>,
+    eth_price: Option<f64>,
+) {
+    let price_for = |symbol: &str| -> Option<f64> {
+        match symbol {
+            "USDC" => Some(1.0),
+            "NOCK" => nock_spot,
+            "WETH" | "ETH" => eth_price,
+            _ => None,
+        }
+    };
+    if let Some(p) = snapshot.data.positions.iter().find(|p| p.position_id == pos_id) {
+        action.expected_amount_0 = Some(p.tokens_owed_0.clone());
+        action.expected_amount_1 = Some(p.tokens_owed_1.clone());
+        if let (Ok(v0), Ok(v1)) = (
+            p.tokens_owed_0.parse::<f64>(),
+            p.tokens_owed_1.parse::<f64>(),
+        ) {
+            match (price_for(&p.token0.symbol), price_for(&p.token1.symbol)) {
+                (Some(p0), Some(p1)) => {
+                    action.expected_usd = Some(format!("{:.4}", v0 * p0 + v1 * p1));
+                }
+                _ => {
+                    action.simulation_detail = Some(
+                        "USD valuation unavailable (missing live NOCK or ETH price)".to_string(),
+                    );
+                }
+            }
+        }
+    }
+    let sim_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{ "from": wallet, "to": action.to, "data": action.data }, "latest"],
+        "id": sim_id
+    });
+    match post_rpc_with_retry(http_client, alchemy_url, &sim_payload, 2).await {
+        Some(res_json) => {
+            if res_json.get("result").and_then(|r| r.as_str()).is_some() {
+                action.simulation = "success".to_string();
+            } else {
+                action.simulation = "failed".to_string();
+                action.simulation_detail = Some("collect eth_call reverted".to_string());
+            }
+        }
+        None => {
+            action.simulation_detail = Some("RPC unavailable for collect simulation".to_string());
+        }
+    }
+}
+
 /// GET /v1/execute/claim-fees/payload — unsigned fee-claim transactions for the
 /// sovereign wallet, derived from live on-chain state. Clients (Android app, web
 /// cockpit) dispatch these to the paired wallet for signing; they never build
@@ -2700,24 +2781,22 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
         .iter()
         .filter(|p| p.protocol == "uniswap-v4")
         .collect();
-    if v4_configs.is_empty() {
+    let v3_configs: Vec<&PositionConfig> = state
+        .config
+        .positions
+        .iter()
+        .filter(|p| p.protocol == "uniswap-v3")
+        .collect();
+    if v4_configs.is_empty() && v3_configs.is_empty() {
         return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
             "error": "NO_CLAIMABLE_POSITIONS",
-            "detail": "No uniswap-v4 positions configured; cannot build claim transactions"
+            "detail": "No Uniswap positions configured; cannot build claim transactions"
         }))).into_response();
     }
 
     // Live prices for token-aware USD valuation (degrade to None, never fabricate).
     let eth_price = fetch_eth_price_usd(&state.http_client, &alchemy_url).await;
     let nock_spot = nock_spot_from_snapshot(&snapshot.data);
-    let price_for = |symbol: &str| -> Option<f64> {
-        match symbol {
-            "USDC" => Some(1.0),
-            "NOCK" => nock_spot,
-            "WETH" | "ETH" => eth_price,
-            _ => None,
-        }
-    };
 
     for (idx, pos) in v4_configs.iter().enumerate() {
         let (Some(c0), Some(c1)) = (pos.currency0.as_deref(), pos.currency1.as_deref()) else {
@@ -2741,47 +2820,39 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
             simulation: "unavailable".to_string(),
             simulation_detail: None,
         };
-        // Expected amounts come from the matching snapshot position's unclaimed fees.
         let pos_id = format!("uniswap-v4:{}:{}", pos.network, pos.nft_id);
-        if let Some(p) = snapshot.data.positions.iter().find(|p| p.position_id == pos_id) {
-            action.expected_amount_0 = Some(p.tokens_owed_0.clone());
-            action.expected_amount_1 = Some(p.tokens_owed_1.clone());
-            // Token-aware USD valuation (USDC = $1; NOCK/WETH from live spots).
-            if let (Ok(v0), Ok(v1)) = (
-                p.tokens_owed_0.parse::<f64>(),
-                p.tokens_owed_1.parse::<f64>(),
-            ) {
-                match (price_for(&p.token0.symbol), price_for(&p.token1.symbol)) {
-                    (Some(p0), Some(p1)) => {
-                        action.expected_usd = Some(format!("{:.4}", v0 * p0 + v1 * p1));
-                    }
-                    _ => {
-                        action.simulation_detail = Some(
-                            "USD valuation unavailable (missing live NOCK or ETH price)".to_string(),
-                        );
-                    }
-                }
-            }
-        }
-        let sim_payload = json!({
-            "jsonrpc": "2.0",
-            "method": "eth_call",
-            "params": [{ "from": wallet, "to": UNISWAP_V4_POSM_BASE, "data": action.data }, "latest"],
-            "id": 20 + idx as i32
-        });
-        match post_rpc_with_retry(&state.http_client, &alchemy_url, &sim_payload, 2).await {
-            Some(res_json) => {
-                if res_json.get("result").and_then(|r| r.as_str()).is_some() {
-                    action.simulation = "success".to_string();
-                } else {
-                    action.simulation = "failed".to_string();
-                    action.simulation_detail = Some("modifyLiquidities collect eth_call reverted".to_string());
-                }
-            }
-            None => {
-                action.simulation_detail = Some("RPC unavailable for V4 collect simulation".to_string());
-            }
-        }
+        finish_claim_action(&state.http_client, &alchemy_url, &wallet, &snapshot,
+            &mut action, &pos_id, 20 + idx as i32, nock_spot, eth_price).await;
+        actions.push(action);
+    }
+
+    // --- Per-position Uniswap v3 collect actions ---
+    // v3 fees accrue in the canonical NPM (tokensOwed); collect((uint256,address,
+    // uint128,uint128)) with type(uint128).max maxes sweeps them to the wallet. Emitted
+    // only for positions whose config carries the canonical npm_address (Phase-1
+    // verified on Base); positions without one stay read-only (advice: ACCUMULATE).
+    for (idx, pos) in v3_configs.iter().enumerate() {
+        let Some(npm) = pos.npm_address.as_deref() else {
+            continue;
+        };
+        let v3_data = build_v3_collect_calldata(pos.nft_id, &wallet);
+        let mut action = ClaimFeeAction {
+            platform: "uniswap-v3".to_string(),
+            label: format!("Collect Uniswap V3 LP fees ({} #{})", pos.id, pos.nft_id),
+            to: npm.to_string(),
+            data: v3_data,
+            value: "0x0".to_string(),
+            expected_amount_0: None,
+            expected_amount_1: None,
+            expected_usd: None,
+            gas_estimate: None,
+            gas_usd: None,
+            simulation: "unavailable".to_string(),
+            simulation_detail: None,
+        };
+        let pos_id = format!("uniswap-v3:{}:{}", pos.network, pos.nft_id);
+        finish_claim_action(&state.http_client, &alchemy_url, &wallet, &snapshot,
+            &mut action, &pos_id, 20 + (v4_configs.len() + idx) as i32, nock_spot, eth_price).await;
         actions.push(action);
     }
 
@@ -4248,7 +4319,13 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                         upper_price: fmt_price(upper_disp),
                         liquidity_usd: format!("{:.2}", pos_usd),
                         in_range: p.in_range,
-                        distance_bps: bracket_distance_bps(spot_price, lower_disp, upper_disp),
+                        // Spot is USD/NOCK; brackets are token0-per-NOCK. Only USD-
+                        // denominated token0 (USDC) yields an honest distance.
+                        distance_bps: if p.token0.symbol == "USDC" {
+                            Some(bracket_distance_bps(spot_price, lower_disp, upper_disp))
+                        } else {
+                            None
+                        },
                     }
                 })
                 .collect(),
@@ -5059,6 +5136,19 @@ database_url: "postgresql://localhost/test"
             0xFFFFFFFFFFFF,
         );
         assert_eq!(data, "0xdd46508f00000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000ffffffffffff0000000000000000000000000000000000000000000000000000000000000240000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000002011100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000002fb2f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000060000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000009b5e262cf9bb04869ab40b19af91d2dc85761722000000000000000000000000ee114cc97ec5adeb34ba5645e315b497d8487a45");
+    }
+
+    #[test]
+    fn test_v3_collect_calldata_golden_vector() {
+        // collect((uint256,address,uint128,uint128)) on the canonical Base NPM
+        // 0x03a520b3…Ed34f1 for tokenId 6336662 (WETH/NOCK 1%). Live-verified via
+        // eth_call 2026-10-24: returns (0, 1654339369283004) = 0.165434 NOCK —
+        // exactly the snapshot's tokens_owed_1 for uniswap-v3:base:6336662.
+        let data = build_v3_collect_calldata(
+            6336662,
+            "0xeE114cC97eC5adeB34bA5645e315B497D8487a45",
+        );
+        assert_eq!(data, "0xfc6f7865000000000000000000000000000000000000000000000000000000000060b096000000000000000000000000ee114cc97ec5adeb34ba5645e315b497d8487a4500000000000000000000000000000000ffffffffffffffffffffffffffffffff00000000000000000000000000000000ffffffffffffffffffffffffffffffff");
     }
 
     #[test]

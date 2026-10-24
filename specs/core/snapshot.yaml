@@ -602,7 +602,12 @@ components:
           type: boolean
         distance_bps:
           type: integer
-          description: Distance from current price to bracket edge (basis points)
+          nullable: true
+          description: >-
+            Signed basis-point distance from the current (USD/NOCK) price to the
+            nearest bracket edge. Null for brackets denominated in a different unit
+            (e.g. ETH-per-NOCK), where a cross-unit distance would be meaningless —
+            clients convert via a live ETH/USD rate before charting.
 
     PortfolioDeviationMatrix:
       type: object

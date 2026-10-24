@@ -180,15 +180,51 @@ function Dashboard() {
     status: a.status,
   }));
 
-  const tickData = (metrics?.tick_bracket_hypervisor?.brackets || []).map((b: any, i: number) => ({
-    name: positionLabel(positionsList[i]),
-    lower: parseFloat(b.lower_price),
-    upper: parseFloat(b.upper_price),
-    displayUpper: b.upper_price,
-    liquidity: parseFloat(b.liquidity_usd),
-    inRange: b.in_range,
-    distance: b.distance_bps / 100,
-  }));
+  // Live ETH/USD derived from the same on-chain pool reads the worker used for USD
+  // valuation (ETH/WETH volatile_assets reserve_usd / reserve_amount). Null when no
+  // ETH leg exists or amounts are zero — zero-mock: never valued at a made-up price.
+  // NB: pool_mechanics is a sibling of derived_metrics on the snapshot data object.
+  const ethUsd = (() => {
+    for (const pm of rawData?.pool_mechanics || []) {
+      const eth = (pm.volatile_assets || []).find((a: any) => ['ETH', 'WETH'].includes(a.token_symbol));
+      if (eth) {
+        const amt = parseFloat(eth.reserve_amount);
+        const usd = parseFloat(eth.reserve_usd);
+        if (amt > 0 && usd > 0) return usd / amt;
+      }
+    }
+    return null;
+  })();
+
+  const tickData = (metrics?.tick_bracket_hypervisor?.brackets || []).map((b: any, i: number) => {
+    const pos = positionsList[i];
+    // Bracket prices are quoted in token0 units per NOCK (USDC or ETH). ETH-denominated
+    // brackets are converted to USD so every row shares one legible axis; without a live
+    // ETH/USD the row keeps native units (collapsed, honest) instead of a fabricated price.
+    const ethDenominated = pos && ['ETH', 'WETH'].includes(pos.token0?.symbol);
+    const converted = !!ethDenominated && ethUsd != null;
+    const fx = converted ? (ethUsd as number) : 1;
+    const lower = parseFloat(b.lower_price) * fx;
+    const upper = parseFloat(b.upper_price) * fx;
+    const spot = parseFloat(metrics?.tick_bracket_hypervisor?.current_price || '0');
+    // Distance to the nearest bracket edge in the same (USD/NOCK) units; falls back to
+    // the worker's bps when a row stays in native units (its sentinel is meaningless
+    // across denominations).
+    const distance = converted && spot > 0 && lower > 0
+      ? Math.min(Math.max(spot - lower, 0), Math.max(upper - spot, 0)) / spot * 100
+      : (b.distance_bps != null ? b.distance_bps / 100 : null);
+    return {
+      name: positionLabel(pos),
+      lower,
+      upper,
+      displayLower: b.lower_price,
+      displayUpper: b.upper_price,
+      liquidity: parseFloat(b.liquidity_usd),
+      inRange: b.in_range,
+      distance,
+      converted,
+    };
+  });
 
   const gasData = (metrics?.velocity_gas_sandbox?.contracts || []).map((c: any) => ({
     name: c.contract_name,
@@ -535,26 +571,31 @@ function Dashboard() {
           </ResponsiveContainer>
         </CanvasPanel>
 
-        {/* 3. Tick Bracket Hypervisor — Horizontal Ranges (one bar per tracked position) */}
+        {/* 3. Tick Bracket Hypervisor — Horizontal Ranges (one bar per tracked position,
+            all brackets converted to USD per NOCK so cross-protocol rows share one axis) */}
         <CanvasPanel title="Tick Bracket Hypervisor (all tracked positions)">
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={tickData} layout="vertical" margin={{ top: 10, right: 30, left: 110, bottom: 0 }}>
-              <XAxis type="number" tickFormatter={v => '$' + v.toLocaleString()} stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+              <XAxis type="number" tickFormatter={v => '$' + v.toFixed(4)} stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} domain={[0, 'dataMax']} />
               <YAxis type="category" dataKey="name" width={110} stroke="#334155" tick={{ fill: '#cbd5e1', fontSize: 11 }} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
+              <ReferenceLine x={parseFloat(metrics?.tick_bracket_hypervisor?.current_price || '0')} stroke="#e2b714" strokeDasharray="4 4" label={{ value: 'Spot', fill: '#e2b714', fontSize: 11, position: 'top' }} />
               <Tooltip
                 contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
                 itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
                 labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
-                formatter={v => '$' + v.toLocaleString()}
+                formatter={(v: any, name: any) => ['$' + Number(v).toFixed(5), name]}
               />
               <Bar dataKey="upper" fill="#f59e0b" fillOpacity={0.6} name="Upper Bracket ($)" />
               <Bar dataKey="lower" fill="#10b981" fillOpacity={0.6} name="Lower Bracket ($)" />
               <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </BarChart>
           </ResponsiveContainer>
-          <div style={{ marginTop: 12, fontSize: '0.75rem', color: '#aaa', fontFamily: 'monospace', display: 'flex', justifyContent: 'space-between' }}>
+          <div style={{ marginTop: 12, fontSize: '0.75rem', color: '#aaa', fontFamily: 'monospace', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span>Spot Price: <strong>${metrics?.tick_bracket_hypervisor?.current_price || '0.00'}</strong></span>
+            {tickData.some((t: any) => t.converted) && (
+              <span style={{ color: '#8b949e' }}>ETH-denominated brackets converted to USD @ ${ethUsd ? ethUsd.toFixed(2) : '—'}/ETH (live pool-derived)</span>
+            )}
             {(() => {
               const bracket = metrics?.tick_bracket_hypervisor?.brackets?.[0];
               if (!bracket?.lower_price) {
