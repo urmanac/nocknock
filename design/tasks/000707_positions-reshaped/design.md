@@ -259,3 +259,41 @@ method used (kept for future re-discovery):
   all 4 artifacts, live snapshot fetch returned the 3 positions at screenshot magnitudes
   (B $71.11 vs $71.45), both v4 collect sims succeed, cockpit renders 3 cards
   (screenshot `02-cockpit-three-positions.png`).
+
+## Post-review fixes (2026-10-24, after first PR proposal was rejected)
+
+The rejection carried no written feedback; the two imperfections flagged during the
+live inspection were treated as the feedback and fixed:
+
+1. **v3 collect added to the claim payload.** The payload was v4-only while the velocity
+   sandbox labeled the v3 "CLAIM_RECOMMENDED" — promising an action the payload didn't
+   carry. The approved spec permitted v3 collect once discovery confirmed a reachable
+   canonical NPM (it did: Base `0x03a520b3…Ed34f1`). Implementation: `collect((uint256,
+   address,uint128,uint128))` selector **0xfc6f7865** (keccak-verified; the same
+   staticcall used as Phase-1 fee-math ground truth), `type(uint128).max` maxes, expected
+   amounts from the snapshot's `tokens_owed_*`. Live eth_call ground truth: returns
+   (0, 1654339369283004) = 0.165434 NOCK — exactly the snapshot value. The per-action
+   expected/valuation/simulation tail was extracted into `finish_claim_action`, shared
+   by both the v4 and v3 loops; NO_CLAIMABLE_POSITIONS guard now requires BOTH loops empty.
+2. **Hypervisor shared-USD axis.** Bracket prices are token0-per-NOCK; ETH-pool rows
+   (~8e-6 ETH/NOCK) were invisible on an axis scaled for the USDC pool (0.024). Fix:
+   derive the worker's live ETH/USD client-side from `pool_mechanics` volatile_assets
+   (`reserve_usd/reserve_amount` — same reads the worker valued with), convert ETH rows
+   to USD/NOCK, add a spot ReferenceLine, disclose the conversion in the footer.
+   Gotcha: `pool_mechanics` is a SIBLING of `derived_metrics` on the snapshot data —
+   `metrics.pool_mechanics` is undefined (first attempt silently no-opped).
+3. **Honest cross-unit distances.** The worker's `distance_bps` for ETH-pool rows was a
+   meaningless cross-unit number (-9993/-9996 sentinels). Now `Option<i32>`: Some only
+   for USD-denominated (USDC) brackets, else null; schema `nullable: true`; TS
+   `number | null`. Frontend computes honest USD-normalized distances itself.
+
+**Post-fix validation:** worker 48/48 (new `test_v3_collect_calldata_golden_vector`),
+frontend 28/28, validate-specs green; live payload = 3 actions (2× v4 + 1× v3), all
+simulation=success, gross $0.04, net +$0.0348; hypervisor renders all 3 brackets on the
+shared axis (screenshot `04-hypervisor-shared-axis.png`).
+
+**Range-edge reading for the operator (from the converted brackets, spot $0.02062):**
+NOCK/ETH spot sits near the strength-side edge of BOTH ETH pools — C exits on a ~1%
+NOCK strengthening vs ETH, A on ~7%; the weakening side has large cushions (C ~35%, A
+~70%). B (USDC) is mid-range: exits at +13.4% (strength) or −17.8% (weakness). A NOCK
+rally takes C out of range first; a NOCK dump threatens B first.

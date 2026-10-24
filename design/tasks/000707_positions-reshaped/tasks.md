@@ -42,11 +42,11 @@
 - [x] Validate: `make test-worker` ✓, `make test-frontend` ✓, `make validate-specs` ✓ (13 pre-existing warnings only), `make build-frontend` ✓ (via `make dist`) — all green
 - [x] Live validation: real snapshot fetch against `0xeE11…7a45` returned the three positions matching the screenshot's magnitudes (B $71.11 vs $71.45); both v4 collect payload entries simulate success on Base; cockpit renders three cards (`screenshots/02-cockpit-three-positions.png`)
 
-## Post-review fixes (PR proposal rejected — address before re-proposal)
-- [~] Claim payload: add the v3 collect action for NFT #6336662 (canonical Base NPM `0x03a520b3…`, selector `collect((uint256,address,uint128,uint128))` = 0xfc6f7865 — the Phase-1-verified ground-truth selector); payload spec permits it since discovery confirmed a reachable canonical NPM; update payload aggregation (gross/net/gas) and simulate on-chain
-- [ ] Frontend: tick bracket hypervisor renders per-position rows on a shared axis denominated in the price-source pool's units — ETH-pool brackets (~8e-6) collapse at the left edge; give each row a per-row scale (or USD-normalize) so all 3 brackets render legibly
-- [ ] Tests: worker payload test now expects 3 actions (2× v4 collect + 1× v3 collect with NPM address + tokenId encoding); re-run worker + frontend suites
-- [ ] Live validation: payload returns 3 actions, all simulation=success, net-after-gas positive
+## Post-review fixes (PR proposal rejected — addressed, 2026-10-24)
+- [x] Claim payload: v3 collect action for NFT #6336662 added — canonical Base NPM `0x03a520b3…`, selector `collect((uint256,address,uint128,uint128))` = 0xfc6f7865 (Phase-1 ground truth), type(uint128).max maxes; live eth_call verified: returns (0, 1654339369283004) = 0.165434 NOCK = the snapshot's tokens_owed_1 exactly; golden-vector test added; payload emits 3 actions, all sim=success (gross $0.04, net +$0.0348)
+- [x] Hypervisor axis: ETH-denominated brackets converted to USD per NOCK via the worker's own live ETH/USD (derived client-side from pool_mechanics volatile_assets reserve_usd/reserve_amount — same reads the worker valued with); shared axis + spot ReferenceLine; footer discloses the conversion rate
+- [x] Data integrity: worker now emits `distance_bps: null` for cross-denomination rows (was a meaningless -9993/-9996 cross-unit number); schema field is `nullable: true` (v2.0.0 unreleased); TS type `number | null`
+- [x] Tests: worker 48/48 (new v3 collect golden vector), frontend 28/28, `make validate-specs` green; live payload = 3 actions all sim=success
 
 ## Post-implementation fixes
 - [x] Drive-by: `specs/core/snapshot.yaml` was missing the colon in `openapi: 3.0.3` (pre-existing on main — redocly treated the file as invalid); `specs/core/api.yaml` had `ClaimFeesPayload`/`ClaimFeeAction` at the `components:` root instead of `components.schemas:` (unresolved-ref errors)
