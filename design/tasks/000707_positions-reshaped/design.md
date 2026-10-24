@@ -27,40 +27,56 @@
   `claimFees` and its tool descriptions name Aerodrome.
 - Brain (`brain/`) is pure math over LP ratios/ticks and consumes none of this — untouched.
 
-## Phase 1 — Discovery (RPC only, no guessing)
+## Phase 1 — Discovery (RPC, no guessing) — COMPLETE 2026-10-24
 
-Deliverable: a completed discovery record appended to `ONCHAIN_INTEGRATION.md` (new
-Uniswap-only section) + `ingestion-worker/config.yaml`. Every identifier must come from
-an actual RPC response or the operator; if ambiguous, ASK the operator (do not guess).
+**Result: all three positions belong to the tracked wallet `0xeE114cC97eC5adeB34bA5645e315B497D8487a45` on Base. The ticket's premise ("zero fresh mints to this wallet", "v3 NPM has 0 NFTs") was based on the WRONG v3 NPM address and a stale v4 mint check.** The screenshot's "9:16:33 PM 2026-10-23" is US Eastern (EDT) = 2026-10-24 01:16 UTC; the v4 mints landed 01:12:37 and 01:14:47 UTC ("1m/3m ago" ✓).
 
-1. **Find the wallet(s) holding the three new positions.**
-   - Candidate A: tracked wallet `0xeE114cC9…7a45` — already known to hold ZERO fresh
-     mints (verified 2026-10-24), so likely not it.
-   - RPC path: `eth_getLogs` on the canonical V4 POSM
-     (`0x7c5f5a4bbd8fd63184577525326123b519429bdc`) for ERC-721 `Transfer` (topic0
-     `0xddf252ad…`) with `from = 0x0` over the mint window (2026-10-23 ≈ 21:10–21:20 UTC;
-     screenshot says created 1m/3m/5m before 21:16) → tokenIds + recipients.
-   - Fallback: operator names the wallet (Uniswap app wallet is a different key set).
+| | Position A | Position B | Position C |
+|---|---|---|---|
+| protocol | uniswap-v4 | uniswap-v4 | uniswap-v3 |
+| NFT id | **3163432** | **3163431** | **6336662** |
+| pool | v4 poolId `0xd316152008e12105594c32686b9d0401fd2c60ca4805c84f280069d218b771a8` | v4 poolId `0x91a9ef0a8dd231b99fa53a2a145a9e8bca7897e0d85852107abb997916f9f99c` | pool `0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a` |
+| fee tier | 2% (20000, tickSpacing 400) | 0.75% (7500, tickSpacing 75) | 1% (10000) |
+| tokens | currency0 = native ETH (`0x0`, 18 dec), currency1 = NOCK (16) | currency0 = USDC (6), currency1 = NOCK (16) | token0 = WETH (`0x4200…06`, 18), token1 = NOCK (16) |
+| ticks | [65200, 71200] | [267825, 271050] | [70400, 74800] |
+| in_range at check | ✓ (tick 70370) | ✓ (tick 269008) | ✓ (tick 70433) |
+| v4 mint tx | `0x0a001ce91d08089c4a4b8529548de5220ffb1415653ee5b9c20658b97d214319` | `0x2613657172d6bec2c2d9585e5ce05203ec1f4f2958696f2935952ac2d95ba221` | (pre-existing NFT) |
+| value at check | ~$156 (position compounded +75% since the $89.48 screenshot; split still 15.2% ETH / 84.8% NOCK) | ~$71.3 (screenshot $71.45 ✓) | ~$18.10 (screenshot $18.13 ✓) |
+| unclaimed fees | 0 | 0 | 0.00799 NOCK = **$0.000166** (screenshot $0.000167 ✓) |
+
+Other discovery facts:
+- Old V4 NFT **#3126000 still owned but liquidity = 0** (dead). The wallet's 42 V4 NFTs = **2 active + 40 zero-liquidity dust**; 59 of 60 V3 NFTs (Base NPM) are dust too.
+- NOCK spot (pool B slot0): **$0.020783**; third-party (DEXScreener/GeckoTerminal) agree ≈ $0.0206–0.0209.
+- ETH/USD: **$2,370.85 from the canonical v3 WETH/USDC 0.05% pool `0xd0b53d9277642d899df5c87a3966a349a798f224`** (resolved via the verified Base v3 factory `0x33128a8fC17869897dcE68Ed026d694621f6FDfD` `getPool(WETH, USDC, 500)`; code verified; price sanity-checked). Both Chainlink aggregator address candidates returned empty `eth_call` → the approved fallback source is adopted as primary.
+- Tracked wallet live balances: NOCK 110,648.08, USDC 134.41, WETH 0, ETH 0.0173.
+- Pool state (for fixtures): pool B slot0 sqrtPriceX96 = 54957167047204907031948508154524863, tick 269008; pool A sqrtPriceX96 = 2672287759573224343549847773129, tick 70370; v3 pool slot0 tick 70433, fgGlobal0 = 88964247217657351611252137835053562972, fgGlobal1 = 9695026829229832421930202654646707105191.
+- RPC quirks learned (validated by a pure-Python keccak implementation self-tested against known vectors): PoolManager event topics on Base — Swap `0x40e9cecb…`, ModifyLiquidity `0xf208f491…` (sender=POSM), ERC-6909 Transfer `0x1b3d7edb…`; POSM `poolKeys(bytes25)` selector `0x86b6be7d` returns the full PoolKey for poolId-prefix; v3 `positions(uint256)` 12-word layout confirmed; this pool's `ticks(int24)` returns an 8-word TickInfo (extended vs canonical 6-word) but words 0–3 follow the canonical layout (liqGross, liqNet, feeGrowthOutside0, feeGrowthOutside1).
+
+Phase-1 discovery tasks are done; identifiers above feed `config.yaml positions:`. The
+method used (kept for future re-discovery):
+
+1. **Find the wallet(s) holding the new positions.**
+   - `eth_getLogs` on the canonical V4 POSM for ERC-721 `Transfer` (topic0
+     `0xddf252ad…`) with `from = 0x0` over the mint window → tokenIds + recipients;
+     join each mint to its `ModifyLiquidity` log (same tx, `sender = POSM`) to get the
+     poolId without trusting any pre-known pool list.
+   - **Actual outcome:** both v4 mints went to the tracked wallet (EDT screenshot time
+     resolves the "zero fresh mints" contradiction).
 2. **Enumerate + classify the tracked wallet's 42 V4 POSM NFTs.**
    - `balanceOf` → enumerate owned tokenIds (Transfer logs to wallet); per NFT call
      `getPositionLiquidity(uint256)` (`0x1efeed33`) and `getPoolAndPositionInfo(uint256)`
      (`0x7ba03aad`) — classify active-liquidity vs dust/empty (liquidity == 0).
    - Includes resolving the fate of old NFT #3126000 (burnt? dust?).
-3. **Decode each of the three new positions.**
-   - v4: `getPoolAndPositionInfo` → poolId, liquidity, tickLower, tickUpper;
-     StateView `getSlot0(poolId)` → sqrtPriceX96 + current tick (in_range check);
-     POSM `poolKeys(bytes25 poolId)` → currency0/currency1/fee/tickSpacing/hooks
-     (selector verified during implementation) → fee tier + token ordering per pool.
-   - v3: per-network canonical NPM (verify address on-chain via the Uniswap deployments
-     registry — do NOT trust the ticket-quoted `0x46A15B…`; Base canonical V3 NPM is
-     expected `0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1`, Ethereum mainnet
-     `0xC36442b4a4522E871399CD717aBDD847Ab11FE88`). `positions(uint256)`
-     (`0x99fbab88`) → 12-word decode: token0, token1, fee, tickLower, tickUpper,
-     liquidity, tokensOwed0/1. Pool address via canonical factory
-     `getPool(token0, token1, fee)`; `slot0()` for sqrtPrice.
-4. **Record** for each position: network, wallet, protocol, NFT id, poolId/pool address,
-   fee tier, token0/token1 addresses + decimals, ticks, currency ordering. NOCK (16 dec),
-   USDC (6 dec), WETH (18 dec).
+3. **Decode each position.**
+   - v4: StateView `getSlot0(poolId)` → sqrtPriceX96 + current tick; POSM
+     `poolKeys(bytes25 poolId)` (`0x86b6be7d`) → currency0/currency1/fee/tickSpacing
+     (verified against the known old pool); StateView `getPositionInfo` +
+     `getFeeGrowthInside` for uncollected fees.
+   - v3: Base canonical NPM `0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1` (the
+     ticket-quoted `0x46A15B…` was the wrong address); `positions(uint256)`
+     (`0x99fbab88`) 12-word decode; pool via factory `getPool(token0, token1, fee)`;
+     `slot0()` + `feeGrowthGlobal{0,1}X128()` + `ticks(int24)` for fees.
+4. **Record** identifiers (table above). NOCK (16 dec), USDC (6 dec), WETH (18 dec).
 
 ## Phase 2 — Model Update
 

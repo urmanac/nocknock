@@ -1,12 +1,12 @@
 # Implementation Tasks: Uniswap-Only Portfolio After Aerodrome Liquidation
 
-## Phase 1 — Discovery (RPC, no guessing)
-- [ ] Locate the wallet(s) holding the three fresh V4 NFTs via `eth_getLogs` on the canonical V4 POSM (Transfer from 0x0, mint window 2026-10-23 ~21:10–21:20 UTC); fall back to asking the operator
-- [ ] Enumerate the tracked wallet's 42 V4 POSM NFTs (Transfer logs → tokenIds) and classify each via `getPositionLiquidity` (0x1efeed33) / `getPoolAndPositionInfo` (0x7ba03aad): active vs dust/empty; record fate of old NFT #3126000
-- [ ] Decode the three new v4 positions: poolId, liquidity, ticks (getPoolAndPositionInfo), sqrtPrice/tick (StateView getSlot0), fee tier + currency ordering (POSM poolKeys)
-- [ ] Locate the v3 position: verify canonical NPM address per network on-chain (Base expected `0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1`; do NOT trust ticket-quoted `0x46A15B…`), find owning wallet, decode `positions(uint256)` (0x99fbab88): fee=1%, ticks, liquidity, tokensOwed; resolve pool via factory `getPool(token0, token1, fee)`
-- [ ] Verify the Chainlink ETH/USD aggregator address on Base (and record a fallback pool: canonical Uniswap v3 WETH/USDC 0.05% slot0)
-- [ ] If any discovery result is ambiguous, ask the operator before proceeding; then record all identifiers in ONCHAIN_INTEGRATION.md + `config.yaml` `positions:` section
+## Phase 1 — Discovery (RPC, no guessing) — DONE (results in design.md)
+- [x] Locate the wallet(s) holding the three fresh positions via `eth_getLogs` (POSN mints joined to ModifyLiquidity by tx) — both v4 mints went to the tracked wallet; ticket premise corrected
+- [x] Enumerate the tracked wallet's 42 V4 POSN NFTs and classify: 2 active (3163431, 3163432) + 40 dust (incl. old #3126000, liquidity=0)
+- [x] Decode the three new v4 positions: poolIds, ticks, fee tiers, currency ordering via POSM poolKeys + StateView getSlot0
+- [x] Locate the v3 position: Base canonical NPM 0x03a520b3…, tokenId 6336662 (WETH/NOCK 1%, ticks [70400,74800]), pool via factory getPool
+- [x] Verify ETH/USD source: both Chainlink candidates empty → adopted approved fallback: canonical v3 WETH/USDC 0.05% pool 0xd0b53d92… (factory-resolved, price-verified $2,373)
+- [x] Record all identifiers in design.md + ONCHAIN_INTEGRATION.md (Phase-2 docs task)
 
 ## Phase 2 — Data model & specs
 - [ ] `specs/core/snapshot.yaml`: add `Position` schema + `positions` array on `SnapshotData`; platform enums gain real `UniswapV3`; deprecate `ConcentratedLiquidity`; replace `tranche_N_nock` series with `positions_nock`; bump `meta.version` to 2.0.0
