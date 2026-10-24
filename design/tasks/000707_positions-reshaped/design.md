@@ -300,3 +300,35 @@ floor: C exits on ~1% further NOCK **strengthening** vs ETH (its weak-side cushi
 exits on ~7% NOCK **weakening** vs ETH (strength-side cushion −41%). B (USDC) is
 mid-range: exits at −17.8% (weak) or +13.4% (strong). Net: a NOCK rally takes C out of
 range first; a NOCK dip takes A out first, then B.
+
+## Change request: fourth position (2nd review round, 2026-10-24)
+
+The reviewer approved the post-review fixes as built and requested a FOURTH live
+position: v4 NFT **3163450**, USDC/NOCK, "fee 3000", ticks [262200, 282300] ("wide
+raft"), the largest holding (~$207; four-position total ~$477).
+
+**Discovery (all RPC-verified):** ownerOf(3163450) = tracked wallet. PoolId + raw ticks
+came from the mint's PoolManager `ModifyLiquidity` event (tx `0x6cdabada…`, block
+53008241): poolId `0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13`,
+ticks 262200/282300. POSM `getPoolAndPositionInfo` cross-checked: fee **30000 = 3.00%**
+(the reviewer's "3000" is the tier label; the raw value is 0x7530), tickSpacing 300,
+packed PositionInfo word = poolId(25B) | 282300 | 262200. Currency order: USDC first
+(v4 salt-based ordering, not address-sorted). feeGrowthInside (0,0) — fees zero.
+
+**Gotcha that cost a cycle:** the operator actively compounds — my first PositionLiquidity
+read (02:33 UTC) returned the bare mint liquidity (48.3e12 → ~$54) and contradicted the
+reviewer's ~$207; re-reading 3 minutes later gave 185.5e12 (~$207) — the wallet's
+ModifyLiquidity log shows the +143.7e12 add / −7.7e12 remove landing between the reads.
+Lesson: when a chain read contradicts the operator's point-in-time numbers, RE-READ
+before theorizing; repositions happen on minute timescales here. The config-registry
+design absorbed the top-up with zero code change — the live pipeline arbitrates value
+every cycle.
+
+**Wiring:** config entry (`uniswap-v4-nock-usdc-wide`, 300bps, NOT price source),
+worker `four_position_fixture` (real reads), count assertions 3→4, config-parse test
+YAML extended, tax-guardrail test input adjusted (D's USDC leg grew the stable stack
+above the test's overdraw threshold), frontend fixture + label/range assertions
+(`USDC/NOCK v4 · 3%`, `0.005501 – 0.04106 USDC per NOCK`). Worker 48/48, frontend
+28/28. Live: 4 positions (D $206.33), total $475.16 ≈ the reviewer's ~$477; claim
+payload = 4 actions all sim=success; cockpit renders four cards
+(screenshot `05-cockpit-four-positions.png`).

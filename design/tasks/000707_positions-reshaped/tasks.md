@@ -48,12 +48,14 @@
 - [x] Data integrity: worker now emits `distance_bps: null` for cross-denomination rows (was a meaningless -9993/-9996 cross-unit number); schema field is `nullable: true` (v2.0.0 unreleased); TS type `number | null`
 - [x] Tests: worker 48/48 (new v3 collect golden vector), frontend 28/28, `make validate-specs` green; live payload = 3 actions all sim=success
 
-## Change request (2nd review, 2026-10-24): FOURTH live position
-- [~] Discovery via RPC: ownerOf(3163450) → confirm tracked wallet; POSM getPoolAndPositionInfo(3163450) → poolId + raw ticks + poolKey (fee); poolKeys cross-check; PositionLiquidity → confirm active (record identifiers in ONCHAIN_INTEGRATION §5)
-- [ ] Config: add position D to `ingestion-worker/config.yaml` (live) + `config.yaml.example` (USDC/NOCK, fee tier 30bps, wide raft, NOT price source — B stays the single source)
-- [ ] Fixtures/tests: extend worker three-position fixtures + count assertions to four; frontend contract-test fixture to four positions
-- [ ] Live validation: worker ingests 4 positions; claim payload = 4 v4 actions all sim=success; cockpit renders FOUR cards (screenshot); totals reconcile with operator's ~$477 screenshot
+## Change request (2nd review, 2026-10-24): FOURTH live position — DONE
+- [x] Discovery via RPC: ownerOf(3163450) = tracked wallet; poolId + raw ticks [262200, 282300] from the mint's ModifyLiquidity event (tx 0x6cdabada…, block 53008241); getPoolAndPositionInfo cross-check (fee 30000 = 3.00%, tickSpacing 300, packed poolId/ticks); PositionLiquidity active — recorded in ONCHAIN_INTEGRATION §5
+- [x] Config: position D in `config.yaml.example` + live config (USDC/NOCK, 300bps, wide raft, NOT price source — B stays the single source)
+- [x] Fixtures/tests: worker `four_position_fixture` (real chain reads; D liquidity 185,454,734,478,733 after the operator's post-mint compounding), count assertions 3→4, config-parse YAML extended, tax-guardrail input adjusted (D's 129-USDC leg); frontend fixture + label/range assertions for D — worker 48/48, frontend 28/28
+- [x] Live validation: snapshot ingests 4 positions — B $71.11, A $150.51, **D $206.33**, C $47.21, total **$475.16 ≈ the operator's ~$477** ✓; claim payload = 4 v4/v3 actions all sim=success; cockpit renders FOUR cards (screenshot `05-cockpit-four-positions.png`); portfolio $2,632.22 (new HWM), floor 115.7% protected
 - [ ] Re-propose PR (approved on sight per reviewer)
+
+Note: the operator's "fee 3000 (3.00%)" — the raw fee value is 30000 (0x7530) = 3.00%; the percentage was right. D's first read (02:33 UTC, L=48.3e12 → ~$54) predated the operator's +143.7e12 add; the live pipeline picked up the compounded state immediately — zero code change needed for repositions (the config-registry design working as intended).
 
 ## Post-implementation fixes
 - [x] Drive-by: `specs/core/snapshot.yaml` was missing the colon in `openapi: 3.0.3` (pre-existing on main — redocly treated the file as invalid); `specs/core/api.yaml` had `ClaimFeesPayload`/`ClaimFeeAction` at the `components:` root instead of `components.schemas:` (unresolved-ref errors)
