@@ -4535,7 +4535,7 @@ mod tests {
 
     #[test]
     fn test_derived_metrics_defensive_lock_under_100k() {
-        let mut raw = three_position_fixture();
+        let mut raw = four_position_fixture();
         // 80,000 wallet NOCK + ~15,296 LP NOCK < 100,000 floor
         raw.wallet_balances[0].amount = "80000.0".to_string();
         raw.wallet_balances[0].amount_usd = "1664.0".to_string();
@@ -4546,7 +4546,7 @@ mod tests {
 
     #[test]
     fn test_derived_metrics_batch_harvest_above_5_dollars() {
-        let mut raw = three_position_fixture();
+        let mut raw = four_position_fixture();
         // Uncollected USDC fees on the NOCK/USDC position push the aggregate over $5.
         raw.positions[1].fee0 = 6.0;
         raw.live_gas_cost_usd = 0.005;
@@ -4558,7 +4558,7 @@ mod tests {
 
     #[test]
     fn test_derived_metrics_hold_and_accrete() {
-        let raw = three_position_fixture();
+        let raw = four_position_fixture();
         let profile = OperatorProfile::default();
         let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
         assert!(metrics.global_status.shot_advice_action.contains("HOLD & ACCRETE"));
@@ -4567,27 +4567,29 @@ mod tests {
     }
 
     #[test]
-    fn test_derived_metrics_three_position_fixture_matches_screenshot() {
+    fn test_derived_metrics_four_position_fixture_matches_screenshot() {
         // Full aggregation over the discovery fixture: totals, brackets, series and
         // the deviation buckets must all reflect N positions, not the old tranches.
-        let raw = three_position_fixture();
+        let raw = four_position_fixture();
         let profile = OperatorProfile::default();
         let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
 
         // NOCK spot from the price-source pool matches the screenshot-era value.
         assert!((raw.spot_price_nock_usd - 0.0208).abs() < 0.0002);
 
-        // Position values (USD): B ≈ 71, C ≈ 18, A ≈ 156 (post-compounding), ± drift.
+        // Position values (USD): B ≈ 71, C ≈ 18, A ≈ 156 (post-compounding),
+        // D ≈ 207 (wide raft, largest holding after the operator's post-mint adds).
         let total_lp_usd = metrics.asset_aggregation_series.active_protocol_series[0].parse::<f64>().unwrap();
-        assert!(total_lp_usd > 230.0 && total_lp_usd < 260.0, "lp total {}", total_lp_usd);
+        assert!(total_lp_usd > 430.0 && total_lp_usd < 470.0, "lp total {}", total_lp_usd);
 
         // One bracket per position, all in range.
-        assert_eq!(metrics.tick_bracket_hypervisor.brackets.len(), 3);
+        assert_eq!(metrics.tick_bracket_hypervisor.brackets.len(), 4);
         assert!(metrics.tick_bracket_hypervisor.brackets.iter().all(|b| b.in_range));
 
         // Per-position NOCK series entries carry the position ids.
-        assert_eq!(metrics.asset_aggregation_series.positions_nock.len(), 3);
+        assert_eq!(metrics.asset_aggregation_series.positions_nock.len(), 4);
         assert!(metrics.asset_aggregation_series.positions_nock.iter().any(|s| s.position_id == "uniswap-v3:base:6336662"));
+        assert!(metrics.asset_aggregation_series.positions_nock.iter().any(|s| s.position_id == "uniswap-v4:base:3163450"));
 
         // Deviation matrix: Treasury / Uniswap LP / Cash only (no Aerodrome bucket).
         let names: Vec<&str> = metrics.portfolio_deviation_matrix.allocations.iter().map(|a| a.bucket_name.as_str()).collect();
@@ -4769,12 +4771,12 @@ database_url: "postgresql://localhost/test"
     fn test_tax_guardrail_blocks_dip_deployment() {
         // Overdrawn tax reserve: the wallet's stable stack cannot cover the virtual
         // 40% tax reserve, so dip-deployment advice must be suppressed entirely.
-        let mut raw = three_position_fixture();
+        let mut raw = four_position_fixture();
         raw.spot_price_nock_usd = 0.015; // dip zone (< 0.020)
-        raw.wallet_balances[1].amount = "50.0".to_string(); // LP USDC leg + wallet 50
+        raw.wallet_balances[1].amount = "10.0".to_string(); // LP USDC legs (B+D ≈ 140) + wallet 10
         let profile = OperatorProfile::default(); // floor 100k; ratio 0.40
         let ledger = LedgerAggregate { total_usd: 500.0, harvest_count: 3, last_at: None };
-        // tax reserve = 500 * 0.40 = 200 > stable stack (~115) -> blocked
+        // tax reserve = 500 * 0.40 = 200 > stable stack (~150) -> blocked
         let metrics = compute_derived_metrics(
             &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &ledger, &MarketRegime::default(),
         );
@@ -5338,6 +5340,14 @@ positions:
     currency1: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"
     tick_lower: 65200
     tick_upper: 71200
+  - id: "uniswap-v4-nock-usdc-wide"
+    protocol: "uniswap-v4"
+    nft_id: 3163450
+    pool_id: "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13"
+    currency0: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    currency1: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"
+    tick_lower: 262200
+    tick_upper: 282300
   - id: "uniswap-v3-weth-nock"
     protocol: "uniswap-v3"
     nft_id: 6336662
@@ -5346,15 +5356,19 @@ positions:
 eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
 "#;
         let cfg: AppConfig = serde_yaml::from_str(yaml).expect("Failed to deserialize yaml");
-        assert_eq!(cfg.positions.len(), 3);
+        assert_eq!(cfg.positions.len(), 4);
         assert_eq!(cfg.positions[0].nft_id, 3163431);
         assert_eq!(cfg.positions[0].tick_lower, Some(267825));
         assert!(cfg.positions[0].is_price_source);
         assert_eq!(cfg.positions[1].protocol, "uniswap-v4");
         assert!(!cfg.positions[1].is_price_source);
-        assert_eq!(cfg.positions[2].protocol, "uniswap-v3");
-        assert_eq!(cfg.positions[2].npm_address.as_deref(), Some("0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1"));
-        assert_eq!(cfg.positions[2].pool_address.as_deref(), Some("0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a"));
+        assert_eq!(cfg.positions[2].nft_id, 3163450);
+        assert_eq!(cfg.positions[2].tick_lower, Some(262200));
+        assert_eq!(cfg.positions[2].tick_upper, Some(282300));
+        assert!(!cfg.positions[2].is_price_source);
+        assert_eq!(cfg.positions[3].protocol, "uniswap-v3");
+        assert_eq!(cfg.positions[3].npm_address.as_deref(), Some("0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1"));
+        assert_eq!(cfg.positions[3].pool_address.as_deref(), Some("0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a"));
         assert_eq!(cfg.eth_price_pool.as_deref(), Some("0xd0b53d9277642d899df5c87a3966a349a798f224"));
         assert_eq!(cfg.mcp_bearer_token, None);
 
@@ -5463,9 +5477,9 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
         );
         assert_eq!(metrics.tick_bracket_hypervisor.brackets.len(), 0);
 
-        // With the three-position fixture, exactly three live brackets.
+        // With the four-position fixture, exactly four live brackets.
         let metrics = compute_derived_metrics(
-            &three_position_fixture(),
+            &four_position_fixture(),
             0.0,
             &OperatorProfile::default(),
             StructuralChannels { channels: vec![] },
@@ -5473,7 +5487,7 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
             &LedgerAggregate::default(),
             &MarketRegime::default(),
         );
-        assert_eq!(metrics.tick_bracket_hypervisor.brackets.len(), 3);
+        assert_eq!(metrics.tick_bracket_hypervisor.brackets.len(), 4);
         let bracket = &metrics.tick_bracket_hypervisor.brackets[0];
         assert_ne!(bracket.lower_price, "0.00000");
         assert_ne!(bracket.upper_price, "999.00000");
@@ -5569,21 +5583,54 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
         }
     }
 
-    /// The three-position portfolio fixture with amounts derived exactly like the
-    /// live pipeline. Magnitude anchors from the operator screenshot (± drift):
-    /// B ≈ $71, C ≈ $18, A ≈ $156 (compounded +75% since the $89.48 screenshot).
-    fn three_position_fixture() -> RawOnChainData {
+    /// Position D — USDC/NOCK, Uniswap v4, 3.00% fee, wide raft (change request:
+    /// largest holding ≈ $207). Chain reads 2026-10-24 02:37 UTC: liquidity =
+    /// PositionLiquidity(3163450) — the operator compounded post-mint (mint tx
+    /// 0x6cdabada… +48.3e12, add +143.7e12, +1.2e12, partial remove −7.7e12);
+    /// sqrtPrice/tick via StateView getSlot0; feeGrowthInside (0,0) — fees zero.
+    fn fixture_position_v4_usdc_wide() -> RawPosition {
+        RawPosition {
+            position_id: "uniswap-v4:base:3163450".to_string(),
+            network: "base".to_string(),
+            protocol: "uniswap-v4".to_string(),
+            wallet: "0xee114cc97ec5adeb34ba5645e315b497d8487a45".to_string(),
+            nft_id: 3163450,
+            pool_id: "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13".to_string(),
+            npm_address: None,
+            fee_tier_bps: 300,
+            token0: PositionTokenInfo { address: USDC_BASE.to_string(), symbol: "USDC".to_string(), decimals: 6 },
+            token1: PositionTokenInfo { address: NOCK_BASE.to_string(), symbol: "NOCK".to_string(), decimals: 16 },
+            liquidity: 185454734478733,
+            sqrt_price_x96: U256::from_hex_be("0xa9d5d9b7b19cc983c088d1f6cd97b").unwrap(),
+            tick: 269065,
+            tick_lower: 262200,
+            tick_upper: 282300,
+            amount0: 0.0,
+            amount1: 0.0,
+            fee0: 0.0,
+            fee1: 0.0,
+            in_range: true,
+            is_price_source: false,
+        }
+    }
+
+    /// The four-position portfolio fixture with amounts derived exactly like the
+    /// live pipeline. Magnitude anchors from the operator screenshots (± drift):
+    /// B ≈ $71, C ≈ $18–47, A ≈ $156 (compounded +75% since the $89.48 screenshot),
+    /// D ≈ $208 (largest holding; minted 2026-10-24 morning).
+    fn four_position_fixture() -> RawOnChainData {
         let mut a = fixture_position_v4_nock_eth();
         let mut b = fixture_position_v4_usdc();
         let mut c = fixture_position_v3_weth_nock();
-        for p in [&mut a, &mut b, &mut c] {
+        let mut d = fixture_position_v4_usdc_wide();
+        for p in [&mut a, &mut b, &mut c, &mut d] {
             let (a0, a1) = concentrated_amounts_raw(p.liquidity, p.sqrt_price_x96, p.tick_lower, p.tick_upper);
             p.amount0 = a0 / 10f64.powi(p.token0.decimals);
             p.amount1 = a1 / 10f64.powi(p.token1.decimals);
         }
-        let spot = nock_spot_from_positions(&[a.clone(), b.clone(), c.clone()]).expect("fixture price source");
+        let spot = nock_spot_from_positions(&[a.clone(), b.clone(), c.clone(), d.clone()]).expect("fixture price source");
         let mut raw = RawOnChainData::default();
-        raw.positions = vec![a, b, c];
+        raw.positions = vec![a, b, c, d];
         raw.spot_price_nock_usd = spot;
         raw.live_eth_price_usd = 2373.14; // canonical v3 WETH/USDC pool at discovery
         raw.live_gas_cost_usd = 0.005;
@@ -5611,7 +5658,7 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
     /// Raw fixture above the default 100k floor so the Overextension branch is
     /// reachable in advice tests (total NOCK ≈ 125,944, spot forced into the dip zone).
     fn raw_above_floor_fixture() -> RawOnChainData {
-        let mut raw = three_position_fixture();
+        let mut raw = four_position_fixture();
         raw.spot_price_nock_usd = 0.015; // dip zone (< $0.020 accumulation boundary)
         raw
     }

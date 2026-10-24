@@ -48,6 +48,19 @@ positions:
     tick_upper: 71200
     is_price_source: false
 
+  # Position D — USDC/NOCK, Uniswap v4, 3.00% fee — wide raft (RPC-verified via the
+  # mint's ModifyLiquidity event: poolId, ticks 262200/282300, liquidity 48295502692597)
+  - id: "uniswap-v4-nock-usdc-wide"
+    protocol: "uniswap-v4"
+    network: "base"
+    nft_id: 3163450
+    pool_id: "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13"
+    currency0: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"   # USDC
+    currency1: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"   # NOCK
+    tick_lower: 262200
+    tick_upper: 282300
+    is_price_source: false
+
   # Position C — WETH/NOCK, Uniswap v3, 1% fee (Base canonical NPM; pool resolved
   # via the v3 factory getPool(WETH, NOCK, 10000))
   - id: "uniswap-v3-weth-nock"

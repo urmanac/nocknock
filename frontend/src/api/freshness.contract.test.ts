@@ -340,9 +340,10 @@ describe('Dashboard Metric & Domain Calculations', () => {
   });
 });
 
-describe('Position Card Rendering Helpers (three-position fixture, v2.0.0)', () => {
+describe('Position Card Rendering Helpers (four-position fixture, v2.0.0)', () => {
   // Discovery-anchored fixture (2026-10-24 RPC reads; the operator screenshot's
-  // portfolio). Amounts/prices drift live — the helpers must handle the shape.
+  // portfolio, + position D from the 2026-10-24 change request). Amounts/prices
+  // drift live — the helpers must handle the shape.
   const fixture = [
     {
       position_id: 'uniswap-v4:base:3163432',
@@ -395,23 +396,46 @@ describe('Position Card Rendering Helpers (three-position fixture, v2.0.0)', () 
       in_range: true,
       is_price_source: false,
     },
+    {
+      // Position D — USDC/NOCK v4 3.00%, wide raft [262200, 282300]. Chain reads
+      // 2026-10-24 02:37 UTC (liquidity after the operator's post-mint compounding;
+      // mint tx 0x6cdabada…); amounts via the pipeline math.
+      position_id: 'uniswap-v4:base:3163450',
+      network: 'base',
+      protocol: 'uniswap-v4',
+      nft_id: 3163450,
+      fee_tier_bps: 300,
+      token0: { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', decimals: 6 },
+      token1: { address: '0x9B5E262cF9bb04869ab40b19AF91D2dc85761722', symbol: 'NOCK', decimals: 16 },
+      amount0: '129.038249',
+      amount1: '3748.2782',
+      amount_usd: '207.00',
+      fees_usd: '0.000000',
+      lower_price: '0.005501',
+      upper_price: '0.04106',
+      in_range: true,
+      is_price_source: false,
+    },
   ];
 
   it('renders one card per position with pair, protocol badge and fee tier', () => {
-    const [a, b, c] = fixture;
+    const [a, b, c, d] = fixture;
     expect(positionLabel(a)).toBe('ETH/NOCK v4 · 2%');
     expect(positionLabel(b)).toBe('USDC/NOCK v4 · 0.75%');
     expect(positionLabel(c)).toBe('WETH/NOCK v3 · 1%');
-    expect(fixture.length).toBe(3);
+    expect(positionLabel(d)).toBe('USDC/NOCK v4 · 3%');
+    expect(fixture.length).toBe(4);
   });
 
   it('shows readable ranges: direct for USDC/NOCK, inverted for ETH-denominated pairs', () => {
-    const [a, b, c] = fixture;
+    const [a, b, c, d] = fixture;
     // NOCK/USDC: direct USDC-per-NOCK, matching the operator screenshot convention.
     expect(positionRangeText(b)).toBe('0.01694 – 0.02339 USDC per NOCK');
     // ETH-per-NOCK (0.0000081) inverts to NOCK-per-ETH (~86k–123k).
     expect(positionRangeText(a)).toBe('67,843 – 123,609 NOCK per ETH');
     // WETH-per-NOCK inverts to NOCK-per-WETH (~114k–177k, the screenshot range).
     expect(positionRangeText(c)).toBe('114,155 – 177,305 NOCK per WETH');
+    // D's wide raft: direct USDC-per-NOCK spanning ~0.0055–0.041.
+    expect(positionRangeText(d)).toBe('0.005501 – 0.04106 USDC per NOCK');
   });
 });
