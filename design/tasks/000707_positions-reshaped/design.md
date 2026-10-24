@@ -234,3 +234,28 @@ method used (kept for future re-discovery):
   "live" card — classify and skip (record in discovery notes).
 - Build/test protocol: `SQLX_OFFLINE=true` for worker builds; `unset GITHUB_TOKEN` before
   any `gh` command; brain untouched (no tranche coupling).
+
+## Implementation Notes (post-implementation, 2026-10-24)
+
+- **Pre-existing spec-lint blockers fixed (drive-by, on main):** `specs/core/snapshot.yaml`
+  line 1 lacked the colon (`openapi 3.0.3` → `openapi: 3.0.3`) — redocly parsed it as garbage
+  and any spec change was unlintable; `specs/core/api.yaml` had `ClaimFeesPayload` /
+  `ClaimFeeAction` at the `components:` root instead of `components.schemas:` (unresolved-ref
+  errors). Both fixed; `make validate-specs` now passes with only pre-existing warnings
+  (info-license, localhost server, missing 4XX responses, unused envelope components).
+- **`wit-bindgen` gotcha:** the Makefile's `cargo install wit-bindgen` targets the library
+  crate ("no binaries"); the CLI is `cargo install wit-bindgen-cli` (v0.63.0 installs a
+  `wit-bindgen` executable). Installed in-sandbox; Makefile left unchanged (out of scope).
+- **Rust toolchain in fresh sandboxes:** `rustup target add wasm32-wasip1` is required before
+  `make test-brain`/`make dist` (brain builds, not the worker).
+- **`client.errors.test.ts` needed no change:** it contains zero platform/source/tranche
+  references (it tests HTTP error mapping only); the ticket's assumption was wrong.
+- **Grep include-paths must carry the repo root prefix** (`nocknock/frontend/src/**`, not
+  `frontend/src/**`) or the search silently matches nothing — cost a few false negatives.
+- **Release-build hygiene:** `UNISWAP_V3_NPM_BASE` was referenced only from `#[cfg(test)]`
+  fixtures and warned dead-code in `--release`; moved into the tests module. Live v3 reads
+  take `npm_address` from config and fail explicitly when missing (zero-guess invariant).
+- **Final validation record:** worker 47/47, frontend 28/28, brain 3/3, `make dist` packages
+  all 4 artifacts, live snapshot fetch returned the 3 positions at screenshot magnitudes
+  (B $71.11 vs $71.45), both v4 collect sims succeed, cockpit renders 3 cards
+  (screenshot `02-cockpit-three-positions.png`).

@@ -26,17 +26,24 @@
 - [x] `src/bin/mcp.rs`: update tool descriptions and the direct-RPC fallback to stop presenting Aerodrome state as live
 - [x] Live-run bugfixes found during validation: v3 fee-delta used the wrong TickInfo word (fixed via NPM collect staticcall ground truth: 0.165434 NOCK exact match); lower/upper price orientation; adaptive bracket price precision; meta.version bumped
 
-## Phase 2 — Frontend
-- [~] `App.tsx`: Positions panel rendering N cards (pair, protocol badge, fee tier, range, split, value, fees, in-range pill); NOCK-stack chart from per-position series + safe haven; iterate N brackets in the hypervisor; de-Aerodrome labels/pills; `SOURCE_LABELS` + `uniswap_rpc`
-- [ ] `LiteCockpit.tsx`: relabel "UNCOLLECTED FEES (BOTH LPs)" → "(ALL POSITIONS)"; verify generic action rendering still works with per-position labels
-- [ ] `walletconnect.ts`: no change needed — Phase 1 confirmed all positions on Base
+## Phase 2 — Frontend — DONE
+- [x] `App.tsx`: Positions panel rendering N cards (pair, protocol badge, fee tier, range, split, value, fees, in-range pill); NOCK-stack chart from per-position series + safe haven; iterate N brackets in the hypervisor; de-Aerodrome labels/pills; `SOURCE_LABELS` + `uniswap_rpc`
+- [x] `LiteCockpit.tsx`: relabel "UNCOLLECTED FEES (BOTH LPs)" → "(ALL POSITIONS)" (L260); generic action rendering verified with per-position labels
+- [x] `walletconnect.ts`: no change needed — Phase 1 confirmed all positions on Base (verified: zero Aerodrome references)
 
-## Phase 2 — Docs
-- [ ] `ONCHAIN_INTEGRATION.md`: mark §2 HISTORICAL (liquidated 2026-10-23); add new Uniswap-only portfolio section with discovered identifiers, selectors, and price-source decision
-- [ ] `README.md` (Strategic Tranches) + `HANDOFF.md` tranche references: minimal edits to the Uniswap-only shape; verify `OPERATOR_GUIDANCE.md` needs no change
+## Phase 2 — Docs — DONE
+- [x] `ONCHAIN_INTEGRATION.md`: §1 address table updated; §2 + §4 marked HISTORICAL (liquidated 2026-10-23); new §5 records the discovered identifiers, selectors, v3 fee-math ground truth, and the ETH/USD price-source decision
+- [x] `README.md` (portfolio section) + `HANDOFF.md` briefing line: minimal edits to the Uniswap-only shape; `OPERATOR_GUIDANCE.md` verified to contain zero Aerodrome/tranche references — no change needed
+- [x] `CHANGELOG.md`: Unreleased entry with migration notes (included in specs slice above)
 
-## Phase 2 — Tests & validation
-- [ ] Worker: per-position v4 decode tests (StateView + slot0 + poolKeys fixtures); v3 `positions(uint256)` 12-word decode fixture test; amount-math tests against the screenshot's magnitudes; rewrite tranche-based tests (`test_derived_metrics_*`, operator-profile weights) against the new shape; add a three-position fixture snapshot test
-- [ ] Frontend: update `freshness.contract.test.ts` schema assertions + add a three-position fixture snapshot driving the position-card rendering; update `client.errors.test.ts` platform usage; keep live-API skip semantics
-- [ ] Validate: `make test-worker`, `make test-frontend`, `make validate-specs`, `make build-frontend` all green
-- [ ] Live validation: real snapshot fetch against the confirmed wallet shows the three positions matching the screenshot's magnitudes (± drift); cockpit renders three cards; claim payload contains no Aerodrome action
+## Phase 2 — Tests & validation — DONE
+- [x] Worker: per-position v4 decode tests (StateView + slot0 + poolKeys fixtures); v3 `positions(uint256)` 12-word decode fixture test; amount-math tests against the screenshot's magnitudes; tranche-based tests rewritten against the new shape; three-position fixture snapshot tests — **47/47 green**
+- [x] Frontend: `freshness.contract.test.ts` asserts v2.0.0 positions schema (live-API guarded) + three-position fixture drives card-rendering helpers; `client.errors.test.ts` verified to contain zero platform/source references — nothing to update; live-API skip semantics kept — **28/28 green**
+- [x] Validate: `make test-worker` ✓, `make test-frontend` ✓, `make validate-specs` ✓ (13 pre-existing warnings only), `make build-frontend` ✓ (via `make dist`) — all green
+- [x] Live validation: real snapshot fetch against `0xeE11…7a45` returned the three positions matching the screenshot's magnitudes (B $71.11 vs $71.45); both v4 collect payload entries simulate success on Base; cockpit renders three cards (`screenshots/02-cockpit-three-positions.png`)
+
+## Post-implementation fixes
+- [x] Drive-by: `specs/core/snapshot.yaml` was missing the colon in `openapi: 3.0.3` (pre-existing on main — redocly treated the file as invalid); `specs/core/api.yaml` had `ClaimFeesPayload`/`ClaimFeeAction` at the `components:` root instead of `components.schemas:` (unresolved-ref errors)
+- [x] Drive-by: Makefile's `cargo install wit-bindgen` targets the library crate (binary lives in `wit-bindgen-cli`); installed `wit-bindgen-cli v0.63.0` in-sandbox to run the WIT half of `validate-specs` (Makefile left as-is — out of scope)
+- [x] `make test-brain` ✓ 3/3, `make dist` ✓ (all 4 artifacts packaged)
+- [x] Release-build dead-code warning fixed: `UNISWAP_V3_NPM_BASE` scoped to the tests module (live v3 reads take `npm_address` from config and fail explicitly when missing)
