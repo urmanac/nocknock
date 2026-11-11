@@ -14,7 +14,7 @@ info:
     - Zero "act now" urgency — pure observation
 
 servers:
-  - url: http://localhost:8080/v1
+  - url: http://localhost:8081/v1
     description: Local development
   - url: https://api.nocknock.xyz/v1
     description: Production

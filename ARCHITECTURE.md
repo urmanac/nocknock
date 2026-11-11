@@ -49,7 +49,7 @@ The system delivers real-time monitoring and tactical shot advice across multipl
     * `get_shot_advice`: Returns the active tactical directive (`HOLD & ACCRETE`, `BATCH HARVEST SHOT`, `DIP REINVESTMENT SHOT`, `DEFENSIVE LOCK`, etc.) along with current gas cost and accrued fee ROI.
     * `simulate_claim_fees`: Simulates gas expenditure vs net yield accrued in Aerodrome and Uniswap V4 tranches.
   * **Zero-DB Dual Fallback**:
-    1. Primary: Queries local Axum API endpoint `http://127.0.0.1:8080/v1/snapshot/latest`.
+    1. Primary: Queries local Axum API endpoint `http://127.0.0.1:8081/v1/snapshot/latest`.
     2. Fallback: Directly queries Base mainnet RPC (`eth_call`) without requiring PostgreSQL or server worker.
 * **Degradation Trigger**: Ingestion worker is running locally or remotely, but direct SQL ports are closed or firewalled.
 

@@ -150,7 +150,7 @@ fn default_sync_window() -> u64 {
     300
 }
 fn default_port() -> u16 {
-    8080
+    8081
 }
 
 /// Market-data backfill configuration (v0.3.0). The whole section is optional;
@@ -661,7 +661,11 @@ async fn main() -> Result<()> {
         )
         .layer(Extension(state.clone()));
 
-    let port = state.config.port;
+    let port = std::env::var("PORT")
+        .or_else(|_| std::env::var("APP_PORT"))
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(state.config.port);
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
         .await?;
     println!(

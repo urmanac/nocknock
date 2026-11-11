@@ -180,3 +180,13 @@ This document defines the issue triage protocol, label architecture, bug severit
 * **Status**: Resolved & Merged (PR #27)
 * **Defect**: Stale threshold was strictly equal to the 300s sync cycle interval, while ingestion RPC calls and transactions take a non-zero duration (~1s). At second 301, the UI flashed a stale warning banner during normal scheduled execution. Additionally, `/v1/snapshot/latest` sent `max-age=300`, causing browsers to trap stale snapshots.
 * **Fix**: Measured live ingestion cycle duration (`sync_duration_ms`) and exposed on `/health` and `/v1/health`. Added 90s grace allowance with 3-tier sync status (`LIVE ON-CHAIN` green $\to$ `SYNC IN PROGRESS` cyan $\to$ `SYNC DELAYED` amber). Switched snapshot cache header to `no-cache, must-revalidate` and added `{ cache: 'no-cache' }` fetch headers.
+
+#### 15. [Issue #61: Chart timeline collapses multi-hour downtime gaps into adjacent ticks without backfill or gap indicators](https://github.com/urmanac/nocknock/issues/61)
+* **Component**: `frontend/src/App.tsx:105-136, 142-157, 162-175, 420`, `ingestion-worker/src/main.rs:2157-2240, 3850-3879`
+* **Labels**: `bug`, `frontend`, `backend`, `data-integrity`
+* **Status**: Open (Triaged)
+* **Defect**: When the engine is offline across multi-hour spans (e.g. 12:38 AM to 7:58 PM), no snapshots are stored. On restart, the backend backfills only price candles for RSI, leaving the snapshot timeline un-backfilled. The frontend renders historical snapshots on an ordinal Recharts `<XAxis dataKey="time" />`, placing pre-downtime and post-downtime points directly adjacent to each other with standard 5-minute spacing, flattening a ~19.3-hour outage and drawing a deceptive continuous line across the gap.
+* **Remediation**:
+  1. Frontend: Detect timestamp deltas $> 2 \times \text{sync_window_seconds}$ and insert null data points with `connectNulls={false}` to visually break the line across downtime intervals, or switch to a continuous time scale with shaded downtime markers.
+  2. Backend: Detect historical gaps on boot and provide telemetry gap metadata in `/v1/snapshot/historical`.
+

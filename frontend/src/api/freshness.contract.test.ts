@@ -15,7 +15,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 declare const process: { env: Record<string, string | undefined> };
 
 // Test configuration
-const API_BASE = process.env.VITE_API_BASE || 'http://localhost:8080/v1';
+const API_BASE = process.env.VITE_API_BASE || 'http://localhost:8081/v1';
 const SYNC_WINDOW_SECONDS = 300; // Must match backend config
 
 interface SnapshotMeta {

@@ -19,7 +19,7 @@ This guide details how to deploy the **NockNock Asset State Room** to the cloud 
                ┌────────────┴────────────┐
                ▼                         ▼
      ┌───────────────────┐     ┌───────────────────────┐
-     │  React Dashboard  │     │   Ingestion Worker    │ (Rust Daemon, Port 8080)
+     │  React Dashboard  │     │   Ingestion Worker    │ (Rust Daemon, Port 8081)
      │  (Vite Static)    │     │   - Alchemy JSON-RPC  │
      └───────────────────┘     │   - Dynamic Strategy  │
                                └───────────┬───────────┘
@@ -47,7 +47,7 @@ Configure these environment variables in your cloud provider:
 |:---|:---|:---|:---:|
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@host:5432/nocknock` | **Yes** |
 | `APP_DATABASE_URL` | Config prefix override for DB | Same as `DATABASE_URL` | Optional |
-| `APP_PORT` / `PORT` | Worker HTTP listen port | `8080` | Optional (default 8080) |
+| `APP_PORT` / `PORT` | Worker HTTP listen port | `8081` | Optional (default 8081; 8080 reserved for Strata) |
 | `APP_ALCHEMY_API_KEYS` | Comma-separated Alchemy API keys | `alch_ZE5FcqyTa3z3ZhhqQQbWK` | **Yes** |
 | `APP_TRACKED_WALLETS` | Wallet address to track on Base | `0xeE114cC97eC5adeB34bA5645e315B497D8487a45` | **Yes** |
 | `APP_SYNC_WINDOW_SECONDS`| Ingestion polling interval | `300` (5 minutes) | Optional |
@@ -81,7 +81,7 @@ Suitable for DigitalOcean Droplet, Hetzner Cloud, Linode, or AWS EC2 ($5–$10/m
 
 5. **Verify health**:
    ```bash
-   curl http://localhost:8080/health
+   curl http://localhost:8081/health
    # Returns: {"status":"ok","ingestion_lag_seconds":...}
    ```
    Open `http://your-server-ip:3000` in your browser.
@@ -131,7 +131,7 @@ Fly.io runs containers close to users with built-in HTTPS and automatic TLS.
      - Root directory: `ingestion-worker`
      - Dockerfile: `Dockerfile`
      - Environment variable: `DATABASE_URL` linked to the PostgreSQL service.
-     - Port: `8080`
+     - Port: `8081`
    - Create a **Static Site** or **Web Service** for `frontend`:
      - Root directory: `frontend`
      - Dockerfile: `Dockerfile`
@@ -150,7 +150,7 @@ state.yourdomain.com {
 }
 
 api.yourdomain.com {
-    reverse_proxy localhost:8080
+    reverse_proxy localhost:8081
 }
 ```
 Reload Caddy:

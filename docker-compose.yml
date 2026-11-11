@@ -28,9 +28,9 @@ services:
     container_name: nocknock-worker
     environment:
       DATABASE_URL: "postgresql://postgres:postgres@db:5432/nocknock"
-      PORT: "8080"
+      PORT: "8081"
     ports:
-      - "8080:8080"
+      - "8081:8081"
     depends_on:
       db:
         condition: service_healthy
