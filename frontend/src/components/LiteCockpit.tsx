@@ -12,7 +12,7 @@
  */
 import React from 'react';
 import { floorDeltaText } from '../floor';
-import { api, ClaimFeeAction, ClaimFeesPayload, LedgerSummary } from '../api/client';
+import { api, describeApiError, ClaimFeeAction, ClaimFeesPayload, LedgerSummary } from '../api/client';
 import {
   connectWallet,
   connectedAccount,
@@ -135,7 +135,7 @@ export function LiteCockpit() {
         setPayload(p);
         setPayloadError(null);
       })
-      .catch((e) => setPayloadError(e instanceof Error ? e.message : String(e)));
+      .catch((e) => setPayloadError(describeApiError(e)));
   }, []);
 
   const loadLedger = React.useCallback(() => {
@@ -268,9 +268,9 @@ export function LiteCockpit() {
 
         {/* 2. Uncollected fees + gas ROI */}
       <section style={lite.card}>
-        <div style={lite.label}>UNCOLLECTED FEES (ALL POSITIONS)</div>
+        <div style={lite.label}>UNCOLLECTED LP FEES</div>
         {payloadError ? (
-          <div style={lite.errorText}>Worker unreachable: {payloadError}</div>
+          <div style={lite.errorText}>{payloadError}</div>
         ) : !payload ? (
           <div style={lite.big}>…</div>
         ) : (
@@ -280,6 +280,13 @@ export function LiteCockpit() {
               est. gas ${payload.estimated_gas_usd ?? '—'} · net after gas $
               {payload.net_after_gas_usd ?? '—'}
             </div>
+            {payload.actions
+              .filter((a) => a.simulation === 'not_claimable')
+              .map((a) => (
+                <div key={`nc-${a.label}`} style={lite.sub}>
+                  {a.label}: {a.simulation_detail ?? 'not LP-claimable'}
+                </div>
+              ))}
             <div style={lite.sub}>
               {ledger
                 ? `ledger: ${ledger.harvest_count} verified harvests · 40% tax reserve $${ledger.tax_reserve_usd} · 60% dry powder $${ledger.growth_dry_powder_usd}`

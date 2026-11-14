@@ -181,9 +181,11 @@ pub struct AccumulationPlanConfig {
     #[serde(default = "default_true")]
     pub respect_cash_target: bool,
     /// Protected cash reserve (operator order, 2026-11-14: "we have lots of cash, we
-    /// want to keep it"). The plan never advises a buy that would take liquid USDC
-    /// below this amount, at any price. Independent of, and usually far above, the
-    /// long-run cash target. Only the operator lowers it.
+    /// want to keep it"). The plan never advises a buy that would take the stable
+    /// balance (wallet USDC plus USDC inside LP; never ETH, which is gas) below this
+    /// amount, at any price. It binds only while an accumulation_plan is configured;
+    /// with no plan NockNock advises no buys at all. Independent of the long-run cash
+    /// target. The user sets it; NockNock never chooses it.
     #[serde(default)]
     pub cash_reserve_usdc: Option<f64>,
 }
@@ -394,6 +396,10 @@ struct RawOnChainData {
     /// Per-position rebuild controls from config, keyed by position_id.
     #[serde(default)]
     rebuild_rules: HashMap<String, RebuildRule>,
+    /// position_ids of Aero positions whose claimFees() reverts: their fees are not
+    /// LP-claimable (shown as such, never as $0 earned).
+    #[serde(default)]
+    fees_not_lp_claimable: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
@@ -1989,15 +1995,49 @@ async fn get_latest_snapshot_handler(
         body["data_provenance"] = data_provenance(&state.db).await;
         (StatusCode::OK, headers, Json(body))
     } else {
+        let last_error = state.last_ingest_error.lock().ok().and_then(|slot| slot.clone());
         (
             StatusCode::SERVICE_UNAVAILABLE,
             HeaderMap::new(),
-            Json(json!({
-                "error": "NO_SNAPSHOT",
-                "message": "No snapshot available yet"
-            })),
+            Json(no_snapshot_body(last_error.as_ref().map(|(_, e)| e.as_str()))),
         )
     }
+}
+
+/// 503 NO_SNAPSHOT body. Pure. On a first run the real cause (a placeholder key, a
+/// missing price source, an NFT the wallet does not own) is only in the last ingestion
+/// error, so it travels as `detail`; the dashboard and MCP show it instead of a bare
+/// "No snapshot available yet".
+fn no_snapshot_body(last_error: Option<&str>) -> serde_json::Value {
+    let mut body = json!({
+        "error": "NO_SNAPSHOT",
+        "message": "No snapshot available yet"
+    });
+    if let Some(e) = last_error.filter(|e| !e.trim().is_empty()) {
+        body["detail"] = json!(e);
+    }
+    body
+}
+
+/// MCP text when the worker holds no snapshot yet. Pure.
+fn no_snapshot_mcp_text(last_error: Option<&str>) -> String {
+    match last_error.filter(|e| !e.trim().is_empty()) {
+        Some(e) => format!("No snapshot available yet. Last ingestion error: {e}"),
+        None => "No snapshot available yet; the first ingestion cycle has not completed.".to_string(),
+    }
+}
+
+/// Source line for MCP text: when the snapshot was generated and the worker's health
+/// verdict (the same one /health reports). Pure. Replaces the old "Live API" label,
+/// which was printed for any snapshot however old.
+fn snapshot_source_line(generated_at: DateTime<Utc>, now: DateTime<Utc>, health: &str) -> String {
+    let age_min = now.signed_duration_since(generated_at).num_minutes().max(0);
+    format!(
+        "Snapshot generated {} ({} min ago) · worker health: {}",
+        generated_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        age_min,
+        health
+    )
 }
 
 async fn trigger_ingest_handler(
@@ -2164,6 +2204,21 @@ async fn get_snapshot_metadata_handler(
     Json(json!({ "snapshots": snapshots }))
 }
 
+/// Rebuild an envelope from a stored `snapshots` row. Pure. The `data` column holds
+/// only the `SnapshotData` payload (see `store_snapshot`); meta comes from the row.
+fn envelope_from_stored(
+    snapshot_id: Uuid,
+    generated_at: DateTime<Utc>,
+    state_hash: String,
+    version: String,
+    data: serde_json::Value,
+) -> Result<SnapshotEnvelope, serde_json::Error> {
+    Ok(SnapshotEnvelope {
+        meta: SnapshotMeta { generated_at, state_hash, version, snapshot_id },
+        data: serde_json::from_value::<SnapshotData>(data)?,
+    })
+}
+
 async fn get_snapshot_by_id_handler(
     Extension(state): Extension<Arc<AppState>>,
     axum::extract::Path(id): axum::extract::Path<String>,
@@ -2185,7 +2240,11 @@ async fn get_snapshot_by_id_handler(
     .unwrap_or_else(|_| None);
 
     if let Some(row) = row {
-        if let Ok(envelope) = serde_json::from_value::<SnapshotEnvelope>(row.data) {
+        // store_snapshot writes only the SnapshotData payload into `data`; the envelope
+        // meta lives in the row's own columns.
+        if let Ok(envelope) =
+            envelope_from_stored(row.snapshot_id, row.generated_at, row.state_hash, row.version, row.data)
+        {
             (
                 StatusCode::OK,
                 HeaderMap::new(),
@@ -2241,16 +2300,19 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
     let floor = floor_clause(global);
 
     format!(
-        "📈 NockNock Sovereign Portfolio State (Live API)\n\
+        "📈 NockNock Sovereign Portfolio State\n\
          =========================================\n\
          • Total Value: {total_usd}\n\
          • Sovereign NOCK Stack: {total_nock} ({floor})\n\
          • Stable Stack: {total_usdc}\n\
          • High-Water Mark: {hwm}\n\
-         • Tactical Directive: {advice}\n\
-         • Mode: Tier 1 Connected (Verified Persistent Snapshot)"
+         • Tactical Directive: {advice}"
     )
 }
+
+/// The harvest rule as the directive engine applies it (derive_metrics precedence):
+/// a floor DEFENSIVE LOCK, a due DCA tranche and a range exit all outrank it.
+pub const HARVEST_RULE_TEXT: &str = "BATCH HARVEST is advised once uncollected LP fees reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).";
 
 pub fn format_shot_advice_text(data: &serde_json::Value) -> String {
     let global = data.pointer("/derived_metrics/global_status");
@@ -2273,7 +2335,7 @@ pub fn format_shot_advice_text(data: &serde_json::Value) -> String {
          • Decision Matrix Details: {details}\n\
          • Uncollected Claimable Fees: {claimable_usd}\n\
          • Net of two claims' gas: {gas_delta}\n\
-         • Harvest rule: BATCH HARVEST is advised when uncollected LP fees reach the fixed $5.00 threshold and no DCA tranche is due."
+         • Harvest rule: {HARVEST_RULE_TEXT}"
     )
 }
 
@@ -2368,6 +2430,11 @@ pub fn format_claim_simulation_text(data: &serde_json::Value) -> String {
             let amount = fee.get("amount").and_then(|a| a.as_str()).unwrap_or("0");
             let amount_usd = fee.get("amount_usd").and_then(|a| a.as_str()).unwrap_or("0.00");
             let gas_str = fee.get("gas_break_even_usd").and_then(|g| g.as_str()).unwrap_or_default();
+            if amount.starts_with("not LP-claimable") {
+                // An Aero pool whose claimFees() reverts: nothing to claim, no gas to count.
+                details.push_str(&format!("  - {symbol}: {amount}\n"));
+                continue;
+            }
             match gas_str.parse::<f64>() {
                 Ok(g) => {
                     // Per-contract break-evens come from the live gas query; take the max
@@ -2484,7 +2551,7 @@ async fn mcp_http_handler(
                     },
                     {
                         "name": "simulate_claim_fees",
-                        "description": "Simulates gas expenditure vs uncollected yield across the tracked Uniswap v3/v4 positions.",
+                        "description": "Simulates gas expenditure vs uncollected LP fees across the tracked LP positions.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {},
@@ -2511,17 +2578,23 @@ async fn mcp_http_handler(
                 .unwrap_or_default();
 
             let latest = state.latest_snapshot.lock().await;
+            let last_error: Option<String> =
+                state.last_ingest_error.lock().ok().and_then(|slot| slot.clone()).map(|(_, e)| e);
             let result_text = if let Some(ref env) = *latest {
                 let data_val = serde_json::to_value(&env.data).unwrap_or_default();
-                match tool_name {
+                let body = match tool_name {
                     "get_portfolio_state" => format_portfolio_state_text(&data_val),
                     "get_shot_advice" => format_shot_advice_text(&data_val),
                     "simulate_claim_fees" => format_claim_simulation_text(&data_val),
                     "get_accumulation_plan" => format_accumulation_plan_text(&data_val),
                     _ => format!("Unknown tool: {tool_name}"),
-                }
+                };
+                let now = Utc::now();
+                let lag = now.signed_duration_since(env.meta.generated_at).num_seconds().max(0);
+                let health = health_status(true, lag, state.config.sync_window_seconds as i64, last_error.is_some());
+                format!("{body}\n{}", snapshot_source_line(env.meta.generated_at, now, health))
             } else {
-                "No snapshot available yet".to_string()
+                no_snapshot_mcp_text(last_error.as_deref())
             };
 
             json!({
@@ -4267,6 +4340,51 @@ fn nothing_to_collect(liquidity: &str, owed0: &str, owed1: &str) -> bool {
     zero(liquidity) && zero(owed0) && zero(owed1)
 }
 
+/// What NockNock says about an Aero pool whose claimFees() reverts: its swap fees are
+/// not paid to LPs that way, and the AERO rewards a staked LP earns are not read yet.
+const AERO_NOT_LP_CLAIMABLE: &str = "not LP-claimable (claimFees() reverts); AERO rewards not read (#93)";
+
+/// Map an Aero claimFees() eth_call to (simulation, detail). Pure. A revert means the
+/// pool pays no LP-claimable fees ("not_claimable"); only a transport failure is
+/// "unavailable".
+fn aero_claim_simulation(result: &Result<Option<String>>) -> (&'static str, Option<String>) {
+    match result {
+        Ok(Some(_)) => ("success", None),
+        Ok(None) => ("not_claimable", Some(AERO_NOT_LP_CLAIMABLE.to_string())),
+        Err(e) => ("unavailable", Some(format!("RPC unavailable for claimFees simulation: {e}"))),
+    }
+}
+
+/// Gas and net totals for the claim payload. Pure. Actions that cannot execute
+/// ("not_claimable") are left out, so they never null the totals of the ones that can.
+/// `gas_usd` per action is None when its estimate failed; any such failure among the
+/// executable actions makes the total unknown rather than understated.
+fn claim_payload_totals(
+    actions: &[ClaimFeeAction],
+    gross_usd: &str,
+    gas_price_and_eth_known: bool,
+) -> (Option<String>, Option<String>) {
+    let executable: Vec<&ClaimFeeAction> =
+        actions.iter().filter(|a| a.simulation != "not_claimable").collect();
+    let estimated_gas_usd = if gas_price_and_eth_known && !executable.is_empty() {
+        executable
+            .iter()
+            .map(|a| a.gas_usd.as_deref().and_then(|g| g.parse::<f64>().ok()))
+            .sum::<Option<f64>>()
+            .map(|g| format!("{:.4}", g))
+    } else {
+        None
+    };
+    let net_after_gas_usd = match (gross_usd.trim(), &estimated_gas_usd) {
+        (g, Some(e)) if !g.is_empty() => {
+            let gross: f64 = g.parse().unwrap_or(0.0);
+            Some(format!("{:.4}", gross - e.parse::<f64>().unwrap_or(0.0)))
+        }
+        _ => None,
+    };
+    (estimated_gas_usd, net_after_gas_usd)
+}
+
 /// Fill expected amounts + token-aware USD valuation from the matching snapshot
 /// position and simulate the collect via eth_call. Shared by the v4 and v3 action
 /// builders so both payload halves behave identically (zero-mock: degrades to None).
@@ -4280,6 +4398,7 @@ async fn finish_claim_action(
     sim_id: i32,
     nock_spot: Option<f64>,
     eth_price: Option<f64>,
+    revert_is_not_claimable: bool,
 ) {
     let price_for = |symbol: &str| -> Option<f64> {
         match symbol {
@@ -4321,6 +4440,18 @@ async fn finish_claim_action(
         "params": [{ "from": wallet, "to": action.to, "data": action.data }, "latest"],
         "id": sim_id
     });
+    if revert_is_not_claimable {
+        // Aero claimFees(): a revert is an answer (no LP-claimable fees), not an outage.
+        let (sim, detail) = aero_claim_simulation(&eth_call_allow_revert(http_client, alchemy_url, &sim_payload).await);
+        action.simulation = sim.to_string();
+        if detail.is_some() {
+            action.simulation_detail = detail;
+        }
+        if action.simulation == "not_claimable" {
+            action.expected_usd = None;
+        }
+        return;
+    }
     match post_rpc_with_retry(http_client, alchemy_url, &sim_payload, 2).await {
         Some(res_json) => {
             if res_json.get("result").and_then(|r| r.as_str()).is_some() {
@@ -4363,9 +4494,12 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
     let snapshot = match snapshot {
         Some(s) => s,
         None => {
-            return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
-                "error": "No snapshot available yet; ingestion cycle has not completed"
-            }))).into_response()
+            let last_error = state.last_ingest_error.lock().ok().and_then(|slot| slot.clone());
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(no_snapshot_body(last_error.as_ref().map(|(_, e)| e.as_str()))),
+            )
+                .into_response();
         }
     };
     let gross_usd = snapshot.data.derived_metrics.global_status.total_fees_claimable_usd.clone();
@@ -4374,7 +4508,6 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
     let mut actions: Vec<ClaimFeeAction> = Vec::new();
 
     // --- Per-position Uniswap v4 collect actions ---
-    // (The Aerodrome tranche was liquidated 2026-10-23; no Aerodrome actions are built.)
     let v4_configs: Vec<&PositionConfig> = state
         .config
         .positions
@@ -4396,7 +4529,7 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
     if v4_configs.is_empty() && v3_configs.is_empty() && aero_configs.is_empty() {
         return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
             "error": "NO_CLAIMABLE_POSITIONS",
-            "detail": "No Uniswap positions configured; cannot build claim transactions"
+            "detail": "No LP positions configured; cannot build claim transactions"
         }))).into_response();
     }
 
@@ -4428,7 +4561,7 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
         };
         let pos_id = format!("uniswap-v4:{}:{}", pos.network, pos.nft_id);
         finish_claim_action(&state.http_client, &alchemy_url, &wallet, &snapshot,
-            &mut action, &pos_id, 20 + idx as i32, nock_spot, eth_price).await;
+            &mut action, &pos_id, 20 + idx as i32, nock_spot, eth_price, false).await;
         actions.push(action);
     }
 
@@ -4458,7 +4591,7 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
         };
         let pos_id = format!("uniswap-v3:{}:{}", pos.network, pos.nft_id);
         finish_claim_action(&state.http_client, &alchemy_url, &wallet, &snapshot,
-            &mut action, &pos_id, 20 + (v4_configs.len() + idx) as i32, nock_spot, eth_price).await;
+            &mut action, &pos_id, 20 + (v4_configs.len() + idx) as i32, nock_spot, eth_price, false).await;
         actions.push(action);
     }
 
@@ -4485,7 +4618,7 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
         };
         let pos_id = position_key(pos);
         finish_claim_action(&state.http_client, &alchemy_url, &wallet, &snapshot,
-            &mut action, &pos_id, 40 + idx as i32, nock_spot, eth_price).await;
+            &mut action, &pos_id, 40 + idx as i32, nock_spot, eth_price, true).await;
         actions.push(action);
     }
 
@@ -4503,9 +4636,12 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
             .and_then(|s| u128::from_str_radix(s.trim_start_matches("0x"), 16).ok()),
         None => None,
     };
-    let mut total_gas_usd = 0.0f64;
-    let mut gas_ok = !actions.is_empty();
     for (idx, action) in actions.iter_mut().enumerate() {
+        // A pool whose claimFees() reverts has nothing to execute: no estimate, and it
+        // stays out of the totals (claim_payload_totals).
+        if action.simulation == "not_claimable" {
+            continue;
+        }
         let est_payload = json!({
             "jsonrpc": "2.0",
             "method": "eth_estimateGas",
@@ -4522,32 +4658,18 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
                     if let (Some(gp), Some(ep)) = (gas_price_wei, eth_price) {
                         let usd = (units as f64) * (gp as f64) / 1e18 * ep;
                         action.gas_usd = Some(format!("{:.4}", usd));
-                        total_gas_usd += usd;
                     }
                 }
                 None => {
-                    gas_ok = false;
                     action.simulation_detail = Some(action.simulation_detail.clone().unwrap_or_default()
                         + "; gas estimation failed");
                 }
             },
-            None => {
-                gas_ok = false;
-            }
+            None => {}
         }
     }
-    let estimated_gas_usd = if gas_ok && gas_price_wei.is_some() && eth_price.is_some() {
-        Some(format!("{:.4}", total_gas_usd))
-    } else {
-        None
-    };
-    let net_after_gas_usd = match (&gross_usd, &estimated_gas_usd) {
-        (g, Some(e)) if !g.is_empty() => {
-            let gross: f64 = g.parse().unwrap_or(0.0);
-            Some(format!("{:.4}", gross - e.parse::<f64>().unwrap_or(0.0)))
-        }
-        _ => None,
-    };
+    let (estimated_gas_usd, net_after_gas_usd) =
+        claim_payload_totals(&actions, &gross_usd, gas_price_wei.is_some() && eth_price.is_some());
 
     let payload = ClaimFeesPayload {
         chain_id: 8453,
@@ -4946,6 +5068,7 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         ));
     }
     let mut raw_positions: Vec<RawPosition> = Vec::new();
+    let mut fees_not_lp_claimable: Vec<String> = Vec::new();
     for pos in &state.config.positions {
         let raw = match pos.protocol.as_str() {
             "uniswap-v4" => {
@@ -4955,7 +5078,12 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
                 fetch_v3_position(&state.http_client, &alchemy_url, pos, wallet_addr).await?
             }
             "aerodrome" => {
-                fetch_aerodrome_position(&state.http_client, &alchemy_url, pos, wallet_addr).await?
+                let (raw, fees_claimable) =
+                    fetch_aerodrome_position(&state.http_client, &alchemy_url, pos, wallet_addr).await?;
+                if !fees_claimable {
+                    fees_not_lp_claimable.push(raw.position_id.clone());
+                }
+                raw
             }
             other => {
                 return Err(anyhow::anyhow!(
@@ -5088,7 +5216,7 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let mut positions = build_position_snapshots(&raw_positions, spot_price, live_eth_price_usd);
     apply_pool_activity(&mut positions, &pool_liquidity);
     let pool_mechanics = build_pool_mechanics(&raw_positions, spot_price, live_eth_price_usd);
-    let contract_fees = build_contract_fees(&positions, live_gas_cost_usd);
+    let contract_fees = build_contract_fees(&positions, live_gas_cost_usd, &fees_not_lp_claimable);
 
     tracing::info!(
         "Live position reads: {} position(s), NOCK spot ${:.6}, ETH/USD ${:.2}",
@@ -5127,6 +5255,7 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         wallet_eth,
         wallet_weth,
         rebuild_rules,
+        fees_not_lp_claimable,
     })
 }
 
@@ -5320,11 +5449,14 @@ fn build_pool_mechanics(raw_positions: &[RawPosition], nock_usd: f64, eth_usd: f
         .collect()
 }
 
-/// One ContractFee per tracked position with its unclaimed fees.
-fn build_contract_fees(positions: &[Position], live_gas_cost_usd: f64) -> Vec<ContractFee> {
+/// One ContractFee per tracked position with its unclaimed fees. A position listed in
+/// `not_lp_claimable` (an Aero pool whose claimFees() reverts) says so in `amount`
+/// and is not claimable, rather than reading as $0 of fees.
+fn build_contract_fees(positions: &[Position], live_gas_cost_usd: f64, not_lp_claimable: &[String]) -> Vec<ContractFee> {
     positions
         .iter()
         .map(|p| {
+            let not_claimable = not_lp_claimable.iter().any(|id| id == &p.position_id);
             let label = match p.protocol.as_str() {
                 "uniswap-v4" => "Uniswap V4".to_string(),
                 "uniswap-v3" => "Uniswap V3".to_string(),
@@ -5345,17 +5477,21 @@ fn build_contract_fees(positions: &[Position], live_gas_cost_usd: f64) -> Vec<Co
                 } else {
                     format!("{}+{} ({} #{})", p.token0.symbol, p.token1.symbol, label, p.nft_id)
                 },
-                amount: format!(
-                    "{:.p0$} {} + {:.p1$} {}",
-                    p.tokens_owed_0.parse::<f64>().unwrap_or(0.0),
-                    p.token0.symbol,
-                    p.tokens_owed_1.parse::<f64>().unwrap_or(0.0),
-                    p.token1.symbol,
-                    p0 = (p.token0.decimals as usize).min(8),
-                    p1 = (p.token1.decimals as usize).min(8),
-                ),
+                amount: if not_claimable {
+                    AERO_NOT_LP_CLAIMABLE.to_string()
+                } else {
+                    format!(
+                        "{:.p0$} {} + {:.p1$} {}",
+                        p.tokens_owed_0.parse::<f64>().unwrap_or(0.0),
+                        p.token0.symbol,
+                        p.tokens_owed_1.parse::<f64>().unwrap_or(0.0),
+                        p.token1.symbol,
+                        p0 = (p.token0.decimals as usize).min(8),
+                        p1 = (p.token1.decimals as usize).min(8),
+                    )
+                },
                 amount_usd: p.fees_usd.clone(),
-                claimable: p.fees_usd.parse::<f64>().unwrap_or(0.0) > 0.0,
+                claimable: !not_claimable && p.fees_usd.parse::<f64>().unwrap_or(0.0) > 0.0,
                 gas_break_even_usd: format!("{:.4}", live_gas_cost_usd),
             }
         })
@@ -5693,7 +5829,7 @@ async fn fetch_aerodrome_position(
     alchemy_url: &str,
     cfg: &PositionConfig,
     wallet: &str,
-) -> Result<RawPosition> {
+) -> Result<(RawPosition, bool)> {
     let pool = cfg
         .pool_address
         .clone()
@@ -5754,23 +5890,25 @@ async fn fetch_aerodrome_position(
     // claimFees() reverts (checked 2026-11-14 on 0x770fE8Fc…). A revert is an answer
     // ("nothing claimable here"), so fees read as zero; only a transport failure, where
     // the node gave no answer at all, fails the cycle.
-    let (fee0_raw, fee1_raw) = if lp_balance > 0 {
+    // The bool records whether claimFees() answers at all, so the revert is shown as
+    // "not LP-claimable" rather than as $0 of fees earned.
+    let (fee0_raw, fee1_raw, fees_claimable) = if lp_balance > 0 {
         let payload = call("0xd294f093".to_string(), Some(wallet.to_string()), 75);
         match eth_call_allow_revert(http_client, alchemy_url, &payload).await {
             Err(e) => {
                 return Err(anyhow::anyhow!("position {}: Aerodrome claimFees read failed: {e}", cfg.id));
             }
-            Ok(Some(hex)) => (word(&hex, 0, "claimFees")?, word(&hex, 1, "claimFees")?),
+            Ok(Some(hex)) => (word(&hex, 0, "claimFees")?, word(&hex, 1, "claimFees")?, true),
             Ok(None) => {
                 tracing::info!(
                     "position {}: claimFees() reverted; this pool has no LP-claimable fees",
                     cfg.id
                 );
-                (0, 0)
+                (0, 0, false)
             }
         }
     } else {
-        (0, 0)
+        (0, 0, true)
     };
     let raw = aerodrome_position_from_reads(
         cfg,
@@ -5789,7 +5927,7 @@ async fn fetch_aerodrome_position(
         "aerodrome position {}: LP balance={}, amounts {:.4} {} / {:.4} {}, fees {:.6}/{:.6}",
         cfg.id, raw.liquidity, raw.amount0, raw.token0.symbol, raw.amount1, raw.token1.symbol, raw.fee0, raw.fee1
     );
-    Ok(raw)
+    Ok((raw, fees_claimable))
 }
 
 async fn fetch_v3_position(
@@ -6112,8 +6250,8 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
     let mut lp_usd = 0.0f64;
     let mut lp_fee_nock = 0.0f64;
     let mut lp_fee_usd = 0.0f64;
-    // Per-position (address, label, fee_usd) tuples for the velocity panel.
-    let mut fee_entries: Vec<(String, String, f64)> = Vec::new();
+    // Per-position (address, label, fee_usd, LP-claimable) tuples for the velocity panel.
+    let mut fee_entries: Vec<(String, String, f64, bool)> = Vec::new();
     for p in &raw.positions {
         let p0 = leg_usd_price(&p.token0, spot_price, raw.live_eth_price_usd);
         let p1 = leg_usd_price(&p.token1, spot_price, raw.live_eth_price_usd);
@@ -6143,6 +6281,7 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
                 p.nft_id
             ) },
             fee_usd,
+            !raw.fees_not_lp_claimable.contains(&p.position_id),
         ));
     }
 
@@ -6650,7 +6789,7 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: fee_entries
                 .iter()
-                .map(|(addr, name, fee_usd)| FeeCollectionIndex {
+                .map(|(addr, name, fee_usd, lp_claimable)| FeeCollectionIndex {
                     contract_address: addr.clone(),
                     contract_name: name.clone(),
                     claimable_usd: format!("{:.2}", fee_usd),
@@ -6660,7 +6799,12 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
                     } else {
                         0.0
                     },
-                    recommended_action: recommended_claim_action(*fee_usd, gas_cost).to_string(),
+                    // A reverting claimFees() is not "$0 earned, accumulate" (#93).
+                    recommended_action: if *lp_claimable {
+                        recommended_claim_action(*fee_usd, gas_cost).to_string()
+                    } else {
+                        "not_claimable".to_string()
+                    },
                 })
                 .collect(),
         },
@@ -7689,6 +7833,144 @@ database_url: "postgresql://localhost/test"
         .unwrap();
         assert_eq!((none.amount0, none.amount1, none.liquidity), (0.0, 0.0, 0));
         assert!(nock_spot_from_positions(&[none]).is_some());
+    }
+
+    // ---------------- v0.5.2 surfaces: Aero fees that cannot be claimed ----------------
+
+    #[test]
+    fn test_aero_claim_revert_is_not_an_rpc_outage() {
+        let (sim, detail) = aero_claim_simulation(&Ok(None));
+        assert_eq!(sim, "not_claimable");
+        let d = detail.unwrap();
+        assert!(d.contains("claimFees() reverts") && d.contains("AERO rewards not read (#93)"), "{d}");
+        assert!(!d.contains("RPC unavailable"));
+        assert_eq!(aero_claim_simulation(&Ok(Some("00".to_string()))), ("success", None));
+        let (sim, detail) = aero_claim_simulation(&Err(anyhow::anyhow!("network error")));
+        assert_eq!(sim, "unavailable");
+        assert!(detail.unwrap().contains("RPC unavailable"));
+    }
+
+    fn claim_action(platform: &str, simulation: &str, gas_usd: Option<&str>) -> ClaimFeeAction {
+        ClaimFeeAction {
+            platform: platform.to_string(),
+            label: platform.to_string(),
+            to: "0x0".to_string(),
+            data: "0x".to_string(),
+            value: "0x0".to_string(),
+            expected_amount_0: None,
+            expected_amount_1: None,
+            expected_usd: None,
+            gas_estimate: None,
+            gas_usd: gas_usd.map(|g| g.to_string()),
+            simulation: simulation.to_string(),
+            simulation_detail: None,
+        }
+    }
+
+    #[test]
+    fn test_claim_payload_totals_ignore_non_claimable_pools() {
+        // The 2026-11-14 payload: v4 $0.0014, v3 $0.0027, and a reverting Aero claim
+        // that used to null both totals.
+        let actions = vec![
+            claim_action("uniswap-v4", "success", Some("0.0014")),
+            claim_action("uniswap-v3", "success", Some("0.0027")),
+            claim_action("aerodrome", "not_claimable", None),
+        ];
+        let (gas, net) = claim_payload_totals(&actions, "0.30", true);
+        assert_eq!(gas.as_deref(), Some("0.0041"));
+        assert_eq!(net.as_deref(), Some("0.2959"));
+        // An executable action whose estimate failed still makes the total unknown.
+        let failed = vec![
+            claim_action("uniswap-v4", "success", Some("0.0014")),
+            claim_action("uniswap-v3", "success", None),
+        ];
+        assert_eq!(claim_payload_totals(&failed, "0.30", true), (None, None));
+        // No live gas price or ETH price: unknown, never zero.
+        assert_eq!(claim_payload_totals(&actions, "0.30", false), (None, None));
+        // Nothing executable: no total to report.
+        let only_aero = vec![claim_action("aerodrome", "not_claimable", None)];
+        assert_eq!(claim_payload_totals(&only_aero, "0.00", true), (None, None));
+    }
+
+    #[test]
+    fn test_reverting_aero_pool_is_not_shown_as_zero_earned() {
+        let mut raw = four_position_fixture();
+        raw.live_gas_cost_usd = 0.0037;
+        let mut aero = aero_position(false);
+        aero.fee0 = 0.0;
+        aero.fee1 = 0.0;
+        raw.fees_not_lp_claimable = vec![aero.position_id.clone()];
+        raw.positions.push(aero.clone());
+        let m = compute_derived_metrics(&raw, 0.0, &OperatorProfile::default(), StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
+        let contracts = &m.velocity_gas_sandbox.contracts;
+        let row = contracts.iter().find(|c| c.contract_name.starts_with("Aero")).expect("aero row");
+        assert_eq!(row.recommended_action, "not_claimable");
+        // The Uniswap rows keep the gas economics.
+        assert!(contracts.iter().filter(|c| !c.contract_name.starts_with("Aero")).all(|c| c.recommended_action != "not_claimable"));
+
+        // Contract fees (the MCP claim simulation) say so too, with no gas counted.
+        let snaps = build_position_snapshots(&[aero], 0.0116, 1830.0);
+        let fees = build_contract_fees(&snaps, 0.0037, &raw.fees_not_lp_claimable);
+        assert_eq!(fees[0].amount, AERO_NOT_LP_CLAIMABLE);
+        assert!(!fees[0].claimable);
+        let text = format_claim_simulation_text(&json!({ "contract_fees": fees }));
+        assert!(text.contains("not LP-claimable (claimFees() reverts); AERO rewards not read (#93)"), "{text}");
+        assert!(text.contains("Estimated Gas: unavailable"), "{text}");
+        // Without the flag the same position reads as ordinary fees.
+        let plain = build_contract_fees(&snaps, 0.0037, &[]);
+        assert_ne!(plain[0].amount, AERO_NOT_LP_CLAIMABLE);
+    }
+
+    // ---------------- v0.5.2 surfaces: snapshot by id, first-run errors, MCP ----------------
+
+    #[test]
+    fn test_envelope_from_stored_round_trips_the_stored_payload() {
+        // store_snapshot writes only the SnapshotData payload into `data`.
+        let data = sample_snapshot_data();
+        let stored = serde_json::to_value(&data).unwrap();
+        let id = Uuid::new_v4();
+        let at = DateTime::parse_from_rfc3339("2026-11-14T06:00:00Z").unwrap().with_timezone(&Utc);
+        let env = envelope_from_stored(id, at, "ab".repeat(32), "2.2.0".to_string(), stored).expect("stored rows parse");
+        assert_eq!(env.meta.snapshot_id, id);
+        assert_eq!(env.meta.generated_at, at);
+        assert_eq!(env.meta.version, "2.2.0");
+        assert_eq!(
+            serde_json::to_value(&env.data).unwrap(),
+            serde_json::to_value(&data).unwrap()
+        );
+        // The old handler's assumption (a whole envelope in `data`) is not what is stored.
+        let wrong = json!({ "meta": {}, "data": serde_json::to_value(&data).unwrap() });
+        assert!(envelope_from_stored(id, at, String::new(), String::new(), wrong).is_err());
+    }
+
+    #[test]
+    fn test_no_snapshot_body_carries_the_last_ingest_error() {
+        let cause = "No NOCK/USD spot: exactly one configured position must have is_price_source: true";
+        let body = no_snapshot_body(Some(cause));
+        assert_eq!(body["error"], "NO_SNAPSHOT");
+        assert_eq!(body["detail"], cause);
+        assert!(no_snapshot_body(None).get("detail").is_none());
+        assert!(no_snapshot_body(Some("  ")).get("detail").is_none());
+
+        let mcp = no_snapshot_mcp_text(Some(cause));
+        assert!(mcp.contains("No snapshot available yet") && mcp.contains(&format!("Last ingestion error: {cause}")), "{mcp}");
+        assert!(!no_snapshot_mcp_text(None).contains("error"));
+    }
+
+    #[test]
+    fn test_mcp_text_shows_snapshot_time_and_health_not_live_api() {
+        let at = DateTime::parse_from_rfc3339("2026-11-14T06:00:00Z").unwrap().with_timezone(&Utc);
+        let now = at + chrono::Duration::minutes(12);
+        let line = snapshot_source_line(at, now, "degraded");
+        assert_eq!(line, "Snapshot generated 2026-11-14T06:00:00Z (12 min ago) · worker health: degraded");
+        let data = serde_json::to_value(sample_snapshot_data()).unwrap();
+        for text in [format_portfolio_state_text(&data), format_shot_advice_text(&data)] {
+            assert!(!text.contains("Live API") && !text.contains("Tier 1 Connected"), "{text}");
+        }
+        // The harvest rule names the precedence the engine applies.
+        let advice = format_shot_advice_text(&data);
+        assert!(advice.contains("only when no DCA tranche is due"), "{advice}");
+        assert!(advice.contains("fixed $5.00 threshold"));
     }
 
     #[test]

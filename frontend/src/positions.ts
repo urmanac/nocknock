@@ -118,3 +118,18 @@ export function walletNockUnits(
   if (Number.isFinite(usd) && spotUsd && spotUsd > 0) return usd / spotUsd;
   return null;
 }
+
+/** Velocity panel row for one fee contract. A pool whose claimFees() reverts is not
+ *  "$0 earned": its fees are not LP-claimable and its AERO rewards are not read (#93). */
+export function velocityRowText(g: {
+  name: string;
+  claimable: number;
+  gasBreakEven: number;
+  ratio: number;
+  action: string;
+}): string {
+  if (g.action === 'not_claimable') {
+    return `${g.name}: not LP-claimable (claimFees() reverts); AERO rewards not read (#93)`;
+  }
+  return `${g.name}: ${String(g.action).toUpperCase()} ($${g.claimable} earned / gas $${g.gasBreakEven} — ${Number(g.ratio).toFixed(0)}x ROI)`;
+}

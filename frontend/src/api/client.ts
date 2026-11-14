@@ -54,7 +54,8 @@ export interface ClaimFeeAction {
   expected_usd?: string | null;
   gas_estimate?: string | null;
   gas_usd?: string | null;
-  simulation: 'success' | 'failed' | 'unavailable';
+  /** 'not_claimable': the Aero pool's claimFees() reverts; nothing to dispatch. */
+  simulation: 'success' | 'failed' | 'unavailable' | 'not_claimable';
   simulation_detail?: string | null;
 }
 
@@ -127,7 +128,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // ('error') last, and keep the HTTP status so callers can branch (e.g. 409 = already
     // recorded, which is an idempotent success rather than a failure).
     const errorMsg = (err && (err.detail || err.message || err.error)) || `HTTP ${res.status}`;
-    throw Object.assign(new Error(errorMsg), { status: res.status });
+    throw Object.assign(new Error(errorMsg), {
+      status: res.status,
+      code: typeof err?.error === 'string' ? err.error : undefined,
+      detail: typeof err?.detail === 'string' ? err.detail : undefined,
+    });
   }
 
   if (res.status === 204) {
@@ -135,6 +140,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return res.json();
+}
+
+/**
+ * What to show for a failed API call. A thrown error with an HTTP status means the
+ * worker answered, so it is not "unreachable". On a first run the worker answers 503
+ * NO_SNAPSHOT and carries its last ingestion error as `detail`: show that cause.
+ */
+export function describeApiError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  const { status, code, detail } = (e ?? {}) as { status?: unknown; code?: unknown; detail?: unknown };
+  if (typeof status !== 'number') return `Worker unreachable: ${msg}`;
+  if (code === 'NO_SNAPSHOT') {
+    return typeof detail === 'string' && detail.trim() !== ''
+      ? `No snapshot yet. Last ingestion error: ${detail}`
+      : 'No snapshot yet: the first ingestion cycle has not completed.';
+  }
+  return msg;
 }
 
 export const api = {

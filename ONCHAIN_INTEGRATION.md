@@ -11,7 +11,7 @@ This document captures the verified on-chain mechanics, smart contract functions
 | **Tracked Wallet** | `0xeE114cC97eC5adeB34bA5645e315B497D8487a45` | Sovereign operator address |
 | **NOCK Token** | `0x9B5E262cF9bb04869ab40b19AF91D2dc85761722` | Sovereign asset (16 decimals) |
 | **USDC Token** | `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` | Settlement currency (6 decimals) |
-| **Aerodrome Pool (vAMM-USDC/NOCK)** | `0x85f1aa3a70fedd1c52705c15baed143e675cd626` | **HISTORICAL — tranche liquidated 2026-10-23** |
+| **Aerodrome Pool (vAMM-USDC/NOCK)** | `0x85f1aa3a70fedd1c52705c15baed143e675cd626` | **HISTORICAL — tranche liquidated 2026-10-23.** Not a position; still the OHLCV history source (`market_data.pool_address`) |
 | **Aerodrome Implementation** | `0xa4e46b4f701c62e14df11b48dce76a7d793cd6d7` | (historical) Implementation behind EIP-1167 proxy |
 | **Uniswap V4 Position Manager** | `0x7c5f5a4bbd8fd63184577525326123b519429bdc` | Position NFT manager (all tracked v4 positions) |
 | **Uniswap V4 StateView** | `0xa3c0c9b65bad0b08107aa264b0f3db444b867a71` | Read-only pool/position state |
@@ -29,6 +29,11 @@ This document captures the verified on-chain mechanics, smart contract functions
 > portfolio repositioned entirely into Uniswap concentrated liquidity (see §5). The
 > mechanics below are preserved as historical verification record only — the worker no
 > longer reads or claims anything on Aerodrome, and no Aerodrome transactions are built.
+>
+> **Superseded in v0.5.0 (noted 2026-11-14):** the worker reads `aerodrome` positions
+> again (Aero volatile pools, including LP staked in a gauge), and the claim payload
+> builds a `claimFees()` action for each. On the new Aero pools `claimFees()` reverts;
+> since v0.5.2 that is reported as "not LP-claimable", not as an RPC outage. See §7.
 
 ### Verification & Selector Analysis
 * Aerodrome pool `0x85f1aa3a70fedd1c52705c15baed143e675cd626` is an EIP-1167 minimal proxy pointing to `0xa4e46b4f701c62e14df11b48dce76a7d793cd6d7`.
@@ -113,6 +118,10 @@ Position D (added by the 2026-10-24 change request): identified via the mint's
 `getPoolAndPositionInfo` (fee 30000 = 3.00%, tickSpacing 300, packed poolId/ticks) and
 `ownerOf` (tracked wallet). NOT a price source — B stays the single NOCK/USD source.
 
+> **Superseded in v0.5.0 (noted 2026-11-14):** B (#3163431) is retired and its pool has
+> had no in-range liquidity since the 2026-11 liquidation. Position D (#3163450) is now
+> the NOCK/USD price source (`is_price_source: true` in the config).
+
 ### Per-position read pipeline (all reads fail the cycle explicitly — zero-mock)
 
 - **v4:** POSM `getPositionLiquidity(uint256)` (`0x1efeed33`) → liquidity;
@@ -172,6 +181,10 @@ Aerodrome and Velodrome merged into **Aero** (front end `aero.xyz`), live since
 2026-10-21; legacy contracts stopped emitting rewards at launch. NockNock holds no
 Aero LP, so this affects only **where NOCK buys are executed** (the accumulation plan)
 and one third-party history feed.
+
+> **Superseded in v0.5.0 (noted 2026-11-14):** the operator holds staked Aero LP, and
+> NockNock tracks Aero positions again (see §7). AERO rewards on staked LP are not read
+> yet (#93).
 
 > **Verification status.** Everything below was read from Base mainnet. No official
 > Aero contract list was found, so the *identity* of these contracts is inferred:

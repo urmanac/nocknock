@@ -146,8 +146,8 @@ This guide captures the operational rules, environment quirks, toolchain configu
 Before pushing any PR or tag:
 ```bash
 make test-brain       # 3 tests (WASM invariants)
-make test-worker      # 91 tests as of v0.5.0 (decoding, advice, plan, LP sizing, Aero pools)
-make test-frontend    # 45 tests as of v0.5.0 (staleness, contract, display helpers)
+make test-worker      # 128 tests as of v0.5.2: 121 worker + 7 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces)
+make test-frontend    # 89 tests as of v0.5.2 (staleness, contract, display helpers, charts, surfaces)
 make dist             # Verifies packaging of dist/ binaries and tarballs
 NOCKNOCK_API_URL=http://chudmax:8081 make test-mcp   # both MCP transports against the deployment
 ```
@@ -158,7 +158,12 @@ before committing: never chain test, commit and push so that a failure cannot st
 
 ## 10. Long-Term Architectural Vision & Roadmaps
 
-- Consult [`HANDOFF.md`](HANDOFF.md) for the strategic vision:
+- For the philosophy behind the numbers (four pillars, gas is not cash, the wallet is the
+  record, building in public), read the dated lore in [`docs/lore/`](docs/lore/), starting
+  with [`2026-11-14-four-pillars-no-hurry.md`](docs/lore/2026-11-14-four-pillars-no-hurry.md).
+  The enforceable rules are in [`OPERATOR_GUIDANCE.md`](OPERATOR_GUIDANCE.md) §7.
+- [`HANDOFF.md`](HANDOFF.md) is a historical dossier (v0.2.1, 2026-10-12). Use it only for
+  the long-range ideas it records:
   - Multi-tenant parameterization (custom operator profiles, flexible floors, dynamic tranches).
   - Urbit native architecture (`%nocknock` desk, `sur/nocknock.hoon`, `app/nocknock.hoon`).
   - Ames P2P sovereign syndicates and collective liquidity defense protocols.
