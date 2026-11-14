@@ -197,8 +197,14 @@ before committing: never chain test, commit and push so that a failure cannot st
 ## 13. On-Prem Deployment: `chudmax` Is Infrastructure
 
 Since 2026-11-13 NockNock runs continuously on the internal host `chudmax` (x86_64,
-Ubuntu, LAN only). Treat it as production for the operator: it holds the accumulation
-ledger and is what the operator reads to decide what to do.
+Ubuntu, LAN only). It is infrastructure, not production: the operator reads it to decide
+what to do, so keep it running and honest, but its database is disposable. The wallet
+and the chain are the record. If the database is lost, the recovery is a fresh start
+(empty database, latest release, the wallet and `config.yaml`). Plan progress can be
+restored by setting `accumulation_plan.starts_at` to the plan's real start and re-recording
+each buy's transaction hash (receipts are re-verified on-chain); the high-water mark and
+charts restart. See
+[`docs/lore/2026-11-14-four-pillars-no-hurry.md`](docs/lore/2026-11-14-four-pillars-no-hurry.md).
 
 - **Shape**: rootless Podman quadlets as systemd user units (`nocknock-db`,
   `nocknock-worker`, `nocknock-frontend`), lingering enabled. Dashboard
@@ -211,8 +217,10 @@ ledger and is what the operator reads to decide what to do.
   workstation is the source of truth (gitignored; it holds the Alchemy key, the
   accumulation plan and the operator's limits). `deploy.sh` stores it as the Podman
   secret `nocknock-config`. Back it up before editing; never commit it.
-- **Backups**: `nocknock-backup.timer` dumps the database nightly to
-  `~/nocknock/backups` on chudmax (14 kept). The dumps are on the same host only.
+- **Nightly dump, not a backup**: `nocknock-backup.timer` writes a `pg_dump` to
+  `~/nocknock/backups` on chudmax nightly (14 kept, same host). It is a convenience
+  for inspecting old state, nothing more. Do not build backup infrastructure or rely
+  on these dumps (operator decision 2026-11-14, issue #96 closed as not planned).
 - **Privileges**: `sudo` on chudmax needs the operator's password. Ask them to run it.
 - **Verify after every deploy**: `/health` is `ok` with `last_error: null`; the snapshot
   version and spot look right; `NOCKNOCK_API_URL=http://chudmax:8081 make test-mcp`.
