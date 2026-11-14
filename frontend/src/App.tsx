@@ -18,6 +18,7 @@ import {
   ComposedChart,
   Legend,
   ReferenceLine,
+  ReferenceArea,
 } from 'recharts';
 import { api } from './api/client';
 import { useFreshness, StaleBanner } from './hooks/useFreshness.tsx';
@@ -30,13 +31,16 @@ const SOURCE_LABELS: Record<string, string> = {
   aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
-import { POSITION_COLORS, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, walletNockUnits } from './positions.ts';
+import { POSITION_COLORS, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus } from './positions.ts';
+import { buildChartRows, compositionReadout, syncWindowOrDefault, type ChartSeries, type GapRow } from './timeline.ts';
 
 function Dashboard() {
+  // The worker's real cadence when the historical response reports it; 300 s otherwise.
+  const [syncWindowSeconds, setSyncWindowSeconds] = React.useState<number>(syncWindowOrDefault(null));
   const { snapshot, loading, error, freshness, refetch, ageDisplay } = useFreshness<
     DerivedMetrics
   >(api.latestSnapshot, {
-    syncWindowSeconds: 300,
+    syncWindowSeconds,
     pollIntervalMs: 10_000,
     debug: import.meta.env.DEV,
     onFreshnessChange: (fresh) => console.log('[Dashboard] Freshness:', fresh ? 'FRESH' : 'STALE'),
@@ -48,6 +52,7 @@ function Dashboard() {
   const loadHistory = React.useCallback(() => {
     api.historicalSnapshots({ limit: 288 })
       .then(res => {
+        setSyncWindowSeconds(syncWindowOrDefault(res?.sync_window_seconds));
         if (res?.snapshots?.length) {
           setHistory([...res.snapshots].reverse());
         }
@@ -95,90 +100,12 @@ function Dashboard() {
     .join(', ');
   const provenanceCandleOnly = Object.keys(provenance?.sources ?? {}).length > 0 &&
     Object.keys(provenance?.sources ?? {}).every(s => s === 'geckoterminal');
-  const hasHistory = history.length > 1;
-  const spansMultipleDays = hasHistory && (
-    new Date(history[history.length - 1]?.meta?.generated_at).toDateString() !== new Date(history[0]?.meta?.generated_at).toDateString()
-  );
-
-  // Transform all chart data inline (single pass, no useMemo order issues)
-  const assetTimePoints: string[] = metrics?.asset_aggregation_series?.time_points || [];
+  // Every time-series dataset (#61): real time on the x axis, breaks at gaps, the
+  // composition from each row's own totals (N1), LP series keyed by position_id (N15).
+  const charts = buildChartRows(history, rawData, syncWindowSeconds, snapshot?.meta?.generated_at);
+  const { assetSeries, valueVsBaseline, composition, channel: channelSeries, positionSeriesDefs, spansMultipleDays } = charts;
   const positionsList: any[] = rawData?.positions || [];
-  // Per-position NOCK series defs (v2.0.0) — the stacked chart is built dynamically
-  // from whatever positions the worker tracks.
-  const positionSeriesDefs = (metrics?.asset_aggregation_series?.positions_nock || []).map((s: any, i: number) => ({
-    key: `pos${i}`,
-    name: positionLabel(positionsList.find((p: any) => p.position_id === s.position_id)),
-  }));
-  // `dm` is the derived_metrics of the SAME snapshot as `ag`, so a pre-0.5.0 snapshot's
-  // wallet NOCK can be recovered from its own USD value and spot (issue #85).
-  const rowFromAg = (ag: any, i: number, time: string, dm: any) => {
-    const spot = parseFloat(
-      dm?.total_value_vs_baseline?.token_price_series?.[i] ?? dm?.tick_bracket_hypervisor?.current_price ?? '',
-    );
-    const walletNock = walletNockUnits(ag, i, spot);
-    const row: any = {
-      time,
-      // Token units: this chart is NOCK against the NOCK floor, never dollars.
-      safeHaven: walletNock === null ? null : Math.round(walletNock),
-      activeProtocol: parseFloat(ag?.active_protocol_series?.[i] || '0'),
-    };
-    let lpTotal = 0;
-    (ag?.positions_nock || []).forEach((s: any, j: number) => {
-      const v = parseFloat(s.series?.[i] || '0');
-      row[`pos${j}`] = Math.round(v);
-      lpTotal += v;
-    });
-    row.totalNock = walletNock === null ? null : Math.round(lpTotal + walletNock);
-    return row;
-  };
-
-  const assetSeries = hasHistory
-    ? history.map(s => {
-        const dm = s.data?.derived_metrics ?? s.data;
-        return rowFromAg(dm?.asset_aggregation_series, 0, formatSnapshotTime(s.meta?.generated_at, spansMultipleDays), dm);
-      })
-    : assetTimePoints.map((t: string, i: number) =>
-        rowFromAg(metrics?.asset_aggregation_series, i, formatSnapshotTime(t, false), metrics),
-      );
-
-  const valueTimePoints: string[] = metrics?.total_value_vs_baseline?.time_points || [];
-  const valuePortfolio: string[] = metrics?.total_value_vs_baseline?.portfolio_value_series || [];
-  const valueTokenPrice: string[] = metrics?.total_value_vs_baseline?.token_price_series || [];
-  const valueHighWaterMark: string[] = metrics?.total_value_vs_baseline?.high_water_mark_series || [];
-  const valueVsBaseline = hasHistory
-    ? history.map(s => {
-        const dm = s.data?.derived_metrics ?? s.data;
-        return {
-          time: formatSnapshotTime(s.meta?.generated_at, spansMultipleDays),
-          portfolio: parseFloat(dm?.total_value_vs_baseline?.portfolio_value_series?.[0] || '0'),
-          tokenPrice: parseFloat(dm?.total_value_vs_baseline?.token_price_series?.[0] || '0'),
-          highWaterMark: parseFloat(dm?.total_value_vs_baseline?.high_water_mark_series?.[0] || '0'),
-        };
-      })
-    : valueTimePoints.map((t: string, i: number) => ({
-        time: formatSnapshotTime(t, false),
-        portfolio: parseFloat(valuePortfolio[i] || '0'),
-        tokenPrice: parseFloat(valueTokenPrice[i] || '0'),
-        highWaterMark: parseFloat(valueHighWaterMark[i] || '0'),
-      }));
-
-  const counterTimePoints: string[] = metrics?.strategy_counterfactual?.time_points || [];
-  const counterActive: string[] = metrics?.strategy_counterfactual?.active_portfolio_series || [];
-  const counterPassive: string[] = metrics?.strategy_counterfactual?.passive_baseline_series || [];
-  const counterfactual = hasHistory
-    ? history.map(s => {
-        const dm = s.data?.derived_metrics ?? s.data;
-        return {
-          time: formatSnapshotTime(s.meta?.generated_at, spansMultipleDays),
-          active: parseFloat(dm?.strategy_counterfactual?.active_portfolio_series?.[0] || '0'),
-          passive: parseFloat(dm?.strategy_counterfactual?.passive_baseline_series?.[0] || '0'),
-        };
-      })
-    : counterTimePoints.map((t: string, i: number) => ({
-        time: formatSnapshotTime(t, false),
-        active: parseFloat(counterActive[i] || '0'),
-        passive: parseFloat(counterPassive[i] || '0'),
-      }));
+  const compositionHasEth = composition.rows.some((r: any) => r.eth != null);
 
   const deviationData = (metrics?.portfolio_deviation_matrix?.allocations || []).map((a: any) => ({
     name: a.bucket_name,
@@ -243,19 +170,6 @@ function Dashboard() {
     ratio: c.efficiency_ratio,
     action: c.recommended_action,
   }));
-
-  // Bollinger structural channel (backend computes 20-period SMA ± 1σ/2σ bands)
-  const channel = metrics?.structural_channels?.channels?.[0];
-  const channelData = channel
-    ? channel.center_line.map((p: any, i: number) => ({
-        time: formatSnapshotTime(p.time, spansMultipleDays),
-        center: parseFloat(channel.center_line[i]?.value || '0'),
-        upper1: parseFloat(channel.upper_1sd?.[i]?.value || '0'),
-        lower1: parseFloat(channel.lower_1sd?.[i]?.value || '0'),
-        upper2: parseFloat(channel.upper_2sd?.[i]?.value || '0'),
-        lower2: parseFloat(channel.lower_2sd?.[i]?.value || '0'),
-      }))
-    : [];
 
   // Zero-mock: never fabricate a floor target — when the field is absent the UI shows
   // '—'/UNKNOWN instead of a hardcoded 100000 that would masquerade as live truth.
@@ -495,7 +409,7 @@ function Dashboard() {
         {/* 1. Sovereign NOCK Stack & Floor Reference */}
         <CanvasPanel title={`The Sovereign NOCK Stack vs ${floorTargetFormatted} Floor (Token Units)`}>
           <ResponsiveContainer width="100%" height={260}>
-            <AreaChart data={assetSeries} margin={{ top: 15, right: 30, left: 15, bottom: 0 }}>
+            <AreaChart data={assetSeries.rows} margin={{ top: 15, right: 30, left: 15, bottom: 0 }}>
               <defs>
                 <linearGradient id="colorVault" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#2ecc71" stopOpacity={0.7} />
@@ -510,7 +424,7 @@ function Dashboard() {
                   <stop offset="95%" stopColor="#9b59b6" stopOpacity={0.15} />
                 </linearGradient>
               </defs>
-              <XAxis dataKey="time" stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} />
+              {timeAxis(assetSeries, spansMultipleDays)}
               <YAxis
                 stroke="#334155"
                 tick={{ fill: '#94a3b8', fontSize: 11 }}
@@ -526,7 +440,9 @@ function Dashboard() {
                 itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
                 labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
                 formatter={(v: any) => `${Number(v).toLocaleString()} NOCK`}
+                labelFormatter={tooltipTime}
               />
+              {gapAreas(assetSeries.gaps)}
               {floorKnown && (
                 <ReferenceLine
                   y={floorTarget}
@@ -543,8 +459,10 @@ function Dashboard() {
                 fill="url(#colorVault)"
                 stroke="#10b981"
                 name="Sovereign Vault (wallet NOCK)"
+                connectNulls={false}
+                dot={isolatedDot('#10b981')}
               />
-              {positionSeriesDefs.map((def: any, i: number) => (
+              {positionSeriesDefs.map((def, i) => (
                 <Area
                   key={def.key}
                   type="monotone"
@@ -554,11 +472,14 @@ function Dashboard() {
                   fillOpacity={0.35}
                   stroke={POSITION_COLORS[i % POSITION_COLORS.length]}
                   name={def.name}
+                  connectNulls={false}
+                  dot={isolatedDot(POSITION_COLORS[i % POSITION_COLORS.length])}
                 />
               ))}
               <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </AreaChart>
           </ResponsiveContainer>
+          <GapCaption gaps={assetSeries.gaps} />
           <div style={{ marginTop: 8, fontSize: '0.75rem', color: '#888', display: 'flex', justifyContent: 'space-between' }}>
             <span>Total Holding: <strong style={{ color: floorHealthColor }}>{totalNockVal} NOCK</strong></span>
             <span>Safety Buffer: <strong style={{ color: floorHealthColor }}>{nockFloorDeltaKnown ? `${nockFloorDeltaRaw >= 0 ? `+${nockFloorDeltaVal}` : nockFloorDeltaVal} NOCK (${nockFloorDeltaRaw >= 0 ? `+${nockFloorDeltaPct}%` : `${nockFloorDeltaPct}%`}) above floor` : '—'}</strong></span>
@@ -568,8 +489,8 @@ function Dashboard() {
         {/* 2. Total Value vs Baseline — Dual Axis */}
         <CanvasPanel title="Total Value & NOCK Price vs Baseline (Dual Axis)">
           <ResponsiveContainer width="100%" height={260}>
-            <ComposedChart data={valueVsBaseline} margin={{ top: 10, right: 80, left: 0, bottom: 0 }}>
-              <XAxis dataKey="time" stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} />
+            <ComposedChart data={valueVsBaseline.rows} margin={{ top: 10, right: 80, left: 0, bottom: 0 }}>
+              {timeAxis(valueVsBaseline, spansMultipleDays)}
               <YAxis yAxisId="left" orientation="left" stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => '$' + v.toLocaleString()} />
               <YAxis yAxisId="right" orientation="right" stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => '$' + v.toFixed(4)} domain={['auto', 'auto']} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
@@ -577,12 +498,15 @@ function Dashboard() {
                 contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
                 itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
                 labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
+                labelFormatter={tooltipTime}
               />
-              <Line yAxisId="left" type="monotone" dataKey="portfolio" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} name="Portfolio USD" />
-              <Line yAxisId="left" type="monotone" dataKey="highWaterMark" stroke="#f59e0b" strokeWidth={1} strokeDasharray="5 5" dot={false} name="High-Water Mark" />
-              <Line yAxisId="right" type="monotone" dataKey="tokenPrice" stroke="#38bdf8" strokeWidth={2} dot={{ r: 3 }} name="NOCK Spot Price" />
+              {gapAreas(valueVsBaseline.gaps, 'left')}
+              <Line yAxisId="left" type="monotone" dataKey="portfolio" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} connectNulls={false} name="Portfolio USD" />
+              <Line yAxisId="left" type="monotone" dataKey="highWaterMark" stroke="#f59e0b" strokeWidth={1} strokeDasharray="5 5" dot={isolatedDot('#f59e0b')} connectNulls={false} name="High-Water Mark" />
+              <Line yAxisId="right" type="monotone" dataKey="tokenPrice" stroke="#38bdf8" strokeWidth={2} dot={{ r: 3 }} connectNulls={false} name="NOCK Spot Price" />
             </ComposedChart>
           </ResponsiveContainer>
+          <GapCaption gaps={valueVsBaseline.gaps} />
         </CanvasPanel>
 
         {/* 3. Tick Bracket Hypervisor — Horizontal Ranges (one bar per tracked position,
@@ -675,33 +599,46 @@ function Dashboard() {
           </div>
         </CanvasPanel>
 
-        {/* 5. Portfolio Composition — Total (Native + USDC) vs Native-Only */}
-        <CanvasPanel title="Portfolio Composition: Total (Native + USDC) vs Native-Only">
+        {/* 5. Portfolio Composition — each row's own totals (N1): total, NOCK, USDC (and ETH
+            once the snapshot reports it). Stable is total_stable_usd, never total − native,
+            which also holds LP WETH: ETH is gas, not a stable reserve. */}
+        <CanvasPanel title="Portfolio Composition: Total vs NOCK vs USDC">
           <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={counterfactual} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-              <XAxis dataKey="time" stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} />
+            <LineChart data={composition.rows} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+              {timeAxis(composition, spansMultipleDays)}
               <YAxis stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => '$' + v.toLocaleString()} />
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
               <Tooltip
                 contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 6, color: '#f0f6fc' }}
                 itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
                 labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
+                formatter={(v: any) => `$${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                labelFormatter={tooltipTime}
               />
-              <Line type="monotone" dataKey="active" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} name="Total Portfolio ($, native + USDC)" />
-              <Line type="monotone" dataKey="passive" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Native Tokens Only ($, no USDC)" />
+              {gapAreas(composition.gaps)}
+              <Line type="monotone" dataKey="active" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} connectNulls={false} name="Total Portfolio ($)" />
+              <Line type="monotone" dataKey="passive" stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="5 5" dot={isolatedDot('#94a3b8')} connectNulls={false} name="NOCK ($)" />
+              <Line type="monotone" dataKey="stable" stroke="#00d2d3" strokeWidth={1.5} dot={isolatedDot('#00d2d3')} connectNulls={false} name="USDC ($, wallet + LP)" />
+              {compositionHasEth && (
+                <Line type="monotone" dataKey="eth" stroke="#a855f7" strokeWidth={1.5} dot={isolatedDot('#a855f7')} connectNulls={false} name="ETH ($, gas + LP WETH)" />
+              )}
               <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </LineChart>
           </ResponsiveContainer>
+          <GapCaption gaps={composition.gaps} />
           {(() => {
-            const lastPoint = counterfactual[counterfactual.length - 1];
-            const activeUsd = lastPoint ? lastPoint.active : parseFloat(global?.total_portfolio_usd || '0');
-            const passiveUsd = lastPoint ? lastPoint.passive : parseFloat(global?.total_native_usd || '0');
-            const deltaUsd = activeUsd - passiveUsd;
-            const deltaPct = passiveUsd > 0 ? ((deltaUsd / passiveUsd) * 100).toFixed(1) : '0.0';
-            const deltaColor = deltaUsd >= 0 ? '#10b981' : '#ef4444';
+            // Read from the LATEST snapshot, never the last history row (N1).
+            const ro = compositionReadout(global);
+            const usd = (v: number) => `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
             return (
-              <div style={{ marginTop: 8, fontSize: '0.75rem', color: deltaColor, textAlign: 'center' }}>
-                Stable Reserve Delta (Total − Native-Only): <strong>{deltaUsd >= 0 ? `+$${deltaUsd.toFixed(2)}` : `-$${Math.abs(deltaUsd).toFixed(2)}`} USD</strong> ({deltaUsd >= 0 ? `+${deltaPct}%` : `${deltaPct}%`} of native value) — the USDC side held alongside LP positions
+              <div style={{ marginTop: 8, fontSize: '0.75rem', color: '#00d2d3', textAlign: 'center' }}>
+                Stable Reserve (USDC in wallet + LP, latest snapshot): <strong>{ro.stableUsd === null ? '—' : `${usd(ro.stableUsd)} USD`}</strong>
+                {ro.stableUsd !== null && (
+                  <> ({ro.pctOfNative === null ? 'no NOCK value to compare' : `${ro.pctOfNative.toFixed(1)}% of NOCK value`})</>
+                )}
+                {ro.otherUsd !== null && Math.abs(ro.otherUsd) >= 0.01 && (
+                  <span style={{ color: '#8b949e' }}> · {usd(ro.otherUsd)} in other legs (Total − NOCK − USDC, e.g. LP WETH)</span>
+                )}
               </div>
             );
           })()}
@@ -793,11 +730,11 @@ function Dashboard() {
         </CanvasPanel>
 
         {/* 7. Structural Channels — Bollinger Bands on Portfolio Value */}
-        {channelData.length > 0 && (
+        {channelSeries.rows.length > 0 && (
           <CanvasPanel title="Structural Channels (20-Period SMA ± 1σ/2σ Bands)">
             <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={channelData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                <XAxis dataKey="time" stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} />
+              <LineChart data={channelSeries.rows} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                {timeAxis(channelSeries, spansMultipleDays)}
                 <YAxis stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => '$' + v.toLocaleString()} domain={['auto', 'auto']} />
                 <CartesianGrid strokeDasharray="3 3" stroke="#222" />
                 <Tooltip
@@ -805,15 +742,18 @@ function Dashboard() {
                   itemStyle={{ color: '#e6edf3', fontSize: '0.85rem' }}
                   labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
                   formatter={(v: any) => `$${Number(v).toLocaleString()}`}
+                  labelFormatter={tooltipTime}
                 />
-                <Line type="monotone" dataKey="upper2" stroke="#7c3aed" strokeWidth={1} strokeDasharray="2 3" dot={false} name="Upper 2σ" />
-                <Line type="monotone" dataKey="upper1" stroke="#38bdf8" strokeWidth={1} strokeDasharray="3 3" dot={false} name="Upper 1σ" />
-                <Line type="monotone" dataKey="center" stroke="#f0f6fc" strokeWidth={2} dot={false} name="SMA(20) Center" />
-                <Line type="monotone" dataKey="lower1" stroke="#38bdf8" strokeWidth={1} strokeDasharray="3 3" dot={false} name="Lower 1σ" />
-                <Line type="monotone" dataKey="lower2" stroke="#7c3aed" strokeWidth={1} strokeDasharray="2 3" dot={false} name="Lower 2σ" />
+                {gapAreas(channelSeries.gaps)}
+                <Line type="monotone" dataKey="upper2" stroke="#7c3aed" strokeWidth={1} strokeDasharray="2 3" dot={isolatedDot('#7c3aed')} connectNulls={false} name="Upper 2σ" />
+                <Line type="monotone" dataKey="upper1" stroke="#38bdf8" strokeWidth={1} strokeDasharray="3 3" dot={isolatedDot('#38bdf8')} connectNulls={false} name="Upper 1σ" />
+                <Line type="monotone" dataKey="center" stroke="#f0f6fc" strokeWidth={2} dot={isolatedDot('#f0f6fc')} connectNulls={false} name="SMA(20) Center" />
+                <Line type="monotone" dataKey="lower1" stroke="#38bdf8" strokeWidth={1} strokeDasharray="3 3" dot={isolatedDot('#38bdf8')} connectNulls={false} name="Lower 1σ" />
+                <Line type="monotone" dataKey="lower2" stroke="#7c3aed" strokeWidth={1} strokeDasharray="2 3" dot={isolatedDot('#7c3aed')} connectNulls={false} name="Lower 2σ" />
                 <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
               </LineChart>
             </ResponsiveContainer>
+            <GapCaption gaps={channelSeries.gaps} />
             <div style={{ marginTop: 8, fontSize: '0.75rem', color: '#888', textAlign: 'center' }}>
               Regression channel over historical portfolio values — band squeezes precede volatility expansion
             </div>
@@ -1059,12 +999,79 @@ const styles: Record<string, React.CSSProperties> = {
   positionCardMeta: { fontSize: '0.72rem', color: '#8b949e', lineHeight: 1.6 },
 };
 
-function formatSnapshotTime(dateStr: string, spansMultipleDays: boolean = false): string {
-  const d = new Date(dateStr);
+function formatSnapshotTime(when: string | number, spansMultipleDays: boolean = false): string {
+  const d = new Date(when);
   if (spansMultipleDays) {
     return d.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/** Tooltip header for a numeric time axis: date and time of the hovered row. */
+function tooltipTime(t: any): string {
+  const n = typeof t === 'number' ? t : Number(t);
+  return Number.isFinite(n) ? formatSnapshotTime(n, true) : '';
+}
+
+/**
+ * Numeric time x axis (#61): rows are spaced by elapsed time, and ticks come from real
+ * rows only, so no label lands on a gap midpoint. Called as a function (not a component)
+ * so Recharts still sees an XAxis child.
+ */
+function timeAxis(series: ChartSeries<{ t: number }>, multiDay: boolean) {
+  return (
+    <XAxis
+      dataKey="t"
+      type="number"
+      scale="time"
+      domain={['dataMin', 'dataMax']}
+      ticks={series.ticks}
+      tickFormatter={(t: number) => formatSnapshotTime(t, multiDay)}
+      stroke="#334155"
+      tick={{ fill: '#94a3b8', fontSize: 11 }}
+      tickLine={false}
+    />
+  );
+}
+
+/** Shade each stretch with no stored snapshots, labelled literally (never "offline"). */
+function gapAreas(gaps: GapRow[], yAxisId?: string) {
+  return gaps.map(g => (
+    <ReferenceArea
+      key={`gap-${g.gapStart}`}
+      x1={g.gapStart}
+      x2={g.gapEnd}
+      {...(yAxisId ? { yAxisId } : {})}
+      fill="#64748b"
+      fillOpacity={0.15}
+      strokeOpacity={0}
+      label={{ value: g.time, fill: '#94a3b8', fontSize: 10, position: 'insideTop' }}
+    />
+  ));
+}
+
+/**
+ * Dot renderer that draws only rows with no real neighbour. A line needs two
+ * consecutive defined points, so without a dot an isolated observation would vanish.
+ */
+function isolatedDot(color: string) {
+  return (props: any) => {
+    const { key, cx, cy, payload } = props ?? {};
+    if (!payload?.isolated || !Number.isFinite(cx) || !Number.isFinite(cy)) return <g key={key} />;
+    return <circle key={key} cx={cx} cy={cy} r={3} fill={color} stroke={color} />;
+  };
+}
+
+/** Text under a time chart naming each gap, since the tooltip hides inside one. */
+function GapCaption({ gaps }: { gaps: GapRow[] }) {
+  if (gaps.length === 0) return null;
+  const shown = gaps.slice(-3);
+  return (
+    <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#8b949e', textAlign: 'center' }}>
+      Shaded: {shown.map(g => `${g.time} (${formatSnapshotTime(g.gapStart, true)} – ${formatSnapshotTime(g.gapEnd, true)})`).join('; ')}
+      {gaps.length > shown.length ? `; and ${gaps.length - shown.length} earlier` : ''}. Gaps are shown, never filled.
+    </div>
+  );
 }
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: Error | null }> {
