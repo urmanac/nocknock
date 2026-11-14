@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Aerodrome Full-Range Tranche (Issue #88)
+- **`protocol: aerodrome` positions.** A volatile x*y=k pool is tracked as a full-range
+  position: the wallet's LP-token share of the reserves, with fees from `claimFees()`
+  simulated from the wallet. It counts in totals, the deviation matrix, charts, fee
+  reporting, the claim payload and LP rebuild suggestions. It is always in range and has
+  no sell-out multiple (it sells NOCK gradually as price rises and never empties).
+  v0.4.0 had removed Aerodrome support, so such a position was invisible.
+- **Price source.** The example config makes the legacy Aerodrome NOCK/USDC vAMM the
+  NOCK/USD price source (spot = reserve ratio). On 2026-11-14 it carried about $110k/day
+  of NOCK volume against about $3.5k/day for the Uniswap v4 3% pool, and the RSI history
+  already came from it.
+- Positions and brackets carry `full_range`; the dashboard shows FULL RANGE, draws no
+  bracket for it, and no longer assumes the price source is the first position.
+
+### Added — Operations
+- **Nightly database backup** for the Podman deployment (`nocknock-backup.timer`,
+  03:30, newest 14 kept in `~/nocknock/backups`). The database now holds the
+  accumulation ledger.
+- `make test-mcp` honours `NOCKNOCK_API_URL`, so both MCP transports can be playtested
+  against a remote deployment.
+
+### Fixed — Pre-0.5.0 Triage
+- **NOCK stack chart units (Issue #85).** The floor chart plotted wallet NOCK from a USD
+  series, drawing a 95,599-NOCK stack at 1,095 against the 100,000 floor. The worker
+  emits `wallet_nock_series` (token units) and the chart uses it; older snapshots are
+  recovered from their own USD value and spot, and an unknowable point is a gap.
+- **Example config layering (Issue #86).** `config.yaml.example` is now really the base
+  layer. It was silently skipped (unknown `.example` extension), so a partial
+  `config.yaml` failed ingestion.
+- **Honest `/health` (Issue #87).** `degraded` when the last ingestion cycle failed or
+  the data is older than the sync window plus grace, with `last_error`. It used to
+  report `ok` whenever any snapshot existed.
+- The claim-fees payload says "Nothing to collect" for an empty position instead of
+  "RPC unavailable", and the plan's MCP text no longer says "$0.00 due now" while waiting.
+
 ### Added — LP Rebuild Suggestions: a Call to Action for REBUILD LP TRANCHES (Issue #83)
 - **Concrete deposits.** While LP is under target, `lp_rebuild.suggestions` sizes one
   deposit per eligible tracked position (amounts of each token at the pool's current

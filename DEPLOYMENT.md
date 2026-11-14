@@ -166,13 +166,20 @@ at boot and survive logout.
    journalctl --user -u nocknock-worker -f
    ```
 
-5. **Point a local MCP client at the deployment** by setting `NOCKNOCK_API_URL` for the
+5. **Backups.** `deploy.sh` installs `nocknock-backup.timer`, which dumps the database
+   nightly at 03:30 to `~/nocknock/backups/nocknock-YYYY-MM-DD.sql.gz` on the host and
+   keeps the newest 14. Run one now with `systemctl --user start nocknock-backup.service`.
+   The dumps stay on the same machine; copy them elsewhere if the host itself is at risk.
+   Restore with `gunzip -c <dump> | podman exec -i nocknock-db psql -U postgres -d nocknock`
+   into an empty database.
+
+6. **Point a local MCP client at the deployment** by setting `NOCKNOCK_API_URL` for the
    stdio server (it defaults to `http://127.0.0.1:8080`):
    ```json
    { "mcpServers": { "nocknock": { "command": "./dist/nocknock-mcp", "env": { "NOCKNOCK_API_URL": "http://<host>:8081" } } } }
    ```
 
-6. **After repositioning liquidity**, update the `positions:` list in `config.yaml` and
+7. **After repositioning liquidity**, update the `positions:` list in `config.yaml` and
    make sure the entry flagged `is_price_source: true` is a pool that still has active
    liquidity; the worker refuses to publish a price from an empty pool.
 

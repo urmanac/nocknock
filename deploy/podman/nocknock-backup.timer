@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly NockNock database backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+# Run a missed backup at next boot (the host may be off overnight).
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

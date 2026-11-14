@@ -41,8 +41,14 @@ ssh "$HOST" "set -e; cd ~/nocknock/src
 echo "==> installing quadlets and restarting"
 ssh "$HOST" 'set -e
   cp ~/nocknock/src/deploy/podman/*.container ~/nocknock/src/deploy/podman/*.network ~/nocknock/src/deploy/podman/*.volume ~/.config/containers/systemd/
+  # Nightly database backup (plain user units, not quadlets). Dumps go to
+  # ~/nocknock/backups, which this script never touches.
+  mkdir -p ~/.config/systemd/user
+  cp ~/nocknock/src/deploy/podman/nocknock-backup.service ~/nocknock/src/deploy/podman/nocknock-backup.timer ~/.config/systemd/user/
+  chmod +x ~/nocknock/src/deploy/podman/nocknock-backup.sh
   loginctl enable-linger
   systemctl --user daemon-reload
+  systemctl --user enable --now nocknock-backup.timer
   systemctl --user restart nocknock-db.service nocknock-worker.service nocknock-frontend.service
   for i in $(seq 1 30); do curl -fsS -m 3 http://localhost:3000/health && break; sleep 2; done; echo
   systemctl --user --no-pager --lines=0 status nocknock-db nocknock-worker nocknock-frontend | grep -E "●|Active:"'

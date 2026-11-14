@@ -230,3 +230,47 @@ swaps was not tested.
   that pool goes quiet the feed degrades fail-open (warnings, widening gaps); re-point
   it then. The live spot is unaffected: it comes from the Uniswap v4 3% pool.
 
+---
+
+## 7. Aerodrome Tranche Restored (v0.5.0) — Read Path and What Is Unverified
+
+The operator intends to hold a full-range NOCK/USDC position again as the long-term
+core (it cannot go out of range, so it never forces a re-range). The worker tracks it
+with `protocol: aerodrome` (issue #88).
+
+### Pool state, read 2026-11-14 (block 57409285)
+
+Legacy vAMM `0x85f1aa3a70fedd1c52705c15baed143e675cd626`:
+
+| Read | Value |
+|---|---|
+| `getReserves()` | 369,321.72 USDC / 31,839,446 NOCK (implied $0.01160) |
+| `totalSupply()` | 342542824101829799 |
+| Activity | 61 swaps in the preceding ~20,000 blocks (~11 h), each emitting a fee event |
+| GeckoTerminal 24h | $111,742 volume, 506 transactions, $735,609 TVL |
+| Wallet LP balance | 0 |
+
+For comparison, the new Aero volatile NOCK/USDC pool `0x770fe8fc…` held about $1,809.
+
+### Read path (same selectors §2 verified against this pool)
+
+- `token0()` `0x0dfe1681`, `token1()` `0xd21220a7`, `getReserves()` `0x0902f1ac`,
+  `totalSupply()` `0x18160ddd`, `balanceOf(wallet)` `0x70a08231`.
+- Position amounts = `balanceOf / totalSupply` of each reserve.
+- Unclaimed fees = `claimFees()` `0xd294f093` as an `eth_call` from the wallet (skipped
+  when the wallet holds no LP).
+- Spot = reserve1/reserve0, expressed as a synthetic sqrtPriceX96 so the shared pricing
+  and sizing code is unchanged. The position's ticks are Uniswap's MIN/MAX (full range).
+
+### Not verified
+
+- **How to deposit.** No supported app was confirmed for adding liquidity to this legacy
+  pool after the Aero merger; aero.xyz routed a swap around it (§6). The rebuild
+  suggestion therefore links to the pool on the explorer, not to a deposit screen.
+- **What an unstaked LP earns now.** Swaps still emit fee events, but reward emissions
+  stopped at the merger and current fee distribution was not confirmed from Aero docs.
+- **Staked LP.** A balance staked in a gauge is not read; only LP tokens held in the
+  wallet count. Staking would make the position look empty.
+- The live read has only been exercised with a zero balance. The share-of-reserves and
+  fee paths are covered by unit tests against the reserves above.
+

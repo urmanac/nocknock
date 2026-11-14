@@ -2161,6 +2161,13 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
         s(plan, "plan_id"), s(plan, "venue"), s(plan, "status"),
         if s(plan, "status") == "complete" {
             "none (plan complete)".to_string()
+        } else if s(plan, "status") != "tranche_due" {
+            // Nothing is due while waiting, pending, paused or blocked: say the size,
+            // not "$0.00 due now".
+            format!(
+                "{} of {} — ${} when due",
+                n("tranche_index"), n("tranches_total"), s(plan, "nominal_tranche_usdc")
+            )
         } else {
             format!(
                 "{} of {} — ${} due now (nominal ${})",
@@ -7465,6 +7472,13 @@ database_url: "postgresql://localhost/test"
         let done = metrics_with_plan(&raw, &done_ctx, &MarketRegime::default());
         let done_text = format_accumulation_plan_text(&json!({ "derived_metrics": serde_json::to_value(&done).unwrap() }));
         assert!(done_text.contains("Next tranche: none (plan complete)"));
+        // Between tranches the text states the size and never "due now".
+        let wfills = PlanFills { count: 1, spent_usdc: 100.0, acquired_nock: 8000.0, last_at: Some(t("2026-11-15T12:00:00Z")), first_price: Some(0.0125) };
+        let wctx = PlanContext { cfg: Some(plan_cfg()), fills: wfills, ledger_unavailable: false, now: t("2026-11-15T18:00:00Z") };
+        let waiting = metrics_with_plan(&raw, &wctx, &MarketRegime::default());
+        let wtext = format_accumulation_plan_text(&json!({ "derived_metrics": serde_json::to_value(&waiting).unwrap() }));
+        assert!(wtext.contains("Next tranche: 2 of 5 — $100.00 when due"));
+        assert!(!wtext.contains("due now"));
         assert!(!done_text.contains("due now"));
         assert!(text.contains("LP rebuild bias: under_target"));
         let rb = rebuild_fixture();

@@ -9,8 +9,13 @@ import json
 import subprocess
 import urllib.request
 import urllib.error
+import os
 
-API_URL = "http://127.0.0.1:8080/v1/mcp"
+# Worker base URL. Set NOCKNOCK_API_URL to playtest a remote deployment, e.g.
+#   NOCKNOCK_API_URL=http://chudmax:8081 make test-mcp
+# The stdio server reads the same variable, so both transports hit the same worker.
+API_BASE = os.environ.get("NOCKNOCK_API_URL", "http://127.0.0.1:8080").rstrip("/")
+API_URL = f"{API_BASE}/v1/mcp"
 
 def test_stdio_mcp():
     print("==================================================")
@@ -97,7 +102,7 @@ def test_http_mcp():
             with urllib.request.urlopen(req, timeout=5) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.URLError as e:
-            print(f"  ⚠️ HTTP request failed: {e}. Is the worker running on :8080?")
+            print(f"  ⚠️ HTTP request failed: {e}. Is the worker reachable at {API_BASE}? (set NOCKNOCK_API_URL)")
             return None
 
     init_res = post_mcp("initialize")
