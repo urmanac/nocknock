@@ -166,12 +166,11 @@ at boot and survive logout.
    journalctl --user -u nocknock-worker -f
    ```
 
-5. **Backups.** `deploy.sh` installs `nocknock-backup.timer`, which dumps the database
-   nightly at 03:30 to `~/nocknock/backups/nocknock-YYYY-MM-DD.sql.gz` on the host and
-   keeps the newest 14. Run one now with `systemctl --user start nocknock-backup.service`.
-   The dumps stay on the same machine; copy them elsewhere if the host itself is at risk.
-   Restore with `gunzip -c <dump> | podman exec -i nocknock-db psql -U postgres -d nocknock`
-   into an empty database.
+5. **The database is disposable.** Nothing here is a backup, and none is installed. The
+   wallet and the chain are the record: after losing the database, start fresh with the
+   latest release and your `config.yaml`. To restore an accumulation plan's progress, set
+   `accumulation_plan.starts_at` to its real start and record each buy's transaction hash
+   again (receipts are re-verified on-chain).
 
 6. **Point a local MCP client at the deployment** by setting `NOCKNOCK_API_URL` for the
    stdio server (it defaults to `http://127.0.0.1:8080`):
@@ -206,13 +205,10 @@ sudo systemctl reload caddy
 
 ---
 
-## 5. Database Backups & Maintenance
+## 5. Database Maintenance
 
-1. **Automated Snapshot Backups**:
-   ```bash
-   # Add to crontab: daily pg_dump
-   0 3 * * * pg_dump -U postgres -d nocknock | gzip > /backups/nocknock_$(date +\%F).sql.gz
-   ```
+1. **No backups.** The database is disposable; the wallet and the chain are the record
+   (operator decision 2026-11-14, issue #96 closed as not planned).
 
 2. **Deduplication Safeguard**:
    The ingestion worker includes built-in deduplication. If on-chain balances and pool reserves do not change between intervals, `store_snapshot` refreshes the `generated_at` timestamp on the active record rather than inserting redundant rows. Storage footprint remains under 50 MB/year.

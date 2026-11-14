@@ -217,10 +217,9 @@ charts restart. See
   workstation is the source of truth (gitignored; it holds the Alchemy key, the
   accumulation plan and the operator's limits). `deploy.sh` stores it as the Podman
   secret `nocknock-config`. Back it up before editing; never commit it.
-- **Nightly dump, not a backup**: `nocknock-backup.timer` writes a `pg_dump` to
-  `~/nocknock/backups` on chudmax nightly (14 kept, same host). It is a convenience
-  for inspecting old state, nothing more. Do not build backup infrastructure or rely
-  on these dumps (operator decision 2026-11-14, issue #96 closed as not planned).
+- **No backups**: the nightly `pg_dump` timer was removed on 2026-11-14 (operator
+  decision, issue #96 closed as not planned). The one dump it left in
+  `~/nocknock/backups` on chudmax is untouched. Do not reinstall backup tooling.
 - **Privileges**: `sudo` on chudmax needs the operator's password. Ask them to run it.
 - **Verify after every deploy**: `/health` is `ok` with `last_error: null`; the snapshot
   version and spot look right; `NOCKNOCK_API_URL=http://chudmax:8081 make test-mcp`.
