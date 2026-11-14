@@ -11,6 +11,7 @@
  * retries the receipt-verified ledger recording until it lands.
  */
 import React from 'react';
+import { floorDeltaText } from '../floor';
 import { api, ClaimFeeAction, ClaimFeesPayload, LedgerSummary } from '../api/client';
 import {
   connectWallet,
@@ -212,7 +213,9 @@ export function LiteCockpit() {
   const executable = (payload?.actions ?? []).filter((a) => a.simulation === 'success');
   const stateOf = (a: ClaimFeeAction): ActionState => actionStates[a.platform] ?? { kind: 'idle' };
 
-  const floorColor = floorDelta == null ? '#8b949e' : floorDelta >= 0 ? '#2ecc71' : '#ef4444';
+  // floorTarget 0 is the operator's own "no floor": neutral, never a +N "above" reading.
+  const noFloor = floorTarget === 0;
+  const floorColor = noFloor || floorDelta == null ? '#8b949e' : floorDelta >= 0 ? '#2ecc71' : '#ef4444';
 
   return (
     <div style={lite.container}>
@@ -246,12 +249,20 @@ export function LiteCockpit() {
       <section style={lite.card}>
         <div style={lite.label}>SOVEREIGN FLOOR</div>
         <div style={{ ...lite.big, color: floorColor }}>
-          {floorDelta == null
-            ? '…'
-            : `${floorDelta >= 0 ? '+' : ''}${floorDelta.toLocaleString()} NOCK`}
+          {noFloor
+            ? 'No floor'
+            : floorDelta == null
+              ? '…'
+              : !Number.isFinite(floorDelta)
+                ? '—'
+                : floorTarget != null && Number.isFinite(floorTarget)
+                ? floorDeltaText(floorDelta, floorTarget)
+                : `${floorDelta >= 0 ? '+' : ''}${floorDelta.toLocaleString()} NOCK`}
         </div>
         <div style={lite.sub}>
-          {floorTarget != null ? `target ${floorTarget.toLocaleString()} NOCK` : 'target loading…'}
+          {noFloor
+            ? 'no floor configured'
+            : floorTarget != null && Number.isFinite(floorTarget) ? `floor ${floorTarget.toLocaleString()} NOCK` : 'floor loading…'}
         </div>
       </section>
 

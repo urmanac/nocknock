@@ -215,6 +215,8 @@ fn format_accumulation_plan(data: &Value) -> String {
     let lp_gap = lp.and_then(|l| l.get("gap_usd")).and_then(|v| v.as_str()).unwrap_or("n/a");
     let lp_line = if lp_status == "no_positions" {
         "• No LP positions are tracked; NockNock suggests deposits only into positions you list under positions:".to_string()
+    } else if lp_status == "no_target" {
+        "• No LP target is configured (operator_profile.target_weights_bps.uniswap_lp), so NockNock suggests no rebuild.".to_string()
     } else {
         format!("• LP rebuild bias: {lp_status} (${lp_gap} short of target; rebuilding is a reposition, no net cash change)")
     };
@@ -290,7 +292,13 @@ fn format_shot_advice(data: &Value) -> String {
     let action = get("shot_advice_action").unwrap_or("unavailable");
     let details = get("shot_advice_details").unwrap_or("unavailable");
     let claimable_usd = get("total_fees_claimable_usd").map(|v| format!("${v} USD")).unwrap_or_else(|| "unavailable".to_string());
-    let gas_delta = get("gas_to_fee_delta_usd").map(|v| format!("+${v} USD")).unwrap_or_else(|| "unavailable".to_string());
+    // Signed as the worker reports it: a negative net is never shown as +$0.00.
+    let gas_delta = get("gas_to_fee_delta_usd")
+        .map(|v| match v.trim().strip_prefix('-') {
+            Some(abs) => format!("-${abs} USD"),
+            None => format!("+${v} USD"),
+        })
+        .unwrap_or_else(|| "unavailable".to_string());
 
     format!(
         "🎯 Tactical Shot Advice Engine\n\
@@ -298,8 +306,8 @@ fn format_shot_advice(data: &Value) -> String {
          • Recommended Action: {action}\n\
          • Decision Matrix Details: {details}\n\
          • Uncollected Claimable Fees: {claimable_usd}\n\
-         • Net Gas-to-Fee Profitability: {gas_delta}\n\
-         • Execution rule: claim advised when claimable yield ≥ 2× live gas break-even."
+         • Net of two claims' gas: {gas_delta}\n\
+         • Harvest rule: BATCH HARVEST is advised when uncollected LP fees reach the fixed $5.00 threshold and no DCA tranche is due."
     )
 }
 
@@ -392,7 +400,7 @@ mod tests {
                     "gas_to_fee_delta_usd": "0.00"
                 },
                 "accumulation_plan": null,
-                "lp_rebuild": { "status": "no_positions", "actual_usd": "0.00", "target_usd": "75.00", "gap_usd": "75.00", "suggestions": [], "excluded": [] }
+                "lp_rebuild": { "status": "no_positions", "actual_usd": "0.00", "target_usd": "0.00", "gap_usd": "0.00", "suggestions": [], "excluded": [] }
             },
             "contract_fees": []
         })
@@ -424,6 +432,22 @@ mod tests {
         assert!(empty_state.contains("Tactical Directive: unavailable"));
         assert!(empty_state.contains("floor unavailable"));
         assert!(!empty_state.contains("HOLD") && !empty_state.contains("0.00"));
+    }
+
+    #[test]
+    fn test_fallback_shot_advice_states_the_real_rule_and_a_signed_net() {
+        let mut data = from_zero_snapshot();
+        data["derived_metrics"]["global_status"]["gas_to_fee_delta_usd"] = json!("-0.01");
+        let text = format_shot_advice(&data);
+        assert!(text.contains("fixed $5.00 threshold"), "{text}");
+        assert!(!text.contains("2× live gas"), "{text}");
+        assert!(text.contains("-$0.01 USD") && !text.contains("+$-"), "{text}");
+
+        let mut no_target = from_zero_snapshot();
+        no_target["derived_metrics"]["lp_rebuild"]["status"] = json!("no_target");
+        let plan = format_accumulation_plan(&no_target);
+        assert!(plan.contains("No LP target is configured"), "{plan}");
+        assert!(!plan.contains("short of target"), "{plan}");
     }
 
     #[test]

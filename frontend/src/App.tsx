@@ -31,6 +31,7 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 import type { DerivedMetrics } from './types/snapshot';
 import { POSITION_COLORS, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText, walletNockUnits } from './positions.ts';
+import { floorState, floorDeltaText, floorSummaryText, regimeLabel, regimeTone } from './floor.ts';
 
 function Dashboard() {
   const { snapshot, loading, error, freshness, refetch, ageDisplay } = useFreshness<
@@ -257,26 +258,28 @@ function Dashboard() {
       }))
     : [];
 
-  // Zero-mock: never fabricate a floor target — when the field is absent the UI shows
-  // '—'/UNKNOWN instead of a hardcoded 100000 that would masquerade as live truth.
-  const floorTarget = global?.nock_floor_target ? parseInt(global.nock_floor_target) : 0;
-  const floorKnown = floorTarget > 0;
+  // Zero-mock: never fabricate a floor target. A missing field is '—'/unavailable; the
+  // worker's "0" is the operator's own "no floor", shown as such in a neutral style.
+  const floor = floorState(global?.nock_floor_target, global?.nock_floor_delta, global?.total_nock_amount);
+  const floorKnown = floor.kind === 'set';
+  const floorNone = floor.kind === 'none';
+  const floorTarget = floor.kind === 'set' ? floor.target : 0;
   const floorTargetFormatted = floorKnown ? floorTarget.toLocaleString() : '—';
-  const floorTargetShort = floorKnown ? `${(floorTarget / 1000).toFixed(0)}k` : '—';
+  const floorTargetShort = floorKnown
+    ? (floorTarget >= 1000 ? `${(floorTarget / 1000).toFixed(0)}k` : floorTarget.toLocaleString())
+    : '—';
   const nockAmountParsed = global?.total_nock_amount ? parseInt(global.total_nock_amount) : NaN;
   const nockAmountRaw = Number.isFinite(nockAmountParsed) ? nockAmountParsed : 0;
   // A known zero stack is 0, not unknown; only a missing field is '—'.
   const totalNockVal = Number.isFinite(nockAmountParsed) ? nockAmountParsed.toLocaleString() : '—';
-  const nockFloorDeltaRaw = floorKnown
-    ? (global?.nock_floor_delta ? parseInt(global.nock_floor_delta) : nockAmountRaw - floorTarget)
-    : 0;
-  const nockFloorDeltaKnown = floorKnown;
-  const nockFloorDeltaVal = nockFloorDeltaKnown ? nockFloorDeltaRaw.toLocaleString() : '—';
+  const nockFloorDeltaKnown = floor.kind === 'set' && floor.delta !== null;
+  const nockFloorDeltaRaw = floor.kind === 'set' && floor.delta !== null ? floor.delta : 0;
   const isFloorSafe = nockFloorDeltaKnown ? nockFloorDeltaRaw >= 0 : false;
   const floorHealthColor = !nockFloorDeltaKnown ? '#8b949e' : isFloorSafe ? '#10b981' : '#ef4444';
   const nockFloorDeltaPct = nockFloorDeltaKnown && floorTarget > 0
     ? ((nockFloorDeltaRaw / floorTarget) * 100).toFixed(1)
     : null;
+  const regimeToneNow = regimeTone(global?.regime);
 
   return (
     <div style={styles.container}>
@@ -335,7 +338,7 @@ function Dashboard() {
             label="Total NOCK Stack"
             value={global?.total_nock_amount}
             suffix=" NOCK"
-            subtitle={nockFloorDeltaKnown ? `${nockFloorDeltaRaw >= 0 ? '+' : ''}${nockFloorDeltaVal} above ${floorTargetShort} floor` : 'floor target unavailable'}
+            subtitle={floorSummaryText(floor)}
             highlightColor={floorHealthColor}
           />
           <StatCard
@@ -343,7 +346,7 @@ function Dashboard() {
             value={global?.total_usdc_amount}
             prefix="$"
             suffix=" USDC"
-            subtitle={`+${global?.total_fees_accrued_usd || '0.00'} USD fees accrued`}
+            subtitle={`${statValueText(global?.total_fees_accrued_usd, '$')} of LP fees uncollected`}
             highlightColor="#00d2d3"
           />
           <StatCard
@@ -356,14 +359,14 @@ function Dashboard() {
             label="Claimable Yield (Net)"
             value={global?.gas_to_fee_delta_usd}
             prefix="$"
-            subtitle={`Gross: $${global?.total_fees_claimable_usd || '0.00'}`}
+            subtitle={`Gross: ${statValueText(global?.total_fees_claimable_usd, '$')}; net of two claims' gas`}
             highlightColor="#f1c40f"
           />
           <StatCard
-            label={`${floorTargetShort.toUpperCase()} Floor Health`}
-            value={nockAmountRaw > 0 && floorKnown ? ((nockAmountRaw / floorTarget) * 100).toFixed(1) : undefined}
+            label={floorKnown ? `${floorTargetShort.toUpperCase()} Floor Health` : 'Floor Health'}
+            value={floorKnown && Number.isFinite(nockAmountParsed) ? ((nockAmountRaw / floorTarget) * 100).toFixed(1) : undefined}
             suffix="%"
-            subtitle={!nockFloorDeltaKnown ? 'floor status unknown' : isFloorSafe ? `Hard Floor Safe (+${nockFloorDeltaVal} buffer)` : `CRITICAL: ${nockFloorDeltaVal} Below Floor`}
+            subtitle={floorNone ? 'No floor configured' : !nockFloorDeltaKnown ? 'floor status unknown' : floorDeltaText(nockFloorDeltaRaw, floorTarget)}
             highlightColor={floorHealthColor}
           />
           <StatCard
@@ -390,7 +393,11 @@ function Dashboard() {
             color: !nockFloorDeltaKnown ? '#8b949e' : isFloorSafe ? '#a7f3d0' : '#fecaca',
             border: !nockFloorDeltaKnown ? '1px solid #30363d' : isFloorSafe ? '1px solid #059669' : '1px solid #dc2626',
           }}>
-            Floor Invariant: <strong>{floorTargetFormatted} NOCK Hard Floor {!nockFloorDeltaKnown ? 'UNKNOWN' : isFloorSafe ? 'PROTECTED' : 'BREACHED'}</strong>{nockFloorDeltaKnown && <> ({nockFloorDeltaRaw >= 0 ? '+' : ''}{nockFloorDeltaVal} cushion)</>}
+            {floorNone
+              ? <>Floor: <strong>No floor configured</strong></>
+              : !floorKnown
+                ? <>Floor: <strong>— UNKNOWN</strong></>
+                : <>Floor: <strong>{floorTargetFormatted} NOCK {!nockFloorDeltaKnown ? 'buffer unavailable' : isFloorSafe ? 'MET' : 'BREACHED'}</strong>{nockFloorDeltaKnown && <> ({floorDeltaText(nockFloorDeltaRaw, floorTarget)})</>}</>}
           </div>
         </div>
         <div style={styles.regimeRow}>
@@ -398,12 +405,14 @@ function Dashboard() {
             <span
               style={{
                 ...styles.regimeBadge,
-                ...(global.regime === 'overextended'
+                ...(regimeToneNow === 'warn'
                   ? { background: '#78350f', color: '#fcd34d', border: '1px solid #d97706' }
-                  : { background: '#064e3b', color: '#a7f3d0', border: '1px solid #059669' }),
+                  : regimeToneNow === 'ok'
+                    ? { background: '#064e3b', color: '#a7f3d0', border: '1px solid #059669' }
+                    : { background: '#161b22', color: '#8b949e', border: '1px solid #30363d' }),
               }}
             >
-              REGIME: {global.regime === 'overextended' ? 'OVEREXTENDED' : 'NORMAL'}
+              REGIME: {regimeLabel(global.regime)}
             </span>
           )}
           <span style={styles.rsiChip}>RSI(14D): <strong style={{ color: '#e6edf3' }}>{global?.rsi_14_1d ?? '—'}</strong></span>
@@ -424,13 +433,13 @@ function Dashboard() {
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>Goal 1 (NOCK Accretion):</span>
             <span style={styles.shotPillText}>
-              {totalNockVal} NOCK total across the Sovereign Treasury wallet and {positionsList.length} tracked LP position{positionsList.length === 1 ? '' : 's'}. Floor lock active if total &lt; {floorTargetFormatted}.
+              {totalNockVal} NOCK total across the Sovereign Treasury wallet and {positionsList.length} tracked LP position{positionsList.length === 1 ? '' : 's'}. {floorKnown ? `DEFENSIVE LOCK if total < ${floorTargetFormatted}.` : floorNone ? 'No floor configured.' : 'Floor unavailable.'}
             </span>
           </div>
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>Goal 2 (USDC Accumulation):</span>
             <span style={styles.shotPillText}>
-              ${global?.total_usdc_amount || '0.00'} USDC across wallet and AMM liquidity. ${global?.total_fees_claimable_usd || '0.00'} live claimable yield accrued.
+              {statValueText(global?.total_usdc_amount, '$', ' USDC')} across wallet and AMM liquidity. {statValueText(global?.total_fees_claimable_usd, '$')} of LP fees uncollected.
             </span>
           </div>
           <div style={styles.shotPill}>
@@ -494,7 +503,7 @@ function Dashboard() {
       {/* Storyboard Canvas — Real Charts (structural channel panel appears when band data exists) */}
       <main style={styles.grid}>
         {/* 1. Sovereign NOCK Stack & Floor Reference */}
-        <CanvasPanel title={`The Sovereign NOCK Stack vs ${floorTargetFormatted} Floor (Token Units)`}>
+        <CanvasPanel title={floorNone ? 'The Sovereign NOCK Stack (Token Units, no floor configured)' : `The Sovereign NOCK Stack vs ${floorTargetFormatted} Floor (Token Units)`}>
           <ResponsiveContainer width="100%" height={260}>
             <AreaChart data={assetSeries} margin={{ top: 15, right: 30, left: 15, bottom: 0 }}>
               <defs>
@@ -562,7 +571,7 @@ function Dashboard() {
           </ResponsiveContainer>
           <div style={{ marginTop: 8, fontSize: '0.75rem', color: '#888', display: 'flex', justifyContent: 'space-between' }}>
             <span>Total Holding: <strong style={{ color: floorHealthColor }}>{totalNockVal} NOCK</strong></span>
-            <span>Safety Buffer: <strong style={{ color: floorHealthColor }}>{nockFloorDeltaKnown ? `${nockFloorDeltaRaw >= 0 ? `+${nockFloorDeltaVal}` : nockFloorDeltaVal} NOCK (${nockFloorDeltaRaw >= 0 ? `+${nockFloorDeltaPct}%` : `${nockFloorDeltaPct}%`}) above floor` : '—'}</strong></span>
+            <span>Safety Buffer: <strong style={{ color: floorHealthColor }}>{nockFloorDeltaKnown ? `${floorDeltaText(nockFloorDeltaRaw, floorTarget)} (${nockFloorDeltaRaw >= 0 ? '+' : ''}${nockFloorDeltaPct}%)` : floorNone ? 'no floor configured' : '—'}</strong></span>
           </div>
         </CanvasPanel>
 
@@ -654,7 +663,7 @@ function Dashboard() {
                 {deviationData.map((d: any, i: number) => (
                   <Cell
                     key={i}
-                    fill={d.status === 'over_funded' ? '#ef4444' : d.status === 'under_funded' ? '#f59e0b' : d.status === 'fast_running' ? '#f97316' : '#10b981'}
+                    fill={d.status === 'over_funded' ? '#ef4444' : d.status === 'under_funded' ? '#f59e0b' : d.status === 'fast_running' ? '#f97316' : d.status === 'on_target' ? '#10b981' : '#8b949e'}
                   />
                 ))}
               </Bar>
@@ -673,6 +682,7 @@ function Dashboard() {
             <span><span style={{ color: '#10b981' }}>■</span> Actual: On Target</span>
             <span><span style={{ color: '#f59e0b' }}>■</span> Actual: Under-Funded</span>
             <span><span style={{ color: '#ef4444' }}>■</span> Actual: Over-Funded</span>
+            <span><span style={{ color: '#8b949e' }}>■</span> Actual: No Target Set</span>
           </div>
         </CanvasPanel>
 
@@ -759,7 +769,7 @@ function Dashboard() {
                 </div>
                 <div style={{ fontSize: '0.7rem', color: '#484f58', lineHeight: 1.6 }}>
                   Virtual accounting inside the single sovereign wallet: {ledger?.last_harvest_at ? `last verified harvest ${new Date(ledger.last_harvest_at).toLocaleString()}. ` : 'No receipt-verified harvests recorded yet. '}
-                  Tax reserve ratio configured in operator_profile.tax_reserve_ratio (default 0.40).
+                  Tax reserve ratio configured in operator_profile.tax_reserve_ratio (unset means no virtual reserve).
                 </div>
               </div>
             );
