@@ -321,6 +321,15 @@ First plan: $100 over five buys, 24 hours apart.
 | Cash-target fix "worth shipping regardless" | Shipped for the no-plan path too | The legacy `DIP REINVESTMENT SHOT` now leaves the cash target behind and says so. |
 | `spot < $0.020` gate | Dropped while a plan is configured | The plan's own `max_price_usd` replaces it. A configured plan, even a completed one, also retires the lump-sum arm so completion is not followed by "deploy everything left". |
 
+**Update, v0.5.1 (operator decision, 2026-11-14): the no-plan arm is retired.** The
+legacy `DIP REINVESTMENT SHOT` sized a lump-sum buy for anyone without a plan, toward a
+hardcoded 120,000 NOCK goal nobody chose. That broke the rule that NockNock never chooses
+a user's numbers (OPERATOR_GUIDANCE §7.14), so it was removed, with its $0.020 boundary
+as a sizing rule and its 120,000 literal. With no plan configured NockNock sizes no buy:
+the planless arms (`NOTHING TO TRACK YET`, `BUILD FROM ZERO`, `TAX RESERVE SHORT`,
+`DIP ZONE`) state facts and say that budget, tranches and interval are the user's to set.
+The two rows above that describe the no-plan path are historical.
+
 ### 8.3 Surface
 
 - Config: optional `accumulation_plan` (see `config.yaml.example`); venue label defaults

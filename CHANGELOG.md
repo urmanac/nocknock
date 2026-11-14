@@ -41,6 +41,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   composition readout, the snapshot's own ETH/USD for ETH brackets, and when the
   high-water mark was set.
 
+### Fixed — surfaces (v0.5.2)
+- **`GET /v1/snapshot/{id}`** returned 500 `CORRUPTED_DATA` for every stored row: the
+  handler parsed the `data` column as a whole envelope, but `store_snapshot` writes only
+  the payload. It now parses `SnapshotData` and builds the envelope from the row
+  (`envelope_from_stored`).
+- **First-run errors are visible.** The 503 `NO_SNAPSHOT` body (latest snapshot and the
+  claim payload) carries the last ingestion error as `detail`, and MCP appends it to "No
+  snapshot available yet". The dashboard and the Lite cockpit show that cause instead of
+  "Worker unreachable"; "unreachable" is now said only when the worker did not answer.
+- **Aero pools whose `claimFees()` reverts** read "not LP-claimable (claimFees()
+  reverts); AERO rewards not read (#93)" in the velocity panel, the MCP claim simulation
+  and the Lite cockpit, never "$0 earned". In the claim payload the action reports
+  `simulation: "not_claimable"` instead of "RPC unavailable", gets no gas estimate, and
+  no longer nulls `estimated_gas_usd` and `net_after_gas_usd` for the actions that can
+  execute.
+- **MCP honesty (both transports).** "Live API" and "Tier 1 Connected" are gone; every
+  answer ends with the snapshot's generation time and the worker's health. The harvest
+  rule says BATCH HARVEST is advised only when no DCA tranche is due. Tool descriptions say
+  "LP" instead of "Uniswap" for all positions.
+- Specs: `recommended_action` lists the values the worker emits (`claim_now`,
+  `claim_recommended`, `accumulate`, `not_claimable`); `simulation` adds `not_claimable`.
+
+### Docs
+- README §1–2 rewritten: the retired portfolio and the operator's numbers presented as
+  "the strategy" are gone; example numbers are one operator's, not recommendations; the
+  current directive precedence and the LP rebuild bias; link to the four-pillars lore.
+  Quick Start: `urmanac/nocknock`, a config step, Node 22+.
+- OPERATOR_GUIDANCE §7.11–7.14: four pillars, gas is not cash, the wallet is the record,
+  building in public; the AERO item reworded in pillar terms.
+- ONCHAIN_INTEGRATION: dated "superseded in v0.5.0" notes; HANDOFF.md marked historical;
+  AGENTS.md §10 points to the lore; design note §8.2 records that the no-plan arm was
+  retired in v0.5.1; "in production" dropped from the mock-data invariant headings.
+
 ### Deferred to Future Releases
 - [ ] **Koinly On-Chain Transaction Classifier (Issue #56, v0.4.0)**: reconcile on-chain fee-claim harvests directly with Koinly's Base wallet sync as ordinary income — explicitly NOT manual CSV download buttons/tooling (duplicate transactions and burns the annual 1,000-transaction budget on the $99 tier; Koinly misclassifying claims as "Liquidity Removals" corrupts LP cost basis).
 - [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).

@@ -1,6 +1,6 @@
 # NockNock Issue Triage & Bug Classification Runbook (`TRIAGE.md`)
 
-> **Core Principle**: "Mock data in the production app is a bug." — Sovereign State Room Directive
+> **Core Principle**: "Mock data is a bug." — Sovereign State Room Directive
 
 This document defines the issue triage protocol, label architecture, bug severity taxonomy, and active bug registry for the **NockNock** project across the `v0.1.x` patch release cycle.
 

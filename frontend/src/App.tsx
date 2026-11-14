@@ -20,7 +20,7 @@ import {
   ReferenceLine,
   ReferenceArea,
 } from 'recharts';
-import { api } from './api/client';
+import { api, describeApiError } from './api/client';
 import { useFreshness, StaleBanner } from './hooks/useFreshness.tsx';
 
 /** market_price_history provenance tags (main.rs PRICE_SOURCE_*) → display names */
@@ -31,7 +31,7 @@ const SOURCE_LABELS: Record<string, string> = {
   aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
-import { POSITION_COLORS, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText } from './positions.ts';
+import { POSITION_COLORS, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText, velocityRowText } from './positions.ts';
 import { floorState, floorDeltaText, floorSummaryText, regimeLabel, regimeTone } from './floor.ts';
 import { buildChartRows, compositionReadout, syncWindowOrDefault, type ChartSeries, type GapRow } from './timeline.ts';
 import { ethUsdPrice, gasLine, hwmSubtitle, pillarLine } from './pillars.ts';
@@ -84,7 +84,7 @@ function Dashboard() {
   if (error) {
     return (
       <div style={styles.container}>
-        <div style={styles.error}>Error: {error.message}</div>
+        <div style={styles.error}>{describeApiError(error)}</div>
         <button onClick={refetch} style={styles.button}>
           Retry
         </button>
@@ -355,7 +355,7 @@ function Dashboard() {
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>LP Positions / Range Risk:</span>
             <span style={styles.shotPillText}>
-              {positionsSummary(positionsList)} Unclaimed fees live-tracked on-chain.
+              {positionsSummary(positionsList)} Uniswap LP fees are read on-chain; rewards on staked Aero LP are not read yet (#93).
             </span>
           </div>
         </div>
@@ -733,7 +733,7 @@ function Dashboard() {
           <div style={{ marginTop: 8, fontSize: '0.75rem', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             {gasData.map((g: any) => (
               <span key={g.name} style={{ color: g.action === 'claim_now' ? '#10b981' : '#f59e0b' }}>
-                <strong>{g.name}:</strong> {g.action.toUpperCase()} (${g.claimable} earned / gas ${g.gasBreakEven} — {g.ratio.toFixed(0)}x ROI)
+                {velocityRowText(g)}
               </span>
             ))}
           </div>

@@ -963,8 +963,11 @@ components:
           description: claimable_usd / gas_break_even_usd
         recommended_action:
           type: string
-          enum: [claim_now, wait, not_worthwhile]
-          description: Gas-economic recommendation
+          enum: [claim_now, claim_recommended, accumulate, not_claimable]
+          description: >
+            Gas-economic recommendation. not_claimable marks an Aero pool whose
+            claimFees() reverts: its fees are not LP-claimable and AERO rewards are
+            not read (#93); claimable_usd is then 0.00 and is not an amount earned.
 
     # ============================================================
     # INPUT TYPES FOR WASM FUNCTIONS

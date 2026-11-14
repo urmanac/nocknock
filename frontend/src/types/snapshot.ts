@@ -220,7 +220,8 @@ export interface FeeCollectionIndex {
   claimable_usd: string;
   gas_break_even_usd: string;
   efficiency_ratio: number;
-  recommended_action: 'claim_now' | 'wait' | 'not_worthwhile';
+  /** What the worker emits; 'not_claimable' is an Aero pool whose claimFees() reverts. */
+  recommended_action: 'claim_now' | 'claim_recommended' | 'accumulate' | 'not_claimable';
 }
 
 // ============================================================
