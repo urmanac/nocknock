@@ -5,7 +5,27 @@
  * turn derives plan progress from receipt-verified buys. Nothing here invents a
  * number — a missing value renders as an em dash.
  */
-import type { AccumulationPlanStatus, LpRebuild } from './types/snapshot';
+import type { AccumulationPlanStatus, LpRebuild, LpSuggestion } from './types/snapshot';
+
+/** "78.20 USDC + 8,730 NOCK" — legs with a zero amount are left out (single-sided ranges). */
+export function suggestionLegs(
+  sg: Pick<LpSuggestion, 'amount0' | 'token0_symbol' | 'amount1' | 'token1_symbol'>,
+): string {
+  const fmt = (amount: string) => {
+    const decimals = amount.includes('.') ? amount.split('.')[1].length : 0;
+    return parseFloat(amount).toLocaleString('en-US', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+  };
+  return [
+    [sg.amount0, sg.token0_symbol],
+    [sg.amount1, sg.token1_symbol],
+  ]
+    .filter(([amount]) => parseFloat(amount) > 0)
+    .map(([amount, symbol]) => `${fmt(amount)} ${symbol}`)
+    .join(' + ');
+}
 
 export const PLAN_STATUS_LABEL: Record<AccumulationPlanStatus['status'], string> = {
   pending: 'PENDING',

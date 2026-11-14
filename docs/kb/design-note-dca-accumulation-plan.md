@@ -361,9 +361,61 @@ The legacy vAMM still holds deep NOCK/USDC liquidity at a better implied price t
 the routed fill. Whether it is still safely tradable through the legacy router is
 untested and is the operator's call, not something the engine should assume.
 
+### 8.6 LP rebuild suggestions (Issue #83) and strategy-consistency fixes
+
+`REBUILD LP TRANCHES` reported a gap but gave no way to act on it. The engine now sizes
+a deposit per eligible tracked position (`lp_rebuild_suggestions`, pure) and links to
+the position in the Uniswap app. Operator rules: equal split unless weighted; do not
+fill out-of-range positions by default; USDC inside LP counts toward the cash reserve.
+
+Building it surfaced three places where the strategy contradicted itself. The operator
+authorised fixing these in code (OPERATOR_GUIDANCE §7.9):
+
+1. **LP could breach the hard floor.** `total_nock` counts NOCK inside LP toward the
+   100,000 floor, but a range sells its NOCK as price rises. An equal split of the LP
+   target would have placed about 18,900 NOCK in ranges with only 17,346 above the
+   floor, so a rally could sell the stack below the floor and trip `DEFENSIVE LOCK`.
+   First fix: a hard cap at the NOCK above the floor (observed live: both
+   suggestions scaled from $185.62 to $170.09, placing exactly 17,346 NOCK).
+   **The operator overruled the hard cap the same day**: the overlap is deliberate.
+   Ranges sell gradually, so only a large rally sells everything, and the point is to
+   trade more and earn fees. Final rule: LP may hold the NOCK above the floor plus
+   `lp_floor_tolerance_bps` of the floor (operator's config: 500, i.e. up to 5,000
+   NOCK). The engine no longer forbids the exposure; it bounds and reports it. Each
+   suggestion shows the price multiple at which it has sold all its NOCK, and
+   `worst_case_nock` shows what remains if every range sells out. Those multiples
+   differ a lot between ranges: on 2026-11-14 the wide USDC/NOCK range needed a
+   ~3.6x rise to sell out, the narrow WETH/NOCK range only ~1.44x (against ETH).
+2. **"In range" was reported for a dead pool.** `in_range` compares a position's ticks
+   with its own pool's tick. NFT #3163431's pool has no in-range liquidity, so its tick
+   is frozen at $0.0169 while the market is at $0.0123; it read "in range" and would
+   have been a rebuild target. Fix: positions carry `pool_active`, dead pools are never
+   suggested, and the dashboard shows STALE POOL.
+3. **The cash reserve and the LP rule disagreed.** The reserve counted wallet USDC only,
+   while the LP rule treats USDC in a range as still cash. A USDC-bearing deposit would
+   have blocked the DCA plan. Fix (operator's choice): the reserve is measured on wallet
+   plus LP USDC. Consequence stated in the advice and tests: if a range converts its
+   USDC to NOCK on a dip, the stable balance falls and the plan stops spending.
+
+Open strategy questions this leaves, none decided:
+
+- **Dip behaviour of LP USDC.** With USDC in a range counted as reserve, a falling price
+  spends the reserve automatically (the range buys NOCK). That is a price-triggered buy
+  ladder, which may be exactly what "there might be a dip" wants, or may not be.
+- **Execution cost is unmeasured.** The first tranche paid ~1.8% over spot. The ledger
+  stores the fill price but not spot at the fill's block, so cost per venue cannot yet
+  be tracked over time.
+- **Legacy advice constants.** The no-plan arm still hardcodes the $0.020 accumulation
+  line, a 120,000 NOCK compounding goal and "$5.00+ high walls"; standing orders say
+  such numbers belong in config.
+- **Deposits are suggested, not built.** The unsigned add-liquidity transaction (v4 POSM
+  `modifyLiquidities`, v3 NPM `increaseLiquidity`) needs its encoding verified by
+  simulation before the cockpit can offer it for signing.
+
 ### 8.4 Still open
 
-Question 1 is answered for the first plan ($100 / 5 / 24h, $950 reserve). Questions
+Question 1 is answered for the first plan ($100 / 5 / 24h, $950 reserve). Question 5
+is answered by 8.1 and 8.6. Questions
 2 (keep or drop the RSI pause), 3 (price
 ceiling), 4 (auto-attach hand-executed buys), 6 (count ETH) and 7 (multiple plans) are
 unchanged. Phases 2 and 3 are not started.

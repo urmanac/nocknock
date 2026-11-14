@@ -23,6 +23,12 @@ token_addresses:
 # Identifiers below are RPC-discovery-verified (2026-10-24; ONCHAIN_INTEGRATION.md §5).
 # The portfolio is Uniswap-only: the Aerodrome tranche was liquidated 2026-10-23.
 # After a repositioning, re-run the Phase-1 discovery runbook and update this list.
+#
+# LP rebuild suggestions (v0.5.0): while LP is under target the engine sizes a deposit
+# for each eligible position. By default the LP target is split equally across positions
+# whose pool is live and which are in range. Optional per-position controls:
+#     rebuild_weight_bps: 7000          # this position's share of the LP target (0 = never)
+#     rebuild_when_out_of_range: true   # exception to "do not fill out-of-range positions"
 positions:
   # Position B — NOCK/USDC, Uniswap v4, 0.75% fee. No longer the price source: after the
   # 2026-11 liquidation this pool has zero in-range liquidity, so its price is frozen.
@@ -89,6 +95,12 @@ port: 8080
 operator_profile:
   # Hard floor invariant: Minimum sovereign NOCK holding required before capital deployment.
   treasury_floor_nock: 100000.0
+
+  # LP floor tolerance: how far below the floor the stack may fall if every LP range
+  # sold ALL its NOCK, in basis points of the floor (500 = 5% = 5,000 NOCK of 100,000).
+  # Ranges sell gradually as price rises, so a small overage lets more NOCK trade and
+  # earn fees. 0 (default) keeps every floor NOCK out of LP.
+  lp_floor_tolerance_bps: 0
 
   # Virtual 60/40 split rule: fraction of realized fee harvests (and measurable net
   # capital gains) earmarked to the virtual tax reserve buffer. The remainder is

@@ -34,3 +34,16 @@ export function positionRangeText(p: any): string {
   }
   return `${fmt(lower)} – ${fmt(upper)} ${p.token0.symbol} per ${p.token1.symbol}`;
 }
+
+/**
+ * Range badge for a position card (2.2.0). A pool with no in-range liquidity has a
+ * frozen price, so "in range" judged against that pool's own tick says nothing about
+ * the market: show STALE POOL instead of a reassuring green pill.
+ */
+export function rangeStatus(p: { in_range: boolean; pool_active?: boolean | null }): {
+  label: string;
+  tone: 'good' | 'warn' | 'stale';
+} {
+  if (p.pool_active === false) return { label: '● STALE POOL', tone: 'stale' };
+  return p.in_range ? { label: '● IN RANGE', tone: 'good' } : { label: '● OUT OF RANGE', tone: 'warn' };
+}

@@ -111,7 +111,16 @@
 7. **Protect the Cash Position (standing order, 2026-11-14)**:
    - "Let's not dilute the cash position overtly — we have lots of cash, we want to keep it. There might be a dip!"
    - Plans carry a `cash_reserve_usdc` floor the engine never advises spending below, at any price. The default 5% cash target is a long-run weight, not permission to spend down to it. Only the operator lowers the reserve.
-8. **No Hallucinations / Urbit Lore**:
+   - The reserve counts USDC inside LP positions as well as wallet USDC (operator decision, 2026-11-14), consistent with the LP-rebuild rule above.
+8. **LP Rebuild Rules (standing orders, 2026-11-14)**:
+   - Split the LP target equally across eligible tracked positions unless config sets weights.
+   - "We should not generally aim to fill positions that are out of range." Out-of-range positions are skipped unless config makes an explicit exception.
+   - Never suggest a deposit into a pool with no in-range liquidity.
+   - LP may hold slightly more NOCK than sits above the hard floor. Operator, 2026-11-14: "Because the LP sells a fraction every time the price moves, by putting in just a little bit more than what we have allowed as a trading limit we will actually be quite unlikely to sell it all unless there is a super rally, in which case we'll still have most of the hundred thousand... We need to trade more." The overage is bounded by `operator_profile.lp_floor_tolerance_bps`, and the engine must state the worst case rather than hide it. Do not re-impose a hard cap at the floor.
+9. **Agents May Improve the Strategy (2026-11-14)**:
+   - "I am counting on you to make the strategy good — the strategy that we wrote may not be good. You are allowed to suggest adjustments, and even build them into the code."
+   - This covers the soundness of the rules: internal consistency, guardrails, measurement, and removing ways the engine can contradict its own invariants. State each adjustment and its reason plainly. It does not extend to choosing the operator's allocation (how much to hold, deploy or reserve): those numbers stay the operator's decision.
+10. **No Hallucinations / Urbit Lore**:
    - Never hallucinate fake Urbit `@p` (e.g. `~urmanac` is invalid Hoon syntax). Stick strictly to verifiable protocol and mathematical facts.
 
 ---

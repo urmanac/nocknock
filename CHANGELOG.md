@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — LP Rebuild Suggestions: a Call to Action for REBUILD LP TRANCHES (Issue #83)
+- **Concrete deposits.** While LP is under target, `lp_rebuild.suggestions` sizes one
+  deposit per eligible tracked position (amounts of each token at the pool's current
+  price) with a link to that position in the Uniswap app; the advice text carries the
+  same steps. The operator makes the deposit; the worker then reads it on-chain.
+- **Rules.** The LP target is split equally across eligible positions, or by
+  `positions[].rebuild_weight_bps`. Out-of-range positions are not filled unless
+  `rebuild_when_out_of_range: true` (operator rule: "we should not generally aim to fill
+  positions that are out of range").
+- **Dead pools are never suggested**, and positions gain `pool_active`. A pool with no
+  in-range liquidity has a frozen price, so `in_range` judged against its own tick is
+  meaningless; the dashboard now shows STALE POOL instead of a green "in range" pill.
+- **LP exposure of floor NOCK is bounded and reported.** A range sells its NOCK as
+  price rises. Suggestions may place the NOCK above `treasury_floor_nock` plus
+  `operator_profile.lp_floor_tolerance_bps` of the floor (default 0). The operator
+  accepts a small overage on purpose: ranges sell gradually, so only a large rally
+  sells everything, and more NOCK in range means more trading and fees. Each suggestion
+  states the price multiple at which it would have sold all its NOCK, and
+  `lp_rebuild.worst_case_nock` states what would remain if every range sold out.
+- **Funding is checked, never assumed.** Suggestions leave liquid USDC for the cash
+  target, tax reserve and remaining DCA tranches, and keep an ETH gas buffer. A short
+  source scales every position that uses it by the same factor (independent of config
+  order) and is named; an unread balance or pool state withholds the suggestion.
+- **Snapshot 2.2.0 (additive)**: `lp_rebuild.suggestions`, `lp_rebuild.excluded`,
+  `positions[].pool_active`.
+
+### Changed — Protected Cash Reserve Counts USDC Inside LP
+- `accumulation_plan.cash_reserve_usdc` is now measured on the stable balance (wallet
+  USDC plus USDC inside LP positions), per the operator's rule that rebuilding LP is
+  cash-neutral. Moving USDC into a range no longer consumes reserve headroom; buying NOCK
+  does. If a range converts its USDC to NOCK on a dip the stable balance falls and the
+  plan stops spending.
+
 ### Added — Accumulation Plan: Dollar-Cost-Averaged NOCK Buys, Phase 1 (Issue #79)
 - **Optional `accumulation_plan` config** (budget, tranches, interval, optional price
   ceiling). While configured, the advice engine paces buys as `DCA TRANCHE DUE (n of N)` /

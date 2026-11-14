@@ -25,6 +25,12 @@ use uuid::Uuid;
 pub struct OperatorProfile {
     #[serde(default = "default_treasury_floor")]
     pub treasury_floor_nock: f64,
+    /// How far below the floor the stack may fall if every LP range sold all its NOCK,
+    /// in basis points of the floor (operator decision, 2026-11-14). A range sells
+    /// gradually as price rises, so the operator accepts placing a little more NOCK in
+    /// LP than sits above the floor, to trade more and earn fees. 0 = none.
+    #[serde(default)]
+    pub lp_floor_tolerance_bps: u32,
     #[serde(default = "default_tax_reserve_ratio")]
     pub tax_reserve_ratio: f64,
     #[serde(default = "default_target_weights")]
@@ -61,6 +67,7 @@ impl Default for OperatorProfile {
     fn default() -> Self {
         Self {
             treasury_floor_nock: default_treasury_floor(),
+            lp_floor_tolerance_bps: 0,
             tax_reserve_ratio: default_tax_reserve_ratio(),
             target_weights_bps: default_target_weights(),
         }
@@ -100,6 +107,14 @@ pub struct PositionConfig {
     /// Designates the position whose pool supplies the NOCK/USD spot.
     #[serde(default)]
     pub is_price_source: bool,
+    /// Share of the LP target this position should hold when rebuilding, in basis
+    /// points. Unset = equal split across every eligible position; 0 = never suggest.
+    #[serde(default)]
+    pub rebuild_weight_bps: Option<u32>,
+    /// Operator rule (2026-11-14): "we should not generally aim to fill positions that
+    /// are out of range". Set true to make an exception for this position.
+    #[serde(default)]
+    pub rebuild_when_out_of_range: bool,
 }
 
 fn default_network() -> String {
@@ -334,6 +349,25 @@ struct RawOnChainData {
     live_gas_cost_usd: f64,
     #[serde(default = "default_eth_price")]
     live_eth_price_usd: f64,
+    /// In-range liquidity of each tracked position's pool, keyed by position_id
+    /// (decimal string). A missing key means the read failed this cycle: unknown, not zero.
+    #[serde(default)]
+    pool_liquidity: HashMap<String, String>,
+    /// Native ETH and WETH held by the wallet; None when not read. Used only to check
+    /// that a suggested deposit can be funded — not counted in portfolio totals.
+    #[serde(default)]
+    wallet_eth: Option<f64>,
+    #[serde(default)]
+    wallet_weth: Option<f64>,
+    /// Per-position rebuild controls from config, keyed by position_id.
+    #[serde(default)]
+    rebuild_rules: HashMap<String, RebuildRule>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq)]
+struct RebuildRule {
+    weight_bps: Option<u32>,
+    when_out_of_range: bool,
 }
 
 /// Token descriptor for position legs (symbol/decimals come from the repo's verified
@@ -372,6 +406,11 @@ struct Position {
     liquidity_amount: String,
     in_range: bool,
     is_price_source: bool,
+    /// False when the position's pool has no in-range liquidity: its price is frozen,
+    /// so `in_range` (judged against that pool's own tick) says nothing about the
+    /// market. Null when the pool read failed this cycle. (2.2.0)
+    #[serde(default)]
+    pool_active: Option<bool>,
 }
 
 /// Per-position NOCK series entry for the asset aggregation chart (v2.0.0;
@@ -539,6 +578,336 @@ struct LpRebuild {
     /// target − actual, floored at zero.
     gap_usd: String,
     target_weight_bps: i32,
+    /// Concrete deposits that would close the gap, one per eligible position (2.2.0).
+    #[serde(default)]
+    suggestions: Vec<LpSuggestion>,
+    /// Tracked positions deliberately left out, with the reason (2.2.0).
+    #[serde(default)]
+    excluded: Vec<LpExclusion>,
+    /// NOCK the operator tolerates below the floor in a full LP sell-out (2.2.0).
+    #[serde(default)]
+    floor_tolerance_nock: Option<String>,
+    /// Total NOCK left if every range, existing and suggested, sold all its NOCK (2.2.0).
+    #[serde(default)]
+    worst_case_nock: Option<String>,
+}
+
+/// One suggested deposit into an existing tracked position. Amounts are what the
+/// position's range takes at the pool's current price for `add_usd` of value; the
+/// operator makes the deposit in the Uniswap app, and the worker sees it on-chain.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct LpSuggestion {
+    position_id: String,
+    nft_id: u64,
+    protocol: String,
+    label: String,
+    /// This position's share of the LP target, and what it holds now.
+    target_usd: String,
+    current_usd: String,
+    add_usd: String,
+    token0_symbol: String,
+    amount0: String,
+    token1_symbol: String,
+    amount1: String,
+    /// Guardrail that shrank the suggestion below its target, in plain words.
+    limited_by: Option<String>,
+    /// Price multiple (NOCK against the pool's other token) at which this range has
+    /// sold ALL of its NOCK: 1.44 means a 44% rise empties it. Selling is gradual on
+    /// the way there. Null when the range holds no NOCK at the current price.
+    #[serde(default)]
+    nock_sold_out_at_multiple: Option<String>,
+    /// Where to act: the position's page in the Uniswap app.
+    url: String,
+}
+
+/// How far NOCK must rise against the pool's other token before the range has sold all
+/// of its NOCK. NOCK as token1 is exhausted at the lower tick, as token0 at the upper.
+/// Pure.
+fn nock_sell_out_multiple(p: &RawPosition) -> Option<f64> {
+    let ticks = if is_nock_token(&p.token1) {
+        p.tick - p.tick_lower
+    } else if is_nock_token(&p.token0) {
+        p.tick_upper - p.tick
+    } else {
+        return None;
+    };
+    if ticks <= 0 {
+        return None; // already past the edge: the range holds no NOCK
+    }
+    Some(1.0001f64.powi(ticks))
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct LpExclusion {
+    position_id: String,
+    nft_id: u64,
+    label: String,
+    reason: String,
+}
+
+/// What the wallet can put into LP without breaking another rule.
+#[derive(Debug, Default, Clone, Copy)]
+struct RebuildFunds {
+    /// NOCK that may go into LP: what sits above the floor plus the tolerated overage.
+    nock: f64,
+    /// The tolerated overage included in `nock` (for the explanation text).
+    floor_tolerance_nock: f64,
+    /// Liquid USDC above what must stay in the wallet (cash target, tax reserve and
+    /// the accumulation plan's remaining tranches).
+    usdc: f64,
+    /// ETH + WETH less a gas buffer; None when balances were not read.
+    eth: Option<f64>,
+}
+
+/// ETH kept back for gas when sizing a deposit that needs ETH/WETH.
+const REBUILD_GAS_BUFFER_ETH: f64 = 0.002;
+
+fn position_label(p: &RawPosition) -> String {
+    format!(
+        "{} {}/{} {:.2}% #{}",
+        if p.protocol == "uniswap-v3" { "v3" } else { "v4" },
+        p.token0.symbol,
+        p.token1.symbol,
+        p.fee_tier_bps as f64 / 100.0,
+        p.nft_id
+    )
+}
+
+/// Human amounts of token0/token1 that one USD of value buys in this position's range
+/// at the pool's current price. None when the range has no value at this price or a
+/// leg cannot be priced. Pure.
+fn amounts_per_usd(p: &RawPosition, nock_usd: f64, eth_usd: f64) -> Option<(f64, f64)> {
+    // Any liquidity works as the probe: amounts are linear in L.
+    let (r0, r1) = concentrated_amounts_raw(1_000_000_000_000_000_000, p.sqrt_price_x96, p.tick_lower, p.tick_upper);
+    let a0 = r0 / 10f64.powi(p.token0.decimals);
+    let a1 = r1 / 10f64.powi(p.token1.decimals);
+    let p0 = leg_usd_price(&p.token0, nock_usd, eth_usd);
+    let p1 = leg_usd_price(&p.token1, nock_usd, eth_usd);
+    if (a0 > 0.0 && p0 <= 0.0) || (a1 > 0.0 && p1 <= 0.0) {
+        return None;
+    }
+    let value = a0 * p0 + a1 * p1;
+    if !(value > 0.0) || !value.is_finite() {
+        return None;
+    }
+    Some((a0 / value, a1 / value))
+}
+
+/// Size the LP rebuild: split the LP target across eligible tracked positions and work
+/// out what each deposit takes. Pure — no I/O, unit-testable.
+///
+/// Eligibility: the pool must have in-range liquidity (a dead pool's price is frozen,
+/// so a deposit there would sit alone at a stale price), and the position must be in
+/// range unless its config makes an exception. Funding: a suggestion is scaled down,
+/// never up, to what the wallet can supply; the limit is named.
+fn lp_rebuild_suggestions(
+    raw: &RawOnChainData,
+    lp_target_usd: f64,
+    funds: RebuildFunds,
+) -> (Vec<LpSuggestion>, Vec<LpExclusion>) {
+    let nock_usd = raw.spot_price_nock_usd;
+    let eth_usd = raw.live_eth_price_usd;
+    let mut excluded = Vec::new();
+    let mut eligible: Vec<(&RawPosition, Option<u32>)> = Vec::new();
+    for p in &raw.positions {
+        let rule = raw.rebuild_rules.get(&p.position_id).copied().unwrap_or_default();
+        let mut skip = |reason: &str| {
+            excluded.push(LpExclusion {
+                position_id: p.position_id.clone(),
+                nft_id: p.nft_id,
+                label: position_label(p),
+                reason: reason.to_string(),
+            })
+        };
+        if rule.weight_bps == Some(0) {
+            skip("excluded in config (rebuild_weight_bps: 0)");
+            continue;
+        }
+        match raw.pool_liquidity.get(&p.position_id).and_then(|v| v.parse::<u128>().ok()) {
+            None => {
+                skip("pool liquidity could not be read this cycle");
+                continue;
+            }
+            Some(0) => {
+                skip("pool has no in-range liquidity, so its price is frozen; a deposit would sit alone at a stale price");
+                continue;
+            }
+            Some(_) => {}
+        }
+        if !p.in_range && !rule.when_out_of_range {
+            skip("position is out of range (out-of-range positions are not filled by default)");
+            continue;
+        }
+        eligible.push((p, rule.weight_bps));
+    }
+
+    // Weights: explicit bps where given; positions without one share what is left equally.
+    let explicit: u32 = eligible.iter().filter_map(|(_, w)| *w).sum();
+    let unweighted = eligible.iter().filter(|(_, w)| w.is_none()).count() as f64;
+    let leftover = (10000.0 - explicit as f64).max(0.0);
+
+    // Pass 1: what each position wants, and what that takes of each token.
+    struct Want<'a> {
+        p: &'a RawPosition,
+        target_usd: f64,
+        current_usd: f64,
+        want_usd: f64,
+        per0: f64,
+        per1: f64,
+    }
+    let mut wants: Vec<Want> = Vec::new();
+    for (p, w) in eligible {
+        let weight = match w {
+            Some(bps) => bps as f64,
+            None => leftover / unweighted,
+        } / 10000.0;
+        let p0 = leg_usd_price(&p.token0, nock_usd, eth_usd);
+        let p1 = leg_usd_price(&p.token1, nock_usd, eth_usd);
+        let current_usd = p.amount0 * p0 + p.amount1 * p1;
+        let target_usd = lp_target_usd * weight;
+        let want_usd = target_usd - current_usd;
+        if want_usd < 1.0 {
+            continue; // already at or above its share
+        }
+        match amounts_per_usd(p, nock_usd, eth_usd) {
+            Some((per0, per1)) => wants.push(Want { p, target_usd, current_usd, want_usd, per0, per1 }),
+            None => excluded.push(LpExclusion {
+                position_id: p.position_id.clone(),
+                nft_id: p.nft_id,
+                label: position_label(p),
+                reason: "the range holds no value at the current price, or a leg cannot be priced".to_string(),
+            }),
+        }
+    }
+
+    // Pass 2: total demand per funding source, and how far each must be scaled back.
+    // Every position drawing on a short source is scaled by the same factor, so the
+    // outcome does not depend on the order positions are listed in config.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Src {
+        Nock,
+        Usdc,
+        Eth,
+        Unfundable,
+    }
+    let src_of = |t: &PositionTokenInfo| {
+        if is_nock_token(t) {
+            Src::Nock
+        } else if is_usdc_token(t) {
+            Src::Usdc
+        } else if is_eth_token(t) {
+            Src::Eth
+        } else {
+            Src::Unfundable
+        }
+    };
+    let (mut need_nock, mut need_usdc, mut need_eth) = (0.0f64, 0.0f64, 0.0f64);
+    for w in &wants {
+        for (tok, per) in [(&w.p.token0, w.per0), (&w.p.token1, w.per1)] {
+            let amt = per * w.want_usd;
+            match src_of(tok) {
+                Src::Nock => need_nock += amt,
+                Src::Usdc => need_usdc += amt,
+                Src::Eth => need_eth += amt,
+                Src::Unfundable => {}
+            }
+        }
+    }
+    let factor = |avail: f64, need: f64| if need > 0.0 { (avail.max(0.0) / need).min(1.0) } else { 1.0 };
+    // (scale factor, plain-words reason) per source.
+    let nock_f = (
+        factor(funds.nock, need_nock),
+        if funds.floor_tolerance_nock > 0.0 {
+            format!(
+                "only {:.0} NOCK may go into LP: what sits above the hard floor plus the {:.0} tolerated below it (a range sells its NOCK as price rises)",
+                funds.nock.max(0.0),
+                funds.floor_tolerance_nock
+            )
+        } else {
+            format!(
+                "only {:.0} NOCK sits above the hard floor (a range can sell its NOCK as price rises, so floor NOCK is never placed in LP)",
+                funds.nock.max(0.0)
+            )
+        },
+    );
+    let usdc_f = (
+        factor(funds.usdc, need_usdc),
+        format!(
+            "only ${:.2} of wallet USDC is free after the cash target, tax reserve and remaining DCA tranches",
+            funds.usdc.max(0.0)
+        ),
+    );
+    let eth_f = match funds.eth {
+        Some(e) => (
+            factor(e, need_eth),
+            format!("wallet holds {:.5} ETH/WETH after a {} ETH gas buffer", e.max(0.0), REBUILD_GAS_BUFFER_ETH),
+        ),
+        // Zero-mock: an unread balance is not assumed sufficient.
+        None => (0.0, "ETH/WETH balance was not read this cycle".to_string()),
+    };
+
+    let mut suggestions = Vec::new();
+    for w in wants {
+        let p = w.p;
+        let mut scale = 1.0f64;
+        let mut limited_by: Option<String> = None;
+        for (tok, per) in [(&p.token0, w.per0), (&p.token1, w.per1)] {
+            if per <= 0.0 {
+                continue;
+            }
+            let (f, why) = match src_of(tok) {
+                Src::Nock => (nock_f.0, nock_f.1.clone()),
+                Src::Usdc => (usdc_f.0, usdc_f.1.clone()),
+                Src::Eth => (eth_f.0, eth_f.1.clone()),
+                Src::Unfundable => (0.0, format!("{} is not a token the engine can fund", tok.symbol)),
+            };
+            if f < scale - 1e-9 {
+                scale = f;
+                limited_by = Some(why);
+            }
+        }
+        let add_usd = w.want_usd * scale;
+        if add_usd < 1.0 {
+            excluded.push(LpExclusion {
+                position_id: p.position_id.clone(),
+                nft_id: p.nft_id,
+                label: position_label(p),
+                reason: format!("cannot be funded: {}", limited_by.unwrap_or_else(|| "amount below $1".to_string())),
+            });
+            continue;
+        }
+        let (amt0, amt1) = (w.per0 * add_usd, w.per1 * add_usd);
+        let fmt_amt = |tok: &PositionTokenInfo, amt: f64| -> String {
+            if is_eth_token(tok) {
+                format!("{:.6}", amt)
+            } else if is_usdc_token(tok) {
+                format!("{:.2}", amt)
+            } else {
+                format!("{:.0}", amt)
+            }
+        };
+        suggestions.push(LpSuggestion {
+            position_id: p.position_id.clone(),
+            nft_id: p.nft_id,
+            protocol: p.protocol.clone(),
+            label: position_label(p),
+            target_usd: format!("{:.2}", w.target_usd),
+            current_usd: format!("{:.2}", w.current_usd),
+            add_usd: format!("{:.2}", add_usd),
+            token0_symbol: p.token0.symbol.clone(),
+            amount0: fmt_amt(&p.token0, amt0),
+            token1_symbol: p.token1.symbol.clone(),
+            amount1: fmt_amt(&p.token1, amt1),
+            limited_by,
+            nock_sold_out_at_multiple: nock_sell_out_multiple(p).map(|m| format!("{:.2}", m)),
+            url: format!(
+                "https://app.uniswap.org/positions/{}/base/{}",
+                if p.protocol == "uniswap-v3" { "v3" } else { "v4" },
+                p.nft_id
+            ),
+        });
+    }
+    (suggestions, excluded)
 }
 
 /// Aggregate of receipt-verified fills for one plan id.
@@ -559,6 +928,9 @@ struct PlanGuards {
     spot_price: f64,
     /// Liquid USDC in the wallet (USDC inside LP positions cannot be spent).
     wallet_usdc: f64,
+    /// USDC held inside LP positions. Counts toward the protected cash reserve
+    /// (operator decision, 2026-11-14: rebuilding LP is cash-neutral).
+    lp_usdc: f64,
     tax_reserve_usd: f64,
     cash_target_usd: f64,
 }
@@ -682,11 +1054,15 @@ fn plan_directive(
         );
     }
     if let Some(reserve) = cfg.cash_reserve_usdc {
+        // The reserve is measured on the whole stable balance: wallet USDC plus USDC
+        // inside LP. Moving USDC into a range therefore does not consume headroom;
+        // buying NOCK with it does.
+        let stable = guards.wallet_usdc + guards.lp_usdc;
         cap(
-            guards.wallet_usdc - reserve,
+            stable - reserve,
             format!(
-                "wallet USDC ${:.2} less the ${:.2} protected cash reserve",
-                guards.wallet_usdc, reserve
+                "stable balance ${:.2} (wallet ${:.2} + LP ${:.2}) less the ${:.2} protected cash reserve",
+                stable, guards.wallet_usdc, guards.lp_usdc, reserve
             ),
         );
     }
@@ -765,7 +1141,7 @@ fn plan_advice(ps: &AccumulationPlanStatus, spot_price: f64) -> (String, String)
             .unwrap_or_default()
     );
     let progress = match &ps.cash_reserve_usdc {
-        Some(r) => format!("{} ${} of cash stays protected.", progress, r),
+        Some(r) => format!("{} The plan never spends the stable balance (wallet + LP USDC) below ${}.", progress, r),
         None => progress,
     };
     let n = format!("{} of {}", ps.tranche_index, ps.tranches_total);
@@ -852,6 +1228,10 @@ fn lp_rebuild_status(lp_usd: f64, total_portfolio_usd: f64, target_weight_bps: i
         actual_usd: format!("{:.2}", lp_usd),
         gap_usd: format!("{:.2}", (target_usd - lp_usd).max(0.0)),
         target_weight_bps,
+        suggestions: Vec::new(),
+        excluded: Vec::new(),
+        floor_tolerance_nock: None,
+        worst_case_nock: None,
     }
 }
 
@@ -871,6 +1251,39 @@ fn apply_lp_rebuild_bias(action: String, details: String, lp: &LpRebuild) -> (St
         lp.target_weight_bps as f64 / 100.0,
         lp.gap_usd
     );
+    let sentence = if lp.suggestions.is_empty() {
+        format!("{} No tracked position is eligible for a deposit right now.", sentence)
+    } else {
+        let steps: Vec<String> = lp
+            .suggestions
+            .iter()
+            .map(|sg| {
+                let mut legs = Vec::new();
+                if sg.amount0.parse::<f64>().map_or(false, |a| a > 0.0) {
+                    legs.push(format!("{} {}", sg.amount0, sg.token0_symbol));
+                }
+                if sg.amount1.parse::<f64>().map_or(false, |a| a > 0.0) {
+                    legs.push(format!("{} {}", sg.amount1, sg.token1_symbol));
+                }
+                format!(
+                    "add {} (${}) to {}{}",
+                    legs.join(" + "),
+                    sg.add_usd,
+                    sg.label,
+                    sg.nock_sold_out_at_multiple
+                        .as_ref()
+                        .map(|m| format!(" (sells all its NOCK by a {}x rise)", m))
+                        .unwrap_or_default()
+                )
+            })
+            .collect();
+        let worst = lp
+            .worst_case_nock
+            .as_ref()
+            .map(|w| format!(" If every range sold out, {} NOCK would remain.", w))
+            .unwrap_or_default();
+        format!("{} Suggested: {}.{}", sentence, steps.join("; "), worst)
+    };
     let idle = action.starts_with("HOLD & ACCRETE")
         || action.starts_with("DCA ON SCHEDULE")
         || action.starts_with("DCA PLAN PENDING")
@@ -1602,6 +2015,20 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
         "• LP rebuild bias: {} (holds ${} of a ${} target, ${} short). Rebuilding ranges is a reposition: no net cash change.",
         s(lp, "status"), s(lp, "actual_usd"), s(lp, "target_usd"), s(lp, "gap_usd")
     );
+    let mut lp_line = lp_line;
+    for sg in lp.and_then(|l| l.get("suggestions")).and_then(|v| v.as_array()).into_iter().flatten() {
+        let g = |k: &str| sg.get(k).and_then(|x| x.as_str()).unwrap_or("n/a");
+        lp_line.push_str(&format!(
+            "\n   → add {} {} + {} {} (${}) to {}{}\n     {}",
+            g("amount0"), g("token0_symbol"), g("amount1"), g("token1_symbol"), g("add_usd"), g("label"),
+            sg.get("limited_by").and_then(|x| x.as_str()).map(|l| format!(" — limited: {l}")).unwrap_or_default(),
+            g("url"),
+        ));
+    }
+    for ex in lp.and_then(|l| l.get("excluded")).and_then(|v| v.as_array()).into_iter().flatten() {
+        let g = |k: &str| ex.get(k).and_then(|x| x.as_str()).unwrap_or("n/a");
+        lp_line.push_str(&format!("\n   ✗ {}: {}", g("label"), g("reason")));
+    }
     let plan = data.pointer("/derived_metrics/accumulation_plan").filter(|p| !p.is_null());
     let Some(_) = plan else {
         return format!(
@@ -2014,7 +2441,11 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // Build snapshot data
     let snapshot_data = SnapshotData {
         wallet_balances: raw_data.wallet_balances,
-        positions: build_position_snapshots(&raw_data.positions, raw_data.spot_price_nock_usd, raw_data.live_eth_price_usd),
+        positions: {
+            let mut positions = build_position_snapshots(&raw_data.positions, raw_data.spot_price_nock_usd, raw_data.live_eth_price_usd);
+            apply_pool_activity(&mut positions, &raw_data.pool_liquidity);
+            positions
+        },
         pool_mechanics: raw_data.pool_mechanics,
         concentrated_liquidity: raw_data.concentrated_liquidity,
         contract_fees: raw_data.contract_fees,
@@ -2048,7 +2479,7 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
         meta: SnapshotMeta {
             generated_at: now,
             state_hash: state_hash.clone(),
-            version: "2.1.0".to_string(),
+            version: "2.2.0".to_string(),
             snapshot_id: Uuid::new_v4(),
         },
         data: snapshot_data,
@@ -4239,7 +4670,54 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
 
     // 5. Snapshot-level builders (sync, unit-testable): USD pricing, pool mechanics,
     //    and per-position contract fees.
-    let positions = build_position_snapshots(&raw_positions, spot_price, live_eth_price_usd);
+    // 5a. Pool activity per tracked position (issue #83). A failed read leaves the
+    //     key absent: unknown, never assumed live or dead.
+    let mut pool_liquidity: HashMap<String, String> = HashMap::new();
+    for p in &raw_positions {
+        match fetch_pool_in_range_liquidity(&state.http_client, &alchemy_url, p).await {
+            Ok(l) => {
+                pool_liquidity.insert(p.position_id.clone(), l.to_string());
+            }
+            Err(e) => tracing::warn!("pool liquidity read failed for {}: {e}", p.position_id),
+        }
+    }
+    // 5b. ETH and WETH balances, used only to check a suggested deposit can be funded.
+    let eth_balance_payload = json!({
+        "jsonrpc": "2.0", "method": "eth_getBalance", "params": [wallet_addr, "latest"], "id": 60
+    });
+    let wallet_eth = post_rpc_with_retry(&state.http_client, &alchemy_url, &eth_balance_payload, 2)
+        .await
+        .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .and_then(|h| u128::from_str_radix(h.trim_start_matches("0x"), 16).ok())
+        .map(|wei| wei as f64 / 1e18);
+    let weth_balance_payload = json!({
+        "jsonrpc": "2.0", "method": "eth_call", "id": 61,
+        "params": [{
+            "to": WETH_BASE,
+            "data": format!("0x70a08231000000000000000000000000{}", wallet_addr.trim_start_matches("0x").to_lowercase())
+        }, "latest"]
+    });
+    let wallet_weth = post_rpc_with_retry(&state.http_client, &alchemy_url, &weth_balance_payload, 2)
+        .await
+        .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .filter(|h| h.len() > 2)
+        .and_then(|h| u128::from_str_radix(h.trim_start_matches("0x"), 16).ok())
+        .map(|wei| wei as f64 / 1e18);
+    // 5c. Per-position rebuild rules from config, keyed like RawPosition.position_id.
+    let rebuild_rules: HashMap<String, RebuildRule> = state
+        .config
+        .positions
+        .iter()
+        .map(|c| {
+            (
+                format!("{}:{}:{}", c.protocol, c.network, c.nft_id),
+                RebuildRule { weight_bps: c.rebuild_weight_bps, when_out_of_range: c.rebuild_when_out_of_range },
+            )
+        })
+        .collect();
+
+    let mut positions = build_position_snapshots(&raw_positions, spot_price, live_eth_price_usd);
+    apply_pool_activity(&mut positions, &pool_liquidity);
     let pool_mechanics = build_pool_mechanics(&raw_positions, spot_price, live_eth_price_usd);
     let contract_fees = build_contract_fees(&positions, live_gas_cost_usd);
 
@@ -4276,6 +4754,10 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         spot_price_nock_usd: spot_price,
         live_gas_cost_usd,
         live_eth_price_usd,
+        pool_liquidity,
+        wallet_eth,
+        wallet_weth,
+        rebuild_rules,
     })
 }
 
@@ -4404,9 +4886,20 @@ fn build_position_snapshots(raw_positions: &[RawPosition], nock_usd: f64, eth_us
                 liquidity_amount: p.liquidity.to_string(),
                 in_range: p.in_range,
                 is_price_source: p.is_price_source,
+                pool_active: None, // filled by apply_pool_activity once pool reads are in
             }
         })
         .collect()
+}
+
+/// Stamp each snapshot position with whether its pool is live. Unknown stays None.
+fn apply_pool_activity(positions: &mut [Position], pool_liquidity: &HashMap<String, String>) {
+    for p in positions.iter_mut() {
+        p.pool_active = pool_liquidity
+            .get(&p.position_id)
+            .and_then(|v| v.parse::<u128>().ok())
+            .map(|l| l > 0);
+    }
 }
 
 /// One PoolMechanic per tracked position's pool. volatile_assets carry the tracked
@@ -5112,6 +5605,7 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
             overextended: regime.overextended,
             spot_price,
             wallet_usdc,
+            lp_usdc,
             tax_reserve_usd,
             cash_target_usd,
         };
@@ -5125,7 +5619,44 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
     // An operator who opts out of the RSI pause keeps buying through an overextension.
     let plan_overrides_cooldown = active_plan.is_some()
         && plan.cfg.as_ref().map_or(false, |c| !c.pause_when_overextended);
-    let lp_rebuild = lp_rebuild_status(lp_usd, total_portfolio_usd, profile.target_weights_bps.uniswap_lp);
+    let mut lp_rebuild = lp_rebuild_status(lp_usd, total_portfolio_usd, profile.target_weights_bps.uniswap_lp);
+    if lp_rebuild.status == "under_target" {
+        let lp_target_usd = total_portfolio_usd * (profile.target_weights_bps.uniswap_lp as f64 / 10000.0);
+        // USDC that must stay liquid: the cash target, or the tax reserve plus the
+        // accumulation plan's unspent budget, whichever is larger.
+        let plan_remaining = active_plan
+            .and_then(|p| p.remaining_usdc.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let liquid_floor = cash_target_usd.max(tax_reserve_usd + plan_remaining);
+        let floor_tolerance_nock = floor * (profile.lp_floor_tolerance_bps as f64 / 10000.0);
+        let funds = RebuildFunds {
+            // A range sells its NOCK as price rises, so in a large enough rally NOCK
+            // placed in LP is converted away entirely. LP may hold the NOCK above the
+            // hard floor plus the operator's tolerated overage, which bounds how far
+            // below the floor a full sell-out of every range could leave the stack.
+            nock: wallet_nock - floor + floor_tolerance_nock,
+            floor_tolerance_nock,
+            usdc: wallet_usdc - liquid_floor,
+            eth: match (raw.wallet_eth, raw.wallet_weth) {
+                (None, None) => None,
+                (e, w) => Some(e.unwrap_or(0.0) + w.unwrap_or(0.0) - REBUILD_GAS_BUFFER_ETH),
+            },
+        };
+        let (suggestions, excluded) = lp_rebuild_suggestions(raw, lp_target_usd, funds);
+        // Worst case for the floor: every range sells all its NOCK, so only wallet
+        // NOCK not being deposited remains.
+        let suggested_nock: f64 = suggestions
+            .iter()
+            .map(|sg| {
+                (if sg.token0_symbol == "NOCK" { sg.amount0.parse::<f64>().unwrap_or(0.0) } else { 0.0 })
+                    + (if sg.token1_symbol == "NOCK" { sg.amount1.parse::<f64>().unwrap_or(0.0) } else { 0.0 })
+            })
+            .sum();
+        lp_rebuild.worst_case_nock = Some(format!("{:.0}", wallet_nock - suggested_nock));
+        lp_rebuild.floor_tolerance_nock = Some(format!("{:.0}", floor_tolerance_nock));
+        lp_rebuild.suggestions = suggestions;
+        lp_rebuild.excluded = excluded;
+    }
 
     // Dynamic Shot Advice Engine
     let (advice_action, advice_details) = if total_nock < floor {
@@ -5839,12 +6370,12 @@ database_url: "postgresql://localhost/test"
         let m = metrics_with_plan(&raw, &ctx, &MarketRegime::default());
         assert_eq!(m.global_status.shot_advice_action, "DCA TRANCHE DUE (1 of 5)");
         assert!(m.global_status.shot_advice_details.contains("Buy $20.00 of NOCK"));
-        assert!(m.global_status.shot_advice_details.contains("$950.00 of cash stays protected"));
+        assert!(m.global_status.shot_advice_details.contains("never spends the stable balance (wallet + LP USDC) below $950.00"));
         assert_eq!(m.accumulation_plan.unwrap().cash_reserve_usdc.as_deref(), Some("950.00"));
     }
 
     fn roomy_guards() -> PlanGuards {
-        PlanGuards { overextended: false, spot_price: 0.0123, wallet_usdc: 1053.0, tax_reserve_usd: 0.0, cash_target_usd: 124.0 }
+        PlanGuards { overextended: false, spot_price: 0.0123, wallet_usdc: 1053.0, lp_usdc: 0.0, tax_reserve_usd: 0.0, cash_target_usd: 124.0 }
     }
 
     fn t(s: &str) -> DateTime<Utc> {
@@ -6109,6 +6640,253 @@ database_url: "postgresql://localhost/test"
         assert!(t("2026-11-06T03:23:19Z") >= plan_anchor(Some(t("2026-11-01T00:00:00Z")), registered));
     }
 
+    // ---------------- LP rebuild suggestions (issue #83) ----------------
+
+    /// Liquid wallet with every tracked pool live except the v4 0.75% pool (#3163431),
+    /// which is dead exactly as on 2026-11-14. ETH balance read; no WETH.
+    fn rebuild_fixture() -> RawOnChainData {
+        let mut raw = liquid_wallet_fixture();
+        for p in &raw.positions {
+            let live = if p.nft_id == 3163431 { "0" } else { "80173935548453779" };
+            raw.pool_liquidity.insert(p.position_id.clone(), live.to_string());
+        }
+        raw.wallet_eth = Some(0.114226);
+        raw.wallet_weth = Some(0.0);
+        raw
+    }
+
+    fn roomy_funds() -> RebuildFunds {
+        RebuildFunds { nock: 1_000_000.0, floor_tolerance_nock: 0.0, usdc: 10_000.0, eth: Some(10.0) }
+    }
+
+    #[test]
+    fn test_floor_tolerance_lets_lp_hold_a_bounded_overage() {
+        // Operator decision: a little more NOCK than sits above the floor may go into
+        // LP, because ranges sell gradually. The overage is bounded and reported.
+        let raw = rebuild_fixture(); // wallet 115,747.8 NOCK; floor 100,000
+        let strict = metrics_with_plan(&raw, &PlanContext::none(), &MarketRegime::default());
+        let nock_in = |m: &DerivedMetrics| -> f64 {
+            m.lp_rebuild.suggestions.iter().map(|sg| {
+                (if sg.token0_symbol == "NOCK" { sg.amount0.parse::<f64>().unwrap() } else { 0.0 })
+                    + (if sg.token1_symbol == "NOCK" { sg.amount1.parse::<f64>().unwrap() } else { 0.0 })
+            }).sum()
+        };
+        assert!(nock_in(&strict) <= 15_747.8 + 3.0);
+        assert_eq!(strict.lp_rebuild.floor_tolerance_nock.as_deref(), Some("0"));
+
+        let mut profile = OperatorProfile::default();
+        profile.lp_floor_tolerance_bps = 500; // 5% of the floor = 5,000 NOCK
+        let loose = compute_derived_metrics_with_plan(
+            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[],
+            &LedgerAggregate::default(), &MarketRegime::default(), &PlanContext::none(),
+        );
+        assert_eq!(loose.lp_rebuild.floor_tolerance_nock.as_deref(), Some("5000"));
+        // More NOCK may go in than strictly sits above the floor, but never beyond the tolerance.
+        assert!(nock_in(&loose) >= nock_in(&strict));
+        assert!(nock_in(&loose) <= 15_747.8 + 5_000.0 + 3.0);
+        // The worst case (every range sells out) is stated and stays within the tolerance.
+        let worst: f64 = loose.lp_rebuild.worst_case_nock.as_deref().unwrap().parse().unwrap();
+        assert!((worst - (115_747.8001 - nock_in(&loose))).abs() < 2.0);
+        assert!(worst >= 100_000.0 - 5_000.0 - 3.0, "worst case {worst} must stay within 5% of the floor");
+        assert!(loose.global_status.shot_advice_details.contains("If every range sold out"));
+    }
+
+    #[test]
+    fn test_nock_sell_out_multiple_from_ticks() {
+        let raw = rebuild_fixture();
+        // The 2026-11-14 live ticks: the wide USDC/NOCK range needs a ~3.6x rise to sell
+        // all its NOCK; the narrow WETH/NOCK ladder only ~1.44x.
+        let mut wide = raw.positions.iter().find(|p| p.nft_id == 3163450).unwrap().clone();
+        wide.tick = 274970;
+        assert!((nock_sell_out_multiple(&wide).unwrap() - 3.586).abs() < 0.01);
+        let mut ladder = raw.positions.iter().find(|p| p.nft_id == 6336662).unwrap().clone();
+        ladder.tick = 74039;
+        assert!((nock_sell_out_multiple(&ladder).unwrap() - 1.439).abs() < 0.01);
+        // Past the edge the range holds no NOCK, so there is nothing left to sell.
+        ladder.tick = ladder.tick_lower;
+        assert_eq!(nock_sell_out_multiple(&ladder), None);
+    }
+
+    fn sg<'a>(v: &'a [LpSuggestion], nft: u64) -> &'a LpSuggestion {
+        v.iter().find(|s| s.nft_id == nft).unwrap_or_else(|| panic!("no suggestion for #{nft}"))
+    }
+
+    #[test]
+    fn test_amounts_per_usd_is_worth_one_dollar() {
+        let raw = rebuild_fixture();
+        for p in &raw.positions {
+            let (a0, a1) = amounts_per_usd(p, raw.spot_price_nock_usd, raw.live_eth_price_usd).expect("priced");
+            let value = a0 * leg_usd_price(&p.token0, raw.spot_price_nock_usd, raw.live_eth_price_usd)
+                + a1 * leg_usd_price(&p.token1, raw.spot_price_nock_usd, raw.live_eth_price_usd);
+            assert!((value - 1.0).abs() < 1e-9, "{}: $1 of range must be worth $1, got {value}", p.position_id);
+            assert!(a0 >= 0.0 && a1 >= 0.0);
+        }
+    }
+
+    #[test]
+    fn test_rebuild_skips_dead_pools_and_splits_equally() {
+        let raw = rebuild_fixture();
+        let (s, x) = lp_rebuild_suggestions(&raw, 300.0, roomy_funds());
+        // Dead pool is excluded even though its frozen tick still reads "in range".
+        let dead = x.iter().find(|e| e.nft_id == 3163431).expect("dead pool excluded");
+        assert!(dead.reason.contains("no in-range liquidity"));
+        assert!(raw.positions.iter().find(|p| p.nft_id == 3163431).unwrap().in_range);
+        // Three live, in-range positions share the target equally.
+        assert_eq!(s.len(), 3);
+        for nft in [3163432u64, 6336662, 3163450] {
+            let one = sg(&s, nft);
+            assert_eq!(one.target_usd, "100.00");
+            assert_eq!(one.add_usd, "100.00");
+            assert_eq!(one.limited_by, None);
+        }
+        assert_eq!(sg(&s, 3163450).url, "https://app.uniswap.org/positions/v4/base/3163450");
+        assert_eq!(sg(&s, 6336662).url, "https://app.uniswap.org/positions/v3/base/6336662");
+        // The USDC/NOCK range spans spot, so its deposit takes both tokens.
+        let wide = sg(&s, 3163450);
+        assert_eq!((wide.token0_symbol.as_str(), wide.token1_symbol.as_str()), ("USDC", "NOCK"));
+        assert!(wide.amount0.parse::<f64>().unwrap() > 0.0 && wide.amount1.parse::<f64>().unwrap() > 0.0);
+    }
+
+    #[test]
+    fn test_rebuild_does_not_fill_out_of_range_positions_by_default() {
+        // Operator rule: "we should not generally aim to fill positions that are out of range".
+        let mut raw = rebuild_fixture();
+        raw.positions.iter_mut().find(|p| p.nft_id == 3163432).unwrap().in_range = false;
+        let (s, x) = lp_rebuild_suggestions(&raw, 300.0, roomy_funds());
+        assert!(s.iter().all(|one| one.nft_id != 3163432));
+        assert!(x.iter().any(|e| e.nft_id == 3163432 && e.reason.contains("out of range")));
+        // The remaining two now take half each.
+        assert_eq!(s.len(), 2);
+        assert_eq!(sg(&s, 3163450).target_usd, "150.00");
+        assert_eq!(sg(&s, 6336662).target_usd, "150.00");
+        // "Generally": a per-position exception brings it back.
+        raw.rebuild_rules.insert(
+            "uniswap-v4:base:3163432".to_string(),
+            RebuildRule { weight_bps: None, when_out_of_range: true },
+        );
+        let (s, _) = lp_rebuild_suggestions(&raw, 300.0, roomy_funds());
+        assert_eq!(s.len(), 3);
+    }
+
+    #[test]
+    fn test_rebuild_weights_and_config_exclusion() {
+        let mut raw = rebuild_fixture();
+        raw.rebuild_rules.insert("uniswap-v4:base:3163450".to_string(), RebuildRule { weight_bps: Some(7000), when_out_of_range: false });
+        raw.rebuild_rules.insert("uniswap-v4:base:3163432".to_string(), RebuildRule { weight_bps: Some(0), when_out_of_range: false });
+        let (s, x) = lp_rebuild_suggestions(&raw, 1000.0, roomy_funds());
+        assert_eq!(sg(&s, 3163450).target_usd, "700.00");
+        // The one unweighted eligible position takes what is left.
+        assert_eq!(sg(&s, 6336662).target_usd, "300.00");
+        assert!(x.iter().any(|e| e.nft_id == 3163432 && e.reason.contains("rebuild_weight_bps: 0")));
+    }
+
+    #[test]
+    fn test_rebuild_never_places_floor_nock_in_lp_and_scales_fairly() {
+        let raw = rebuild_fixture();
+        // Unconstrained NOCK demand for the three deposits.
+        let (free, _) = lp_rebuild_suggestions(&raw, 900.0, roomy_funds());
+        let nock_of = |v: &[LpSuggestion]| -> f64 {
+            v.iter()
+                .map(|one| {
+                    (if one.token0_symbol == "NOCK" { one.amount0.parse::<f64>().unwrap() } else { 0.0 })
+                        + (if one.token1_symbol == "NOCK" { one.amount1.parse::<f64>().unwrap() } else { 0.0 })
+                })
+                .sum()
+        };
+        let demand = nock_of(&free);
+        assert!(demand > 1000.0);
+        // Only half of that sits above the floor.
+        let tight = RebuildFunds { nock: demand / 2.0, floor_tolerance_nock: 0.0, usdc: 10_000.0, eth: Some(10.0) };
+        let (s, _) = lp_rebuild_suggestions(&raw, 900.0, tight);
+        assert!(nock_of(&s) <= demand / 2.0 + 3.0, "LP NOCK {} must stay within the {} above the floor", nock_of(&s), demand / 2.0);
+        // Every position that needs NOCK is scaled by the same factor and says why.
+        for one in &s {
+            assert_eq!(one.add_usd, "150.00", "{} should be halved from $300", one.label);
+            assert!(one.limited_by.as_ref().unwrap().contains("hard floor"));
+        }
+        // Order independence: reversing the config order changes nothing.
+        let mut reversed = rebuild_fixture();
+        reversed.positions.reverse();
+        let (r, _) = lp_rebuild_suggestions(&reversed, 900.0, tight);
+        for one in &s {
+            assert_eq!(sg(&r, one.nft_id).add_usd, one.add_usd);
+        }
+        // Nothing above the floor at all: no NOCK-bearing deposit is suggested.
+        let none = RebuildFunds { nock: 0.0, floor_tolerance_nock: 0.0, usdc: 10_000.0, eth: Some(10.0) };
+        let (s, x) = lp_rebuild_suggestions(&raw, 900.0, none);
+        assert!(s.is_empty());
+        assert!(x.iter().any(|e| e.reason.contains("cannot be funded") && e.reason.contains("hard floor")));
+    }
+
+    #[test]
+    fn test_rebuild_unread_balances_are_never_assumed() {
+        let mut raw = rebuild_fixture();
+        // Pool read failed for one position: unknown, so not suggested.
+        raw.pool_liquidity.remove("uniswap-v4:base:3163450");
+        let (s, x) = lp_rebuild_suggestions(&raw, 300.0, roomy_funds());
+        assert!(s.iter().all(|one| one.nft_id != 3163450));
+        assert!(x.iter().any(|e| e.nft_id == 3163450 && e.reason.contains("could not be read")));
+        // ETH balance not read: the WETH/NOCK deposit is withheld, the others stand.
+        let raw = rebuild_fixture();
+        let (s, x) = lp_rebuild_suggestions(&raw, 300.0, RebuildFunds { nock: 1_000_000.0, floor_tolerance_nock: 0.0, usdc: 10_000.0, eth: None });
+        let weth_needed = raw.positions.iter().find(|p| p.nft_id == 6336662).map(|p| amounts_per_usd(p, raw.spot_price_nock_usd, raw.live_eth_price_usd).unwrap().0 > 0.0).unwrap();
+        if weth_needed {
+            assert!(s.iter().all(|one| one.nft_id != 6336662));
+            assert!(x.iter().any(|e| e.nft_id == 6336662 && e.reason.contains("not read")));
+        }
+        assert!(s.iter().any(|one| one.nft_id == 3163450));
+    }
+
+    #[test]
+    fn test_reserve_counts_usdc_inside_lp() {
+        // $157 of USDC moved into a range: wallet 876, LP 157, stable total still 1,033.
+        let mut cfg = plan_cfg();
+        cfg.budget_usdc = 100.0;
+        cfg.cash_reserve_usdc = Some(950.0);
+        let mut guards = roomy_guards();
+        guards.wallet_usdc = 876.0;
+        guards.lp_usdc = 157.0;
+        let now = t("2026-11-15T12:00:00Z");
+        // Rebuilding LP did not consume reserve headroom: the $20 tranche still stands.
+        assert_eq!(
+            plan_directive(&cfg, &PlanFills::default(), &guards, false, now),
+            PlanDirective::TrancheDue { usdc: 20.0, limited_by: None }
+        );
+        // If the range converts that USDC to NOCK on a dip, the stable total falls and
+        // the plan stops spending: the reserve is honest about what is left.
+        guards.lp_usdc = 0.0;
+        let d = plan_directive(&cfg, &PlanFills::default(), &guards, false, now);
+        assert!(matches!(d, PlanDirective::Blocked { ref reason } if reason.contains("protected cash reserve")));
+    }
+
+    #[test]
+    fn test_advice_carries_concrete_rebuild_steps_and_pool_activity() {
+        let raw = rebuild_fixture();
+        let m = metrics_with_plan(&raw, &PlanContext::none(), &MarketRegime::default());
+        assert_eq!(m.lp_rebuild.status, "under_target");
+        assert!(!m.lp_rebuild.suggestions.is_empty());
+        assert!(m.global_status.shot_advice_details.contains("Suggested: add "));
+        assert!(m.global_status.shot_advice_details.contains("#3163450"));
+        assert!(!m.global_status.shot_advice_details.contains("#3163431"), "the dead pool must not be suggested");
+        // NOCK placed in LP never exceeds what sits above the 100,000 floor.
+        let lp_nock: f64 = m.lp_rebuild.suggestions.iter().map(|one| {
+            (if one.token0_symbol == "NOCK" { one.amount0.parse::<f64>().unwrap() } else { 0.0 })
+                + (if one.token1_symbol == "NOCK" { one.amount1.parse::<f64>().unwrap() } else { 0.0 })
+        }).sum();
+        assert!(lp_nock <= 115_747.8001 - 100_000.0 + 3.0, "LP NOCK {lp_nock} exceeds the NOCK above the floor");
+        // Snapshot positions are stamped live/dead/unknown.
+        let mut positions = build_position_snapshots(&raw.positions, raw.spot_price_nock_usd, raw.live_eth_price_usd);
+        assert!(positions.iter().all(|p| p.pool_active.is_none()));
+        apply_pool_activity(&mut positions, &raw.pool_liquidity);
+        assert_eq!(positions.iter().find(|p| p.nft_id == 3163431).unwrap().pool_active, Some(false));
+        assert_eq!(positions.iter().find(|p| p.nft_id == 3163450).unwrap().pool_active, Some(true));
+        // With no pool reads at all, nothing is suggested and the advice says so.
+        let blind = liquid_wallet_fixture();
+        let m = metrics_with_plan(&blind, &PlanContext::none(), &MarketRegime::default());
+        assert!(m.lp_rebuild.suggestions.is_empty());
+        assert!(m.global_status.shot_advice_details.contains("No tracked position is eligible"));
+    }
+
     fn transfer_log(token: &str, from: &str, to: &str, amount: u128) -> serde_json::Value {
         let pad = |a: &str| format!("0x000000000000000000000000{}", a.trim_start_matches("0x").to_lowercase());
         json!({
@@ -6177,6 +6955,11 @@ database_url: "postgresql://localhost/test"
         assert!(done_text.contains("Next tranche: none (plan complete)"));
         assert!(!done_text.contains("due now"));
         assert!(text.contains("LP rebuild bias: under_target"));
+        let rb = rebuild_fixture();
+        let rm = metrics_with_plan(&rb, &PlanContext::none(), &MarketRegime::default());
+        let rtext = format_accumulation_plan_text(&json!({ "derived_metrics": serde_json::to_value(&rm).unwrap() }));
+        assert!(rtext.contains("→ add ") && rtext.contains("https://app.uniswap.org/positions/v4/base/3163450"));
+        assert!(rtext.contains("✗ v4 USDC/NOCK 0.75% #3163431: pool has no in-range liquidity"));
         // Before the first fill the average is "n/a", never a made-up number.
         assert!(text.contains("average $n/a"));
         let none = format_accumulation_plan_text(&json!({ "derived_metrics": { "lp_rebuild": {} } }));
