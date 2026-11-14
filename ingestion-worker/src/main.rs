@@ -6186,7 +6186,7 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
                         status: calc_status(t3_dev, w.treasury),
                     },
                     AllocationDeviation {
-                        bucket_name: "Uniswap LP (all tracked positions)".to_string(),
+                        bucket_name: "LP (all tracked positions)".to_string(),
                         target_weight_bps: w.uniswap_lp,
                         actual_weight_bps: lp_weight,
                         deviation_bps: lp_dev,
