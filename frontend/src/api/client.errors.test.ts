@@ -100,6 +100,8 @@ describe('accumulation plan display helpers', () => {
     const lp = { target_usd: '371.29', actual_usd: '0.00', gap_usd: '371.29', target_weight_bps: 1500 };
     expect(lpRebuildActive({ ...lp, status: 'under_target' })).toBe(true);
     expect(lpRebuildActive({ ...lp, status: 'on_target' })).toBe(false);
+    // No tracked positions: nothing to rebuild, no bias shown (v0.5.1).
+    expect(lpRebuildActive({ ...lp, status: 'no_positions' })).toBe(false);
     expect(lpRebuildActive(undefined)).toBe(false);
   });
 
@@ -260,5 +262,21 @@ describe('positions summary', () => {
     );
     expect(positionsSummary([])).toBe('No LP positions tracked.');
     expect(positionsSummary([{ in_range: true, full_range: true }])).toBe('1 LP position tracked live: 1 full range.');
+  });
+});
+
+import { statValueText } from '../positions';
+
+describe('stat card values (from zero)', () => {
+  it('renders a known zero as 0 and never NaN', () => {
+    expect(statValueText('0', '', ' NOCK')).toBe('0 NOCK');
+    expect(statValueText('113863', '', ' NOCK')).toBe('113,863 NOCK');
+    expect(statValueText('1,234.5', '$', '')).toBe('$1,234.5');
+    expect(statValueText('—', '', ' NOCK')).toBe('—');
+    expect(statValueText(undefined, '$', '')).toBe('—');
+    expect(statValueText('', '$', '')).toBe('—');
+    for (const v of ['0', 'abc', '—', undefined]) {
+      expect(statValueText(v, '', ' NOCK')).not.toContain('NaN');
+    }
   });
 });

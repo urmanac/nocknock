@@ -30,7 +30,7 @@ const SOURCE_LABELS: Record<string, string> = {
   aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
-import { POSITION_COLORS, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, walletNockUnits } from './positions.ts';
+import { POSITION_COLORS, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText, walletNockUnits } from './positions.ts';
 
 function Dashboard() {
   const { snapshot, loading, error, freshness, refetch, ageDisplay } = useFreshness<
@@ -263,8 +263,10 @@ function Dashboard() {
   const floorKnown = floorTarget > 0;
   const floorTargetFormatted = floorKnown ? floorTarget.toLocaleString() : '—';
   const floorTargetShort = floorKnown ? `${(floorTarget / 1000).toFixed(0)}k` : '—';
-  const nockAmountRaw = global?.total_nock_amount ? parseInt(global.total_nock_amount) : 0;
-  const totalNockVal = nockAmountRaw > 0 ? nockAmountRaw.toLocaleString() : '—';
+  const nockAmountParsed = global?.total_nock_amount ? parseInt(global.total_nock_amount) : NaN;
+  const nockAmountRaw = Number.isFinite(nockAmountParsed) ? nockAmountParsed : 0;
+  // A known zero stack is 0, not unknown; only a missing field is '—'.
+  const totalNockVal = Number.isFinite(nockAmountParsed) ? nockAmountParsed.toLocaleString() : '—';
   const nockFloorDeltaRaw = floorKnown
     ? (global?.nock_floor_delta ? parseInt(global.nock_floor_delta) : nockAmountRaw - floorTarget)
     : 0;
@@ -331,7 +333,7 @@ function Dashboard() {
         <div style={styles.globalStats}>
           <StatCard
             label="Total NOCK Stack"
-            value={totalNockVal}
+            value={global?.total_nock_amount}
             suffix=" NOCK"
             subtitle={nockFloorDeltaKnown ? `${nockFloorDeltaRaw >= 0 ? '+' : ''}${nockFloorDeltaVal} above ${floorTargetShort} floor` : 'floor target unavailable'}
             highlightColor={floorHealthColor}
@@ -379,7 +381,7 @@ function Dashboard() {
           <div style={styles.adviceActionRow}>
             <span style={styles.adviceBadge}>TACTICAL SHOT ADVICE</span>
             <span style={styles.adviceActionText}>
-              {global?.shot_advice_action || 'HOLD & ACCRETE (Dual Growth Engine Active)'}
+              {global?.shot_advice_action || 'Advice unavailable'}
             </span>
           </div>
           <div style={{
@@ -416,8 +418,7 @@ function Dashboard() {
           )}
         </div>
         <p style={styles.adviceDetails}>
-          {global?.shot_advice_details ||
-            `Total NOCK held is ${totalNockVal} (${nockFloorDeltaRaw >= 0 ? '+' : ''}${nockFloorDeltaVal} above ${floorTargetShort} hard floor). AMMs are generating dual yield. Maintain posture.`}
+          {global?.shot_advice_details || '—'}
         </p>
         <div style={styles.shotPillContainer}>
           <div style={styles.shotPill}>
@@ -842,7 +843,7 @@ function StatCard({
   subtitle?: string;
   highlightColor?: string;
 }) {
-  const display = value ? `${prefix}${parseFloat(value.replace(/,/g, '')).toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}` : '—';
+  const display = statValueText(value, prefix, suffix);
   return (
     <div style={styles.statCard}>
       <div style={styles.statLabel}>{label}</div>

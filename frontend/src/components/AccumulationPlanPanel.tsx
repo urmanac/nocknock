@@ -92,7 +92,7 @@ export function AccumulationPlanPanel({
         {lpNote}
         <div style={{ fontSize: '0.8rem', color: '#8b949e', lineHeight: 1.6 }}>
           No accumulation plan is configured. Add an <code>accumulation_plan</code> section to the worker's config.yaml
-          (budget, tranches, interval) to have NOCK buys paced in tranches instead of advised as one lump sum.
+          (budget, tranches, interval, with your own numbers) to have NOCK buys paced; NockNock does not size buys without one.
         </div>
       </div>
     );

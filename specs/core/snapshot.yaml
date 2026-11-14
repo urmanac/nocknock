@@ -529,7 +529,8 @@ components:
       properties:
         status:
           type: string
-          enum: [under_target, on_target, over_target]
+          description: no_positions when no LP position is tracked (no suggestions, no bias text)
+          enum: [under_target, on_target, over_target, no_positions]
         target_usd:
           type: string
         actual_usd:
@@ -655,7 +656,7 @@ components:
         shot_advice_details:
           type: string
           description: Detailed explanation of tactical advisory status
-          example: "Total NOCK held is 107,123 (+7,123 above 100k hard floor). AMMs are generating dual yield. Maintain posture."
+          example: "Total NOCK held is 113863 (+13863 above the 100000 floor). 3 LP positions tracked: 2 ranged (2 in range), 1 full range. $0.30 of LP fees uncollected. Liquid dry powder: none (wallet USDC $930.78 less the larger of the $119.53 cash target and the $0.00 virtual tax reserve)."
         regime:
           type: string
           description: Market regime from daily RSI(14) overextension detection (see rsi_14_1d)

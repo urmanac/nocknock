@@ -71,7 +71,7 @@ export interface AccumulationPlanStatus {
 
 /** LP weight vs target; rebuilding is a reposition with no net cash change (2.1.0) */
 export interface LpRebuild {
-  status: 'under_target' | 'on_target' | 'over_target';
+  status: 'under_target' | 'on_target' | 'over_target' | 'no_positions';
   target_usd: string;
   actual_usd: string;
   gap_usd: string;

@@ -44,6 +44,17 @@ export function positionsSummary(
   return `${n} LP position${n === 1 ? '' : 's'} tracked live: ${parts.join(', ')}.`;
 }
 
+/**
+ * Stat card value: '—' unless the value parses to a finite number (a known 0 renders
+ * as 0). Replaces a formatter that printed 'NaN NOCK' for a zero stack.
+ */
+export function statValueText(value: string | undefined | null, prefix = '', suffix = ''): string {
+  if (value === undefined || value === null) return '—';
+  const n = parseFloat(String(value).replace(/,/g, ''));
+  if (!Number.isFinite(n)) return '—';
+  return `${prefix}${n.toLocaleString('en-US', { maximumFractionDigits: 2 })}${suffix}`;
+}
+
 /** Protocol pill text for a position card. */
 export function protocolBadge(protocol: string): string {
   if (protocol === 'uniswap-v4') return 'UNISWAP V4';

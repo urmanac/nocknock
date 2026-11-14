@@ -47,7 +47,9 @@ pub struct TargetWeightsBps {
     pub cash: i32,
 }
 
-fn default_treasury_floor() -> f64 { 100000.0 }
+/// No floor unless the operator sets one (v0.5.1). A floor is the operator's own number;
+/// 0 means "no floor rule", never someone else's 100,000.
+fn default_treasury_floor() -> f64 { 0.0 }
 fn default_tax_reserve_ratio() -> f64 { 0.40 }
 fn default_treasury_bps() -> i32 { 8000 }
 fn default_uniswap_lp_bps() -> i32 { 1500 }
@@ -1336,6 +1338,59 @@ fn lp_rebuild_status(lp_usd: f64, total_portfolio_usd: f64, target_weight_bps: i
     }
 }
 
+/// One-line summary of the tracked LP positions, built from the positions themselves
+/// (issue #95; a port of the frontend `positionsSummary`). A pool reading zero in-range
+/// liquidity counts as stale; a pool whose read failed is not called stale. It claims
+/// nothing about yield or profit and loss.
+///
+/// The flag is true only when at least one ranged position holds liquidity, is in
+/// range, and sits on a pool read live this cycle: the only case in which the old
+/// "(Dual Growth Engine Active)" label is a statement of fact.
+fn lp_positions_summary(raw: &RawOnChainData) -> (String, bool) {
+    let n = raw.positions.len();
+    if n == 0 {
+        return ("No LP positions tracked.".to_string(), false);
+    }
+    let pool_active = |p: &RawPosition| -> Option<bool> {
+        raw.pool_liquidity
+            .get(&p.position_id)
+            .and_then(|v| v.parse::<u128>().ok())
+            .map(|l| l > 0)
+    };
+    let full = raw.positions.iter().filter(|p| is_full_range(p.tick_lower, p.tick_upper)).count();
+    let ranged: Vec<&RawPosition> = raw.positions.iter().filter(|p| !is_full_range(p.tick_lower, p.tick_upper)).collect();
+    // A ranged position holding no liquidity is empty: neither in nor out of range.
+    let empty = ranged.iter().filter(|p| p.liquidity == 0).count();
+    let held: Vec<&&RawPosition> = ranged.iter().filter(|p| p.liquidity > 0).collect();
+    let stale = held.iter().filter(|p| pool_active(p) == Some(false)).count();
+    let in_range = held.iter().filter(|p| p.in_range && pool_active(p) != Some(false)).count();
+    let out = held.len() - in_range - stale;
+    let engine_active = ranged
+        .iter()
+        .any(|p| p.in_range && p.liquidity > 0 && pool_active(p) == Some(true));
+    let mut parts: Vec<String> = Vec::new();
+    if !ranged.is_empty() {
+        let mut detail = vec![format!("{} in range", in_range)];
+        if out > 0 {
+            detail.push(format!("{} out of range", out));
+        }
+        if stale > 0 {
+            detail.push(format!("{} on a stale pool", stale));
+        }
+        if empty > 0 {
+            detail.push(format!("{} empty", empty));
+        }
+        parts.push(format!("{} ranged ({})", ranged.len(), detail.join(", ")));
+    }
+    if full > 0 {
+        parts.push(format!("{} full range", full));
+    }
+    (
+        format!("{} LP position{} tracked: {}.", n, if n == 1 { "" } else { "s" }, parts.join(", ")),
+        engine_active,
+    )
+}
+
 /// Standing bias (operator order, 2026-11-14): rebuilding LP tranches leaves the net
 /// cash position unchanged, so it is always worth doing. When LP is under target the
 /// rebuild becomes the primary directive whenever the engine would otherwise say
@@ -1391,6 +1446,7 @@ fn apply_lp_rebuild_bias(action: String, details: String, lp: &LpRebuild) -> (St
         return (action, format!("{} Standing bias: {}", details, sentence));
     }
     let idle = action.starts_with("HOLD & ACCRETE")
+        || action.starts_with("DIP ZONE")
         || action.starts_with("DCA ON SCHEDULE")
         || action.starts_with("DCA PLAN PENDING")
         || action.starts_with("DCA PAUSED")
@@ -2133,24 +2189,40 @@ async fn get_snapshot_by_id_handler(
     }
 }
 
+/// Floor clause for MCP text, from the snapshot's own `nock_floor_target` (never a
+/// hardcoded 100k). "0" means no floor is configured; a missing field is unavailable.
+pub fn floor_clause(global: Option<&serde_json::Value>) -> String {
+    let get = |k: &str| global.and_then(|g| g.get(k)).and_then(|v| v.as_str());
+    let target = get("nock_floor_target").and_then(|t| t.trim().parse::<f64>().ok());
+    let delta = get("nock_floor_delta").and_then(|d| d.trim().parse::<f64>().ok());
+    match (target, delta) {
+        (None, _) => "floor unavailable".to_string(),
+        (Some(t), _) if t <= 0.0 => "no floor configured".to_string(),
+        (Some(t), Some(d)) if d < 0.0 => format!("{:.0} below the {:.0} NOCK floor", -d, t),
+        (Some(t), Some(d)) => format!("+{:.0} above the {:.0} NOCK floor", d, t),
+        (Some(t), None) => format!("{:.0} NOCK floor; buffer unavailable", t),
+    }
+}
+
 pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
     let global = data.pointer("/derived_metrics/global_status");
-    let total_usd = global.and_then(|g| g.get("total_portfolio_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
-    let total_nock = global.and_then(|g| g.get("total_nock_amount")).and_then(|v| v.as_str()).unwrap_or("0");
-    let nock_delta = global.and_then(|g| g.get("nock_floor_delta")).and_then(|v| v.as_str()).unwrap_or("0");
-    let total_usdc = global.and_then(|g| g.get("total_usdc_amount")).and_then(|v| v.as_str()).unwrap_or("0.00");
-    let hwm = global.and_then(|g| g.get("high_water_mark_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
-    let advice = global.and_then(|g| g.get("shot_advice_action")).and_then(|v| v.as_str()).unwrap_or("HOLD");
-
-    let delta_prefix = if nock_delta.starts_with('-') { "" } else { "+" };
+    // Missing fields say so: never an invented 0.00 or HOLD.
+    let get = |k: &str| global.and_then(|g| g.get(k)).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
+    let usd = |k: &str| get(k).map(|v| format!("${v} USD")).unwrap_or_else(|| "unavailable".to_string());
+    let total_usd = usd("total_portfolio_usd");
+    let total_nock = get("total_nock_amount").map(|v| format!("{v} NOCK")).unwrap_or_else(|| "unavailable".to_string());
+    let total_usdc = get("total_usdc_amount").map(|v| format!("{v} USDC")).unwrap_or_else(|| "unavailable".to_string());
+    let hwm = usd("high_water_mark_usd");
+    let advice = get("shot_advice_action").unwrap_or("unavailable");
+    let floor = floor_clause(global);
 
     format!(
         "📈 NockNock Sovereign Portfolio State (Live API)\n\
          =========================================\n\
-         • Total Value: ${total_usd} USD\n\
-         • Sovereign NOCK Stack: {total_nock} NOCK (Floor buffer delta: {delta_prefix}{nock_delta} above 100k)\n\
-         • Stable Stack: {total_usdc} USDC\n\
-         • High-Water Mark: ${hwm} USD\n\
+         • Total Value: {total_usd}\n\
+         • Sovereign NOCK Stack: {total_nock} ({floor})\n\
+         • Stable Stack: {total_usdc}\n\
+         • High-Water Mark: {hwm}\n\
          • Tactical Directive: {advice}\n\
          • Mode: Tier 1 Connected (Verified Persistent Snapshot)"
     )
@@ -2158,18 +2230,19 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
 
 pub fn format_shot_advice_text(data: &serde_json::Value) -> String {
     let global = data.pointer("/derived_metrics/global_status");
-    let action = global.and_then(|g| g.get("shot_advice_action")).and_then(|v| v.as_str()).unwrap_or("HOLD");
-    let details = global.and_then(|g| g.get("shot_advice_details")).and_then(|v| v.as_str()).unwrap_or("Accreting");
-    let claimable_usd = global.and_then(|g| g.get("total_fees_claimable_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
-    let gas_delta = global.and_then(|g| g.get("gas_to_fee_delta_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
+    let get = |k: &str| global.and_then(|g| g.get(k)).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
+    let action = get("shot_advice_action").unwrap_or("unavailable");
+    let details = get("shot_advice_details").unwrap_or("unavailable");
+    let claimable_usd = get("total_fees_claimable_usd").map(|v| format!("${v} USD")).unwrap_or_else(|| "unavailable".to_string());
+    let gas_delta = get("gas_to_fee_delta_usd").map(|v| format!("+${v} USD")).unwrap_or_else(|| "unavailable".to_string());
 
     format!(
         "🎯 Tactical Shot Advice Engine\n\
          ===============================\n\
          • Recommended Action: {action}\n\
          • Decision Matrix Details: {details}\n\
-         • Uncollected Claimable Fees: ${claimable_usd} USD\n\
-         • Net Gas-to-Fee Profitability: +${gas_delta} USD\n\
+         • Uncollected Claimable Fees: {claimable_usd}\n\
+         • Net Gas-to-Fee Profitability: {gas_delta}\n\
          • Execution rule: claim advised when claimable yield ≥ 2× live gas break-even."
     )
 }
@@ -2182,10 +2255,14 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
             .unwrap_or_else(|| "n/a".to_string())
     };
     let lp = data.pointer("/derived_metrics/lp_rebuild");
-    let lp_line = format!(
-        "• LP rebuild bias: {} (holds ${} of a ${} target, ${} short). Rebuilding ranges is a reposition: no net cash change.",
-        s(lp, "status"), s(lp, "actual_usd"), s(lp, "target_usd"), s(lp, "gap_usd")
-    );
+    let lp_line = if s(lp, "status") == "no_positions" {
+        "• No LP positions are tracked; NockNock suggests deposits only into positions you list under positions:".to_string()
+    } else {
+        format!(
+            "• LP rebuild bias: {} (holds ${} of a ${} target, ${} short). Rebuilding ranges is a reposition: no net cash change.",
+            s(lp, "status"), s(lp, "actual_usd"), s(lp, "target_usd"), s(lp, "gap_usd")
+        )
+    };
     let mut lp_line = lp_line;
     for sg in lp.and_then(|l| l.get("suggestions")).and_then(|v| v.as_array()).into_iter().flatten() {
         let g = |k: &str| sg.get(k).and_then(|x| x.as_str()).unwrap_or("n/a");
@@ -6042,18 +6119,33 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
         tick_to_display_price_dec(p.tick_lower, p.token0.decimals, p.token1.decimals)
     });
 
-    // Tax-reserve guardrail (virtual 60/40 sub-ledger): dip deployments may only
-    // consume growth dry powder; the tax reserve share of realized harvests is
-    // protected. If the wallet's stable stack cannot cover the reserve, deployment
-    // advice is suppressed entirely in favor of rebuilding the buffer.
+    // Liquid dry powder (issue #63): only wallet USDC is spendable. USDC inside LP is
+    // working capital (a USDC/NOCK range converts it to NOCK as the price falls), so it
+    // neither covers the virtual tax reserve nor counts as dry powder: the same rule
+    // plan_directive's tax cap and the LP rebuild's liquid floor already use.
     let tax_reserve_usd = ledger.total_usd * profile.tax_reserve_ratio;
-    let deployable_usdc = (total_stable_usd - tax_reserve_usd).max(0.0);
-    let tax_guardrail_blocked = tax_reserve_usd > 0.0 && total_stable_usd < tax_reserve_usd;
-
-    // Cash target (issue #79): the advised spend never dips liquid USDC below
-    // target_weights_bps.cash. Only wallet USDC is spendable; USDC inside LP is not.
+    let tax_guardrail_blocked = tax_reserve_usd > 0.0 && wallet_usdc < tax_reserve_usd;
+    // Cash target (issue #79) and tax reserve overlap: the larger one stays in the wallet.
     let cash_target_usd = total_portfolio_usd * (profile.target_weights_bps.cash as f64 / 10000.0);
-    let deployable_usdc = deployable_usdc.min((wallet_usdc - cash_target_usd).max(0.0));
+    let deployable_usdc = (wallet_usdc - tax_reserve_usd.max(cash_target_usd)).max(0.0);
+    let lp_usdc_note = if lp_usdc >= 0.005 {
+        format!(" The ${:.2} of USDC inside LP is working capital, not dry powder: it stays in its ranges.", lp_usdc)
+    } else {
+        String::new()
+    };
+    let dry_powder_sentence = format!(
+        "Liquid dry powder: {} (wallet USDC ${:.2} less the larger of the ${:.2} cash target and the ${:.2} virtual tax reserve).",
+        if deployable_usdc >= PLAN_DUST_USDC { format!("${:.2}", deployable_usdc) } else { "none".to_string() },
+        wallet_usdc,
+        cash_target_usd,
+        tax_reserve_usd
+    );
+    // ETH is gas: stated as a fact when the wallet has none, never sized.
+    let gas_note = match (raw.wallet_eth, raw.wallet_weth) {
+        (Some(e), Some(w)) if e <= 0.0 && w <= 0.0 => " The wallet holds no ETH; every action on Base pays its gas in ETH.",
+        _ => "",
+    };
+    let own_plan_hint = "add an accumulation_plan with your own budget_usdc, tranches and interval_hours";
 
     // Accumulation plan (issue #79): pure decision over config + verified fills.
     let plan_status: Option<AccumulationPlanStatus> = plan.cfg.as_ref().map(|cfg| {
@@ -6076,6 +6168,11 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
     let plan_overrides_cooldown = active_plan.is_some()
         && plan.cfg.as_ref().map_or(false, |c| !c.pause_when_overextended);
     let mut lp_rebuild = lp_rebuild_status(lp_usd, total_portfolio_usd, profile.target_weights_bps.uniswap_lp);
+    // Nothing tracked: there is no range to rebuild, so no suggestion and no bias text
+    // (a user who never held LP is not told to "re-establish" one).
+    if raw.positions.is_empty() {
+        lp_rebuild.status = "no_positions".to_string();
+    }
     if lp_rebuild.status == "under_target" {
         let lp_target_usd = total_portfolio_usd * (profile.target_weights_bps.uniswap_lp as f64 / 10000.0);
         // USDC that must stay liquid: the cash target, or the tax reserve plus the
@@ -6114,71 +6211,179 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
         lp_rebuild.excluded = excluded;
     }
 
-    // Dynamic Shot Advice Engine
-    let (advice_action, advice_details) = if total_nock < floor {
+    // Dynamic Shot Advice Engine (v0.5.1). Every figure comes from config or the chain;
+    // NockNock never sizes a buy outside the operator's own accumulation plan.
+    let (lp_summary, engine_active) = lp_positions_summary(raw);
+    // RANGE EXIT reports the price-source range's own value, never the whole LP book.
+    let range_exit: Option<(String, String)> = raw
+        .positions
+        .iter()
+        .find(|p| p.is_price_source && !is_full_range(p.tick_lower, p.tick_upper))
+        .zip(range_top_price)
+        .filter(|(_, top)| spot_price > 0.0 && *top > 0.0 && spot_price >= *top)
+        .map(|(p, top)| {
+            let p0 = leg_usd_price(&p.token0, spot_price, raw.live_eth_price_usd);
+            let p1 = leg_usd_price(&p.token1, spot_price, raw.live_eth_price_usd);
+            let pos_usd = p.amount0 * p0 + p.amount1 * p1;
+            (
+                "RANGE EXIT FLASHPOINT (Above Range)".to_string(),
+                format!(
+                    "Spot ${:.4} is at or above the top of the price-source range (${:.4}). That range ({}) holds ${:.2} ({:.2} {} + {:.2} {}) and earns no fees unless the price falls back into it. Whether to leave it, withdraw it or open a new range is your decision; NockNock does not choose range bounds.",
+                    spot_price,
+                    top,
+                    position_label(p),
+                    pos_usd,
+                    p.amount0,
+                    p.token0.symbol,
+                    p.amount1,
+                    p.token1.symbol
+                ),
+            )
+        });
+    // BATCH HARVEST: the split comes from the configured ratio, and the text says what the
+    // harvest ledger actually books (USDC and NOCK; WETH fees are not booked yet).
+    let harvest: Option<(String, String)> = (total_fees_usd >= 5.00).then(|| {
+        let gas_efficiency = if gas_cost > 0.0 {
+            format!("{:.0}x", total_fees_usd / gas_cost)
+        } else {
+            "unknown".to_string()
+        };
+        let r = profile.tax_reserve_ratio * 100.0;
         (
-            "DEFENSIVE LOCK (Floor Recovery)".to_string(),
+            "BATCH HARVEST SHOT (Execute Claim)".to_string(),
             format!(
-                "CRITICAL: Total NOCK stack ({:.0}) is below the {:.0} floor by {:.0} NOCK! All yield and stable reserves are locked to replenish the sovereign foundation.",
-                total_nock, floor, floor - total_nock
+                "Uncollected LP fees (${:.2}) have reached the fixed $5.00 harvest threshold ({} gas efficiency). After harvesting, record the transaction: NockNock books {:.0}% of the USDC and NOCK received to the virtual tax reserve and {:.0}% to growth. WETH fees are not booked yet. Bookkeeping only; nothing moves on-chain.",
+                total_fees_usd,
+                gas_efficiency,
+                r,
+                100.0 - r
+            ),
+        )
+    });
+    // A plan with a tranche due (or a config error to report) leads. A plan with nothing
+    // due (waiting, pending, paused, blocked) yields to a range exit or a due harvest (N11).
+    let plan_leads = active_plan.filter(|p| !matches!(p.status.as_str(), "waiting" | "pending" | "paused" | "blocked"));
+    let exit_or_harvest = range_exit.clone().or_else(|| harvest.clone());
+    let wallet_label = raw
+        .wallet_balances
+        .first()
+        .map(|w| format!("The tracked wallet {}", w.wallet_address))
+        .unwrap_or_else(|| "The tracked wallet".to_string());
+    let dip_zone = spot_price > 0.0 && spot_price < 0.020;
+
+    let (advice_action, advice_details) = if floor > 0.0 && total_nock < floor {
+        let deficit = format!(
+            "Total NOCK ({:.0}) is below the {:.0} floor by {:.0} NOCK.",
+            total_nock,
+            floor,
+            floor - total_nock
+        );
+        match active_plan {
+            // The plan stays visible: a tranche transition changes the action, so it notifies.
+            Some(ps) => {
+                let (plan_action, plan_details) = plan_advice(ps, spot_price);
+                (
+                    format!("DEFENSIVE LOCK (Floor Recovery) · {}", plan_action),
+                    format!("{} Your accumulation plan is the recovery path: {}", deficit, plan_details),
+                )
+            }
+            None => (
+                "DEFENSIVE LOCK (Floor Recovery)".to_string(),
+                format!(
+                    "{} NockNock does not size recovery buys: {} to have them paced.",
+                    deficit, own_plan_hint
+                ),
+            ),
+        }
+    } else if !plan_configured && total_portfolio_usd <= 0.0 && total_nock <= 0.0 {
+        (
+            "NOTHING TO TRACK YET (Empty Wallet)".to_string(),
+            format!(
+                "{} holds no NOCK, no USDC and no LP value that NockNock reads. Once it is funded NockNock reports it here. To have NOCK buys paced, {}; set operator_profile.treasury_floor_nock only if you want a floor alarm.{}",
+                wallet_label, own_plan_hint, gas_note
             ),
         )
     } else if regime.overextended && !plan_overrides_cooldown {
         (
             "SWEEP TO STABLE / ACCUMULATE DRY POWDER (Overextension Cooldown)".to_string(),
             format!(
-                "NOCK spot (${:.5}) is overextended (daily RSI(14) {:.0} >= 70). Buying tops is how gains evaporate: suppress deployment, harvest if fees warrant it, and sweep to the stable stack until momentum cools.",
+                "NOCK spot (${:.5}) is overextended: daily RSI(14) {} is at or above 70.{} NockNock advises no sale and no buy while it stays there.",
                 spot_price,
-                regime.rsi_1d.unwrap_or(0.0)
+                regime.rsi_1d.map(|r| format!("{:.0}", r)).unwrap_or_else(|| "unavailable".to_string()),
+                if active_plan.is_some() {
+                    " Your accumulation plan pauses buys until it cools."
+                } else {
+                    ""
+                }
             ),
         )
+    } else if let Some(ps) = plan_leads {
+        plan_advice(ps, spot_price)
+    } else if let (Some(_), Some(adv)) = (active_plan, exit_or_harvest.as_ref()) {
+        adv.clone()
     } else if let Some(ps) = active_plan {
         plan_advice(ps, spot_price)
-    } else if !plan_configured && spot_price > 0.0 && spot_price < 0.020 && tax_guardrail_blocked {
+    } else if !plan_configured && dip_zone && tax_guardrail_blocked {
         (
             "SWEEP TO STABLE / ACCUMULATE DRY POWDER (Tax Guardrail)".to_string(),
             format!(
-                "Spot price (${:.5}) is at accumulation territory, but the virtual tax reserve (${:.2}) exceeds the stable stack (${:.2}). Deployment suppressed: harvest fees and rebuild the 60/40 buffer before buying dips.",
-                spot_price, tax_reserve_usd, total_stable_usd
+                "Spot price (${:.5}) is below the $0.020 accumulation line, but the virtual tax reserve (${:.2}) exceeds liquid wallet USDC (${:.2}).{} Deployment suppressed: no buy is advised while wallet USDC is below the reserve.",
+                spot_price, tax_reserve_usd, wallet_usdc, lp_usdc_note
             ),
         )
-    } else if !plan_configured && spot_price > 0.0 && spot_price < 0.020 && deployable_usdc >= PLAN_DUST_USDC {
+    } else if !plan_configured && total_nock <= 0.0 && wallet_usdc >= PLAN_DUST_USDC {
         (
-            "DIP REINVESTMENT SHOT (Deploy USDC)".to_string(),
+            "BUILD FROM ZERO (No Buy Plan Configured)".to_string(),
             format!(
-                "Spot price (${:.5}) has breached the $0.020 accumulation boundary! Deploy ${:.2} of saved USDC (${:.2} available; ${:.2} protected as virtual tax reserve, ${:.2} kept as cash target) to purchase NOCK at discount and compound buffer toward 120,000.",
-                spot_price, deployable_usdc, total_stable_usd, tax_reserve_usd, cash_target_usd
+                "{} holds ${:.2} of USDC and no NOCK.{} NockNock does not choose amounts for you: {} (optionally cash_reserve_usdc and max_price_usd) and it will pace each NOCK buy and verify it on-chain.{}",
+                wallet_label, wallet_usdc, lp_usdc_note, own_plan_hint, gas_note
             ),
         )
-    } else if spot_price > 0.0 && range_top_price.map_or(false, |top| top > 0.0 && spot_price >= top) {
+    } else if !plan_configured && dip_zone && deployable_usdc >= PLAN_DUST_USDC {
         (
-            "RANGE EXIT FLASHPOINT (Build High Wall)".to_string(),
+            "DIP ZONE (No Buy Plan Configured)".to_string(),
             format!(
-                "Spot ${:.4} has reached the top of the price-source range (${:.4})! Take principal (${:.2}) and rebuild single-sided high walls at $5.00+.",
-                spot_price,
-                range_top_price.unwrap_or(0.0),
-                lp_usd
+                "Spot ${:.5} is below the $0.020 accumulation line and the wallet holds ${:.2} of liquid USDC. {}{} NockNock does not size buys outside a plan: {} and it will pace them.{}",
+                spot_price, wallet_usdc, dry_powder_sentence, lp_usdc_note, own_plan_hint, gas_note
             ),
         )
-    } else if total_fees_usd >= 5.00 {
-        let gas_efficiency = if gas_cost > 0.0 {
-            format!("{:.0}x", total_fees_usd / gas_cost)
+    } else if let Some(adv) = exit_or_harvest {
+        adv
+    } else {
+        let floor_text = if floor > 0.0 {
+            format!("Total NOCK held is {:.0} (+{:.0} above the {:.0} floor).", total_nock, nock_floor_delta, floor)
         } else {
-            "unknown".to_string()
+            format!("Total NOCK held is {:.0}; no floor configured.", total_nock)
+        };
+        // The "HOLD & ACCRETE" prefix stays (apply_lp_rebuild_bias keys idle detection on
+        // it); the parenthetical states only what the positions show.
+        let label = if engine_active {
+            "HOLD & ACCRETE (Dual Growth Engine Active)"
+        } else if raw.positions.is_empty() {
+            "HOLD & ACCRETE (No LP Tracked)"
+        } else if lp_usd <= 0.0 {
+            "HOLD & ACCRETE (LP Empty)"
+        } else {
+            "HOLD & ACCRETE (No Ranged LP Confirmed In Range)"
+        };
+        let dip_note = if !plan_configured && dip_zone {
+            format!(
+                " Spot (${:.5}) is below the $0.020 accumulation line. NockNock does not size buys outside a plan: {} to have them paced.",
+                spot_price, own_plan_hint
+            )
+        } else {
+            String::new()
         };
         (
-            "BATCH HARVEST SHOT (Execute Claim)".to_string(),
+            label.to_string(),
             format!(
-                "Accumulated yield (${:.2}) exceeds $5.00 threshold at {} gas efficiency. Harvest fees and apply 60/40 Split Rule (40% to Tax Escrow, 60% Growth Capital).",
-                total_fees_usd, gas_efficiency
-            ),
-        )
-    } else {
-        (
-            "HOLD & ACCRETE (Dual Growth Engine Active)".to_string(),
-            format!(
-                "Total NOCK held is {:.0} (+{:.0} above {:.0} hard floor). {} Uniswap position(s) generating yield (+${:.2} uncollected). 0% realized loss. Maintain posture.",
-                total_nock, nock_floor_delta, floor, raw.positions.len(), total_fees_usd
+                "{} {}{} {}{}{}",
+                floor_text,
+                lp_summary,
+                if raw.positions.is_empty() { String::new() } else { format!(" ${:.2} of LP fees uncollected.", total_fees_usd) },
+                dry_powder_sentence,
+                lp_usdc_note,
+                dip_note
             ),
         )
     };
@@ -6281,13 +6486,17 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
                 };
 
                 let w = &profile.target_weights_bps;
-                let t3_weight = ((t3_usd / total_portfolio_usd) * 10000.0) as i32;
+                // An empty portfolio has no weights: 0/0 is never computed.
+                let weight = |usd: f64| -> i32 {
+                    if total_portfolio_usd > 0.0 { ((usd / total_portfolio_usd) * 10000.0) as i32 } else { 0 }
+                };
+                let t3_weight = weight(t3_usd);
                 let t3_dev = t3_weight - w.treasury;
 
-                let lp_weight = ((lp_usd / total_portfolio_usd) * 10000.0) as i32;
+                let lp_weight = weight(lp_usd);
                 let lp_dev = lp_weight - w.uniswap_lp;
 
-                let usdc_weight = ((wallet_usdc / total_portfolio_usd) * 10000.0) as i32;
+                let usdc_weight = weight(wallet_usdc);
                 let usdc_dev = usdc_weight - w.cash;
 
                 vec![
@@ -6478,9 +6687,26 @@ mod tests {
         // 80,000 wallet NOCK + ~15,296 LP NOCK < 100,000 floor
         raw.wallet_balances[0].amount = "80000.0".to_string();
         raw.wallet_balances[0].amount_usd = "1664.0".to_string();
-        let profile = OperatorProfile::default();
+        // The floor is the operator's own number (v0.5.1: there is no default floor).
+        let profile = operator_profile_2026_11();
         let metrics = compute_derived_metrics(&raw, 2500.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
-        assert!(metrics.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
+        assert_eq!(metrics.global_status.shot_advice_action, "DEFENSIVE LOCK (Floor Recovery)");
+        let d = &metrics.global_status.shot_advice_details;
+        assert!(d.contains("is below the 100000 floor by"), "{d}");
+        assert!(d.contains("accumulation_plan"));
+        for banned in ["CRITICAL", "locked", "sovereign foundation", "Deploy $", "Buy $"] {
+            assert!(!d.contains(banned), "{banned} in: {d}");
+        }
+        // With the default profile there is no floor, so no lock.
+        let none = compute_derived_metrics(&raw, 2500.0, &OperatorProfile::default(), StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
+        assert!(!none.global_status.shot_advice_action.contains("DEFENSIVE LOCK"));
+        assert_eq!(none.global_status.nock_floor_target, "0");
+    }
+
+    /// The operator's own profile as configured on chudmax (floor 100,000). Tests that
+    /// exercise floor behaviour set it explicitly: the code default is "no floor".
+    fn operator_profile_2026_11() -> OperatorProfile {
+        OperatorProfile { treasury_floor_nock: 100_000.0, ..OperatorProfile::default() }
     }
 
     #[test]
@@ -6503,6 +6729,65 @@ mod tests {
         assert!(metrics.global_status.shot_advice_action.contains("HOLD & ACCRETE"));
         // Advice text is Uniswap-only now: no Aerodrome wording survives.
         assert!(!metrics.global_status.shot_advice_details.contains("Aerodrome"));
+        // #95: no P/L claim, no yield claim, no "Uniswap position(s)".
+        let d = &metrics.global_status.shot_advice_details;
+        for banned in ["realized", "0%", "Uniswap position", "generating yield"] {
+            assert!(!d.contains(banned), "{banned} in: {d}");
+        }
+        // Pools were not read in this fixture, so nothing is claimed to be earning.
+        assert_eq!(metrics.global_status.shot_advice_action, "HOLD & ACCRETE (No Ranged LP Confirmed In Range)");
+    }
+
+    #[test]
+    fn test_hold_advice_states_no_pnl_and_names_lp_positions() {
+        // Issue #95: HOLD is built from the positions. Four ranged positions on live
+        // pools plus an Aero full-range pool; one pool then reads zero liquidity.
+        let mut raw = four_position_fixture();
+        for p in &raw.positions {
+            raw.pool_liquidity.insert(p.position_id.clone(), "80173935548453779".to_string());
+        }
+        let aero = aero_position(false);
+        raw.pool_liquidity.insert(aero.position_id.clone(), "342542824101829799".to_string());
+        raw.positions.push(aero);
+        let m = compute_derived_metrics(&raw, 0.0, &OperatorProfile::default(), StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
+        assert_eq!(m.global_status.shot_advice_action, "HOLD & ACCRETE (Dual Growth Engine Active)");
+        let d = &m.global_status.shot_advice_details;
+        assert!(d.starts_with("Total NOCK held is "), "{d}");
+        assert!(d.contains("; no floor configured."), "{d}");
+        assert!(d.contains("5 LP positions tracked: 4 ranged (4 in range), 1 full range."), "{d}");
+        assert!(d.contains("of LP fees uncollected."), "{d}");
+        assert!(d.contains("Liquid dry powder: "), "{d}");
+        for banned in ["realized", "0%", "Uniswap position", "generating yield", "Maintain posture", "hard floor"] {
+            assert!(!d.contains(banned), "{banned} in: {d}");
+        }
+
+        // A stale pool is called stale, and the label stops claiming growth once no
+        // ranged position is confirmed in range on a live pool.
+        raw.pool_liquidity.insert("uniswap-v4:base:3163431".to_string(), "0".to_string());
+        let m = compute_derived_metrics(&raw, 0.0, &OperatorProfile::default(), StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
+        assert!(m.global_status.shot_advice_details.contains("4 ranged (3 in range, 1 on a stale pool), 1 full range"));
+        for p in raw.positions.iter().filter(|p| !is_full_range(p.tick_lower, p.tick_upper)).map(|p| p.position_id.clone()).collect::<Vec<_>>() {
+            raw.pool_liquidity.insert(p, "0".to_string());
+        }
+        let m = compute_derived_metrics(&raw, 0.0, &OperatorProfile::default(), StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
+        assert_eq!(m.global_status.shot_advice_action, "HOLD & ACCRETE (No Ranged LP Confirmed In Range)");
+    }
+
+    #[test]
+    fn test_hold_advice_replays_the_2026_11_14_empty_book() {
+        // 05:36Z on 2026-11-14: four tracked positions, all emptied, and HOLD said
+        // "4 Uniswap position(s) generating yield ... 0% realized loss". With the plan
+        // complete (no dip arm), HOLD now states the empty book.
+        let raw = liquid_wallet_fixture();
+        let fills = PlanFills { count: 5, spent_usdc: 500.0, acquired_nock: 40500.0, last_at: Some(t("2026-11-15T12:00:00Z")), first_price: Some(0.0125) };
+        let ctx = PlanContext { cfg: Some(plan_cfg()), fills, ledger_unavailable: false, now: t("2026-11-20T12:00:00Z") };
+        let m = metrics_with_plan(&raw, &ctx, &MarketRegime::default());
+        assert_eq!(m.global_status.shot_advice_action, "HOLD & ACCRETE (LP Empty)");
+        let d = &m.global_status.shot_advice_details;
+        assert!(d.starts_with("Total NOCK held is 115748 (+15748 above the 100000 floor). 4 LP positions tracked: 4 ranged (0 in range, 4 empty). $0.00 of LP fees uncollected. Liquid dry powder: $929.22 (wallet USDC $1053.00 less the larger of the $123.78 cash target and the $0.00 virtual tax reserve)."), "{d}");
+        for banned in ["realized", "generating yield", "Uniswap position", "Deploy $", "120,000", "CRITICAL"] {
+            assert!(!d.contains(banned), "{banned} in: {d}");
+        }
     }
 
     #[test]
@@ -6708,46 +6993,67 @@ database_url: "postgresql://localhost/test"
 
     #[test]
     fn test_tax_guardrail_blocks_dip_deployment() {
-        // Overdrawn tax reserve: the wallet's stable stack cannot cover the virtual
-        // 40% tax reserve, so dip-deployment advice must be suppressed entirely.
+        // Issue #63: only wallet USDC backs the virtual tax reserve. USDC inside LP
+        // (B+D in this fixture) does not cover it and is not dry powder.
         let mut raw = four_position_fixture();
         raw.spot_price_nock_usd = 0.015; // dip zone (< 0.020)
-        raw.wallet_balances[1].amount = "10.0".to_string(); // LP USDC legs (B+D ≈ 140) + wallet 10
-        let profile = OperatorProfile::default(); // floor 100k; ratio 0.40
+        raw.wallet_balances[1].amount = "10.0".to_string();
+        let profile = OperatorProfile::default(); // ratio 0.40
         let ledger = LedgerAggregate { total_usd: 500.0, harvest_count: 3, last_at: None };
-        // tax reserve = 500 * 0.40 = 200 > stable stack (~150) -> blocked
         let metrics = compute_derived_metrics(
             &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &ledger, &MarketRegime::default(),
         );
-        assert!(metrics.global_status.shot_advice_action.contains("SWEEP TO STABLE"));
-        assert!(metrics.global_status.shot_advice_action.contains("Tax Guardrail"));
-        assert!(metrics.global_status.shot_advice_details.contains("Deployment suppressed"));
+        assert_eq!(metrics.global_status.shot_advice_action, "SWEEP TO STABLE / ACCUMULATE DRY POWDER (Tax Guardrail)");
+        let d = &metrics.global_status.shot_advice_details;
+        assert!(d.contains("the virtual tax reserve ($200.00) exceeds liquid wallet USDC ($10.00)."), "{d}");
+        assert!(d.contains("of USDC inside LP is working capital, not dry powder"), "{d}");
+        assert!(d.contains("Deployment suppressed"));
+        assert!(!d.contains("60/40"));
 
-        // Small harvest ledger: reserve 40 * 0.40 = 16 <= stable stack, so the tax
-        // guardrail passes — but $10 of liquid USDC is below the 5% cash target, so
-        // there is still nothing to deploy (issue #79 cash-target rule).
+        // A $16 reserve still exceeds the $10 wallet: LP USDC no longer covers it.
         let small = LedgerAggregate { total_usd: 40.0, harvest_count: 1, last_at: None };
         let metrics = compute_derived_metrics(
             &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &small, &MarketRegime::default(),
         );
-        assert!(!metrics.global_status.shot_advice_action.contains("DIP REINVESTMENT SHOT"));
-        assert!(!metrics.global_status.shot_advice_action.contains("Tax Guardrail"));
+        assert!(metrics.global_status.shot_advice_action.contains("Tax Guardrail"));
+        assert!(metrics.global_status.shot_advice_details.contains("exceeds liquid wallet USDC ($10.00)"));
 
-        // Liquid USDC well above the cash target -> DIP advice fires, sized to keep the target.
+        // $50 covers the reserve but not the cash target: nothing is dry powder, so the
+        // engine holds and says so.
+        raw.wallet_balances[1].amount = "50.0".to_string();
+        let metrics = compute_derived_metrics(
+            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &small, &MarketRegime::default(),
+        );
+        assert!(metrics.global_status.shot_advice_action.starts_with("HOLD & ACCRETE"));
+        let total: f64 = metrics.global_status.total_portfolio_usd.parse().unwrap();
+        assert!(
+            metrics.global_status.shot_advice_details.contains(&format!(
+                "Liquid dry powder: none (wallet USDC $50.00 less the larger of the ${:.2} cash target and the $16.00 virtual tax reserve).",
+                total * 0.05
+            )),
+            "{}", metrics.global_status.shot_advice_details
+        );
+
+        // Liquid USDC well above the cash target: DIP ZONE states the dry powder and
+        // sizes nothing (no lump-sum "Deploy $" without a plan).
         raw.wallet_balances[1].amount = "5000.0".to_string();
         let metrics = compute_derived_metrics(
             &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &small, &MarketRegime::default(),
         );
-        assert!(metrics.global_status.shot_advice_action.contains("DIP REINVESTMENT SHOT"));
-        assert!(metrics.global_status.shot_advice_details.contains("protected as virtual tax reserve"));
-        assert!(metrics.global_status.shot_advice_details.contains("kept as cash target"));
+        assert_eq!(metrics.global_status.shot_advice_action, "DIP ZONE (No Buy Plan Configured)");
         let total: f64 = metrics.global_status.total_portfolio_usd.parse().unwrap();
-        let advised = 5000.0 - total * 0.05;
+        let d = &metrics.global_status.shot_advice_details;
         assert!(
-            metrics.global_status.shot_advice_details.contains(&format!("Deploy ${:.2}", advised)),
-            "advised spend must leave the 5% cash target: {}",
-            metrics.global_status.shot_advice_details
+            d.contains(&format!(
+                "Liquid dry powder: ${:.2} (wallet USDC $5000.00 less the larger of the ${:.2} cash target and the $16.00 virtual tax reserve).",
+                5000.0 - total * 0.05,
+                total * 0.05
+            )),
+            "{d}"
         );
+        for banned in ["Deploy $", "120,000", "at discount", "CRITICAL"] {
+            assert!(!d.contains(banned), "{banned} in: {d}");
+        }
     }
 
     // ---------------- Accumulation plan (issue #79) ----------------
@@ -7008,7 +7314,7 @@ database_url: "postgresql://localhost/test"
 
     fn metrics_with_plan(raw: &RawOnChainData, ctx: &PlanContext, regime: &MarketRegime) -> DerivedMetrics {
         compute_derived_metrics_with_plan(
-            raw, 0.0, &OperatorProfile::default(), StructuralChannels { channels: vec![] }, &[],
+            raw, 0.0, &operator_profile_2026_11(), StructuralChannels { channels: vec![] }, &[],
             &LedgerAggregate::default(), regime, ctx,
         )
     }
@@ -7018,9 +7324,10 @@ database_url: "postgresql://localhost/test"
         let raw = liquid_wallet_fixture();
         assert_eq!(raw.wallet_balances[0].token_symbol, "NOCK");
         assert_eq!(raw.wallet_balances[1].token_symbol, "USDC");
-        // No plan: the legacy arm still fires, but now leaves the cash target behind.
+        // No plan: the dip zone is stated as a fact and nothing is sized (v0.5.1).
         let legacy = metrics_with_plan(&raw, &PlanContext::none(), &MarketRegime::default());
-        assert!(legacy.global_status.shot_advice_action.contains("DIP REINVESTMENT SHOT"));
+        assert_eq!(legacy.global_status.shot_advice_action, "DIP ZONE (No Buy Plan Configured)");
+        assert!(!legacy.global_status.shot_advice_details.contains("Deploy $"));
         assert!(legacy.accumulation_plan.is_none());
 
         let ctx = PlanContext { cfg: Some(plan_cfg()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-15T12:00:00Z") };
@@ -7408,7 +7715,7 @@ database_url: "postgresql://localhost/test"
         assert!(nock_in(&strict) <= 15_747.8 + 3.0);
         assert_eq!(strict.lp_rebuild.floor_tolerance_nock.as_deref(), Some("0"));
 
-        let mut profile = OperatorProfile::default();
+        let mut profile = operator_profile_2026_11();
         profile.lp_floor_tolerance_bps = 500; // 5% of the floor = 5,000 NOCK
         let loose = compute_derived_metrics_with_plan(
             &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[],
@@ -8334,6 +8641,7 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
                     "total_portfolio_usd": "2952.37",
                     "total_nock_amount": "106140",
                     "nock_floor_delta": "6140",
+                    "nock_floor_target": "100000",
                     "total_usdc_amount": "349.68",
                     "high_water_mark_usd": "3200.25",
                     "shot_advice_action": "HOLD & ACCRETE",
@@ -8346,7 +8654,8 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
 
         let state_text = format_portfolio_state_text(&sample_data);
         assert!(state_text.contains("106140 NOCK"));
-        assert!(state_text.contains("+6140 above 100k"));
+        assert!(state_text.contains("+6140 above the 100000 NOCK floor"), "{state_text}");
+        assert!(!state_text.contains("100k"));
         assert!(state_text.contains("$2952.37 USD"));
 
         let advice_text = format_shot_advice_text(&sample_data);
@@ -8785,6 +9094,320 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
         assert!(metrics.global_status.shot_advice_details.contains("daily RSI(14)"));
         assert_eq!(metrics.global_status.regime, "overextended");
         assert_eq!(metrics.global_status.rsi_14.as_deref(), Some("40.0"));
+    }
+
+    // ============================================================
+    // From zero (v0.5.1): a newcomer's own numbers, and nothing else
+    // ============================================================
+
+    /// Text NockNock must never produce for a newcomer (or anyone): sized lump sums,
+    /// someone else's goal, alarm words, and uncomputed P/L or yield claims.
+    const NEVER_IN_ADVICE: [&str; 5] = ["Deploy $", "120,000", "CRITICAL", "realized loss", "generating yield"];
+
+    fn assert_no_invented_text(details: &str) {
+        for banned in NEVER_IN_ADVICE {
+            assert!(!details.contains(banned), "{banned:?} in: {details}");
+        }
+    }
+
+    /// A newcomer's wallet: no LP, gas read as zero, every amount a test input.
+    fn from_zero_raw(usdc: f64, nock: f64) -> RawOnChainData {
+        let mut raw = RawOnChainData::default();
+        raw.spot_price_nock_usd = 0.01153;
+        raw.live_eth_price_usd = 3000.0;
+        raw.live_gas_cost_usd = 0.004;
+        raw.wallet_eth = Some(0.0);
+        raw.wallet_weth = Some(0.0);
+        let row = |sym: &str, addr: &str, amount: f64| WalletBalance {
+            wallet_address: "0x00000000000000000000000000000000000000aa".to_string(),
+            token_symbol: sym.to_string(),
+            token_address: addr.to_string(),
+            amount: format!("{:.4}", amount),
+            amount_usd: "0".to_string(),
+            updated_at: "now".to_string(),
+        };
+        raw.wallet_balances = vec![row("NOCK", NOCK_BASE, nock), row("USDC", USDC_BASE, usdc)];
+        raw
+    }
+
+    /// The newcomer's own plan: $100 over 5 tranches, 24 h apart.
+    fn own_plan() -> AccumulationPlanConfig {
+        AccumulationPlanConfig {
+            id: "my-first-plan".to_string(),
+            budget_usdc: 100.0,
+            tranches: 5,
+            interval_hours: 24.0,
+            starts_at: None,
+            venue: "Aero".to_string(),
+            max_price_usd: None,
+            pause_when_overextended: true,
+            respect_cash_target: true,
+            cash_reserve_usdc: None,
+        }
+    }
+
+    fn zero_metrics(raw: &RawOnChainData, profile: &OperatorProfile, ctx: &PlanContext) -> DerivedMetrics {
+        compute_derived_metrics_with_plan(
+            raw, 0.0, profile, StructuralChannels { channels: vec![] }, &[],
+            &LedgerAggregate::default(), &MarketRegime::default(), ctx,
+        )
+    }
+
+    fn own_plan_due() -> PlanContext {
+        PlanContext { cfg: Some(own_plan()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-15T12:00:00Z") }
+    }
+
+    fn own_plan_after_first_fill() -> PlanContext {
+        PlanContext {
+            cfg: Some(own_plan()),
+            fills: PlanFills { count: 1, spent_usdc: 20.0, acquired_nock: 1734.6054, last_at: Some(t("2026-11-15T12:00:00Z")), first_price: Some(0.01153) },
+            ledger_unavailable: false,
+            now: t("2026-11-15T18:00:00Z"),
+        }
+    }
+
+    #[test]
+    fn test_from_zero_usdc_only_without_plan_never_sizes_a_buy() {
+        // R1
+        let m = zero_metrics(&from_zero_raw(500.0, 0.0), &OperatorProfile::default(), &PlanContext::none());
+        let g = &m.global_status;
+        assert_eq!(g.total_portfolio_usd, "500.00");
+        assert_eq!(g.total_native_usd, "0.00");
+        assert_eq!(g.total_stable_usd, "500.00");
+        assert_eq!(g.total_nock_amount, "0");
+        assert_eq!(g.nock_floor_target, "0");
+        assert_eq!(g.high_water_mark_usd, "500.00");
+        assert_eq!(g.shot_advice_action, "BUILD FROM ZERO (No Buy Plan Configured)");
+        let d = &g.shot_advice_details;
+        assert!(d.contains("$500.00") && d.contains("accumulation_plan") && d.contains("no ETH"), "{d}");
+        assert_no_invented_text(d);
+        for banned in ["Buy $", "DEFENSIVE LOCK", "Standing bias", "Re-establishing"] {
+            assert!(!d.contains(banned), "{banned} in: {d}");
+        }
+        assert!(m.accumulation_plan.is_none());
+        assert_eq!(m.lp_rebuild.status, "no_positions");
+        assert!(m.lp_rebuild.suggestions.is_empty() && m.lp_rebuild.excluded.is_empty());
+        let w: Vec<i32> = m.portfolio_deviation_matrix.allocations.iter().map(|a| a.actual_weight_bps).collect();
+        assert_eq!(w, vec![0, 0, 10000]);
+        assert!(m.tick_bracket_hypervisor.brackets.is_empty());
+        assert!(m.asset_aggregation_series.positions_nock.is_empty());
+        assert!(m.velocity_gas_sandbox.contracts.is_empty());
+    }
+
+    #[test]
+    fn test_from_zero_empty_wallet_is_an_explicit_empty_state() {
+        // R2
+        let m = zero_metrics(&from_zero_raw(0.0, 0.0), &OperatorProfile::default(), &PlanContext::none());
+        assert_eq!(m.global_status.shot_advice_action, "NOTHING TO TRACK YET (Empty Wallet)");
+        let d = &m.global_status.shot_advice_details;
+        assert!(d.contains("0x00000000000000000000000000000000000000aa"), "{d}");
+        assert!(d.contains("holds no NOCK, no USDC and no LP"));
+        assert!(d.contains("accumulation_plan") && d.contains("no ETH"));
+        assert!(!d.contains("Maintain posture"));
+        assert_no_invented_text(d);
+        assert_eq!(m.global_status.total_portfolio_usd, "0.00");
+        assert_eq!(m.global_status.high_water_mark_usd, "0.00");
+        let w: Vec<i32> = m.portfolio_deviation_matrix.allocations.iter().map(|a| a.actual_weight_bps).collect();
+        assert_eq!(w, vec![0, 0, 0]);
+        assert_eq!(m.lp_rebuild.status, "no_positions");
+        // Gas held: the gas fact is not stated.
+        let mut gas = from_zero_raw(0.0, 0.0);
+        gas.wallet_eth = Some(0.01);
+        let m = zero_metrics(&gas, &OperatorProfile::default(), &PlanContext::none());
+        assert!(!m.global_status.shot_advice_details.contains("no ETH"));
+    }
+
+    #[test]
+    fn test_from_zero_users_own_plan_leads_and_uses_only_their_numbers() {
+        // R3
+        let m = zero_metrics(&from_zero_raw(500.0, 0.0), &OperatorProfile::default(), &own_plan_due());
+        assert_eq!(m.global_status.shot_advice_action, "DCA TRANCHE DUE (1 of 5)");
+        let d = &m.global_status.shot_advice_details;
+        assert!(d.starts_with("Buy $20.00 of NOCK on Aero (spot $0.01153)."), "{d}");
+        assert!(d.contains("Plan \"my-first-plan\": $0.00 of $100.00 deployed over 0 verified buy(s)."), "{d}");
+        assert!(!d.contains("DEFENSIVE LOCK") && !d.contains("Standing bias"));
+        assert_no_invented_text(d);
+        let ps = m.accumulation_plan.unwrap();
+        assert_eq!(ps.status, "tranche_due");
+        assert_eq!(ps.tranche_usdc, "20.00");
+        assert_eq!(ps.nominal_tranche_usdc, "20.00");
+        assert_eq!(ps.budget_usdc, "100.00");
+        assert_eq!(ps.binding_constraint, None);
+    }
+
+    #[test]
+    fn test_from_zero_after_first_fill_waits_on_the_users_interval() {
+        // R4
+        let m = zero_metrics(&from_zero_raw(480.0, 1734.6054), &OperatorProfile::default(), &own_plan_after_first_fill());
+        assert_eq!(m.global_status.shot_advice_action, "DCA ON SCHEDULE (2 of 5 next)");
+        assert_eq!(
+            m.global_status.shot_advice_details,
+            "Nothing to buy yet: the next $20.00 tranche is due at 2026-11-16T12:00:00+00:00. Plan \"my-first-plan\": $20.00 of $100.00 deployed over 1 verified buy(s), average cost $0.011530."
+        );
+        assert_eq!(m.global_status.total_nock_amount, "1735");
+        assert_eq!(m.global_status.total_portfolio_usd, "500.00");
+        let ps = m.accumulation_plan.unwrap();
+        assert_eq!(ps.tranche_index, 2);
+        assert_eq!(ps.fills, 1);
+        assert_eq!(ps.avg_price_usd.as_deref(), Some("0.011530"));
+        assert_eq!(ps.lump_sum_nock.as_deref(), Some("8673.0269"));
+        assert_eq!(ps.remaining_usdc, "80.00");
+        assert_eq!(ps.next_due_at.as_deref(), Some("2026-11-16T12:00:00+00:00"));
+    }
+
+    #[test]
+    fn test_from_zero_users_own_floor_keeps_the_plan_visible_and_notifying() {
+        // R5: the user's own 100,000 floor, with their own plan.
+        let profile = operator_profile_2026_11();
+        let due = zero_metrics(&from_zero_raw(500.0, 0.0), &profile, &own_plan_due());
+        assert_eq!(due.global_status.shot_advice_action, "DEFENSIVE LOCK (Floor Recovery) · DCA TRANCHE DUE (1 of 5)");
+        let d = &due.global_status.shot_advice_details;
+        assert!(d.contains("is below the 100000 floor by 100000 NOCK"), "{d}");
+        assert!(d.contains("Your accumulation plan is the recovery path: Buy $20.00 of NOCK on Aero (spot $0.01153)"), "{d}");
+        assert!(!d.contains("stable reserves are locked"));
+        assert_no_invented_text(d);
+        assert_eq!(due.global_status.nock_floor_target, "100000");
+        assert_eq!(due.global_status.nock_floor_delta, "-100000");
+        assert_eq!(due.accumulation_plan.as_ref().unwrap().status, "tranche_due");
+
+        let waiting = zero_metrics(&from_zero_raw(480.0, 1734.6054), &profile, &own_plan_after_first_fill());
+        assert_eq!(waiting.global_status.shot_advice_action, "DEFENSIVE LOCK (Floor Recovery) · DCA ON SCHEDULE (2 of 5 next)");
+        assert!(waiting.global_status.shot_advice_details.contains("below the 100000 floor by 98265 NOCK"));
+        // The tranche transition changes the action, so it notifies.
+        assert!(directive_transition_notification(
+            Some(&due.global_status.shot_advice_action),
+            &waiting.global_status.shot_advice_action,
+            &waiting.global_status.shot_advice_details,
+            None,
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn test_from_zero_users_own_floor_without_plan_points_to_a_plan() {
+        // R6
+        let m = zero_metrics(&from_zero_raw(500.0, 0.0), &operator_profile_2026_11(), &PlanContext::none());
+        assert_eq!(m.global_status.shot_advice_action, "DEFENSIVE LOCK (Floor Recovery)");
+        let d = &m.global_status.shot_advice_details;
+        assert!(d.contains("below the 100000 floor by 100000 NOCK") && d.contains("accumulation_plan"), "{d}");
+        assert!(!d.contains("Buy $"));
+        assert_no_invented_text(d);
+    }
+
+    #[test]
+    fn test_planless_dip_zone_states_facts_only() {
+        // R7: the operator's 2026-11-14 wallet with no plan section.
+        let raw = liquid_wallet_fixture();
+        let m = compute_derived_metrics_with_plan(
+            &raw, 0.0, &operator_profile_2026_11(), StructuralChannels { channels: vec![] }, &[],
+            &LedgerAggregate::default(), &MarketRegime::default(), &PlanContext::none(),
+        );
+        assert_eq!(m.global_status.shot_advice_action, "DIP ZONE (No Buy Plan Configured)");
+        let d = &m.global_status.shot_advice_details;
+        assert!(d.contains("$0.01229") && d.contains("$1053.00") && d.contains("accumulation_plan"), "{d}");
+        assert!(d.contains("Liquid dry powder: $929.22 (wallet USDC $1053.00 less the larger of the $123.78 cash target and the $0.00 virtual tax reserve)."), "{d}");
+        // The whole text, including the appended LP-bias sentence, invents nothing.
+        assert!(d.contains("Standing bias: "), "{d}");
+        assert_no_invented_text(d);
+    }
+
+    #[test]
+    fn test_due_tranche_leads_but_waiting_plan_yields_to_harvest_and_range_exit() {
+        // N11: a plan with nothing due no longer hides a due harvest or a range exit.
+        let mut raw = four_position_fixture();
+        raw.wallet_balances[1].amount = "5000.0".to_string(); // the tranche is fundable
+        raw.positions[1].fee0 = 6.0; // fees over the fixed $5.00 threshold
+        let profile = OperatorProfile::default();
+        let run = |raw: &RawOnChainData, ctx: &PlanContext| {
+            compute_derived_metrics_with_plan(raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default(), ctx)
+        };
+        let due = PlanContext { cfg: Some(plan_cfg()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-15T12:00:00Z") };
+        let m = run(&raw, &due);
+        assert_eq!(m.global_status.shot_advice_action, "DCA TRANCHE DUE (1 of 5)");
+
+        let fills = PlanFills { count: 1, spent_usdc: 100.0, acquired_nock: 8000.0, last_at: Some(t("2026-11-15T12:00:00Z")), first_price: Some(0.0125) };
+        let waiting = PlanContext { cfg: Some(plan_cfg()), fills, ledger_unavailable: false, now: t("2026-11-15T18:00:00Z") };
+        let m = run(&raw, &waiting);
+        assert_eq!(m.global_status.shot_advice_action, "BATCH HARVEST SHOT (Execute Claim)");
+        assert_eq!(m.accumulation_plan.as_ref().unwrap().status, "waiting");
+
+        // Spot above the price-source range's top: RANGE EXIT leads and reports that
+        // range's own value, not the whole LP book, and no invented $5.00 wall.
+        let src = raw.positions.iter().find(|p| p.is_price_source).unwrap().clone();
+        let top = tick_to_display_price_dec(src.tick_lower, src.token0.decimals, src.token1.decimals);
+        raw.spot_price_nock_usd = top * 1.01;
+        let m = run(&raw, &waiting);
+        assert_eq!(m.global_status.shot_advice_action, "RANGE EXIT FLASHPOINT (Above Range)");
+        let d = &m.global_status.shot_advice_details;
+        let spot = raw.spot_price_nock_usd;
+        let pos_usd = src.amount0 * leg_usd_price(&src.token0, spot, raw.live_eth_price_usd)
+            + src.amount1 * leg_usd_price(&src.token1, spot, raw.live_eth_price_usd);
+        assert!(d.contains(&format!("That range ({}) holds ${:.2}", position_label(&src), pos_usd)), "{d}");
+        let lp_total: f64 = m.asset_aggregation_series.active_protocol_series[0].parse().unwrap();
+        let exit_text = d.split(" Standing bias:").next().unwrap();
+        assert!(!exit_text.contains(&format!("${:.2}", lp_total)), "the LP book total must not be the range's value: {d}");
+        assert!(!d.contains("$5.00") && !d.contains("High Wall"), "{d}");
+        // Blocked and paused plans yield too; a due tranche still leads.
+        let m = run(&raw, &due);
+        assert_eq!(m.global_status.shot_advice_action, "DCA TRANCHE DUE (1 of 5)");
+    }
+
+    #[test]
+    fn test_sweep_to_stable_states_facts_and_instructs_no_sale() {
+        // N13: the overextension arm states the daily RSI and the plan's pause.
+        let raw = raw_above_floor_fixture();
+        let hot = MarketRegime { rsi_5m: None, rsi_1d: Some(82.0), overextended: true };
+        let ctx = PlanContext { cfg: Some(plan_cfg()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-15T12:00:00Z") };
+        let m = compute_derived_metrics_with_plan(&raw, 0.0, &OperatorProfile::default(), StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &hot, &ctx);
+        assert_eq!(m.global_status.shot_advice_action, "SWEEP TO STABLE / ACCUMULATE DRY POWDER (Overextension Cooldown)");
+        let d = &m.global_status.shot_advice_details;
+        assert!(d.starts_with("NOCK spot ($0.01500) is overextended: daily RSI(14) 82 is at or above 70. Your accumulation plan pauses buys until it cools."), "{d}");
+        for banned in ["sweep to the stable stack", "suppress deployment", "Buying tops", "sell"] {
+            assert!(!d.contains(banned), "{banned} in: {d}");
+        }
+        assert_eq!(m.accumulation_plan.unwrap().status, "paused");
+        // Without a plan there is no pause to mention.
+        let m = compute_derived_metrics(&raw, 0.0, &OperatorProfile::default(), StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &hot);
+        assert!(!m.global_status.shot_advice_details.contains("accumulation plan"));
+    }
+
+    #[test]
+    fn test_batch_harvest_text_follows_the_configured_tax_ratio() {
+        let mut raw = four_position_fixture();
+        raw.positions[1].fee0 = 6.0;
+        let mut profile = OperatorProfile::default();
+        let m = compute_derived_metrics(&raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
+        let d = &m.global_status.shot_advice_details;
+        assert!(d.contains("books 40% of the USDC and NOCK received to the virtual tax reserve and 60% to growth"), "{d}");
+        assert!(d.contains("WETH fees are not booked yet"));
+        profile.tax_reserve_ratio = 0.25;
+        let m = compute_derived_metrics(&raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
+        let d = &m.global_status.shot_advice_details;
+        assert!(d.contains("books 25% of the USDC and NOCK received to the virtual tax reserve and 75% to growth"), "{d}");
+        assert!(!d.contains("60/40") && !d.contains("40%") && !d.contains("Tax Escrow"), "{d}");
+    }
+
+    #[test]
+    fn test_mcp_formatters_from_zero() {
+        // R14 (worker side): the floor comes from the snapshot, missing fields say so.
+        let data = json!({"derived_metrics":{"global_status":{"total_portfolio_usd":"500.00","total_nock_amount":"0","nock_floor_delta":"0","nock_floor_target":"0","total_usdc_amount":"500.00","high_water_mark_usd":"500.00","shot_advice_action":"BUILD FROM ZERO (No Buy Plan Configured)","total_fees_claimable_usd":"0.00","gas_to_fee_delta_usd":"0.00"},"accumulation_plan":null,"lp_rebuild":{"status":"no_positions","actual_usd":"0.00","target_usd":"75.00","gap_usd":"75.00","suggestions":[],"excluded":[]}},"contract_fees":[]});
+        let state = format_portfolio_state_text(&data);
+        assert!(state.contains("Sovereign NOCK Stack: 0 NOCK (no floor configured)"), "{state}");
+        assert!(!state.contains("100k"));
+        let mut below = data.clone();
+        below["derived_metrics"]["global_status"]["nock_floor_target"] = json!("100000");
+        below["derived_metrics"]["global_status"]["nock_floor_delta"] = json!("-100000");
+        let text = format_portfolio_state_text(&below);
+        assert!(text.contains("100000 below the 100000 NOCK floor") && !text.contains("above"), "{text}");
+        let plan = format_accumulation_plan_text(&data);
+        assert!(plan.contains("No accumulation_plan is configured") && plan.contains("No LP positions are tracked"), "{plan}");
+        assert!(!plan.contains("Rebuilding ranges"));
+        let empty = format_shot_advice_text(&json!({}));
+        assert!(empty.contains("Recommended Action: unavailable"), "{empty}");
+        assert!(!empty.contains("HOLD") && !empty.contains("Accreting") && !empty.contains("0.00"));
+        let empty_state = format_portfolio_state_text(&json!({}));
+        assert!(empty_state.contains("floor unavailable") && empty_state.contains("Tactical Directive: unavailable"));
+        assert!(!empty_state.contains("HOLD") && !empty_state.contains("0.00"));
     }
 
     // --- DB-gated integration tests (gracefully skipped without DATABASE_URL) ---
