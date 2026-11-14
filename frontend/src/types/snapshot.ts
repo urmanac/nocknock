@@ -131,7 +131,10 @@ export interface GlobalStatus {
 
 export interface AssetAggregationSeries {
   time_points: string[];
+  /** Wallet NOCK valued in USD */
   safe_haven_series: string[];
+  /** Wallet NOCK in token units (v0.5.0); absent on older snapshots */
+  wallet_nock_series?: string[];
   active_protocol_series: string[];
   /** NOCK units per tracked position (v2.0.0; replaces the retired tranche_1/2/3_nock series) */
   positions_nock?: Array<{ position_id: string; series: string[] }>;
@@ -301,6 +304,8 @@ export interface Position {
   is_price_source: boolean;
   /** False when the pool has no in-range liquidity (frozen price); null/absent = unknown (2.2.0) */
   pool_active?: boolean | null;
+  /** True for a position spanning every price (Aerodrome volatile pool); bounds are not meaningful (2.2.0) */
+  full_range?: boolean;
 }
 
 export interface RawSnapshotData {

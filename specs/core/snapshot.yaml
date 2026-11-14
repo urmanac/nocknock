@@ -233,6 +233,9 @@ components:
           type: boolean
           nullable: true
           description: False when the position's pool has no in-range liquidity (frozen price; in_range is then meaningless). Null when the pool read failed. (2.2.0)
+        full_range:
+          type: boolean
+          description: True for a position spanning every price (an Aerodrome volatile pool). It cannot go out of range; lower_price/upper_price are then "0" and not meaningful. (2.2.0)
 
     PositionToken:
       type: object
@@ -676,6 +679,11 @@ components:
             type: string
             format: date-time
           description: Timestamps for each data point (aligned with series)
+        wallet_nock_series:
+          type: array
+          items:
+            type: string
+          description: Wallet NOCK in TOKEN UNITS at each point (2.2.0). The floor chart plots this; safe_haven_series is the same holding valued in USD.
         safe_haven_series:
           type: array
           items:

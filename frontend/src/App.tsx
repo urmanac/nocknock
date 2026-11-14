@@ -30,7 +30,7 @@ const SOURCE_LABELS: Record<string, string> = {
   aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
-import { POSITION_COLORS, positionLabel, positionRangeText, rangeStatus } from './positions.ts';
+import { POSITION_COLORS, positionLabel, positionRangeText, protocolBadge, rangeStatus, walletNockUnits } from './positions.ts';
 
 function Dashboard() {
   const { snapshot, loading, error, freshness, refetch, ageDisplay } = useFreshness<
@@ -109,10 +109,17 @@ function Dashboard() {
     key: `pos${i}`,
     name: positionLabel(positionsList.find((p: any) => p.position_id === s.position_id)),
   }));
-  const rowFromAg = (ag: any, i: number, time: string) => {
+  // `dm` is the derived_metrics of the SAME snapshot as `ag`, so a pre-0.5.0 snapshot's
+  // wallet NOCK can be recovered from its own USD value and spot (issue #85).
+  const rowFromAg = (ag: any, i: number, time: string, dm: any) => {
+    const spot = parseFloat(
+      dm?.total_value_vs_baseline?.token_price_series?.[i] ?? dm?.tick_bracket_hypervisor?.current_price ?? '',
+    );
+    const walletNock = walletNockUnits(ag, i, spot);
     const row: any = {
       time,
-      safeHaven: parseFloat(ag?.safe_haven_series?.[i] || '0'),
+      // Token units: this chart is NOCK against the NOCK floor, never dollars.
+      safeHaven: walletNock === null ? null : Math.round(walletNock),
       activeProtocol: parseFloat(ag?.active_protocol_series?.[i] || '0'),
     };
     let lpTotal = 0;
@@ -121,17 +128,17 @@ function Dashboard() {
       row[`pos${j}`] = Math.round(v);
       lpTotal += v;
     });
-    row.totalNock = Math.round(lpTotal + row.safeHaven);
+    row.totalNock = walletNock === null ? null : Math.round(lpTotal + walletNock);
     return row;
   };
 
   const assetSeries = hasHistory
     ? history.map(s => {
         const dm = s.data?.derived_metrics ?? s.data;
-        return rowFromAg(dm?.asset_aggregation_series, 0, formatSnapshotTime(s.meta?.generated_at, spansMultipleDays));
+        return rowFromAg(dm?.asset_aggregation_series, 0, formatSnapshotTime(s.meta?.generated_at, spansMultipleDays), dm);
       })
     : assetTimePoints.map((t: string, i: number) =>
-        rowFromAg(metrics?.asset_aggregation_series, i, formatSnapshotTime(t, false)),
+        rowFromAg(metrics?.asset_aggregation_series, i, formatSnapshotTime(t, false), metrics),
       );
 
   const valueTimePoints: string[] = metrics?.total_value_vs_baseline?.time_points || [];
@@ -224,8 +231,10 @@ function Dashboard() {
       inRange: b.in_range,
       distance,
       converted,
+      fullRange: !!b.full_range,
     };
-  });
+    // A full-range position (Aerodrome) has no bracket to draw.
+  }).filter((t: any) => !t.fullRange);
 
   const gasData = (metrics?.velocity_gas_sandbox?.contracts || []).map((c: any) => ({
     name: c.contract_name,
@@ -444,9 +453,11 @@ function Dashboard() {
                   ...styles.positionBadge,
                   ...(p.protocol === 'uniswap-v4'
                     ? { background: '#0c4a6e22', color: '#38bdf8', border: '1px solid #0284c7' }
-                    : { background: '#3b076422', color: '#c084fc', border: '1px solid #7e22ce' }),
+                    : p.protocol === 'aerodrome'
+                      ? { background: '#7c2d1222', color: '#fdba74', border: '1px solid #c2410c' }
+                      : { background: '#3b076422', color: '#c084fc', border: '1px solid #7e22ce' }),
                 }}>
-                  {p.protocol === 'uniswap-v4' ? 'UNISWAP V4' : 'UNISWAP V3'} · {p.fee_tier_bps / 100}%
+                  {protocolBadge(p.protocol)} · {p.fee_tier_bps / 100}%
                 </span>
               </div>
               <div style={styles.positionCardMid}>
@@ -469,7 +480,7 @@ function Dashboard() {
                 {p.token0.symbol}: {p.amount0} ({p.token1.symbol}: {p.amount1}) · Fees: ${p.fees_usd}
               </div>
               <div style={styles.positionCardMeta}>
-                #{p.nft_id} · {p.network}{p.is_price_source ? ' · price source' : ''}
+                {p.protocol === 'aerodrome' ? 'LP token' : `#${p.nft_id}`} · {p.network}{p.is_price_source ? ' · price source' : ''}
               </div>
             </div>
           ))}
@@ -600,11 +611,21 @@ function Dashboard() {
               <span style={{ color: '#8b949e' }}>ETH-denominated brackets converted to USD @ ${ethUsd ? ethUsd.toFixed(2) : '—'}/ETH (live pool-derived)</span>
             )}
             {(() => {
-              const bracket = metrics?.tick_bracket_hypervisor?.brackets?.[0];
+              // Brackets are index-aligned with positions; the price source is not
+              // necessarily the first one.
+              const src = positionsList.find((p: any) => p.is_price_source);
+              const srcIndex = src ? positionsList.indexOf(src) : 0;
+              const bracket = metrics?.tick_bracket_hypervisor?.brackets?.[srcIndex];
+              if (bracket?.full_range) {
+                return (
+                  <span style={{ color: '#10b981' }}>
+                    {src ? positionLabel(src) : 'Price source'}: full range, never out of range
+                  </span>
+                );
+              }
               if (!bracket?.lower_price) {
                 return <span style={{ color: '#8b949e' }}>Price-source position range: —</span>;
               }
-              const src = positionsList.find((p: any) => p.is_price_source);
               return (
                 <span style={{ color: bracket.in_range ? '#10b981' : '#f59e0b' }}>
                   {src ? positionLabel(src) : 'Price source'} range: {src ? positionRangeText(src) : '—'} ({bracket.in_range ? 'IN RANGE' : 'OUT OF RANGE'})

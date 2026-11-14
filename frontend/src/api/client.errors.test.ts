@@ -154,3 +154,58 @@ describe('LP rebuild suggestion display', () => {
     expect(rangeStatus({ in_range: true, pool_active: null }).tone).toBe('good');
   });
 });
+
+// ---------------- NOCK stack chart units (issue #85) ----------------
+import { walletNockUnits } from '../positions';
+
+describe('wallet NOCK for the floor chart', () => {
+  it('uses token units when the snapshot carries them', () => {
+    // The 2026-11-14 values: 95,598.98 NOCK worth $1,094.58 at $0.01145.
+    const ag = { wallet_nock_series: ['95598.9782'], safe_haven_series: ['1094.58'] };
+    expect(walletNockUnits(ag, 0, 0.01145)).toBeCloseTo(95598.9782, 3);
+  });
+
+  it('recovers units for older snapshots from their own USD value and spot', () => {
+    // Pre-0.5.0 snapshot: only the USD series exists. Never plot 1,094 as NOCK.
+    const nock = walletNockUnits({ safe_haven_series: ['1094.58'] }, 0, 0.01145);
+    expect(nock).not.toBeNull();
+    expect(Math.round(nock!)).toBe(95597);
+    expect(nock!).toBeGreaterThan(90000);
+  });
+
+  it('leaves a gap rather than guessing when units cannot be known', () => {
+    expect(walletNockUnits({ safe_haven_series: ['1094.58'] }, 0, null)).toBeNull();
+    expect(walletNockUnits({ safe_haven_series: ['1094.58'] }, 0, 0)).toBeNull();
+    expect(walletNockUnits(undefined, 0, 0.01145)).toBeNull();
+    expect(walletNockUnits({ wallet_nock_series: [] }, 0, 0.01145)).toBeNull();
+  });
+});
+
+// ---------------- Aerodrome full-range position display (issue #88) ----------------
+import { positionLabel, positionRangeText, protocolBadge } from '../positions';
+
+describe('Aerodrome full-range position display', () => {
+  const aero = {
+    protocol: 'aerodrome',
+    fee_tier_bps: 30,
+    token0: { symbol: 'USDC' },
+    token1: { symbol: 'NOCK' },
+    lower_price: '0',
+    upper_price: '0',
+    in_range: true,
+    full_range: true,
+    pool_active: true,
+  };
+
+  it('labels the protocol and never prints a fake range', () => {
+    expect(positionLabel(aero)).toBe('USDC/NOCK Aerodrome · 0.3%');
+    expect(protocolBadge('aerodrome')).toBe('AERODROME');
+    expect(protocolBadge('uniswap-v4')).toBe('UNISWAP V4');
+    expect(positionRangeText(aero)).toBe('Full range (cannot go out of range)');
+    expect(rangeStatus(aero)).toEqual({ label: '● FULL RANGE', tone: 'good' });
+  });
+
+  it('still flags a dead pool ahead of everything else', () => {
+    expect(rangeStatus({ ...aero, pool_active: false }).tone).toBe('stale');
+  });
+});

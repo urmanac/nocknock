@@ -79,11 +79,17 @@ impl Default for OperatorProfile {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PositionConfig {
     pub id: String,
-    /// "uniswap-v4" | "uniswap-v3"
+    /// "uniswap-v4" | "uniswap-v3" | "aerodrome" (volatile x*y=k pool, full range)
     pub protocol: String,
     #[serde(default = "default_network")]
     pub network: String,
+    /// Position NFT id (Uniswap). Unused for aerodrome, whose position is an LP-token
+    /// balance in `pool_address`.
+    #[serde(default)]
     pub nft_id: u64,
+    /// aerodrome only: swap fee in basis points, for display (default 30 = 0.30%).
+    #[serde(default)]
+    pub fee_bps: Option<u32>,
     /// v4: bytes32 poolId. Unused for v3 (pool comes from the NPM decode).
     #[serde(default)]
     pub pool_id: Option<String>,
@@ -119,6 +125,15 @@ pub struct PositionConfig {
 
 fn default_network() -> String {
     "base".to_string()
+}
+
+/// Stable identifier shared by config rules and RawPosition.position_id.
+fn position_key(c: &PositionConfig) -> String {
+    if c.protocol == "aerodrome" {
+        format!("aerodrome:{}:{}", c.network, c.pool_address.clone().unwrap_or_default().to_lowercase())
+    } else {
+        format!("{}:{}:{}", c.protocol, c.network, c.nft_id)
+    }
 }
 
 /// Dollar-cost-averaging plan for NOCK accumulation (issue #79). Optional: without
@@ -411,6 +426,10 @@ struct Position {
     /// market. Null when the pool read failed this cycle. (2.2.0)
     #[serde(default)]
     pool_active: Option<bool>,
+    /// True for a position that spans every price (an Aerodrome volatile pool): it has
+    /// no range to leave, and lower_price/upper_price are not meaningful. (2.2.0)
+    #[serde(default)]
+    full_range: bool,
 }
 
 /// Per-position NOCK series entry for the asset aggregation chart (v2.0.0;
@@ -624,6 +643,9 @@ struct LpSuggestion {
 /// of its NOCK. NOCK as token1 is exhausted at the lower tick, as token0 at the upper.
 /// Pure.
 fn nock_sell_out_multiple(p: &RawPosition) -> Option<f64> {
+    if is_full_range(p.tick_lower, p.tick_upper) {
+        return None; // sells gradually forever; never empties
+    }
     let ticks = if is_nock_token(&p.token1) {
         p.tick - p.tick_lower
     } else if is_nock_token(&p.token0) {
@@ -662,7 +684,24 @@ struct RebuildFunds {
 /// ETH kept back for gas when sizing a deposit that needs ETH/WETH.
 const REBUILD_GAS_BUFFER_ETH: f64 = 0.002;
 
+/// Uniswap's tick bounds; a position spanning both is full range (it can never go
+/// out of range). Aerodrome volatile pools are modelled this way.
+const MIN_TICK: i32 = -887272;
+const MAX_TICK: i32 = 887272;
+
+fn is_full_range(tick_lower: i32, tick_upper: i32) -> bool {
+    tick_lower <= MIN_TICK && tick_upper >= MAX_TICK
+}
+
 fn position_label(p: &RawPosition) -> String {
+    if p.protocol == "aerodrome" {
+        return format!(
+            "Aerodrome {}/{} {:.2}% (full range)",
+            p.token0.symbol,
+            p.token1.symbol,
+            p.fee_tier_bps as f64 / 100.0
+        );
+    }
     format!(
         "{} {}/{} {:.2}% #{}",
         if p.protocol == "uniswap-v3" { "v3" } else { "v4" },
@@ -767,7 +806,7 @@ fn lp_rebuild_suggestions(
         let target_usd = lp_target_usd * weight;
         let want_usd = target_usd - current_usd;
         if want_usd < 1.0 {
-            continue; // already at or above its share
+            continue; // already at or above its share: never suggest unwinding
         }
         match amounts_per_usd(p, nock_usd, eth_usd) {
             Some((per0, per1)) => wants.push(Want { p, target_usd, current_usd, want_usd, per0, per1 }),
@@ -777,6 +816,27 @@ fn lp_rebuild_suggestions(
                 label: position_label(p),
                 reason: "the range holds no value at the current price, or a leg cannot be priced".to_string(),
             }),
+        }
+    }
+
+    // Never suggest more than the aggregate gap. Positions already above their share
+    // are left alone (no unwinding), so the others' shares can add up to more than
+    // what LP as a whole is short by; scale them down together so a completed rebuild
+    // lands on the LP target instead of overshooting it.
+    let lp_now: f64 = raw
+        .positions
+        .iter()
+        .map(|p| {
+            p.amount0 * leg_usd_price(&p.token0, nock_usd, eth_usd)
+                + p.amount1 * leg_usd_price(&p.token1, nock_usd, eth_usd)
+        })
+        .sum();
+    let lp_gap = (lp_target_usd - lp_now).max(0.0);
+    let total_want: f64 = wants.iter().map(|w| w.want_usd).sum();
+    if total_want > lp_gap && total_want > 0.0 {
+        let k = lp_gap / total_want;
+        for w in wants.iter_mut() {
+            w.want_usd *= k;
         }
     }
 
@@ -900,11 +960,17 @@ fn lp_rebuild_suggestions(
             amount1: fmt_amt(&p.token1, amt1),
             limited_by,
             nock_sold_out_at_multiple: nock_sell_out_multiple(p).map(|m| format!("{:.2}", m)),
-            url: format!(
-                "https://app.uniswap.org/positions/{}/base/{}",
-                if p.protocol == "uniswap-v3" { "v3" } else { "v4" },
-                p.nft_id
-            ),
+            url: if p.protocol == "aerodrome" {
+                // The pool itself, on the explorer: the deposit UI for legacy Aerodrome
+                // pools after the Aero merger was not verified (ONCHAIN_INTEGRATION §7).
+                format!("https://basescan.org/address/{}", p.pool_id)
+            } else {
+                format!(
+                    "https://app.uniswap.org/positions/{}/base/{}",
+                    if p.protocol == "uniswap-v3" { "v3" } else { "v4" },
+                    p.nft_id
+                )
+            },
         });
     }
     (suggestions, excluded)
@@ -1356,7 +1422,11 @@ fn default_floor_target_string() -> String {
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 struct AssetAggregationSeries {
     time_points: Vec<String>,
+    /// Wallet NOCK valued in USD (kept for the dollar composition panels).
     safe_haven_series: Vec<String>,
+    /// Wallet NOCK in token units (issue #85): what the floor chart must plot.
+    #[serde(default)]
+    wallet_nock_series: Vec<String>,
     active_protocol_series: Vec<String>,
     #[serde(default)]
     positions_nock: Vec<PositionNockSeries>,
@@ -1386,6 +1456,10 @@ struct TickBracket {
     /// like the spot (USD/NOCK). Cross-denomination rows (ETH-pools) emit null rather
     /// than a meaningless cross-unit number (zero-mock).
     distance_bps: Option<i32>,
+    /// True when the position spans every price; its bounds are then not meaningful
+    /// and clients should not draw it as a bracket. (2.2.0)
+    #[serde(default)]
+    full_range: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
@@ -1458,24 +1532,71 @@ struct AppState {
     config: Arc<AppConfig>,
     latest_snapshot: Mutex<Option<SnapshotEnvelope>>,
     last_sync_duration_ms: std::sync::atomic::AtomicU64,
+    /// Error from the most recent ingestion cycle, cleared by the next success (issue #87).
+    last_ingest_error: std::sync::Mutex<Option<(DateTime<Utc>, String)>>,
+}
+
+/// Grace added to the sync window before health calls the data stale; matches the
+/// dashboard's own freshness allowance.
+const HEALTH_SYNC_GRACE_SECONDS: i64 = 90;
+
+/// Health verdict (issue #87). Pure. A snapshot existing is not enough to be "ok":
+/// the most recent cycle must have succeeded and the data must be inside the sync
+/// window plus grace.
+fn health_status(has_snapshot: bool, lag_seconds: i64, sync_window_seconds: i64, last_cycle_failed: bool) -> &'static str {
+    if last_cycle_failed {
+        "degraded"
+    } else if !has_snapshot {
+        "starting"
+    } else if lag_seconds > sync_window_seconds + HEALTH_SYNC_GRACE_SECONDS {
+        "degraded"
+    } else {
+        "ok"
+    }
+}
+
+/// Run one ingestion cycle and remember whether it failed, for /health.
+async fn run_cycle_tracked(state: &Arc<AppState>) -> Result<()> {
+    let result = run_ingestion_cycle(state).await;
+    if let Ok(mut slot) = state.last_ingest_error.lock() {
+        *slot = result.as_ref().err().map(|e| (Utc::now(), e.to_string()));
+    }
+    result
 }
 
 // ============================================================
 // Main
 // ============================================================
 
+/// Build the worker config from layered sources (issue #86).
+///
+/// `example_path` is the base layer. It is loaded with an explicit YAML format: the
+/// `config` crate infers format from the file extension, and `.example` is not one it
+/// knows, so `File::with_name("config.yaml.example")` was silently skipped and a
+/// partial config.yaml (for instance one without `positions:`) failed ingestion.
+/// `config_path` None means "config.{yaml,toml,json,...}" in the working directory.
+fn load_app_config(example_path: &str, config_path: Option<&str>, include_env: bool) -> Result<AppConfig> {
+    let mut builder = Config::builder()
+        .add_source(config::File::new(example_path, config::FileFormat::Yaml).required(false));
+    builder = match config_path {
+        Some(path) => builder.add_source(config::File::new(path, config::FileFormat::Yaml).required(false)),
+        None => builder.add_source(config::File::with_name("config").required(false)),
+    };
+    if include_env {
+        builder = builder
+            .add_source(config::Environment::with_prefix("APP").separator("__"))
+            .add_source(config::Environment::default());
+    }
+    Ok(builder.build()?.try_deserialize::<AppConfig>()?)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    // Load config (falls back gracefully to config.yaml.example or env vars)
-    let config = Config::builder()
-        .add_source(config::File::with_name("config.yaml.example").required(false))
-        .add_source(config::File::with_name("config").required(false))
-        .add_source(config::Environment::with_prefix("APP").separator("__"))
-        .add_source(config::Environment::default())
-        .build()?
-        .try_deserialize::<AppConfig>()?;
+    // Load config: config.yaml.example is the base layer, config.yaml overrides it,
+    // environment variables override both.
+    let config = load_app_config("config.yaml.example", None, true)?;
 
     // Initialize database
     let db = PgPool::connect(&config.database_url)
@@ -1526,6 +1647,7 @@ async fn main() -> Result<()> {
         config: Arc::new(config),
         latest_snapshot: Mutex::new(initial_latest),
         last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
+        last_ingest_error: std::sync::Mutex::new(None),
     });
 
     // Historical price backfill (v0.3.0): heal multi-hour/multi-day gaps left by
@@ -1537,7 +1659,7 @@ async fn main() -> Result<()> {
     let state_clone = state.clone();
     tokio::spawn(async move {
         // Run immediately on boot to guarantee freshness
-        if let Err(e) = run_ingestion_cycle(&state_clone).await {
+        if let Err(e) = run_cycle_tracked(&state_clone).await {
             eprintln!("Initial ingestion error: {e}");
         }
         let mut interval = tokio::time::interval(
@@ -1548,7 +1670,7 @@ async fn main() -> Result<()> {
         interval.tick().await; // consume first tick since we just ran
         loop {
             interval.tick().await;
-            if let Err(e) = run_ingestion_cycle(&state_clone).await {
+            if let Err(e) = run_cycle_tracked(&state_clone).await {
                 eprintln!("Ingestion error: {e}");
             }
         }
@@ -1662,7 +1784,8 @@ async fn shutdown_signal() {
 async fn health_handler(Extension(state): Extension<Arc<AppState>>) -> impl IntoResponse {
     let latest = state.latest_snapshot.lock().await;
     let latest = &*latest;
-    let status: &str = if latest.is_some() { "ok" } else { "starting" };
+    let last_error: Option<(DateTime<Utc>, String)> =
+        state.last_ingest_error.lock().ok().and_then(|slot| slot.clone());
     let last_sync: Option<DateTime<Utc>> = latest.as_ref().map(|s| s.meta.generated_at);
     let ingestion_lag_seconds: i64 = last_sync
         .map(|ts| {
@@ -1672,8 +1795,16 @@ async fn health_handler(Extension(state): Extension<Arc<AppState>>) -> impl Into
 
     let sync_duration_ms = state.last_sync_duration_ms.load(std::sync::atomic::Ordering::Relaxed);
 
+    let status = health_status(
+        latest.is_some(),
+        ingestion_lag_seconds,
+        state.config.sync_window_seconds as i64,
+        last_error.is_some(),
+    );
     Json(json!({
         "status": status,
+        "last_error": last_error.as_ref().map(|(_, e)| e.clone()),
+        "last_error_at": last_error.as_ref().map(|(t, _)| t.to_rfc3339()),
         "last_sync": last_sync.map(|dt| dt.to_rfc3339()),
         "ingestion_lag_seconds": ingestion_lag_seconds,
         "sync_duration_ms": sync_duration_ms,
@@ -1752,7 +1883,7 @@ async fn get_latest_snapshot_handler(
 async fn trigger_ingest_handler(
     Extension(state): Extension<Arc<AppState>>,
 ) -> impl IntoResponse {
-    match run_ingestion_cycle(&state).await {
+    match run_cycle_tracked(&state).await {
         Ok(_) => (
             StatusCode::OK,
             Json(json!({
@@ -2051,6 +2182,13 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
         s(plan, "plan_id"), s(plan, "venue"), s(plan, "status"),
         if s(plan, "status") == "complete" {
             "none (plan complete)".to_string()
+        } else if s(plan, "status") != "tranche_due" {
+            // Nothing is due while waiting, pending, paused or blocked: say the size,
+            // not "$0.00 due now".
+            format!(
+                "{} of {} — ${} when due",
+                n("tranche_index"), n("tranches_total"), s(plan, "nominal_tranche_usdc")
+            )
         } else {
             format!(
                 "{} of {} — ${} due now (nominal ${})",
@@ -3949,6 +4087,12 @@ struct ClaimFeesPayload {
     actions: Vec<ClaimFeeAction>,
 }
 
+/// True when a position has no liquidity and no unclaimed fees. Pure.
+fn nothing_to_collect(liquidity: &str, owed0: &str, owed1: &str) -> bool {
+    let zero = |v: &str| v.parse::<f64>().map_or(false, |x| x == 0.0);
+    zero(liquidity) && zero(owed0) && zero(owed1)
+}
+
 /// Fill expected amounts + token-aware USD valuation from the matching snapshot
 /// position and simulate the collect via eth_call. Shared by the v4 and v3 action
 /// builders so both payload halves behave identically (zero-mock: degrades to None).
@@ -3974,6 +4118,13 @@ async fn finish_claim_action(
     if let Some(p) = snapshot.data.positions.iter().find(|p| p.position_id == pos_id) {
         action.expected_amount_0 = Some(p.tokens_owed_0.clone());
         action.expected_amount_1 = Some(p.tokens_owed_1.clone());
+        if nothing_to_collect(&p.liquidity_amount, &p.tokens_owed_0, &p.tokens_owed_1) {
+            // An empty position's collect reverts; that is not an RPC outage (issue #87).
+            action.expected_usd = Some("0.0000".to_string());
+            action.simulation_detail =
+                Some("Nothing to collect: this position holds no liquidity and no fees".to_string());
+            return;
+        }
         if let (Ok(v0), Ok(v1)) = (
             p.tokens_owed_0.parse::<f64>(),
             p.tokens_owed_1.parse::<f64>(),
@@ -4062,7 +4213,13 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
         .iter()
         .filter(|p| p.protocol == "uniswap-v3")
         .collect();
-    if v4_configs.is_empty() && v3_configs.is_empty() {
+    let aero_configs: Vec<&PositionConfig> = state
+        .config
+        .positions
+        .iter()
+        .filter(|p| p.protocol == "aerodrome")
+        .collect();
+    if v4_configs.is_empty() && v3_configs.is_empty() && aero_configs.is_empty() {
         return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
             "error": "NO_CLAIMABLE_POSITIONS",
             "detail": "No Uniswap positions configured; cannot build claim transactions"
@@ -4128,6 +4285,33 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
         let pos_id = format!("uniswap-v3:{}:{}", pos.network, pos.nft_id);
         finish_claim_action(&state.http_client, &alchemy_url, &wallet, &snapshot,
             &mut action, &pos_id, 20 + (v4_configs.len() + idx) as i32, nock_spot, eth_price).await;
+        actions.push(action);
+    }
+
+    // --- Aerodrome volatile-pool fee claims (issue #88) ---
+    // claimFees() on the pool pays the caller's accrued swap fees; selector 0xd294f093
+    // verified against this pool (ONCHAIN_INTEGRATION.md §2).
+    for (idx, pos) in aero_configs.iter().enumerate() {
+        let Some(pool) = pos.pool_address.as_deref() else {
+            continue;
+        };
+        let mut action = ClaimFeeAction {
+            platform: "aerodrome".to_string(),
+            label: format!("Claim Aerodrome LP fees ({})", pos.id),
+            to: pool.to_string(),
+            data: "0xd294f093".to_string(),
+            value: "0x0".to_string(),
+            expected_amount_0: None,
+            expected_amount_1: None,
+            expected_usd: None,
+            gas_estimate: None,
+            gas_usd: None,
+            simulation: "unavailable".to_string(),
+            simulation_detail: None,
+        };
+        let pos_id = position_key(pos);
+        finish_claim_action(&state.http_client, &alchemy_url, &wallet, &snapshot,
+            &mut action, &pos_id, 40 + idx as i32, nock_spot, eth_price).await;
         actions.push(action);
     }
 
@@ -4592,9 +4776,12 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
             "uniswap-v3" => {
                 fetch_v3_position(&state.http_client, &alchemy_url, pos, wallet_addr).await?
             }
+            "aerodrome" => {
+                fetch_aerodrome_position(&state.http_client, &alchemy_url, pos, wallet_addr).await?
+            }
             other => {
                 return Err(anyhow::anyhow!(
-                    "Position {} has unsupported protocol '{}' (expected uniswap-v4 or uniswap-v3)",
+                    "Position {} has unsupported protocol '{}' (expected uniswap-v4, uniswap-v3 or aerodrome)",
                     pos.id,
                     other
                 ));
@@ -4710,7 +4897,7 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         .iter()
         .map(|c| {
             (
-                format!("{}:{}:{}", c.protocol, c.network, c.nft_id),
+                position_key(c),
                 RebuildRule { weight_bps: c.rebuild_weight_bps, when_out_of_range: c.rebuild_when_out_of_range },
             )
         })
@@ -4768,7 +4955,10 @@ async fn fetch_pool_in_range_liquidity(
     alchemy_url: &str,
     src: &RawPosition,
 ) -> Result<u128> {
-    let (to, data) = if src.protocol == "uniswap-v3" {
+    let (to, data) = if src.protocol == "aerodrome" {
+        // A volatile pool is live while it has LP supply: totalSupply().
+        (src.pool_id.clone(), "0x18160ddd".to_string())
+    } else if src.protocol == "uniswap-v3" {
         (src.pool_id.clone(), V3_LIQUIDITY.to_string())
     } else {
         (
@@ -4875,18 +5065,21 @@ fn build_position_snapshots(raw_positions: &[RawPosition], nock_usd: f64, eth_us
                 lower_tick: p.tick_lower,
                 upper_tick: p.tick_upper,
                 // Display orientation: bigger tick -> lower price (token0-per-token1).
-                lower_price: format!(
-                    "{}",
+                lower_price: if is_full_range(p.tick_lower, p.tick_upper) {
+                    "0".to_string()
+                } else {
                     fmt_price(tick_to_display_price_dec(p.tick_upper, p.token0.decimals, p.token1.decimals))
-                ),
-                upper_price: format!(
-                    "{}",
+                },
+                upper_price: if is_full_range(p.tick_lower, p.tick_upper) {
+                    "0".to_string()
+                } else {
                     fmt_price(tick_to_display_price_dec(p.tick_lower, p.token0.decimals, p.token1.decimals))
-                ),
+                },
                 liquidity_amount: p.liquidity.to_string(),
                 in_range: p.in_range,
                 is_price_source: p.is_price_source,
                 pool_active: None, // filled by apply_pool_activity once pool reads are in
+                full_range: is_full_range(p.tick_lower, p.tick_upper),
             }
         })
         .collect()
@@ -4958,11 +5151,17 @@ fn build_contract_fees(positions: &[Position], live_gas_cost_usd: f64) -> Vec<Co
             ContractFee {
                 contract_address: if p.protocol == "uniswap-v3" {
                     p.npm_address.clone().unwrap_or_else(|| p.pool_id.clone())
+                } else if p.protocol == "aerodrome" {
+                    p.pool_id.clone()
                 } else {
                     UNISWAP_V4_POSM_BASE.to_string()
                 },
                 fee_token_address: p.token0.address.clone(),
-                fee_token_symbol: format!("{}+{} ({} #{})", p.token0.symbol, p.token1.symbol, label, p.nft_id),
+                fee_token_symbol: if p.protocol == "aerodrome" {
+                    format!("{}+{} ({})", p.token0.symbol, p.token1.symbol, label)
+                } else {
+                    format!("{}+{} ({} #{})", p.token0.symbol, p.token1.symbol, label, p.nft_id)
+                },
                 amount: format!(
                     "{:.p0$} {} + {:.p1$} {}",
                     p.tokens_owed_0.parse::<f64>().unwrap_or(0.0),
@@ -5197,6 +5396,148 @@ async fn fetch_v4_position(
         in_range: tick_lower <= tick && tick <= tick_upper,
         is_price_source: pos.is_price_source,
     })
+}
+
+/// Pure core of the Aerodrome read (issue #88): turn pool reserves, LP supply, the
+/// wallet's LP balance and its claimable fees into a RawPosition. A volatile pool is
+/// x*y=k across every price, so it is modelled as a full-range position: the wallet
+/// owns `lp_balance / total_supply` of each reserve, it is always in range, and its
+/// price is reserve1/reserve0. Unit-testable.
+#[allow(clippy::too_many_arguments)]
+fn aerodrome_position_from_reads(
+    cfg: &PositionConfig,
+    wallet: &str,
+    pool: &str,
+    token0: PositionTokenInfo,
+    token1: PositionTokenInfo,
+    reserve0_raw: u128,
+    reserve1_raw: u128,
+    total_supply: u128,
+    lp_balance: u128,
+    fee0_raw: u128,
+    fee1_raw: u128,
+) -> Result<RawPosition> {
+    if reserve0_raw == 0 || reserve1_raw == 0 || total_supply == 0 {
+        return Err(anyhow::anyhow!(
+            "position {}: Aerodrome pool {} has empty reserves or no LP supply",
+            cfg.id,
+            pool
+        ));
+    }
+    let share = lp_balance as f64 / total_supply as f64;
+    let amount0 = reserve0_raw as f64 * share / 10f64.powi(token0.decimals);
+    let amount1 = reserve1_raw as f64 * share / 10f64.powi(token1.decimals);
+    // sqrtPriceX96 equivalent of the pool's spot, so the shared price and sizing math
+    // (nock_spot_from_positions, amounts_per_usd) works unchanged.
+    let raw_price = reserve1_raw as f64 / reserve0_raw as f64; // token1_raw per token0_raw
+    let sqrt_x96 = raw_price.sqrt() * 79228162514264337593543950336.0; // * 2^96
+    let two128 = 340282366920938463463374607431768211456.0f64;
+    let hi = (sqrt_x96 / two128).floor();
+    let sqrt_price_x96 = U256(hi as u128, (sqrt_x96 - hi * two128) as u128);
+    let tick = (raw_price.ln() / 1.0001f64.ln()).floor() as i32;
+    Ok(RawPosition {
+        position_id: position_key(cfg),
+        network: cfg.network.clone(),
+        protocol: "aerodrome".to_string(),
+        wallet: wallet.to_string(),
+        nft_id: 0,
+        pool_id: pool.to_lowercase(),
+        npm_address: None,
+        fee_tier_bps: cfg.fee_bps.unwrap_or(30),
+        token0: token0.clone(),
+        token1: token1.clone(),
+        liquidity: lp_balance,
+        sqrt_price_x96,
+        tick,
+        tick_lower: MIN_TICK,
+        tick_upper: MAX_TICK,
+        amount0,
+        amount1,
+        fee0: fee0_raw as f64 / 10f64.powi(token0.decimals),
+        fee1: fee1_raw as f64 / 10f64.powi(token1.decimals),
+        in_range: true,
+        is_price_source: cfg.is_price_source,
+    })
+}
+
+/// Read an Aerodrome volatile-pool position (issue #88). Selectors are the ones the
+/// pre-v0.4.0 worker used against this same pool (ONCHAIN_INTEGRATION.md §2):
+/// getReserves 0x0902f1ac, totalSupply 0x18160ddd, balanceOf 0x70a08231, claimFees
+/// 0xd294f093 simulated from the wallet. Every read failing fails the cycle (zero-mock).
+async fn fetch_aerodrome_position(
+    http_client: &Client,
+    alchemy_url: &str,
+    cfg: &PositionConfig,
+    wallet: &str,
+) -> Result<RawPosition> {
+    let pool = cfg
+        .pool_address
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("position {}: aerodrome positions need pool_address", cfg.id))?;
+    let wallet_word = format!("000000000000000000000000{}", wallet.trim_start_matches("0x").to_lowercase());
+    let call = |data: String, from: Option<String>, id: i32| {
+        let mut tx = json!({ "to": pool, "data": data });
+        if let Some(f) = from {
+            tx["from"] = json!(f);
+        }
+        json!({ "jsonrpc": "2.0", "method": "eth_call", "params": [tx, "latest"], "id": id })
+    };
+    let read = |payload: serde_json::Value, what: &'static str| {
+        let cfg_id = cfg.id.clone();
+        async move {
+            post_rpc_with_retry(http_client, alchemy_url, &payload, 2)
+                .await
+                .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.trim_start_matches("0x").to_string()))
+                .ok_or_else(|| anyhow::anyhow!("position {}: Aerodrome {} read failed", cfg_id, what))
+        }
+    };
+    let word = |hex: &str, i: usize, what: &str| -> Result<u128> {
+        let start = i * 64;
+        if hex.len() < start + 64 {
+            return Err(anyhow::anyhow!("position {}: Aerodrome {} returned short output", cfg.id, what));
+        }
+        // uint112/uint256 values here fit u128; take the low 32 hex bytes.
+        u128::from_str_radix(&hex[start + 32..start + 64], 16)
+            .map_err(|e| anyhow::anyhow!("position {}: Aerodrome {} unparseable: {e}", cfg.id, what))
+    };
+
+    let t0 = read(call("0x0dfe1681".to_string(), None, 70), "token0").await?;
+    let t1 = read(call("0xd21220a7".to_string(), None, 71), "token1").await?;
+    if t0.len() < 64 || t1.len() < 64 {
+        return Err(anyhow::anyhow!("position {}: Aerodrome token0/token1 returned short output", cfg.id));
+    }
+    let token0 = token_info(&t0[24..64])?;
+    let token1 = token_info(&t1[24..64])?;
+    let reserves = read(call("0x0902f1ac".to_string(), None, 72), "getReserves").await?;
+    let supply = read(call("0x18160ddd".to_string(), None, 73), "totalSupply").await?;
+    let balance = read(call(format!("0x70a08231{wallet_word}"), None, 74), "balanceOf").await?;
+    let lp_balance = word(&balance, 0, "balanceOf")?;
+    // claimFees() simulated from the wallet returns exactly what a claim would pay.
+    // With no LP there is nothing to simulate, so the call is skipped.
+    let (fee0_raw, fee1_raw) = if lp_balance > 0 {
+        let fees = read(call("0xd294f093".to_string(), Some(wallet.to_string()), 75), "claimFees").await?;
+        (word(&fees, 0, "claimFees")?, word(&fees, 1, "claimFees")?)
+    } else {
+        (0, 0)
+    };
+    let raw = aerodrome_position_from_reads(
+        cfg,
+        wallet,
+        &pool,
+        token0,
+        token1,
+        word(&reserves, 0, "getReserves")?,
+        word(&reserves, 1, "getReserves")?,
+        word(&supply, 0, "totalSupply")?,
+        lp_balance,
+        fee0_raw,
+        fee1_raw,
+    )?;
+    tracing::info!(
+        "aerodrome position {}: LP balance={}, amounts {:.4} {} / {:.4} {}, fees {:.6}/{:.6}",
+        cfg.id, raw.liquidity, raw.amount0, raw.token0.symbol, raw.amount1, raw.token1.symbol, raw.fee0, raw.fee1
+    );
+    Ok(raw)
 }
 
 async fn fetch_v3_position(
@@ -5536,17 +5877,19 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
         fee_entries.push((
             if p.protocol == "uniswap-v3" {
                 p.npm_address.clone().unwrap_or_else(|| p.pool_id.clone())
+            } else if p.protocol == "aerodrome" {
+                p.pool_id.clone()
             } else {
                 UNISWAP_V4_POSM_BASE.to_string()
             },
-            format!(
+            if p.protocol == "aerodrome" { position_label(p) } else { format!(
                 "{} ({}/{} {:.2}%, #{})",
                 if p.protocol == "uniswap-v4" { "Uniswap V4" } else { "Uniswap V3" },
                 p.token0.symbol,
                 p.token1.symbol,
                 p.fee_tier_bps as f64 / 100.0,
                 p.nft_id
-            ),
+            ) },
             fee_usd,
         ));
     }
@@ -5582,7 +5925,7 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
 
     // Range top of the price-source position (display units) — feeds the RANGE EXIT
     // branch; replaces the retired hardcoded V4 tick constants.
-    let range_top_price = raw.positions.iter().find(|p| p.is_price_source).map(|p| {
+    let range_top_price = raw.positions.iter().find(|p| p.is_price_source && !is_full_range(p.tick_lower, p.tick_upper)).map(|p| {
         tick_to_display_price_dec(p.tick_lower, p.token0.decimals, p.token1.decimals)
     });
 
@@ -5752,6 +6095,7 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
         asset_aggregation_series: AssetAggregationSeries {
             time_points: vec![now_str.clone()],
             safe_haven_series: vec![format!("{:.2}", t3_usd)],
+            wallet_nock_series: vec![format!("{:.4}", t3_nock)],
             active_protocol_series: vec![format!("{:.2}", lp_usd)],
             positions_nock: raw
                 .positions
@@ -5790,14 +6134,18 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
                     // Display orientation: bigger tick -> lower price (token0-per-token1).
                     let lower_disp = tick_to_display_price_dec(p.tick_upper, p.token0.decimals, p.token1.decimals);
                     let upper_disp = tick_to_display_price_dec(p.tick_lower, p.token0.decimals, p.token1.decimals);
+                    let full_range = is_full_range(p.tick_lower, p.tick_upper);
                     TickBracket {
-                        lower_price: fmt_price(lower_disp),
-                        upper_price: fmt_price(upper_disp),
+                        lower_price: if full_range { "0".to_string() } else { fmt_price(lower_disp) },
+                        upper_price: if full_range { "0".to_string() } else { fmt_price(upper_disp) },
                         liquidity_usd: format!("{:.2}", pos_usd),
                         in_range: p.in_range,
+                        full_range,
                         // Spot is USD/NOCK; brackets are token0-per-NOCK. Only USD-
                         // denominated token0 (USDC) yields an honest distance.
-                        distance_bps: if p.token0.symbol == "USDC" {
+                        distance_bps: if full_range {
+                            None
+                        } else if p.token0.symbol == "USDC" {
                             Some(bracket_distance_bps(spot_price, lower_disp, upper_disp))
                         } else {
                             None
@@ -5838,7 +6186,7 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
                         status: calc_status(t3_dev, w.treasury),
                     },
                     AllocationDeviation {
-                        bucket_name: "Uniswap LP (all tracked positions)".to_string(),
+                        bucket_name: "LP (all tracked positions)".to_string(),
                         target_weight_bps: w.uniswap_lp,
                         actual_weight_bps: lp_weight,
                         deviation_bps: lp_dev,
@@ -6071,7 +6419,7 @@ mod tests {
 
         // Deviation matrix: Treasury / Uniswap LP / Cash only (no Aerodrome bucket).
         let names: Vec<&str> = metrics.portfolio_deviation_matrix.allocations.iter().map(|a| a.bucket_name.as_str()).collect();
-        assert!(names.iter().any(|n| n.contains("Uniswap LP")));
+        assert!(names.iter().any(|n| n.contains("LP (all tracked positions)")));
         assert!(!names.iter().any(|n| n.contains("Aerodrome")));
 
         // v3 unclaimed fees surface in contract_fees with the NPM address.
@@ -6640,6 +6988,229 @@ database_url: "postgresql://localhost/test"
         assert!(t("2026-11-06T03:23:19Z") >= plan_anchor(Some(t("2026-11-01T00:00:00Z")), registered));
     }
 
+    // ---------------- Pre-0.5.0 fixes (issues #85, #86, #87) ----------------
+
+    #[test]
+    fn test_wallet_nock_series_is_token_units_not_dollars() {
+        let raw = liquid_wallet_fixture(); // 115,747.8001 NOCK at $0.01229
+        let m = metrics_with_plan(&raw, &PlanContext::none(), &MarketRegime::default());
+        let ag = &m.asset_aggregation_series;
+        assert_eq!(ag.wallet_nock_series, vec!["115747.8001".to_string()]);
+        // The USD series is unchanged and is NOT the token count.
+        let usd: f64 = ag.safe_haven_series[0].parse().unwrap();
+        assert!((usd - 115_747.8001 * 0.01229).abs() < 0.01);
+        assert!(usd < 2_000.0);
+    }
+
+    #[test]
+    fn test_example_config_is_the_base_layer() {
+        let dir = std::env::temp_dir().join(format!("nocknock-cfg-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let example = dir.join("config.yaml.example");
+        let main = dir.join("config.yaml");
+        std::fs::write(
+            &example,
+            "alchemy_api_keys: [\"YOUR_ALCHEMY_API_KEY\"]\nport: 8080\nsync_window_seconds: 300\npositions:\n  - id: \"p1\"\n    protocol: \"uniswap-v4\"\n    nft_id: 3163450\n    is_price_source: true\noperator_profile:\n  treasury_floor_nock: 100000.0\n",
+        )
+        .unwrap();
+        // A partial operator config: key and port only, exactly the shape that failed
+        // ingestion on 2026-11-14 with "No positions configured".
+        std::fs::write(&main, "alchemy_api_keys: [\"real-key\"]\nport: 8081\noperator_profile:\n  lp_floor_tolerance_bps: 500\n").unwrap();
+        let cfg = load_app_config(example.to_str().unwrap(), Some(main.to_str().unwrap()), false).unwrap();
+        assert_eq!(cfg.positions.len(), 1, "positions must come from the example base layer");
+        assert_eq!(cfg.positions[0].nft_id, 3163450);
+        assert_eq!(cfg.alchemy_api_keys, vec!["real-key".to_string()]);
+        assert_eq!(cfg.port, 8081);
+        // Nested sections merge key by key.
+        assert_eq!(cfg.operator_profile.treasury_floor_nock, 100000.0);
+        assert_eq!(cfg.operator_profile.lp_floor_tolerance_bps, 500);
+        // With no config.yaml at all the example alone still parses.
+        let only = load_app_config(example.to_str().unwrap(), Some(dir.join("absent.yaml").to_str().unwrap()), false).unwrap();
+        assert_eq!(only.positions.len(), 1);
+        assert_eq!(only.port, 8080);
+        let _ = std::fs::remove_file(&example);
+        let _ = std::fs::remove_file(&main);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn test_health_status_is_not_ok_when_ingestion_is_failing_or_stale() {
+        // Healthy: fresh snapshot, last cycle fine.
+        assert_eq!(health_status(true, 10, 300, false), "ok");
+        assert_eq!(health_status(true, 390, 300, false), "ok"); // inside window + 90s grace
+        // The 2026-11-14 incident: old snapshot, every cycle failing, lag 491s.
+        assert_eq!(health_status(true, 491, 300, true), "degraded");
+        // Failing counts even while the last snapshot is still recent.
+        assert_eq!(health_status(true, 5, 300, true), "degraded");
+        // Stale without a recorded error (scheduler stuck) is degraded too.
+        assert_eq!(health_status(true, 391, 300, false), "degraded");
+        // Boot: nothing yet and nothing failed is "starting"; a failed first cycle is not.
+        assert_eq!(health_status(false, 0, 300, false), "starting");
+        assert_eq!(health_status(false, 0, 300, true), "degraded");
+    }
+
+    #[test]
+    fn test_nothing_to_collect_only_for_truly_empty_positions() {
+        assert!(nothing_to_collect("0", "0.000000", "0.000000"));
+        assert!(!nothing_to_collect("0", "0.000001", "0.000000")); // fees left behind
+        assert!(!nothing_to_collect("48295502692597", "0.000000", "0.000000")); // funded
+        assert!(!nothing_to_collect("not-a-number", "0", "0")); // unknown is not "empty"
+    }
+
+    // ---------------- Aerodrome full-range tranche (issue #88) ----------------
+
+    fn aero_cfg(price_source: bool) -> PositionConfig {
+        serde_yaml::from_str(&format!(
+            "id: aerodrome-vamm-nock-usdc\nprotocol: aerodrome\npool_address: \"0x85f1aa3a70fedd1c52705c15baed143e675cd626\"\nis_price_source: {price_source}\n"
+        ))
+        .unwrap()
+    }
+
+    /// The legacy vAMM as read on 2026-11-14 (block 57409285): 369,321.72 USDC and
+    /// 31,839,446 NOCK in reserve, LP supply 342542824101829799; wallet given 1%.
+    fn aero_position(price_source: bool) -> RawPosition {
+        aerodrome_position_from_reads(
+            &aero_cfg(price_source),
+            "0xeE114cC97eC5adeB34bA5645e315B497D8487a45",
+            "0x85f1aa3a70fedd1c52705c15baed143e675cd626",
+            token_info(USDC_BASE).unwrap(),
+            token_info(NOCK_BASE).unwrap(),
+            369_321_720_000,
+            318_394_460_000_000_000_000_000,
+            342_542_824_101_829_799,
+            3_425_428_241_018_297, // 1% of supply
+            440_190,               // 0.44019 USDC of fees
+            250_000_000_000_000_000, // 25 NOCK of fees
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_aerodrome_position_is_a_share_of_reserves_and_full_range() {
+        let p = aero_position(false);
+        assert_eq!(p.protocol, "aerodrome");
+        assert_eq!(p.position_id, "aerodrome:base:0x85f1aa3a70fedd1c52705c15baed143e675cd626");
+        assert_eq!((p.token0.symbol.as_str(), p.token1.symbol.as_str()), ("USDC", "NOCK"));
+        // 1% of each reserve.
+        assert!((p.amount0 - 3693.2172).abs() < 0.01, "USDC {}", p.amount0);
+        assert!((p.amount1 - 318_394.46).abs() < 1.0, "NOCK {}", p.amount1);
+        assert!((p.fee0 - 0.44019).abs() < 1e-9 && (p.fee1 - 25.0).abs() < 1e-9);
+        assert_eq!(p.fee_tier_bps, 30);
+        // Full range: always in range, never "sells out".
+        assert!(p.in_range && is_full_range(p.tick_lower, p.tick_upper));
+        assert_eq!(nock_sell_out_multiple(&p), None);
+        assert_eq!(position_label(&p), "Aerodrome USDC/NOCK 0.30% (full range)");
+        // An x*y=k position is 50/50 by value at the pool's own price.
+        let spot = 369_321.72 / 31_839_446.0;
+        let (usdc_per_usd, nock_per_usd) = amounts_per_usd(&p, spot, 1830.0).unwrap();
+        assert!((usdc_per_usd - 0.5).abs() < 1e-6, "USDC leg {usdc_per_usd}");
+        assert!((nock_per_usd * spot - 0.5).abs() < 1e-6);
+        // Snapshot view flags it so clients do not draw a bracket or print a range.
+        let snap = build_position_snapshots(&[p.clone()], spot, 1830.0);
+        assert!(snap[0].full_range);
+        assert_eq!((snap[0].lower_price.as_str(), snap[0].upper_price.as_str()), ("0", "0"));
+        assert!((snap[0].amount_usd.parse::<f64>().unwrap() - 2.0 * 3693.2172).abs() < 0.05);
+    }
+
+    #[test]
+    fn test_aerodrome_pool_can_be_the_price_source() {
+        // The deepest NOCK/USDC market gives the spot: reserve ratio, to within float noise.
+        let p = aero_position(true);
+        let spot = nock_spot_from_positions(&[p]).expect("spot from reserves");
+        assert!((spot - 369_321.72 / 31_839_446.0).abs() < 1e-9, "spot {spot}");
+        assert!((spot - 0.0116).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_aerodrome_rejects_an_empty_pool_and_handles_no_lp() {
+        let empty = aerodrome_position_from_reads(
+            &aero_cfg(false), "0xw", "0xpool", token_info(USDC_BASE).unwrap(), token_info(NOCK_BASE).unwrap(),
+            0, 0, 0, 0, 0, 0,
+        );
+        assert!(empty.is_err(), "an empty pool has no price and must not be read as zero");
+        // Wallet holds no LP yet: a valid, empty position that still carries the pool price.
+        let none = aerodrome_position_from_reads(
+            &aero_cfg(true), "0xw", "0xpool", token_info(USDC_BASE).unwrap(), token_info(NOCK_BASE).unwrap(),
+            369_321_720_000, 318_394_460_000_000_000_000_000, 342_542_824_101_829_799, 0, 0, 0,
+        )
+        .unwrap();
+        assert_eq!((none.amount0, none.amount1, none.liquidity), (0.0, 0.0, 0));
+        assert!(nock_spot_from_positions(&[none]).is_some());
+    }
+
+    #[test]
+    fn test_aerodrome_joins_the_rebuild_split_and_counts_toward_lp() {
+        let mut raw = rebuild_fixture();
+        let mut aero = aero_position(false);
+        aero.amount0 = 0.0;
+        aero.amount1 = 0.0;
+        aero.liquidity = 0;
+        raw.pool_liquidity.insert(aero.position_id.clone(), "342542824101829799".to_string());
+        raw.positions.push(aero);
+        let (s, _) = lp_rebuild_suggestions(&raw, 400.0, roomy_funds());
+        // Four eligible positions (the dead 0.75% pool stays out): a quarter each.
+        assert_eq!(s.len(), 4);
+        let a = s.iter().find(|x| x.protocol == "aerodrome").expect("aerodrome suggested");
+        assert_eq!(a.target_usd, "100.00");
+        assert_eq!(a.nock_sold_out_at_multiple, None);
+        assert!(a.url.contains("0x85f1aa3a70fedd1c52705c15baed143e675cd626"));
+        // About half the deposit is USDC and half NOCK. The split is exactly 50/50 at
+        // the pool's own price; this fixture's engine spot ($0.01229) sits 6% above the
+        // pool's ($0.0116), so the NOCK leg is valued slightly higher here.
+        let usdc_leg: f64 = a.amount0.parse().unwrap();
+        assert!((45.0..=55.0).contains(&usdc_leg), "USDC leg {usdc_leg}");
+        // A config weight makes it the core holding.
+        raw.rebuild_rules.insert(
+            "aerodrome:base:0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
+            RebuildRule { weight_bps: Some(7000), when_out_of_range: false },
+        );
+        let (s, _) = lp_rebuild_suggestions(&raw, 400.0, roomy_funds());
+        assert_eq!(s.iter().find(|x| x.protocol == "aerodrome").unwrap().target_usd, "280.00");
+        assert_eq!(sg(&s, 3163450).target_usd, "40.00");
+
+        // Funded: its value and NOCK count in LP totals; its bracket is flagged full range.
+        let mut funded = rebuild_fixture();
+        funded.positions.push(aero_position(false));
+        let m = metrics_with_plan(&funded, &PlanContext::none(), &MarketRegime::default());
+        let lp_usd: f64 = m.asset_aggregation_series.active_protocol_series[0].parse().unwrap();
+        assert!(lp_usd > 3693.0, "LP total must include the Aerodrome USDC leg, got {lp_usd}");
+        let b = m.tick_bracket_hypervisor.brackets.last().unwrap();
+        assert!(b.full_range && b.distance_bps.is_none());
+        assert_eq!(m.asset_aggregation_series.positions_nock.last().unwrap().position_id,
+            "aerodrome:base:0x85f1aa3a70fedd1c52705c15baed143e675cd626");
+    }
+
+    #[test]
+    fn test_rebuild_fills_only_the_gap_when_other_positions_are_above_their_share() {
+        // The 2026-11-14 situation: two Uniswap ranges hold ~$179 each, Aerodrome is
+        // empty, and the LP target is raised to $486 (20%). Equal thirds would be $162
+        // each: the Uniswap ranges are over their share and are left alone, and the
+        // Aerodrome suggestion is the remaining gap ($128), not its full $162 share.
+        let mut raw = rebuild_fixture();
+        let spot = raw.spot_price_nock_usd;
+        for p in raw.positions.iter_mut() {
+            match p.nft_id {
+                3163450 => { p.amount0 = 71.0; p.amount1 = (179.0 - 71.0) / spot; }
+                6336662 => { p.amount0 = 0.0; p.amount1 = 179.0 / spot; }
+                _ => {}
+            }
+        }
+        let mut aero = aero_position(false);
+        aero.amount0 = 0.0;
+        aero.amount1 = 0.0;
+        aero.liquidity = 0;
+        raw.pool_liquidity.insert(aero.position_id.clone(), "342542824101829799".to_string());
+        raw.positions.push(aero);
+        let (s, _) = lp_rebuild_suggestions(&raw, 486.0, roomy_funds());
+        assert_eq!(s.len(), 2, "only positions below their share are suggested: {s:?}");
+        let total: f64 = s.iter().map(|x| x.add_usd.parse::<f64>().unwrap()).sum();
+        assert!((total - 128.0).abs() < 0.05, "suggestions must sum to the $128 gap, got {total}");
+        // Neither funded Uniswap range is asked to change.
+        assert!(s.iter().all(|x| x.nft_id != 3163450 && x.nft_id != 6336662));
+        let a = s.iter().find(|x| x.protocol == "aerodrome").unwrap();
+        assert!(a.add_usd.parse::<f64>().unwrap() > 60.0);
+    }
+
     // ---------------- LP rebuild suggestions (issue #83) ----------------
 
     /// Liquid wallet with every tracked pool live except the v4 0.75% pool (#3163431),
@@ -6953,6 +7524,13 @@ database_url: "postgresql://localhost/test"
         let done = metrics_with_plan(&raw, &done_ctx, &MarketRegime::default());
         let done_text = format_accumulation_plan_text(&json!({ "derived_metrics": serde_json::to_value(&done).unwrap() }));
         assert!(done_text.contains("Next tranche: none (plan complete)"));
+        // Between tranches the text states the size and never "due now".
+        let wfills = PlanFills { count: 1, spent_usdc: 100.0, acquired_nock: 8000.0, last_at: Some(t("2026-11-15T12:00:00Z")), first_price: Some(0.0125) };
+        let wctx = PlanContext { cfg: Some(plan_cfg()), fills: wfills, ledger_unavailable: false, now: t("2026-11-15T18:00:00Z") };
+        let waiting = metrics_with_plan(&raw, &wctx, &MarketRegime::default());
+        let wtext = format_accumulation_plan_text(&json!({ "derived_metrics": serde_json::to_value(&waiting).unwrap() }));
+        assert!(wtext.contains("Next tranche: 2 of 5 — $100.00 when due"));
+        assert!(!wtext.contains("due now"));
         assert!(!done_text.contains("due now"));
         assert!(text.contains("LP rebuild bias: under_target"));
         let rb = rebuild_fixture();
@@ -7189,6 +7767,7 @@ database_url: "postgresql://localhost/test"
                 asset_aggregation_series: AssetAggregationSeries {
                     time_points: vec!["2026-10-11T00:00:00Z".to_string()],
                     safe_haven_series: vec!["48.00".to_string()],
+                    wallet_nock_series: vec![],
                     active_protocol_series: vec!["2.00".to_string()],
                     positions_nock: vec![],
                 },

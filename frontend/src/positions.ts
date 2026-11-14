@@ -11,9 +11,18 @@ export const POSITION_COLORS = ['#38bdf8', '#a855f7', '#f59e0b', '#ec4899', '#14
 /** Human label for a tracked position: pair + protocol badge + fee tier. */
 export function positionLabel(p: any): string {
   if (!p) return 'Position';
-  const proto = p.protocol === 'uniswap-v4' ? 'v4' : p.protocol === 'uniswap-v3' ? 'v3' : p.protocol;
+  const proto =
+    p.protocol === 'uniswap-v4' ? 'v4' : p.protocol === 'uniswap-v3' ? 'v3' : p.protocol === 'aerodrome' ? 'Aerodrome' : p.protocol;
   const fee = (p.fee_tier_bps / 100).toFixed(2).replace(/\.?0+$/, '');
   return `${p.token0.symbol}/${p.token1.symbol} ${proto} · ${fee}%`;
+}
+
+/** Protocol pill text for a position card. */
+export function protocolBadge(protocol: string): string {
+  if (protocol === 'uniswap-v4') return 'UNISWAP V4';
+  if (protocol === 'uniswap-v3') return 'UNISWAP V3';
+  if (protocol === 'aerodrome') return 'AERODROME';
+  return String(protocol ?? '').toUpperCase();
 }
 
 /**
@@ -23,6 +32,8 @@ export function positionLabel(p: any): string {
  * matching the operator's Uniswap-app convention for both screenshot shapes.
  */
 export function positionRangeText(p: any): string {
+  // A volatile x*y=k pool covers every price: there is no range to print or to leave.
+  if (p.full_range) return 'Full range (cannot go out of range)';
   const lower = parseFloat(p.lower_price);
   const upper = parseFloat(p.upper_price);
   const fmt = (v: number) =>
@@ -40,10 +51,32 @@ export function positionRangeText(p: any): string {
  * frozen price, so "in range" judged against that pool's own tick says nothing about
  * the market: show STALE POOL instead of a reassuring green pill.
  */
-export function rangeStatus(p: { in_range: boolean; pool_active?: boolean | null }): {
+export function rangeStatus(p: { in_range: boolean; pool_active?: boolean | null; full_range?: boolean }): {
   label: string;
   tone: 'good' | 'warn' | 'stale';
 } {
   if (p.pool_active === false) return { label: '● STALE POOL', tone: 'stale' };
+  if (p.full_range) return { label: '● FULL RANGE', tone: 'good' };
   return p.in_range ? { label: '● IN RANGE', tone: 'good' } : { label: '● OUT OF RANGE', tone: 'warn' };
+}
+
+/**
+ * Wallet NOCK in TOKEN UNITS for the floor chart (issue #85).
+ *
+ * `safe_haven_series` is the wallet's NOCK valued in USD; plotting it against the
+ * 100,000 NOCK floor drew a 95,599-NOCK stack at 1,095. Snapshots from v0.5.0 carry
+ * `wallet_nock_series` directly. Older snapshots do not, so the units are recovered
+ * exactly from the same snapshot's own numbers (USD value ÷ its spot price). When
+ * neither is available the point is null: a gap in the line, never a guess.
+ */
+export function walletNockUnits(
+  ag: { wallet_nock_series?: string[]; safe_haven_series?: string[] } | null | undefined,
+  i: number,
+  spotUsd: number | null | undefined,
+): number | null {
+  const direct = parseFloat(ag?.wallet_nock_series?.[i] ?? '');
+  if (Number.isFinite(direct)) return direct;
+  const usd = parseFloat(ag?.safe_haven_series?.[i] ?? '');
+  if (Number.isFinite(usd) && spotUsd && spotUsd > 0) return usd / spotUsd;
+  return null;
 }
