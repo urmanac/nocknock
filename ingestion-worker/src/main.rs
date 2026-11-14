@@ -1725,6 +1725,8 @@ const V4_POOL_KEYS: &str = "0x86b6be7d"; // poolKeys(bytes25)
 // (getPoolAndPositionInfo(uint256) = 0x7ba03aad exists on the POSM; the pipeline
 // reads ticks/liquidity via StateView + config instead.)
 const V4_STATE_VIEW_GET_SLOT0: &str = "0xc815641c"; // getSlot0(bytes32)
+const V4_STATE_VIEW_GET_LIQUIDITY: &str = "0xfa6793d5"; // getLiquidity(bytes32)
+const V3_LIQUIDITY: &str = "0x1a686502"; // liquidity()
 const V4_STATE_VIEW_GET_POSITION_INFO: &str = "0xdacf1d2f"; // getPositionInfo(bytes32,address,int24,int24,bytes32)
 const V4_STATE_VIEW_GET_FEE_GROWTH_INSIDE: &str = "0x53e9c1fb"; // getFeeGrowthInside(bytes32,int24,int24)
 const V3_POSITIONS: &str = "0x99fbab88"; // positions(uint256)
@@ -3337,6 +3339,15 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         )
     })?;
 
+    // 3b. Stale-price guard (zero-mock): a pool with no in-range liquidity cannot
+    //     trade, so its sqrtPrice stays frozen wherever the last liquidity was pulled.
+    //     Publishing that as "live" spot is a data-integrity bug — fail the cycle.
+    if let Some(src) = raw_positions.iter().find(|p| p.is_price_source) {
+        let pool_liquidity =
+            fetch_pool_in_range_liquidity(&state.http_client, &alchemy_url, src).await?;
+        check_price_source_liquidity(&src.position_id, &src.pool_id, pool_liquidity)?;
+    }
+
     // 4. Fetch live token balances for tracked wallet
 
     // 5. Fetch live token balances for tracked wallet
@@ -3424,6 +3435,61 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         live_gas_cost_usd,
         live_eth_price_usd,
     })
+}
+
+/// In-range (active) liquidity of the price-source pool: StateView `getLiquidity(poolId)`
+/// for Uniswap v4, the pool's own `liquidity()` for Uniswap v3.
+async fn fetch_pool_in_range_liquidity(
+    http_client: &Client,
+    alchemy_url: &str,
+    src: &RawPosition,
+) -> Result<u128> {
+    let (to, data) = if src.protocol == "uniswap-v3" {
+        (src.pool_id.clone(), V3_LIQUIDITY.to_string())
+    } else {
+        (
+            UNISWAP_V4_STATE_VIEW_BASE.to_string(),
+            format!("{}{}", V4_STATE_VIEW_GET_LIQUIDITY, src.pool_id.trim_start_matches("0x")),
+        )
+    };
+    let payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{ "to": to, "data": data }, "latest"],
+        "id": 58
+    });
+    post_rpc_with_retry(http_client, alchemy_url, &payload, 2)
+        .await
+        .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .and_then(|s| {
+            let clean = s.trim_start_matches("0x");
+            if clean.len() < 64 {
+                return None;
+            }
+            // uint128 right-aligned in a 32-byte word
+            u128::from_str_radix(&clean[clean.len() - 32..], 16).ok()
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "price source {}: failed to query in-range liquidity of pool {}",
+                src.position_id,
+                src.pool_id
+            )
+        })
+}
+
+/// A price-source pool must have active liquidity, otherwise its price is frozen
+/// and must never be presented as live spot. Pure — unit-testable.
+fn check_price_source_liquidity(position_id: &str, pool_id: &str, in_range_liquidity: u128) -> Result<()> {
+    if in_range_liquidity == 0 {
+        return Err(anyhow::anyhow!(
+            "Stale NOCK/USD spot: price-source pool {} (position {}) has zero in-range liquidity, \
+             so its price is frozen. Move is_price_source to a pool with active liquidity.",
+            pool_id,
+            position_id
+        ));
+    }
+    Ok(())
 }
 
 /// NOCK/USD spot from the designated price-source position. The pool must quote
@@ -5298,6 +5364,16 @@ database_url: "postgresql://localhost/test"
     #[test]
     fn test_decode_v3_positions_return_rejects_short() {
         assert!(decode_v3_positions_return("0x1234").is_err());
+    }
+
+    #[test]
+    fn test_price_source_liquidity_guard() {
+        // Live pool: any non-zero active liquidity passes.
+        assert!(check_price_source_liquidity("uniswap-v4:base:3163450", "0x064a", 80173935548453779).is_ok());
+        // Dead pool (the v4 0.75% pool after the 2026-11 liquidation): frozen price is rejected.
+        let err = check_price_source_liquidity("uniswap-v4:base:3163431", "0x91a9", 0).unwrap_err();
+        assert!(err.to_string().contains("zero in-range liquidity"));
+        assert!(err.to_string().contains("0x91a9"));
     }
 
     #[test]

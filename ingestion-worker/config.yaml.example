@@ -24,7 +24,8 @@ token_addresses:
 # The portfolio is Uniswap-only: the Aerodrome tranche was liquidated 2026-10-23.
 # After a repositioning, re-run the Phase-1 discovery runbook and update this list.
 positions:
-  # Position B — NOCK/USDC, Uniswap v4, 0.75% fee (the NOCK/USD price source)
+  # Position B — NOCK/USDC, Uniswap v4, 0.75% fee. No longer the price source: after the
+  # 2026-11 liquidation this pool has zero in-range liquidity, so its price is frozen.
   - id: "uniswap-v4-nock-usdc"
     protocol: "uniswap-v4"
     network: "base"
@@ -34,7 +35,7 @@ positions:
     currency1: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"   # NOCK
     tick_lower: 267825
     tick_upper: 271050
-    is_price_source: true
+    is_price_source: false
 
   # Position A — ETH/NOCK, Uniswap v4, 2% fee (currency0 = native ETH)
   - id: "uniswap-v4-nock-eth"
@@ -48,7 +49,8 @@ positions:
     tick_upper: 71200
     is_price_source: false
 
-  # Position D — USDC/NOCK, Uniswap v4, 3.00% fee — wide raft (RPC-verified via the
+  # Position D — USDC/NOCK, Uniswap v4, 3.00% fee — wide raft and the NOCK/USD price
+  # source (pool has active third-party liquidity). (RPC-verified via the
   # mint's ModifyLiquidity event: poolId, ticks 262200/282300, liquidity 48295502692597)
   - id: "uniswap-v4-nock-usdc-wide"
     protocol: "uniswap-v4"
@@ -59,7 +61,7 @@ positions:
     currency1: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"   # NOCK
     tick_lower: 262200
     tick_upper: 282300
-    is_price_source: false
+    is_price_source: true
 
   # Position C — WETH/NOCK, Uniswap v3, 1% fee (Base canonical NPM; pool resolved
   # via the v3 factory getPool(WETH, NOCK, 10000))
@@ -111,13 +113,15 @@ operator_profile:
 # Heals gaps in market_price_history from free public OHLCV feeds and extends
 # daily depth for the multi-day RSI. The whole section is optional — every
 # field defaults so existing config files keep working unchanged.
-# pool_address defaults to the tracked v4 NOCK/USDC pool (0.75%); providers
-# without coverage for it degrade fail-open (warnings only).
-# market_data:
+# pool_address is the pool whose OHLCV history feeds RSI; it should be the deepest
+# NOCK/USDC market. The code default is the v4 0.75% pool, which went illiquid after
+# the 2026-11 liquidation, so it is pinned here to the Aerodrome vAMM (~$760k TVL).
+# Providers without coverage degrade fail-open (warnings only).
+market_data:
+  pool_address: "0x85f1aa3a70fedd1c52705c15baed143e675cd626"
 #   backfill_enabled: true
 #   geckoterminal_base_url: "https://api.geckoterminal.com/api/v2"
 #   dexscreener_base_url: "https://api.dexscreener.com/latest"
-#   pool_address: "0x91a9ef0a8dd231b99fa53a2a145a9e8bca7897e0d85852107abb997916f9f99c"
 #   gap_threshold_minutes: 15
 #   min_history_days: 14
 #   hourly_lookback: 168
