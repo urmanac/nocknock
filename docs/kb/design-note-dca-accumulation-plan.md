@@ -292,6 +292,20 @@ The rebuild is not budgeted by the plan. The two interact only through the walle
 moved into LP is no longer liquid, so later tranches are sized against what remains and
 name the limiting guardrail if they shrink.
 
+### 8.1a Operator decision: protect the cash position
+
+Operator, 2026-11-14: *"Let's not dilute the cash position overtly — we have lots of
+cash, we want to keep it. There might be a dip!"* The default targets (cash 5%) would
+have let a plan spend about $929 of the $1,053 on hand, and the example plan ($500 over
+five daily buys) nearly half.
+
+Resolved with `accumulation_plan.cash_reserve_usdc`: a floor on liquid USDC that the
+plan can never draw below, whatever the budget, the targets or the price. It is a hard
+cap in `plan_directive`, alongside the tax reserve and cash target, and the smallest
+limit wins. The operator chose **$950 protected, held at any price** (no automatic
+release on a dip; the reserve is lowered by hand when the operator decides to use it).
+First plan: $100 over five buys, 24 hours apart.
+
 ### 8.2 Differences from the draft
 
 | Draft | As built | Why |
@@ -319,7 +333,8 @@ name the limiting guardrail if they shrink.
 
 ### 8.4 Still open
 
-Questions 1 (budget, tranches, cadence), 2 (keep or drop the RSI pause), 3 (price
+Question 1 is answered for the first plan ($100 / 5 / 24h, $950 reserve). Questions
+2 (keep or drop the RSI pause), 3 (price
 ceiling), 4 (auto-attach hand-executed buys), 6 (count ETH) and 7 (multiple plans) are
 unchanged. Phases 2 and 3 are not started.
 

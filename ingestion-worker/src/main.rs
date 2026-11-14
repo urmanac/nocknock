@@ -135,6 +135,12 @@ pub struct AccumulationPlanConfig {
     /// Never advise spending liquid USDC below `target_weights_bps.cash` (default true).
     #[serde(default = "default_true")]
     pub respect_cash_target: bool,
+    /// Protected cash reserve (operator order, 2026-11-14: "we have lots of cash, we
+    /// want to keep it"). The plan never advises a buy that would take liquid USDC
+    /// below this amount, at any price. Independent of, and usually far above, the
+    /// long-run cash target. Only the operator lowers it.
+    #[serde(default)]
+    pub cash_reserve_usdc: Option<f64>,
 }
 
 fn default_plan_venue() -> String {
@@ -512,6 +518,9 @@ struct AccumulationPlanStatus {
     /// Plain-words reason when paused / blocked / invalid, or the limiting guardrail
     /// when a due tranche was sized below nominal.
     binding_constraint: Option<String>,
+    /// Protected cash reserve the plan never draws below; null when none is set.
+    #[serde(default)]
+    cash_reserve_usdc: Option<String>,
 }
 
 /// Standing bias toward re-establishing LP ranges. Moving NOCK and USDC the wallet
@@ -600,6 +609,11 @@ fn plan_directive(
             reason: "accumulation_plan needs a non-empty id, budget_usdc > 0, tranches > 0 and interval_hours >= 0".to_string(),
         };
     }
+    if cfg.cash_reserve_usdc.map_or(false, |r| !(r >= 0.0)) {
+        return PlanDirective::Invalid {
+            reason: "accumulation_plan.cash_reserve_usdc must be zero or positive".to_string(),
+        };
+    }
     if ledger_unavailable {
         return PlanDirective::Blocked {
             reason: "the accumulation ledger could not be read this cycle, so plan progress is unknown".to_string(),
@@ -663,6 +677,15 @@ fn plan_directive(
             ),
         );
     }
+    if let Some(reserve) = cfg.cash_reserve_usdc {
+        cap(
+            guards.wallet_usdc - reserve,
+            format!(
+                "wallet USDC ${:.2} less the ${:.2} protected cash reserve",
+                guards.wallet_usdc, reserve
+            ),
+        );
+    }
     if usdc < PLAN_DUST_USDC {
         return PlanDirective::Blocked {
             reason: format!(
@@ -720,6 +743,7 @@ fn build_plan_status(
             .filter(|p| *p > 0.0)
             .map(|p| format!("{:.4}", cfg.budget_usdc / p)),
         binding_constraint,
+        cash_reserve_usdc: cfg.cash_reserve_usdc.map(|r| format!("{:.2}", r)),
     }
 }
 
@@ -736,6 +760,10 @@ fn plan_advice(ps: &AccumulationPlanStatus, spot_price: f64) -> (String, String)
             .map(|p| format!(", average cost ${}", p))
             .unwrap_or_default()
     );
+    let progress = match &ps.cash_reserve_usdc {
+        Some(r) => format!("{} ${} of cash stays protected.", progress, r),
+        None => progress,
+    };
     let n = format!("{} of {}", ps.tranche_index, ps.tranches_total);
     match ps.status.as_str() {
         "tranche_due" => (
@@ -1587,6 +1615,7 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
          • Acquired: {} NOCK at average ${}\n\
          • Lump-sum counterfactual (whole budget at first fill price): {} NOCK\n\
          • Constraint: {}\n\
+         • Protected cash reserve: ${}\n\
          {lp_line}",
         s(plan, "plan_id"), s(plan, "venue"), s(plan, "status"),
         if s(plan, "status") == "complete" {
@@ -1602,6 +1631,7 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
         s(plan, "acquired_nock"), s(plan, "avg_price_usd"),
         s(plan, "lump_sum_nock"),
         s(plan, "binding_constraint"),
+        s(plan, "cash_reserve_usdc"),
     )
 }
 
@@ -5737,7 +5767,76 @@ database_url: "postgresql://localhost/test"
             max_price_usd: None,
             pause_when_overextended: true,
             respect_cash_target: true,
+            cash_reserve_usdc: None,
         }
+    }
+
+    #[test]
+    fn test_plan_never_draws_below_the_protected_cash_reserve() {
+        // The operator's 2026-11-14 setup: $1,053 liquid, $950 protected, $100 over 5 buys.
+        let mut cfg = plan_cfg();
+        cfg.budget_usdc = 100.0;
+        cfg.cash_reserve_usdc = Some(950.0);
+        let now = t("2026-11-15T12:00:00Z");
+        // Nominal $20 fits above the reserve ($103 of headroom): full tranche, no limit named.
+        assert_eq!(
+            plan_directive(&cfg, &PlanFills::default(), &roomy_guards(), false, now),
+            PlanDirective::TrancheDue { usdc: 20.0, limited_by: None }
+        );
+        // Headroom shrinks to $8 (e.g. USDC moved into LP): the tranche shrinks and says why.
+        let mut guards = roomy_guards();
+        guards.wallet_usdc = 958.0;
+        match plan_directive(&cfg, &PlanFills::default(), &guards, false, now) {
+            PlanDirective::TrancheDue { usdc, limited_by } => {
+                assert!((usdc - 8.0).abs() < 1e-9);
+                assert!(limited_by.unwrap().contains("protected cash reserve"));
+            }
+            other => panic!("expected a shrunk tranche, got {other:?}"),
+        }
+        // At or below the reserve nothing is spendable, however cheap NOCK is.
+        guards.wallet_usdc = 950.0;
+        guards.spot_price = 0.0001;
+        let d = plan_directive(&cfg, &PlanFills::default(), &guards, false, now);
+        assert!(matches!(d, PlanDirective::Blocked { ref reason } if reason.contains("protected cash reserve")));
+        // The reserve binds even when the operator opts out of the 5% cash target.
+        cfg.respect_cash_target = false;
+        assert!(matches!(
+            plan_directive(&cfg, &PlanFills::default(), &guards, false, now),
+            PlanDirective::Blocked { .. }
+        ));
+        // A reserve protects against an oversized budget too: the example plan
+        // ($500 / 5) can only ever take the $103 above a $950 reserve.
+        let mut big = plan_cfg();
+        big.cash_reserve_usdc = Some(950.0);
+        match plan_directive(&big, &PlanFills::default(), &roomy_guards(), false, now) {
+            PlanDirective::TrancheDue { usdc, limited_by } => {
+                assert!((usdc - 100.0).abs() < 1e-9 && limited_by.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+        let mut after_one = roomy_guards();
+        after_one.wallet_usdc = 953.0; // one $100 buy later
+        match plan_directive(&big, &PlanFills { count: 1, spent_usdc: 100.0, acquired_nock: 8000.0, last_at: Some(t("2026-11-14T00:00:00Z")), first_price: Some(0.0125) }, &after_one, false, now) {
+            PlanDirective::TrancheDue { usdc, .. } => assert!((usdc - 3.0).abs() < 1e-9),
+            other => panic!("{other:?}"),
+        }
+        // Negative reserve is a config error, stated explicitly.
+        cfg.cash_reserve_usdc = Some(-1.0);
+        assert!(matches!(plan_directive(&cfg, &PlanFills::default(), &roomy_guards(), false, now), PlanDirective::Invalid { .. }));
+    }
+
+    #[test]
+    fn test_advice_states_the_protected_reserve() {
+        let raw = liquid_wallet_fixture();
+        let mut cfg = plan_cfg();
+        cfg.budget_usdc = 100.0;
+        cfg.cash_reserve_usdc = Some(950.0);
+        let ctx = PlanContext { cfg: Some(cfg), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-15T12:00:00Z") };
+        let m = metrics_with_plan(&raw, &ctx, &MarketRegime::default());
+        assert_eq!(m.global_status.shot_advice_action, "DCA TRANCHE DUE (1 of 5)");
+        assert!(m.global_status.shot_advice_details.contains("Buy $20.00 of NOCK"));
+        assert!(m.global_status.shot_advice_details.contains("$950.00 of cash stays protected"));
+        assert_eq!(m.accumulation_plan.unwrap().cash_reserve_usdc.as_deref(), Some("950.00"));
     }
 
     fn roomy_guards() -> PlanGuards {

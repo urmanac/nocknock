@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DCA ON SCHEDULE` instead of advising one lump-sum deployment. The plan only paces:
   nothing is signed or sent. Missed windows never stack; a pause defers without consuming
   a tranche; guardrails can shrink a tranche (naming the limit) but never enlarge it.
+- **Protected cash reserve** (`accumulation_plan.cash_reserve_usdc`): the plan never
+  advises a buy that would take liquid USDC below it, at any price, and says so in the
+  advice. It binds independently of the 5% cash target, so an oversized budget or the
+  default targets cannot dilute the cash position past it. Only the operator lowers it.
 - **Accumulation ledger** (`accumulation_events`) and
   `POST /v1/execute/record-accumulation { tx_hash }`: a buy counts only after the worker
   verifies on-chain that the transaction moved USDC out of, and NOCK into, the sovereign

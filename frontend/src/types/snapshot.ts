@@ -65,6 +65,8 @@ export interface AccumulationPlanStatus {
   /** NOCK the whole budget would have bought at the first fill's price */
   lump_sum_nock?: string | null;
   binding_constraint?: string | null;
+  /** Protected cash reserve the plan never draws below */
+  cash_reserve_usdc?: string | null;
 }
 
 /** LP weight vs target; rebuilding is a reposition with no net cash change (2.1.0) */

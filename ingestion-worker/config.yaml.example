@@ -126,6 +126,8 @@ operator_profile:
 #   max_price_usd: 0.020           # optional ceiling: pause while spot is above it
 #   pause_when_overextended: true  # pause while daily RSI(14) >= 70
 #   respect_cash_target: true      # never spend liquid USDC below target_weights_bps.cash
+#   cash_reserve_usdc: 950         # protected reserve: never advise a buy that takes liquid
+#                                  # USDC below this, at any price (keep dry powder for a dip)
 
 # ============================================================
 # Market Price Backfill Engine (v0.3.0)

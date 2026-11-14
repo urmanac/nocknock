@@ -156,6 +156,11 @@ export function AccumulationPlanPanel({
           <div style={small}>
             {plan.fills} verified buy{plan.fills === 1 ? '' : 's'} · ${plan.remaining_usdc} remaining
           </div>
+          {plan.cash_reserve_usdc && (
+            <div style={{ ...small, color: '#2ecc71', letterSpacing: 1 }}>
+              ✓ ${plan.cash_reserve_usdc} CASH RESERVE PROTECTED — the plan never draws below it
+            </div>
+          )}
         </div>
 
         <div style={{ flex: 1, minWidth: 200 }}>

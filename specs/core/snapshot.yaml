@@ -508,6 +508,10 @@ components:
           type: string
           nullable: true
           description: Reason when paused/blocked/invalid, or the guardrail that shrank a due tranche
+        cash_reserve_usdc:
+          type: string
+          nullable: true
+          description: Protected cash reserve the plan never draws below; null when none is set
 
     LpRebuild:
       type: object
