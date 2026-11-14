@@ -18,7 +18,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [ ] **Unsigned add-liquidity transactions** for LP rebuild suggestions (encoding to be verified by simulation).
 - [ ] **Aero concentrated (CL) positions (Issue #91)**, starting with WETH/NOCK CL200.
 - [ ] **AERO reward accounting (Issue #93)**: read, value and ledger rewards from staked Aero positions.
-- [ ] **Count ETH** in portfolio totals; externalise the legacy advice constants.
+- [ ] **Count ETH** in portfolio totals (#94, next patch); externalise the legacy advice constants.
+
+## [0.5.1] - 2026-11-14
+
+Patch: "honest numbers", part 1. Plan: `docs/kb/plan-v0.5-patches.md`.
+
+### Fixed — advice states only what was read (#95, #63)
+- **HOLD** is built from the tracked positions (in range, out of range, stale pool, full
+  range). Removed the never-computed "0% realized loss", "generating yield" and
+  "Uniswap position(s)".
+- **No default floor.** DEFENSIVE LOCK fires only below a floor the operator set, without
+  "CRITICAL" or "locked". With an active plan the action reads
+  `DEFENSIVE LOCK (Floor Recovery) · <plan action>`, so tranches still notify.
+- **Defaults choose nothing.** Target weights and the tax ratio default to "no rule"
+  (`no_target`), and an empty `tracked_wallets` is an explicit error. Configs that set
+  these keys, like the operator's, are unchanged.
+- **No planless lump-sum buy.** The old DIP REINVESTMENT arm became three facts-only
+  directives: `NOTHING TO TRACK YET`, `BUILD FROM ZERO` and `DIP ZONE` (each "No Buy Plan
+  Configured" where relevant).
+- **Dry powder** is wallet USDC less the larger of the tax reserve and the cash target. The
+  tax guardrail compares wallet USDC only.
+- **No sell instructions.** SWEEP TO STABLE became `OVEREXTENDED (Daily RSI ≥ 70, No Buy
+  Advised)`. RANGE EXIT reports the range's own value, with no invented $5 wall.
+- **A plan with nothing due no longer hides RANGE EXIT or BATCH HARVEST.**
+- **BATCH HARVEST** percentages come from `tax_reserve_ratio`, and the text says WETH fees
+  are not booked yet.
+- **Regime** reads `unknown` with no daily RSI. The RSI is undefined on a flat series, and
+  the spot must be finite.
+- **MCP** stops inventing values ("above 100k", HOLD, $0.00), and the stdio fallback no
+  longer reads a hardcoded wallet or a dead pool.
+- **Dashboard** shows no invented HOLD fallback and no "NaN NOCK", and shows "no floor
+  configured" for a floor of 0.
+
+### Fixed — charts (#61)
+- **Downtime gaps** are shaded and captioned, on a real time axis.
+- **The composition chart** uses each row's own totals. It was about 8 hours stale.
+- **LP series are keyed by `position_id`.**
+
+### Removed
+- **The nightly `pg_dump` timer and backup tooling** (#96, not planned): the database is
+  disposable, and the wallet is the record.
+
+### Notes
+- **Snapshot spec:** additive enum values (`no_positions`, `no_target`, regime `unknown`).
+- **Tests:** worker 91 → 119, frontend 45 → 84.
 
 ## [0.5.0] - 2026-11-14
 
