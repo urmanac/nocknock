@@ -180,3 +180,32 @@ describe('wallet NOCK for the floor chart', () => {
     expect(walletNockUnits({ wallet_nock_series: [] }, 0, 0.01145)).toBeNull();
   });
 });
+
+// ---------------- Aerodrome full-range position display (issue #88) ----------------
+import { positionLabel, positionRangeText, protocolBadge } from '../positions';
+
+describe('Aerodrome full-range position display', () => {
+  const aero = {
+    protocol: 'aerodrome',
+    fee_tier_bps: 30,
+    token0: { symbol: 'USDC' },
+    token1: { symbol: 'NOCK' },
+    lower_price: '0',
+    upper_price: '0',
+    in_range: true,
+    full_range: true,
+    pool_active: true,
+  };
+
+  it('labels the protocol and never prints a fake range', () => {
+    expect(positionLabel(aero)).toBe('USDC/NOCK Aerodrome · 0.3%');
+    expect(protocolBadge('aerodrome')).toBe('AERODROME');
+    expect(protocolBadge('uniswap-v4')).toBe('UNISWAP V4');
+    expect(positionRangeText(aero)).toBe('Full range (cannot go out of range)');
+    expect(rangeStatus(aero)).toEqual({ label: '● FULL RANGE', tone: 'good' });
+  });
+
+  it('still flags a dead pool ahead of everything else', () => {
+    expect(rangeStatus({ ...aero, pool_active: false }).tone).toBe('stale');
+  });
+});

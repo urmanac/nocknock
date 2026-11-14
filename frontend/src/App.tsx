@@ -30,7 +30,7 @@ const SOURCE_LABELS: Record<string, string> = {
   aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
-import { POSITION_COLORS, positionLabel, positionRangeText, rangeStatus, walletNockUnits } from './positions.ts';
+import { POSITION_COLORS, positionLabel, positionRangeText, protocolBadge, rangeStatus, walletNockUnits } from './positions.ts';
 
 function Dashboard() {
   const { snapshot, loading, error, freshness, refetch, ageDisplay } = useFreshness<
@@ -231,8 +231,10 @@ function Dashboard() {
       inRange: b.in_range,
       distance,
       converted,
+      fullRange: !!b.full_range,
     };
-  });
+    // A full-range position (Aerodrome) has no bracket to draw.
+  }).filter((t: any) => !t.fullRange);
 
   const gasData = (metrics?.velocity_gas_sandbox?.contracts || []).map((c: any) => ({
     name: c.contract_name,
@@ -451,9 +453,11 @@ function Dashboard() {
                   ...styles.positionBadge,
                   ...(p.protocol === 'uniswap-v4'
                     ? { background: '#0c4a6e22', color: '#38bdf8', border: '1px solid #0284c7' }
-                    : { background: '#3b076422', color: '#c084fc', border: '1px solid #7e22ce' }),
+                    : p.protocol === 'aerodrome'
+                      ? { background: '#7c2d1222', color: '#fdba74', border: '1px solid #c2410c' }
+                      : { background: '#3b076422', color: '#c084fc', border: '1px solid #7e22ce' }),
                 }}>
-                  {p.protocol === 'uniswap-v4' ? 'UNISWAP V4' : 'UNISWAP V3'} · {p.fee_tier_bps / 100}%
+                  {protocolBadge(p.protocol)} · {p.fee_tier_bps / 100}%
                 </span>
               </div>
               <div style={styles.positionCardMid}>
@@ -476,7 +480,7 @@ function Dashboard() {
                 {p.token0.symbol}: {p.amount0} ({p.token1.symbol}: {p.amount1}) · Fees: ${p.fees_usd}
               </div>
               <div style={styles.positionCardMeta}>
-                #{p.nft_id} · {p.network}{p.is_price_source ? ' · price source' : ''}
+                {p.protocol === 'aerodrome' ? 'LP token' : `#${p.nft_id}`} · {p.network}{p.is_price_source ? ' · price source' : ''}
               </div>
             </div>
           ))}
@@ -607,11 +611,21 @@ function Dashboard() {
               <span style={{ color: '#8b949e' }}>ETH-denominated brackets converted to USD @ ${ethUsd ? ethUsd.toFixed(2) : '—'}/ETH (live pool-derived)</span>
             )}
             {(() => {
-              const bracket = metrics?.tick_bracket_hypervisor?.brackets?.[0];
+              // Brackets are index-aligned with positions; the price source is not
+              // necessarily the first one.
+              const src = positionsList.find((p: any) => p.is_price_source);
+              const srcIndex = src ? positionsList.indexOf(src) : 0;
+              const bracket = metrics?.tick_bracket_hypervisor?.brackets?.[srcIndex];
+              if (bracket?.full_range) {
+                return (
+                  <span style={{ color: '#10b981' }}>
+                    {src ? positionLabel(src) : 'Price source'}: full range, never out of range
+                  </span>
+                );
+              }
               if (!bracket?.lower_price) {
                 return <span style={{ color: '#8b949e' }}>Price-source position range: —</span>;
               }
-              const src = positionsList.find((p: any) => p.is_price_source);
               return (
                 <span style={{ color: bracket.in_range ? '#10b981' : '#f59e0b' }}>
                   {src ? positionLabel(src) : 'Price source'} range: {src ? positionRangeText(src) : '—'} ({bracket.in_range ? 'IN RANGE' : 'OUT OF RANGE'})

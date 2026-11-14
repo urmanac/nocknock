@@ -304,6 +304,8 @@ export interface Position {
   is_price_source: boolean;
   /** False when the pool has no in-range liquidity (frozen price); null/absent = unknown (2.2.0) */
   pool_active?: boolean | null;
+  /** True for a position spanning every price (Aerodrome volatile pool); bounds are not meaningful (2.2.0) */
+  full_range?: boolean;
 }
 
 export interface RawSnapshotData {

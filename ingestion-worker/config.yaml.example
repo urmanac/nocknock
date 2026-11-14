@@ -55,8 +55,7 @@ positions:
     tick_upper: 71200
     is_price_source: false
 
-  # Position D — USDC/NOCK, Uniswap v4, 3.00% fee — wide raft and the NOCK/USD price
-  # source (pool has active third-party liquidity). (RPC-verified via the
+  # Position D — USDC/NOCK, Uniswap v4, 3.00% fee — wide raft. (RPC-verified via the
   # mint's ModifyLiquidity event: poolId, ticks 262200/282300, liquidity 48295502692597)
   - id: "uniswap-v4-nock-usdc-wide"
     protocol: "uniswap-v4"
@@ -67,7 +66,7 @@ positions:
     currency1: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"   # NOCK
     tick_lower: 262200
     tick_upper: 282300
-    is_price_source: true
+    is_price_source: false
 
   # Position C — WETH/NOCK, Uniswap v3, 1% fee (Base canonical NPM; pool resolved
   # via the v3 factory getPool(WETH, NOCK, 10000))
@@ -78,6 +77,16 @@ positions:
     npm_address: "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1"
     pool_address: "0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a"
     is_price_source: false
+
+  # Aerodrome (now Aero) NOCK/USDC volatile pool — full range, x*y=k (v0.5.0, issue #88).
+  # The position is an LP-token balance in the pool, read as a share of reserves. It can
+  # never go out of range. On 2026-11-14 this pool carried ~$110k/day of NOCK volume,
+  # about 30x the next venue, so it is also the NOCK/USD price source.
+  - id: "aerodrome-vamm-nock-usdc"
+    protocol: "aerodrome"
+    network: "base"
+    pool_address: "0x85f1aa3a70fedd1c52705c15baed143e675cd626"
+    is_price_source: true
 
 # Canonical Uniswap v3 WETH/USDC 0.05% pool (Base) for the live ETH/USD spot (slot0).
 # Resolved via the verified v3 factory getPool and price-checked at discovery.
