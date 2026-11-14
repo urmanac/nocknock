@@ -102,6 +102,8 @@ export interface LedgerSummary {
 
 export interface HistoricalResponse {
   snapshots: SnapshotEnvelope[];
+  /** The worker's sync cadence, when it reports one (#61); the dashboard falls back to 300. */
+  sync_window_seconds?: number;
   pagination: {
     limit: number;
     returned: number;
