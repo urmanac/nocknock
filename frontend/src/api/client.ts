@@ -80,6 +80,18 @@ export interface RecordHarvestResponse {
   already_present: number;
 }
 
+export interface RecordAccumulationResponse {
+  recorded: boolean;
+  duplicate: boolean;
+  plan_id: string;
+  tx_hash: string;
+  usdc_spent: string;
+  nock_received: string;
+  effective_price_usd: string;
+  block_number: number;
+  confirmed_at: string;
+}
+
 export interface LedgerSummary {
   cumulative_harvested_usd: string;
   tax_reserve_usd: string;
@@ -152,4 +164,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ platform, tx_hash: txHash }),
     }),
+
+  // Accumulation plan (v0.5.0): attach a confirmed USDC→NOCK buy to the plan. The
+  // worker accepts it only after verifying the on-chain receipt.
+  recordAccumulation: (txHash: string) =>
+    request<RecordAccumulationResponse>('/execute/record-accumulation', {
+      method: 'POST',
+      body: JSON.stringify({ tx_hash: txHash }),
+    }),
+
+  // Ask the worker to ingest now (used after recording a buy so the plan advances).
+  ingestNow: () => request<unknown>('/ingest', { method: 'POST' }),
 };

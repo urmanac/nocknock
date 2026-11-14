@@ -5,7 +5,17 @@ use std::io::{self, BufRead, Write};
 use std::time::Duration;
 
 const DEFAULT_BASE_RPC: &str = "https://mainnet.base.org";
-const LOCAL_API_URL: &str = "http://127.0.0.1:8080/v1/snapshot/latest";
+/// Worker base URL when NOCKNOCK_API_URL is unset. Point the variable at a remote
+/// deployment (e.g. `http://chudmax:8081`) to read it instead of a local worker.
+const DEFAULT_API_BASE: &str = "http://127.0.0.1:8080";
+
+fn api_base() -> String {
+    std::env::var("NOCKNOCK_API_URL")
+        .ok()
+        .map(|v| v.trim().trim_end_matches('/').to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| DEFAULT_API_BASE.to_string())
+}
 const WALLET_ADDR: &str = "0xeE114cC97eC5adeB34bA5645e315B497D8487a45";
 #[allow(dead_code)]
 const WALLET_PADDED: &str = "000000000000000000000000ee114cc97ec5adeb34ba5645e315b497d8487a45";
@@ -101,6 +111,15 @@ async fn main() -> Result<()> {
                                     "properties": {},
                                     "required": []
                                 }
+                            },
+                            {
+                                "name": "get_accumulation_plan",
+                                "description": "Returns the dollar-cost-averaging plan: whether a NOCK tranche is due, its size, progress from receipt-verified buys, average cost, and the LP-rebuild bias.",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {},
+                                    "required": []
+                                }
                             }
                         ]
                     }
@@ -161,7 +180,7 @@ async fn handle_tool_call(client: &Client, tool_name: &str) -> String {
             "name": tool_name
         }
     });
-    if let Ok(resp) = client.post("http://127.0.0.1:8080/v1/mcp").json(&mcp_payload).timeout(Duration::from_secs(2)).send().await {
+    if let Ok(resp) = client.post(format!("{}/v1/mcp", api_base())).json(&mcp_payload).timeout(Duration::from_secs(2)).send().await {
         if resp.status().is_success() {
             if let Ok(mcp_val) = resp.json::<Value>().await {
                 if let Some(text) = mcp_val.pointer("/result/content/0/text").and_then(|t| t.as_str()) {
@@ -172,7 +191,7 @@ async fn handle_tool_call(client: &Client, tool_name: &str) -> String {
     }
 
     // Fallback: try snapshot API
-    if let Ok(resp) = client.get(LOCAL_API_URL).timeout(Duration::from_secs(2)).send().await {
+    if let Ok(resp) = client.get(format!("{}/v1/snapshot/latest", api_base())).timeout(Duration::from_secs(2)).send().await {
         if resp.status().is_success() {
             if let Ok(snap) = resp.json::<Value>().await {
                 if let Some(data) = snap.get("data") {
@@ -180,6 +199,7 @@ async fn handle_tool_call(client: &Client, tool_name: &str) -> String {
                         "get_portfolio_state" => format_portfolio_state(data),
                         "get_shot_advice" => format_shot_advice(data),
                         "simulate_claim_fees" => format_claim_simulation(data),
+                        "get_accumulation_plan" => format_accumulation_plan(data),
                         _ => format!("Unknown tool: {tool_name}"),
                     };
                 }
@@ -189,6 +209,32 @@ async fn handle_tool_call(client: &Client, tool_name: &str) -> String {
 
     // 2. Fallback to direct decentralized Base RPC (Zero-DB mode)
     handle_direct_rpc_fallback(client, tool_name).await
+}
+
+/// Compact plan view for the snapshot-API fallback (the worker's own /v1/mcp gives
+/// the full text and is tried first).
+fn format_accumulation_plan(data: &Value) -> String {
+    let lp = data.pointer("/derived_metrics/lp_rebuild");
+    let lp_status = lp.and_then(|l| l.get("status")).and_then(|v| v.as_str()).unwrap_or("n/a");
+    let lp_gap = lp.and_then(|l| l.get("gap_usd")).and_then(|v| v.as_str()).unwrap_or("n/a");
+    let lp_line = format!("• LP rebuild bias: {lp_status} (${lp_gap} short of target; rebuilding is a reposition, no net cash change)");
+    match data.pointer("/derived_metrics/accumulation_plan").filter(|p| !p.is_null()) {
+        None => format!("🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n{lp_line}"),
+        Some(plan) => {
+            let s = |k: &str| plan.get(k).and_then(|v| v.as_str()).unwrap_or("n/a").to_string();
+            let n = |k: &str| plan.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+            format!(
+                "🪜 Accumulation Plan \"{}\"\n====================\n\
+                 • Status: {}\n\
+                 • Next tranche: {} of {} — ${} due now\n\
+                 • Next due at: {}\n\
+                 • Progress: ${} of ${} spent; average ${}\n\
+                 {lp_line}",
+                s("plan_id"), s("status"), n("tranche_index"), n("tranches_total"), s("tranche_usdc"),
+                s("next_due_at"), s("spent_usdc"), s("budget_usdc"), s("avg_price_usd"),
+            )
+        }
+    }
 }
 
 fn format_portfolio_state(data: &Value) -> String {
@@ -381,6 +427,11 @@ async fn handle_direct_rpc_fallback(client: &Client, tool_name: &str) -> String 
              • Estimated Gas Cost: unavailable in zero-DB mode\n\
              • Claim decision needs the worker's pre-simulated payload — open the cockpit"
         ),
+        "get_accumulation_plan" => "🪜 Accumulation Plan (Decentralized RPC Mode)\n\
+             =============================================\n\
+             • Plan progress lives in the worker's receipt-verified ledger and is not available in zero-DB mode (no fabricated progress).\n\
+             • Start the worker, or set NOCKNOCK_API_URL to a running deployment."
+            .to_string(),
         _ => format!("Unknown tool: {tool_name}"),
     }
 }

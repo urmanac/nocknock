@@ -103,7 +103,15 @@
 4. **Traded Assets & CPA Tie-Out**:
    - The treasury only actively trades NOCK and sometimes ETH/WETH on Base.
    - All transactions tie out to CPA records via Koinly tax reporting.
-5. **No Hallucinations / Urbit Lore**:
+5. **LP Rebuild Bias (standing order, 2026-11-14)**:
+   - "Rebuilding the tranches has basically no net cash position change so we should always act with a bias towards doing that."
+   - When LP is under its target weight, advice must surface `REBUILD LP TRANCHES`: as the primary directive whenever the engine would otherwise be idle, and appended to every other directive. It must never displace a due DCA tranche or a safety directive.
+6. **NOCK Buys Are Dollar-Cost Averaged**:
+   - Purchases are paced by the `accumulation_plan` (budget, tranches and cadence are the operator's call; never invent defaults). The operator buys on Aerodrome and records the transaction hash; only receipt-verified buys advance the plan.
+7. **Protect the Cash Position (standing order, 2026-11-14)**:
+   - "Let's not dilute the cash position overtly — we have lots of cash, we want to keep it. There might be a dip!"
+   - Plans carry a `cash_reserve_usdc` floor the engine never advises spending below, at any price. The default 5% cash target is a long-run weight, not permission to spend down to it. Only the operator lowers the reserve.
+8. **No Hallucinations / Urbit Lore**:
    - Never hallucinate fake Urbit `@p` (e.g. `~urmanac` is invalid Hoon syntax). Stick strictly to verifiable protocol and mathematical facts.
 
 ---

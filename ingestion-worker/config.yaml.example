@@ -108,6 +108,28 @@ operator_profile:
 # mcp_bearer_token: "your-secret-bearer-token"
 
 # ============================================================
+# Accumulation Plan — dollar-cost-averaged NOCK buys (v0.5.0)
+# ============================================================
+# Optional. While this section exists the advice engine paces buys in tranches
+# ("DCA TRANCHE DUE (3 of 10)") instead of advising one lump-sum deployment. The plan
+# only PACES: you make each swap yourself (e.g. on Aerodrome) and record its
+# transaction hash (dashboard, or POST /v1/execute/record-accumulation). Progress is
+# counted from receipt-verified buys only; missed windows never stack.
+# Budget, tranche count and cadence are your allocation decision — there is no default.
+# accumulation_plan:
+#   id: "2026-11-reentry"          # label; keys the accumulation ledger
+#   budget_usdc: 500               # total to deploy across the plan
+#   tranches: 5                    # equal buys
+#   interval_hours: 24             # minimum spacing between buys
+#   starts_at: "2026-11-15T00:00:00Z"   # optional; default is immediately
+#   venue: "Aerodrome"             # label shown in advice
+#   max_price_usd: 0.020           # optional ceiling: pause while spot is above it
+#   pause_when_overextended: true  # pause while daily RSI(14) >= 70
+#   respect_cash_target: true      # never spend liquid USDC below target_weights_bps.cash
+#   cash_reserve_usdc: 950         # protected reserve: never advise a buy that takes liquid
+#                                  # USDC below this, at any price (keep dry powder for a dip)
+
+# ============================================================
 # Market Price Backfill Engine (v0.3.0)
 # ============================================================
 # Heals gaps in market_price_history from free public OHLCV feeds and extends

@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Accumulation Plan: Dollar-Cost-Averaged NOCK Buys, Phase 1 (Issue #79)
+- **Optional `accumulation_plan` config** (budget, tranches, interval, optional price
+  ceiling). While configured, the advice engine paces buys as `DCA TRANCHE DUE (n of N)` /
+  `DCA ON SCHEDULE` instead of advising one lump-sum deployment. The plan only paces:
+  nothing is signed or sent. Missed windows never stack; a pause defers without consuming
+  a tranche; guardrails can shrink a tranche (naming the limit) but never enlarge it.
+- **Protected cash reserve** (`accumulation_plan.cash_reserve_usdc`): the plan never
+  advises a buy that would take liquid USDC below it, at any price, and says so in the
+  advice. It binds independently of the 5% cash target, so an oversized budget or the
+  default targets cannot dilute the cash position past it. Only the operator lowers it.
+- **Accumulation ledger** (`accumulation_events`) and
+  `POST /v1/execute/record-accumulation { tx_hash }`: a buy counts only after the worker
+  verifies on-chain that the transaction moved USDC out of, and NOCK into, the sovereign
+  wallet. Amounts and the fill time come from the receipt and its block, never from the
+  request. A buy confirmed before the plan began (`starts_at`, or when the worker first
+  saw the plan) is rejected, so an old hash cannot advance a new plan.
+  `GET /v1/accumulation/events` lists verified fills.
+- **Standing LP-rebuild bias** (operator standing order, 2026-11-14): rebuilding LP
+  tranches leaves the net cash position unchanged, so when LP is under target
+  `REBUILD LP TRANCHES (No Net Cash Change)` leads whenever the engine would otherwise be
+  idle and is appended to every other directive. It never displaces a due tranche or a
+  safety directive.
+- **Snapshot 2.1.0 (additive)**: `derived_metrics.accumulation_plan` (status, next
+  tranche, spend, average cost, lump-sum counterfactual) and `derived_metrics.lp_rebuild`.
+- **MCP**: new `get_accumulation_plan` tool (HTTP and stdio). The stdio server reads
+  `NOCKNOCK_API_URL` so it can target a remote deployment.
+- **Dashboard**: "Accumulation Plan" panel with progress, average cost versus the
+  lump-sum counterfactual, the LP-rebuild note and a RECORD BUY field.
+
+### Changed
+- **Advised spend respects the cash target.** `DIP REINVESTMENT SHOT` (the no-plan path)
+  no longer advises spending liquid USDC below `target_weights_bps.cash`, and is skipped
+  when nothing is spendable. Previously the 5% cash target was displayed but never applied.
+
 ### Deferred to Future Releases
 - [ ] **Koinly On-Chain Transaction Classifier (Issue #56, v0.4.0)**: reconcile on-chain fee-claim harvests directly with Koinly's Base wallet sync as ordinary income — explicitly NOT manual CSV download buttons/tooling (duplicate transactions and burns the annual 1,000-transaction budget on the $99 tier; Koinly misclassifying claims as "Liquidity Removals" corrupts LP cost basis).
 - [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).
