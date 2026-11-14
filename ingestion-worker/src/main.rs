@@ -6419,7 +6419,7 @@ mod tests {
 
         // Deviation matrix: Treasury / Uniswap LP / Cash only (no Aerodrome bucket).
         let names: Vec<&str> = metrics.portfolio_deviation_matrix.allocations.iter().map(|a| a.bucket_name.as_str()).collect();
-        assert!(names.iter().any(|n| n.contains("Uniswap LP")));
+        assert!(names.iter().any(|n| n.contains("LP (all tracked positions)")));
         assert!(!names.iter().any(|n| n.contains("Aerodrome")));
 
         // v3 unclaimed fees surface in contract_fees with the NPM address.
