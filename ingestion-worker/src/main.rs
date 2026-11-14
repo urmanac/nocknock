@@ -90,6 +90,11 @@ pub struct PositionConfig {
     /// aerodrome only: swap fee in basis points, for display (default 30 = 0.30%).
     #[serde(default)]
     pub fee_bps: Option<u32>,
+    /// Where the operator adds liquidity to this position, when the default link is
+    /// wrong (for example a pool on the new Aero app:
+    /// https://app.aero.xyz/deposit/8453-<pool address>).
+    #[serde(default)]
+    pub deposit_url: Option<String>,
     /// v4: bytes32 poolId. Unused for v3 (pool comes from the NPM decode).
     #[serde(default)]
     pub pool_id: Option<String>,
@@ -379,10 +384,37 @@ struct RawOnChainData {
     rebuild_rules: HashMap<String, RebuildRule>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 struct RebuildRule {
     weight_bps: Option<u32>,
     when_out_of_range: bool,
+    #[serde(default)]
+    deposit_url: Option<String>,
+}
+
+/// Where the operator goes to make a suggested deposit.
+///
+/// - Uniswap: the position's page in the Uniswap web app.
+/// - Aerodrome: the legacy Aerodrome app's deposit page for the pair (`type=-1` is a
+///   volatile pool). Checked 2026-11-14: aerodrome.finance still serves this route,
+///   while app.aero.xyz answers "Pool not found" for the legacy NOCK/USDC pool.
+/// - A config `deposit_url` overrides both.
+fn deposit_url_for(p: &RawPosition, rule: &RebuildRule) -> String {
+    if let Some(url) = rule.deposit_url.as_ref().filter(|u| !u.trim().is_empty()) {
+        return url.clone();
+    }
+    if p.protocol == "aerodrome" {
+        format!(
+            "https://aerodrome.finance/deposit?token0={}&token1={}&type=-1",
+            p.token0.address, p.token1.address
+        )
+    } else {
+        format!(
+            "https://app.uniswap.org/positions/{}/base/{}",
+            if p.protocol == "uniswap-v3" { "v3" } else { "v4" },
+            p.nft_id
+        )
+    }
 }
 
 /// Token descriptor for position legs (symbol/decimals come from the repo's verified
@@ -749,7 +781,7 @@ fn lp_rebuild_suggestions(
     let mut excluded = Vec::new();
     let mut eligible: Vec<(&RawPosition, Option<u32>)> = Vec::new();
     for p in &raw.positions {
-        let rule = raw.rebuild_rules.get(&p.position_id).copied().unwrap_or_default();
+        let rule = raw.rebuild_rules.get(&p.position_id).cloned().unwrap_or_default();
         let mut skip = |reason: &str| {
             excluded.push(LpExclusion {
                 position_id: p.position_id.clone(),
@@ -837,6 +869,9 @@ fn lp_rebuild_suggestions(
         let k = lp_gap / total_want;
         for w in wants.iter_mut() {
             w.want_usd *= k;
+            // Report the share actually being filled, so the client does not show
+            // "$128 of $162 wanted" for a deposit that is exactly what is wanted.
+            w.target_usd = w.current_usd + w.want_usd;
         }
     }
 
@@ -960,17 +995,7 @@ fn lp_rebuild_suggestions(
             amount1: fmt_amt(&p.token1, amt1),
             limited_by,
             nock_sold_out_at_multiple: nock_sell_out_multiple(p).map(|m| format!("{:.2}", m)),
-            url: if p.protocol == "aerodrome" {
-                // The pool itself, on the explorer: the deposit UI for legacy Aerodrome
-                // pools after the Aero merger was not verified (ONCHAIN_INTEGRATION §7).
-                format!("https://basescan.org/address/{}", p.pool_id)
-            } else {
-                format!(
-                    "https://app.uniswap.org/positions/{}/base/{}",
-                    if p.protocol == "uniswap-v3" { "v3" } else { "v4" },
-                    p.nft_id
-                )
-            },
+            url: deposit_url_for(p, &raw.rebuild_rules.get(&p.position_id).cloned().unwrap_or_default()),
         });
     }
     (suggestions, excluded)
@@ -4898,7 +4923,11 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         .map(|c| {
             (
                 position_key(c),
-                RebuildRule { weight_bps: c.rebuild_weight_bps, when_out_of_range: c.rebuild_when_out_of_range },
+                RebuildRule {
+                    weight_bps: c.rebuild_weight_bps,
+                    when_out_of_range: c.rebuild_when_out_of_range,
+                    deposit_url: c.deposit_url.clone(),
+                },
             )
         })
         .collect();
@@ -5514,9 +5543,31 @@ async fn fetch_aerodrome_position(
     let lp_balance = word(&balance, 0, "balanceOf")?;
     // claimFees() simulated from the wallet returns exactly what a claim would pay.
     // With no LP there is nothing to simulate, so the call is skipped.
+    //
+    // Not every volatile pool pays fees to LPs this way: on the new Aero pools
+    // claimFees() reverts (checked 2026-11-14 on 0x770fE8Fc…). A revert is an answer
+    // ("nothing claimable here"), so fees read as zero; only a transport failure, where
+    // the node gave no answer at all, fails the cycle.
     let (fee0_raw, fee1_raw) = if lp_balance > 0 {
-        let fees = read(call("0xd294f093".to_string(), Some(wallet.to_string()), 75), "claimFees").await?;
-        (word(&fees, 0, "claimFees")?, word(&fees, 1, "claimFees")?)
+        let payload = call("0xd294f093".to_string(), Some(wallet.to_string()), 75);
+        match post_rpc_with_retry(http_client, alchemy_url, &payload, 2).await {
+            None => {
+                return Err(anyhow::anyhow!("position {}: Aerodrome claimFees read failed", cfg.id));
+            }
+            Some(res) => match res.get("result").and_then(|v| v.as_str()) {
+                Some(hex) => {
+                    let hex = hex.trim_start_matches("0x");
+                    (word(hex, 0, "claimFees")?, word(hex, 1, "claimFees")?)
+                }
+                None => {
+                    tracing::info!(
+                        "position {}: claimFees() reverted; this pool has no LP-claimable fees",
+                        cfg.id
+                    );
+                    (0, 0)
+                }
+            },
+        }
     } else {
         (0, 0)
     };
@@ -7153,7 +7204,24 @@ database_url: "postgresql://localhost/test"
         let a = s.iter().find(|x| x.protocol == "aerodrome").expect("aerodrome suggested");
         assert_eq!(a.target_usd, "100.00");
         assert_eq!(a.nock_sold_out_at_multiple, None);
-        assert!(a.url.contains("0x85f1aa3a70fedd1c52705c15baed143e675cd626"));
+        // The link is the legacy Aerodrome deposit page for the pair, not an explorer
+        // page and never a Uniswap link.
+        assert_eq!(
+            a.url,
+            format!("https://aerodrome.finance/deposit?token0={USDC_BASE}&token1={NOCK_BASE}&type=-1")
+        );
+        // A config override wins (for example a pool on the new Aero app).
+        raw.rebuild_rules.insert(
+            "aerodrome:base:0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
+            RebuildRule {
+                weight_bps: None,
+                when_out_of_range: false,
+                deposit_url: Some("https://app.aero.xyz/deposit/8453-0x770fE8Fc9248c6382950A86E39a9391B41D59e0A".to_string()),
+            },
+        );
+        let (o, _) = lp_rebuild_suggestions(&raw, 400.0, roomy_funds());
+        assert!(o.iter().find(|x| x.protocol == "aerodrome").unwrap().url.starts_with("https://app.aero.xyz/deposit/8453-"));
+        raw.rebuild_rules.clear();
         // About half the deposit is USDC and half NOCK. The split is exactly 50/50 at
         // the pool's own price; this fixture's engine spot ($0.01229) sits 6% above the
         // pool's ($0.0116), so the NOCK leg is valued slightly higher here.
@@ -7162,7 +7230,7 @@ database_url: "postgresql://localhost/test"
         // A config weight makes it the core holding.
         raw.rebuild_rules.insert(
             "aerodrome:base:0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
-            RebuildRule { weight_bps: Some(7000), when_out_of_range: false },
+            RebuildRule { weight_bps: Some(7000), when_out_of_range: false, deposit_url: None },
         );
         let (s, _) = lp_rebuild_suggestions(&raw, 400.0, roomy_funds());
         assert_eq!(s.iter().find(|x| x.protocol == "aerodrome").unwrap().target_usd, "280.00");
@@ -7209,6 +7277,9 @@ database_url: "postgresql://localhost/test"
         assert!(s.iter().all(|x| x.nft_id != 3163450 && x.nft_id != 6336662));
         let a = s.iter().find(|x| x.protocol == "aerodrome").unwrap();
         assert!(a.add_usd.parse::<f64>().unwrap() > 60.0);
+        // The stated target is what is being filled: nothing is reported as held back.
+        assert_eq!(a.target_usd, a.add_usd);
+        assert_eq!(a.limited_by, None);
     }
 
     // ---------------- LP rebuild suggestions (issue #83) ----------------
@@ -7333,7 +7404,7 @@ database_url: "postgresql://localhost/test"
         // "Generally": a per-position exception brings it back.
         raw.rebuild_rules.insert(
             "uniswap-v4:base:3163432".to_string(),
-            RebuildRule { weight_bps: None, when_out_of_range: true },
+            RebuildRule { weight_bps: None, when_out_of_range: true, deposit_url: None },
         );
         let (s, _) = lp_rebuild_suggestions(&raw, 300.0, roomy_funds());
         assert_eq!(s.len(), 3);
@@ -7342,8 +7413,8 @@ database_url: "postgresql://localhost/test"
     #[test]
     fn test_rebuild_weights_and_config_exclusion() {
         let mut raw = rebuild_fixture();
-        raw.rebuild_rules.insert("uniswap-v4:base:3163450".to_string(), RebuildRule { weight_bps: Some(7000), when_out_of_range: false });
-        raw.rebuild_rules.insert("uniswap-v4:base:3163432".to_string(), RebuildRule { weight_bps: Some(0), when_out_of_range: false });
+        raw.rebuild_rules.insert("uniswap-v4:base:3163450".to_string(), RebuildRule { weight_bps: Some(7000), when_out_of_range: false, deposit_url: None });
+        raw.rebuild_rules.insert("uniswap-v4:base:3163432".to_string(), RebuildRule { weight_bps: Some(0), when_out_of_range: false, deposit_url: None });
         let (s, x) = lp_rebuild_suggestions(&raw, 1000.0, roomy_funds());
         assert_eq!(sg(&s, 3163450).target_usd, "700.00");
         // The one unweighted eligible position takes what is left.

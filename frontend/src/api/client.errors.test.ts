@@ -209,3 +209,30 @@ describe('Aerodrome full-range position display', () => {
     expect(rangeStatus({ ...aero, pool_active: false }).tone).toBe('stale');
   });
 });
+
+// ---------------- Suggestion link labels say where the link goes ----------------
+import { suggestionLinkLabel } from '../accumulation';
+
+describe('suggestion link labels', () => {
+  it('names the real destination, never "Uniswap" for an Aerodrome pool', () => {
+    expect(suggestionLinkLabel('https://app.uniswap.org/positions/v4/base/3163450')).toBe(
+      'OPEN POSITION IN UNISWAP WEB APP ↗',
+    );
+    const aeroLabel = suggestionLinkLabel(
+      'https://aerodrome.finance/deposit?token0=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token1=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&type=-1',
+    );
+    expect(aeroLabel).toBe('OPEN DEPOSIT ON AERODROME.FINANCE ↗');
+    expect(aeroLabel).not.toContain('UNISWAP');
+    expect(suggestionLinkLabel('https://app.aero.xyz/deposit/8453-0x770fE8Fc9248c6382950A86E39a9391B41D59e0A')).toBe(
+      'OPEN DEPOSIT ON AERO.XYZ ↗',
+    );
+    expect(suggestionLinkLabel('https://basescan.org/address/0x85f1aa3a70fedd1c52705c15baed143e675cd626')).toBe(
+      'VIEW POOL ON BASESCAN ↗',
+    );
+  });
+
+  it('falls back to the host, and to a neutral label for a bad URL', () => {
+    expect(suggestionLinkLabel('https://example.org/deposit')).toBe('OPEN EXAMPLE.ORG ↗');
+    expect(suggestionLinkLabel('not a url')).toBe('OPEN LINK ↗');
+  });
+});

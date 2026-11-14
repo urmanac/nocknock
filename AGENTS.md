@@ -145,11 +145,14 @@ This guide captures the operational rules, environment quirks, toolchain configu
 
 Before pushing any PR or tag:
 ```bash
-make test-brain       # 3 tests passing (WASM invariants)
-make test-worker      # 6 tests passing (decoding, spot math, advice)
-make test-frontend    # 12 tests passing (staleness & contract)
+make test-brain       # 3 tests (WASM invariants)
+make test-worker      # 89 tests as of v0.5.0 (decoding, advice, plan, LP sizing, Aerodrome)
+make test-frontend    # 41 tests as of v0.5.0 (staleness, contract, display helpers)
 make dist             # Verifies packaging of dist/ binaries and tarballs
+NOCKNOCK_API_URL=http://chudmax:8081 make test-mcp   # both MCP transports against the deployment
 ```
+Counts only go up; a lower number means tests were lost. Run the suite and let it finish
+before committing: never chain test, commit and push so that a failure cannot stop the push.
 
 ---
 
@@ -188,4 +191,34 @@ make dist             # Verifies packaging of dist/ binaries and tarballs
   - Zero mock data invariants and configuration externalization.
   - On-chain reality: single sovereign wallet, 60/40 virtual sub-ledger, no custom wallet development.
   - Model Context Protocol (MCP) installation, activation, and playtesting requirements.
+
+---
+
+## 13. On-Prem Deployment: `chudmax` Is Infrastructure
+
+Since 2026-11-13 NockNock runs continuously on the internal host `chudmax` (x86_64,
+Ubuntu, LAN only). Treat it as production for the operator: it holds the accumulation
+ledger and is what the operator reads to decide what to do.
+
+- **Shape**: rootless Podman quadlets as systemd user units (`nocknock-db`,
+  `nocknock-worker`, `nocknock-frontend`), lingering enabled. Dashboard
+  `http://chudmax:3000`, API and HTTP MCP `http://chudmax:8081`. PostgreSQL is not
+  published. Host port 8080 belongs to Strata: never take it.
+- **Deploy**: `deploy/podman/deploy.sh chudmax` from a clean checkout of the commit you
+  mean to run. It ships the working tree (minus gitignored files), builds on the host,
+  and restarts. After a release, deploy the tagged commit so the host matches the tag.
+- **Config and secrets**: the operator's `ingestion-worker/config.yaml` on the
+  workstation is the source of truth (gitignored; it holds the Alchemy key, the
+  accumulation plan and the operator's limits). `deploy.sh` stores it as the Podman
+  secret `nocknock-config`. Back it up before editing; never commit it.
+- **Backups**: `nocknock-backup.timer` dumps the database nightly to
+  `~/nocknock/backups` on chudmax (14 kept). The dumps are on the same host only.
+- **Privileges**: `sudo` on chudmax needs the operator's password. Ask them to run it.
+- **Verify after every deploy**: `/health` is `ok` with `last_error: null`; the snapshot
+  version and spot look right; `NOCKNOCK_API_URL=http://chudmax:8081 make test-mcp`.
+- **Playtests on this host** may use throwaway accumulation plans, but label them
+  plainly, remove their ledger rows afterwards, and restore the operator's config.
+- **Do not** leave it running an unmerged branch at the end of a session without saying
+  so in the session log.
+- Other hosts (`netmoom`, `metnoom`) reject the workstation's SSH key; nothing runs there.
 

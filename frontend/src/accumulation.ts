@@ -27,6 +27,26 @@ export function suggestionLegs(
     .join(' + ');
 }
 
+/**
+ * Button text for a suggestion's link, taken from where the link really goes. The
+ * button used to read "Open in Uniswap" for every suggestion, including the Aerodrome
+ * one whose link is the pool on a block explorer. "Uniswap" alone was also ambiguous
+ * here: the position link opens the Uniswap web app, not the Uniswap wallet app.
+ */
+export function suggestionLinkLabel(url: string): string {
+  let host = '';
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return 'OPEN LINK ↗';
+  }
+  if (host === 'app.uniswap.org') return 'OPEN POSITION IN UNISWAP WEB APP ↗';
+  if (host === 'aerodrome.finance') return 'OPEN DEPOSIT ON AERODROME.FINANCE ↗';
+  if (host === 'app.aero.xyz') return 'OPEN DEPOSIT ON AERO.XYZ ↗';
+  if (host === 'basescan.org') return 'VIEW POOL ON BASESCAN ↗';
+  return `OPEN ${host.toUpperCase()} ↗`;
+}
+
 export const PLAN_STATUS_LABEL: Record<AccumulationPlanStatus['status'], string> = {
   pending: 'PENDING',
   tranche_due: 'TRANCHE DUE',

@@ -264,11 +264,19 @@ For comparison, the new Aero volatile NOCK/USDC pool `0x770fe8fc…` held about 
 
 ### Not verified
 
-- **How to deposit.** No supported app was confirmed for adding liquidity to this legacy
-  pool after the Aero merger; aero.xyz routed a swap around it (§6). The rebuild
-  suggestion therefore links to the pool on the explorer, not to a deposit screen.
-- **What an unstaked LP earns now.** Swaps still emit fee events, but reward emissions
-  stopped at the merger and current fee distribution was not confirmed from Aero docs.
+- **How to deposit: partly checked (2026-11-14).** `app.aero.xyz` does not know this
+  pool: `https://app.aero.xyz/deposit/8453-0x85f1aa3a…d626` answers "Pool not found",
+  and its pool list offers only a new Basic Volatile NOCK/USDC pool
+  `0x770fE8Fc9248c6382950A86E39a9391B41D59e0A` (about $915 TVL) and the CL200 WETH/NOCK
+  pool. The legacy app at `aerodrome.finance` is still served (v5.0.0) and accepts the
+  route `/deposit?token0=<USDC>&token1=<NOCK>&type=-1` (volatile), stopping at wallet
+  connection. The rebuild suggestion links there. What that page offers once a wallet
+  is connected was not seen. To track a pool on the new app instead, change
+  `pool_address` and set `deposit_url: https://app.aero.xyz/deposit/8453-<pool>`.
+- **What an unstaked LP earns now.** Swaps on the legacy pool still emit fee events,
+  but reward emissions stopped at the merger and current fee distribution was not
+  confirmed. (aero.xyz states that new-Aero pool revenue goes to AERO stakers; its pool
+  page lists separate AERO and fee reward rates for depositors.)
 - **Staked LP.** A balance staked in a gauge is not read; only LP tokens held in the
   wallet count. Staking would make the position look empty.
 - The live read has only been exercised with a zero balance. The share-of-reserves and

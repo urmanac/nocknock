@@ -7,19 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Deferred to Future Releases
+- [ ] **Koinly On-Chain Transaction Classifier (Issue #56, v0.4.0)**: reconcile on-chain fee-claim harvests directly with Koinly's Base wallet sync as ordinary income — explicitly NOT manual CSV download buttons/tooling (duplicate transactions and burns the annual 1,000-transaction budget on the $99 tier; Koinly misclassifying claims as "Liquidity Removals" corrupts LP cost basis).
+- [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).
+- [ ] **Multi-Pool Dynamic Ingestion**: Discovering and tracking secondary AMM pools on Base.
+- [ ] **Coinbase Staked-ETH Connector**: CDP API integration to monitor staked ETH balances.
+- [ ] **Urbit Native (%nocknock Desk)**: Hoon data structures and Gall agent.
+- [ ] **Phone install, notifications and TLS (Epic #89)** for the internal deployment.
+- [ ] **Accumulation plan Phase 2**: redesign for Aero's router, or keep operator-executed swaps and measure execution cost per fill against spot.
+- [ ] **Unsigned add-liquidity transactions** for LP rebuild suggestions (encoding to be verified by simulation).
+- [ ] **Aero concentrated (CL) positions (Issue #91)**, starting with WETH/NOCK CL200.
+- [ ] **Count ETH** in portfolio totals; externalise the legacy advice constants.
+
+## [0.5.0] - 2026-11-14
+
 ### Added — Aerodrome Full-Range Tranche (Issue #88)
 - **`protocol: aerodrome` positions.** A volatile x*y=k pool is tracked as a full-range
   position: the wallet's LP-token share of the reserves, with fees from `claimFees()`
   simulated from the wallet. It counts in totals, the deviation matrix, charts, fee
   reporting, the claim payload and LP rebuild suggestions. It is always in range and has
   no sell-out multiple (it sells NOCK gradually as price rises and never empties).
-  v0.4.0 had removed Aerodrome support, so such a position was invisible.
+  v0.4.0 had removed Aerodrome support, so such a position was invisible. A pool whose
+  `claimFees()` reverts (the new Aero pools) reads as having no LP-claimable fees
+  instead of failing the cycle.
 - **Price source.** The example config makes the legacy Aerodrome NOCK/USDC vAMM the
   NOCK/USD price source (spot = reserve ratio). On 2026-11-14 it carried about $110k/day
   of NOCK volume against about $3.5k/day for the Uniswap v4 3% pool, and the RSI history
   already came from it.
 - Positions and brackets carry `full_range`; the dashboard shows FULL RANGE, draws no
   bracket for it, and no longer assumes the price source is the first position.
+- Suggestion buttons name their real destination ("Open position in Uniswap web app",
+  "Open deposit on aerodrome.finance"); the label was hardcoded to "Open in Uniswap"
+  for every venue. A suggestion capped by the aggregate LP gap reports the share being
+  filled, not "$128 of $162 wanted".
 
 ### Added — Operations
 - **Nightly database backup** for the Podman deployment (`nocknock-backup.timer`,
@@ -115,12 +135,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer advises spending liquid USDC below `target_weights_bps.cash`, and is skipped
   when nothing is spendable. Previously the 5% cash target was displayed but never applied.
 
-### Deferred to Future Releases
-- [ ] **Koinly On-Chain Transaction Classifier (Issue #56, v0.4.0)**: reconcile on-chain fee-claim harvests directly with Koinly's Base wallet sync as ordinary income — explicitly NOT manual CSV download buttons/tooling (duplicate transactions and burns the annual 1,000-transaction budget on the $99 tier; Koinly misclassifying claims as "Liquidity Removals" corrupts LP cost basis).
-- [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).
-- [ ] **Multi-Pool Dynamic Ingestion**: Discovering and tracking secondary AMM pools on Base.
-- [ ] **Coinbase Staked-ETH Connector**: CDP API integration to monitor staked ETH balances.
-- [ ] **Urbit Native (%nocknock Desk)**: Hoon data structures and Gall agent.
+### Known Limitations in 0.5.0
+- The Aerodrome position read has only run live against a zero LP balance; the
+  share-of-reserves and fee paths are unit-tested with real reserves. A gauge-staked
+  balance is not read.
+- The Aerodrome rebuild suggestion links to the legacy Aerodrome app's deposit page for
+  the pair (the new aero.xyz app does not list that pool). The page was only checked up
+  to wallet connection. `positions[].deposit_url` overrides the link.
+- Aero's concentrated (CL) pools, such as WETH/NOCK CL200, are not tracked: a position
+  there is invisible to NockNock (Issue #91). Its Basic Volatile NOCK/USDC pool is
+  tracked but excluded from suggestions by default (`rebuild_weight_bps: 0`).
+- Suggested LP deposits are sized, not built: the operator makes them in the venue's app.
+- Notification delivery for `DCA TRANCHE DUE` has not been exercised on the on-prem
+  deployment (Epic #89).
+- 17 frontend dependency advisories remain with no upstream fix (unchanged from 0.4.0).
 
 ## [0.4.0] - 2026-11-13
 
