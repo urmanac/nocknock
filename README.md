@@ -36,20 +36,26 @@ NockNock monitors and guides a three-tier capital allocation strategy designed t
   └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Strategic Tranches
+### Strategic Portfolio (v2.0.0 — Uniswap-only; Aerodrome tranche liquidated 2026-10-23)
 
-1. **Tranche 1: Uniswap V4 LP (5% Target Allocation)**
-   - Contract / NFT ID: `#3126000` on Base (`0x7c5f5a4bbd8fd63184577525326123b519429bdc`)
-   - Tick Range: `[-274200, -223200]` ($0.01237 to $2.02783)
-   - Function: Automated DCA scale-out engine. As NOCK price appreciates toward $2.028, liquidity gradually shifts into 100% USDC.
-2. **Tranche 2: Aerodrome Engine (10% Target Allocation)**
-   - Pool: `0x85f1aa3a70fedd1c52705c15baed143e675cd626` (USDC/NOCK 0.3% volatile)
-   - Function: High-velocity trading fee accumulator. Yield is harvested and recycled.
-3. **Tranche 3: Sovereign Treasury (80% Target Allocation)**
+The operator positions manually; the tracked positions are config-driven
+(`ingestion-worker/config.yaml`, discovery-verified identifiers in
+ONCHAIN_INTEGRATION.md §5):
+
+1. **Sovereign Treasury (~80% Target Allocation)**
    - Hard Floor Invariant: **100,000 NOCK minimum**.
    - Liquid cold wallet reserves protecting sovereign voting weight and governance posture.
-4. **Liquid USDC Buffer (5% Target Allocation)**
-   - Dry powder from DCA scale-outs and harvested yield, deployed on market retractions.
+2. **Uniswap LP — all tracked positions (~15% Target Allocation)**
+   - Tracked live per position (protocol, fee tier, range, unclaimed fees):
+     - ETH/NOCK — Uniswap v4, 2% fee (NFT #3163432)
+     - USDC/NOCK — Uniswap v4, 0.75% fee (NFT #3163431; NOCK/USD price source)
+     - USDC/NOCK — Uniswap v4, 3% fee, wide raft (NFT #3163450)
+     - WETH/NOCK — Uniswap v3, 1% fee (NFT #6336662)
+   - Function: concentrated-liquidity fee accumulation. Yield is harvested and recycled.
+3. **Liquid USDC Buffer (~5% Target Allocation)**
+   - Dry powder from harvested yield, deployed on market retractions.
+4. **RETIRED: Aerodrome Engine (was 10%)** — liquidated 2026-10-23; kept only as
+   historical record (ONCHAIN_INTEGRATION.md §2).
 
 ---
 

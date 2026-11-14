@@ -1,0 +1,23 @@
+[Unit]
+Description=NockNock ingestion worker (REST API + HTTP MCP)
+Requires=nocknock-db.service
+After=nocknock-db.service
+
+[Container]
+ContainerName=nocknock-worker
+Image=localhost/nocknock-worker:latest
+Network=nocknock.network
+NetworkAlias=worker
+# Host port 8080 belongs to Strata on chudmax; the API/MCP is exposed on 8081.
+PublishPort=8081:8080
+Environment=PORT=8080
+Secret=nocknock-database-url,type=env,target=DATABASE_URL
+# config.yaml (holds the Alchemy key) lives in a podman secret, never in the image.
+Secret=nocknock-config,target=/app/config.yaml,uid=1000,gid=1000,mode=0400
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

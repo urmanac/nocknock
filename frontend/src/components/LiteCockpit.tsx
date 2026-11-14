@@ -255,9 +255,9 @@ export function LiteCockpit() {
         </div>
       </section>
 
-      {/* 2. Uncollected fees + gas ROI */}
+        {/* 2. Uncollected fees + gas ROI */}
       <section style={lite.card}>
-        <div style={lite.label}>UNCOLLECTED FEES (BOTH LPs)</div>
+        <div style={lite.label}>UNCOLLECTED FEES (ALL POSITIONS)</div>
         {payloadError ? (
           <div style={lite.errorText}>Worker unreachable: {payloadError}</div>
         ) : !payload ? (

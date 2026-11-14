@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
                         "tools": [
                             {
                                 "name": "get_portfolio_state",
-                                "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, native token balance, and active tranche allocations.",
+                                "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, native token balance, and tracked Uniswap LP position totals.",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {},
@@ -95,7 +95,7 @@ async fn main() -> Result<()> {
                             },
                             {
                                 "name": "simulate_claim_fees",
-                                "description": "Simulates gas expenditure vs uncollected yield across Aerodrome and Uniswap V4 positions.",
+                                "description": "Simulates gas expenditure vs uncollected yield across the tracked Uniswap v3/v4 positions.",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {},
@@ -285,45 +285,46 @@ fn format_claim_simulation(data: &Value) -> String {
 }
 
 async fn handle_direct_rpc_fallback(client: &Client, tool_name: &str) -> String {
-    // Direct decentralized query to Base node
-    let aero_reserves = json!({
+    // Direct decentralized query to Base mainnet. The Aerodrome tranche was liquidated
+    // on 2026-10-23; the tracked LP is now Uniswap-only, so the NOCK spot comes from
+    // the tracked v4 NOCK/USDC pool slot0 (discovery-verified identifiers).
+    const NOCK_USDC_POOL_ID: &str = "0x91a9ef0a8dd231b99fa53a2a145a9e8bca7897e0d85852107abb997916f9f99c";
+    const NOCK_TOKEN: &str = "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722";
+
+    let slot0 = json!({
         "jsonrpc": "2.0",
         "method": "eth_call",
         "params": [{
-            "to": "0x85f1aa3a70fedd1c52705c15baed143e675cd626",
-            "data": "0x0902f1ac"
+            "to": "0xa3c0c9b65bad0b08107aa264b0f3db444b867a71", // Uniswap v4 StateView
+            "data": format!("0xc815641c{}", NOCK_USDC_POOL_ID.trim_start_matches("0x"))
         }, "latest"],
         "id": 1
     });
 
-    let aero_claim = json!({
+    let nock_balance_call = json!({
         "jsonrpc": "2.0",
         "method": "eth_call",
         "params": [{
-            "from": WALLET_ADDR,
-            "to": "0x85f1aa3a70fedd1c52705c15baed143e675cd626",
-            "data": "0xd294f093"
+            "to": NOCK_TOKEN,
+            "data": format!("0x70a082310000000000000000{}", WALLET_ADDR.trim_start_matches("0x"))
         }, "latest"],
         "id": 2
     });
 
     let mut spot_price: Option<f64> = None;
-    let mut claim_usdc = 0.0f64;
-    let mut claim_nock = 0.0f64;
+    let mut nock_balance: Option<f64> = None;
 
-    if let Ok(resp) = client.post(DEFAULT_BASE_RPC).json(&aero_reserves).send().await {
+    if let Ok(resp) = client.post(DEFAULT_BASE_RPC).json(&slot0).send().await {
         if let Ok(val) = resp.json::<Value>().await {
             if let Some(hex_str) = val.get("result").and_then(|r| r.as_str()) {
                 let clean = hex_str.trim_start_matches("0x");
-                if clean.len() >= 128 {
-                    if let (Ok(r0), Ok(r1)) = (
-                        u128::from_str_radix(&clean[..64], 16),
-                        u128::from_str_radix(&clean[64..128], 16),
-                    ) {
-                        let usdc = r0 as f64 / 1e6;
-                        let nock = r1 as f64 / 1e16;
-                        if nock > 0.0 {
-                            spot_price = Some(usdc / nock);
+                if clean.len() >= 64 {
+                    if let Ok(s) = u128::from_str_radix(&clean[..64], 16) {
+                        // token0 = USDC (6 dec), token1 = NOCK (16 dec):
+                        // raw = NOCK_raw per USDC_raw -> USDC per NOCK = 1e10 / raw
+                        let raw = (s as f64 / 79228162514264337593543950336.0).powi(2);
+                        if raw > 0.0 {
+                            spot_price = Some(1e10 / raw);
                         }
                     }
                 }
@@ -331,18 +332,11 @@ async fn handle_direct_rpc_fallback(client: &Client, tool_name: &str) -> String 
         }
     }
 
-    if let Ok(resp) = client.post(DEFAULT_BASE_RPC).json(&aero_claim).send().await {
+    if let Ok(resp) = client.post(DEFAULT_BASE_RPC).json(&nock_balance_call).send().await {
         if let Ok(val) = resp.json::<Value>().await {
             if let Some(hex_str) = val.get("result").and_then(|r| r.as_str()) {
-                let clean = hex_str.trim_start_matches("0x");
-                if clean.len() >= 128 {
-                    if let (Ok(c0), Ok(c1)) = (
-                        u128::from_str_radix(&clean[..64], 16),
-                        u128::from_str_radix(&clean[64..128], 16),
-                    ) {
-                        claim_usdc = c0 as f64 / 1e6;
-                        claim_nock = c1 as f64 / 1e16;
-                    }
+                if let Ok(v) = u128::from_str_radix(hex_str.trim_start_matches("0x"), 16) {
+                    nock_balance = Some(v as f64 / 1e16);
                 }
             }
         }
@@ -351,23 +345,23 @@ async fn handle_direct_rpc_fallback(client: &Client, tool_name: &str) -> String 
     let price_str = spot_price
         .map(|p| format!("${:.6} USD", p))
         .unwrap_or_else(|| "Unavailable (RPC query failed)".to_string());
+    let nock_str = nock_balance
+        .map(|b| format!("{:.2} NOCK", b))
+        .unwrap_or_else(|| "Unavailable".to_string());
+    let nock_usd_str = match (nock_balance, spot_price) {
+        (Some(b), Some(p)) => format!("~${:.2} USD", b * p),
+        _ => "Unavailable".to_string(),
+    };
 
-    let claim_usd = spot_price.map(|p| claim_usdc + claim_nock * p);
-    let claim_usd_str = claim_usd
-        .map(|c| format!("${:.4} USD", c))
-        .unwrap_or_else(|| "Pending spot price".to_string());
-
-    // Zero-DB mode has no live gas feed, so the ≥2× gas claim decision cannot be made
-    // here. Report the accrual state honestly instead of a fabricated $0.005 gas or a
-    // hardcoded $5.00 trigger.
-    let advice = "ACCRUE (live gas unavailable in zero-DB mode; open the cockpit for a live claim decision)";
+    let advice = "ACCRUE (fee claims need the worker's simulated Golden Path payload; open the cockpit)";
 
     match tool_name {
         "get_portfolio_state" => format!(
             "📈 NockNock Sovereign State (Decentralized Direct RPC Mode)\n\
              ===========================================================\n\
              • NOCK Spot Price: {price_str}\n\
-             • Uncollected Aerodrome Yield: {claim_usd_str}\n\
+             • Wallet NOCK Balance: {nock_str} ({nock_usd_str})\n\
+             • LP Positions: Uniswap-only portfolio (full breakdown needs the worker/DB)\n\
              • Mode: Zero-DB Edge RPC Fallback (Database and Worker Offline)\n\
              • Status: Sovereign RPC Connected directly to Base mainnet."
         ),
@@ -375,22 +369,17 @@ async fn handle_direct_rpc_fallback(client: &Client, tool_name: &str) -> String 
             "🎯 Tactical Shot Advice Engine (Decentralized RPC Mode)\n\
              =======================================================\n\
              • Recommended Action: {advice}\n\
-             • Active Accrued Yield: {claim_usd_str}\n\
+             • NOCK Spot Price: {price_str}\n\
              • Gas Estimate: unavailable in zero-DB mode\n\
              • Mode: Zero-DB Edge RPC Fallback"
         ),
         "simulate_claim_fees" => format!(
             "⚡ Fee Claim Simulation (Decentralized RPC Mode)\n\
              ===============================================\n\
-             • Uncollected Aerodrome Fees: {:.5} USDC + {:.4} NOCK\n\
-             • Total USD Value: {claim_usd_str}\n\
+             • Unclaimed LP fees: not simulated in zero-DB mode (no fabricated estimates)\n\
+             • NOCK Spot Price: {price_str}\n\
              • Estimated Gas Cost: unavailable in zero-DB mode\n\
-             • Net Yield: {} (claim decision needs live gas — open the cockpit)",
-            claim_usdc,
-            claim_nock,
-            claim_usd
-                .map(|c| format!("${:.4} USD (gross)", c))
-                .unwrap_or_else(|| "Pending spot price".to_string())
+             • Claim decision needs the worker's pre-simulated payload — open the cockpit"
         ),
         _ => format!("Unknown tool: {tool_name}"),
     }

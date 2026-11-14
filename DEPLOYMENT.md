@@ -137,6 +137,39 @@ Fly.io runs containers close to users with built-in HTTPS and automatic TLS.
      - Dockerfile: `Dockerfile`
      - Port: `80`
 
+### Option D: Rootless Podman Quadlets (Internal Hosts, No Public Exposure)
+
+For a LAN-only host you own. Services run as systemd user units under your account, start
+at boot and survive logout.
+
+1. **One-time host setup** (needs sudo on the host):
+   ```bash
+   sudo apt install podman
+   ```
+
+2. **Deploy from your checkout** (needs `ingestion-worker/config.yaml` with your Alchemy key):
+   ```bash
+   deploy/podman/deploy.sh <host>
+   ```
+   The script ships the working tree minus gitignored files, builds both images on the
+   host, stores `config.yaml` and a generated database password as Podman secrets,
+   installs the quadlets into `~/.config/containers/systemd/` and restarts the stack.
+   Re-run it to upgrade; the database volume and password are kept.
+
+3. **Endpoints**: dashboard on `http://<host>:3000`, API and HTTP MCP on
+   `http://<host>:8081` (host port 8080 is left free). PostgreSQL is reachable only
+   inside the `nocknock` container network.
+
+4. **Operate**:
+   ```bash
+   systemctl --user status nocknock-db nocknock-worker nocknock-frontend
+   journalctl --user -u nocknock-worker -f
+   ```
+
+5. **After repositioning liquidity**, update the `positions:` list in `config.yaml` and
+   make sure the entry flagged `is_price_source: true` is a pool that still has active
+   liquidity; the worker refuses to publish a price from an empty pool.
+
 ---
 
 ## 4. Reverse Proxy & SSL (HTTPS) with Caddy

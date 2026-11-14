@@ -66,6 +66,8 @@ export interface AssetAggregationSeries {
   time_points: string[];
   safe_haven_series: string[];
   active_protocol_series: string[];
+  /** NOCK units per tracked position (v2.0.0; replaces the retired tranche_1/2/3_nock series) */
+  positions_nock?: Array<{ position_id: string; series: string[] }>;
 }
 
 export interface TotalValueVsBaseline {
@@ -85,7 +87,8 @@ export interface TickBracket {
   upper_price: string;
   liquidity_usd: string;
   in_range: boolean;
-  distance_bps: number;
+  /** Null when the bracket's denomination differs from the USD/NOCK spot (ETH-pools). */
+  distance_bps: number | null;
 }
 
 export interface PortfolioDeviationMatrix {
@@ -155,8 +158,9 @@ export interface WalletBalance {
 
 export interface PoolMechanic {
   pool_id: string;
-  platform: 'Aerodrome' | 'UniswapV4' | 'Velodrome' | 'Other';
+  platform: 'Aerodrome' | 'UniswapV4' | 'UniswapV3' | 'Velodrome' | 'Other';
   pool_type: 'volatile' | 'stable' | 'concentrated';
+  /** The tracked wallet's amounts in this pool (not pool-wide reserves) */
   volatile_assets: PoolAsset[];
   liquidity_usd: string;
   fee_accrued_usd: string;
@@ -197,9 +201,44 @@ export interface ContractFee {
   gas_break_even_usd: string;
 }
 
+export interface PositionToken {
+  address: string;
+  symbol: string;
+  decimals: number;
+}
+
+/** One tracked LP position (v2.0.0 — replaces the two-tranche model) */
+export interface Position {
+  position_id: string;
+  network: string;
+  wallet: string;
+  protocol: 'uniswap-v4' | 'uniswap-v3' | 'aerodrome';
+  nft_id: number;
+  pool_id: string;
+  npm_address?: string | null;
+  fee_tier_bps: number;
+  token0: PositionToken;
+  token1: PositionToken;
+  amount0: string;
+  amount1: string;
+  amount_usd: string;
+  tokens_owed_0: string;
+  tokens_owed_1: string;
+  fees_usd: string;
+  lower_tick: number;
+  upper_tick: number;
+  lower_price: string;
+  upper_price: string;
+  liquidity_amount: string;
+  in_range: boolean;
+  is_price_source: boolean;
+}
+
 export interface RawSnapshotData {
   wallet_balances: WalletBalance[];
+  positions: Position[];
   pool_mechanics: PoolMechanic[];
+  /** DEPRECATED since v2.0.0 — superseded by positions; worker emits an empty array */
   concentrated_liquidity: ConcentratedLiquidity[];
   contract_fees: ContractFee[];
   derived_metrics: DerivedMetrics;
