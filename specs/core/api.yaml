@@ -224,7 +224,7 @@ paths:
         '409':
           description: No accumulation_plan is configured
         '422':
-          description: Invalid hash, reverted transaction, or not a USDC to NOCK purchase by the tracked wallet
+          description: Invalid hash, reverted transaction, not a USDC to NOCK purchase by the tracked wallet, or confirmed before the plan began (BEFORE_PLAN_START)
         '503':
           description: RPC unavailable; nothing recorded
 

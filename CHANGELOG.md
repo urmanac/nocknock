@@ -17,7 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /v1/execute/record-accumulation { tx_hash }`: a buy counts only after the worker
   verifies on-chain that the transaction moved USDC out of, and NOCK into, the sovereign
   wallet. Amounts and the fill time come from the receipt and its block, never from the
-  request. `GET /v1/accumulation/events` lists verified fills.
+  request. A buy confirmed before the plan began (`starts_at`, or when the worker first
+  saw the plan) is rejected, so an old hash cannot advance a new plan.
+  `GET /v1/accumulation/events` lists verified fills.
 - **Standing LP-rebuild bias** (operator standing order, 2026-11-14): rebuilding LP
   tranches leaves the net cash position unchanged, so when LP is under target
   `REBUILD LP TRANCHES (No Net Cash Change)` leads whenever the engine would otherwise be

@@ -303,6 +303,7 @@ name the limiting guardrail if they shrink.
 | Deployable = stable − tax reserve | Deployable uses **wallet** USDC | USDC inside LP positions cannot be spent on a swap. |
 | Ledger read failure unspecified | Plan reports `blocked` | Treating an unreadable ledger as "no buys yet" would re-advise a tranche already bought. |
 | `confirmed_at` falls back to wall clock (as harvests do) | No fallback: recording fails | The fill time sets when the next tranche is due; a wrong time would shift the schedule. |
+| Any verified USDC→NOCK swap can be recorded | Only swaps confirmed at or after the plan's anchor | Found in the chudmax playtest: a week-old swap was accepted and instantly completed a new plan. The anchor is `starts_at` when set, otherwise when the worker first saw the plan id (`accumulation_plans` registry). |
 | Cash-target fix "worth shipping regardless" | Shipped for the no-plan path too | The legacy `DIP REINVESTMENT SHOT` now leaves the cash target behind and says so. |
 | `spot < $0.020` gate | Dropped while a plan is configured | The plan's own `max_price_usd` replaces it. A configured plan, even a completed one, also retires the lump-sum arm so completion is not followed by "deploy everything left". |
 

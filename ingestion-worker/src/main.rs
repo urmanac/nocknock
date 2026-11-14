@@ -1581,7 +1581,7 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
     format!(
         "🪜 Accumulation Plan \"{}\" ({})\n====================\n\
          • Status: {}\n\
-         • Next tranche: {} of {} — ${} due now (nominal ${})\n\
+         • Next tranche: {}\n\
          • Next due at: {}\n\
          • Progress: ${} of ${} spent over {} verified buy(s); ${} remaining\n\
          • Acquired: {} NOCK at average ${}\n\
@@ -1589,7 +1589,14 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
          • Constraint: {}\n\
          {lp_line}",
         s(plan, "plan_id"), s(plan, "venue"), s(plan, "status"),
-        n("tranche_index"), n("tranches_total"), s(plan, "tranche_usdc"), s(plan, "nominal_tranche_usdc"),
+        if s(plan, "status") == "complete" {
+            "none (plan complete)".to_string()
+        } else {
+            format!(
+                "{} of {} — ${} due now (nominal ${})",
+                n("tranche_index"), n("tranches_total"), s(plan, "tranche_usdc"), s(plan, "nominal_tranche_usdc")
+            )
+        },
         s(plan, "next_due_at"),
         s(plan, "spent_usdc"), s(plan, "budget_usdc"), fills, s(plan, "remaining_usdc"),
         s(plan, "acquired_nock"), s(plan, "avg_price_usd"),
@@ -2075,6 +2082,26 @@ async fn post_rpc_with_retry(
 
 /// Fire-and-forget directive-transition notifications (issue #28). Delivery
 /// failures are logged and never fatal to the ingestion cycle.
+/// The instant from which buys may count toward a plan: the configured `starts_at`
+/// when the operator set one (which may deliberately reach back to include earlier
+/// buys), otherwise the moment the worker first saw the plan. Pure — unit-testable.
+fn plan_anchor(starts_at: Option<DateTime<Utc>>, registered_at: DateTime<Utc>) -> DateTime<Utc> {
+    starts_at.unwrap_or(registered_at)
+}
+
+/// Register the plan id on first sight and return when that was. Idempotent.
+async fn plan_registered_at(db: &PgPool, plan_id: &str) -> std::result::Result<DateTime<Utc>, sqlx::Error> {
+    sqlx::query("INSERT INTO accumulation_plans (plan_id) VALUES ($1) ON CONFLICT (plan_id) DO NOTHING")
+        .bind(plan_id)
+        .execute(db)
+        .await?;
+    let row = sqlx::query("SELECT registered_at FROM accumulation_plans WHERE plan_id = $1")
+        .bind(plan_id)
+        .fetch_one(db)
+        .await?;
+    row.try_get::<DateTime<Utc>, _>("registered_at")
+}
+
 /// Load the configured accumulation plan together with its receipt-verified fills.
 /// A ledger read failure is surfaced (plan reports `blocked`) rather than treated as
 /// "no buys yet", which would re-advise a tranche that was already bought.
@@ -2083,6 +2110,10 @@ async fn load_plan_context(state: &Arc<AppState>) -> PlanContext {
     let Some(cfg) = state.config.accumulation_plan.clone() else {
         return PlanContext { cfg: None, fills: PlanFills::default(), ledger_unavailable: false, now };
     };
+    if let Err(e) = plan_registered_at(&state.db, &cfg.id).await {
+        tracing::error!("Accumulation plan registry unavailable: {e}");
+        return PlanContext { cfg: Some(cfg), fills: PlanFills::default(), ledger_unavailable: true, now };
+    }
     let row = sqlx::query(
         "SELECT COUNT(*) AS fills, \
                 COALESCE(SUM(usdc_spent::numeric)::float8, 0) AS spent, \
@@ -3304,6 +3335,29 @@ async fn record_accumulation_handler(
     let Some(confirmed_at) = confirmed_at else {
         return err(StatusCode::SERVICE_UNAVAILABLE, "RPC_UNAVAILABLE", "Could not read the block timestamp; not recorded");
     };
+
+    // A buy made before the plan existed is not part of the plan: without this an old
+    // hash pasted by mistake would advance, or even complete, a brand-new plan.
+    let registered_at = match plan_registered_at(&state.db, &plan.id).await {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!("Accumulation plan registry unavailable: {e}");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "DB_ERROR", "Could not read the plan registry; nothing recorded");
+        }
+    };
+    let anchor = plan_anchor(plan.starts_at, registered_at);
+    if confirmed_at < anchor {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "BEFORE_PLAN_START",
+            &format!(
+                "This purchase was confirmed at {}, before plan \"{}\" began ({}). To count earlier buys, set accumulation_plan.starts_at to an earlier time.",
+                confirmed_at.to_rfc3339(),
+                plan.id,
+                anchor.to_rfc3339()
+            ),
+        );
+    }
 
     let res = sqlx::query(
         "INSERT INTO accumulation_events \
@@ -5940,6 +5994,18 @@ database_url: "postgresql://localhost/test"
         assert_eq!((a.as_str(), d.as_str()), ("HOLD & ACCRETE (x)", "details"));
     }
 
+    #[test]
+    fn test_plan_anchor_prefers_operator_start_over_first_sight() {
+        let registered = t("2026-11-14T05:00:00Z");
+        // No starts_at: buys count from the moment the worker first saw the plan, so a
+        // week-old swap (the 2026-11-06 hash used in the playtest) is before the anchor.
+        assert_eq!(plan_anchor(None, registered), registered);
+        assert!(t("2026-11-06T03:23:19Z") < plan_anchor(None, registered));
+        // An explicit starts_at wins, including one that reaches back on purpose.
+        assert_eq!(plan_anchor(Some(t("2026-11-01T00:00:00Z")), registered), t("2026-11-01T00:00:00Z"));
+        assert!(t("2026-11-06T03:23:19Z") >= plan_anchor(Some(t("2026-11-01T00:00:00Z")), registered));
+    }
+
     fn transfer_log(token: &str, from: &str, to: &str, amount: u128) -> serde_json::Value {
         let pad = |a: &str| format!("0x000000000000000000000000{}", a.trim_start_matches("0x").to_lowercase());
         json!({
@@ -6000,6 +6066,13 @@ database_url: "postgresql://localhost/test"
         assert!(text.contains("Status: tranche_due"));
         assert!(text.contains("1 of 5"));
         assert!(text.contains("$100.00 due now"));
+        // A finished plan never reports a tranche as due.
+        let fills = PlanFills { count: 5, spent_usdc: 500.0, acquired_nock: 40500.0, last_at: Some(t("2026-11-15T12:00:00Z")), first_price: Some(0.0125) };
+        let done_ctx = PlanContext { cfg: Some(plan_cfg()), fills, ledger_unavailable: false, now: t("2026-11-20T12:00:00Z") };
+        let done = metrics_with_plan(&raw, &done_ctx, &MarketRegime::default());
+        let done_text = format_accumulation_plan_text(&json!({ "derived_metrics": serde_json::to_value(&done).unwrap() }));
+        assert!(done_text.contains("Next tranche: none (plan complete)"));
+        assert!(!done_text.contains("due now"));
         assert!(text.contains("LP rebuild bias: under_target"));
         // Before the first fill the average is "n/a", never a made-up number.
         assert!(text.contains("average $n/a"));
