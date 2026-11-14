@@ -58,7 +58,7 @@
 
 ---
 
-## 4. The "Mock Data in Production is a Bug" Invariant
+## 4. The "Mock Data is a Bug" Invariant
 
 - In a sovereign state room, synthetic numbers, silent mock fallbacks, or static percentages in UI are **high-severity data-integrity bugs**, not cosmetic flaws.
 - **Rules of Data Truth**:
@@ -116,13 +116,29 @@
    - Split the LP target equally across eligible tracked positions unless config sets weights.
    - "We should not generally aim to fill positions that are out of range." Out-of-range positions are skipped unless config makes an explicit exception.
    - Never suggest a deposit into a pool with no in-range liquidity.
-   - Aero tranches live at app.aero.xyz ("We shouldn't refer folks to aerodrome.finance anymore"). Link there, never to the retired Aerodrome app. Staking is left at the Aero app's default; AERO rewards are unplanned income, so stay conservative and do not assume the operator wants to accumulate AERO.
+   - Aero tranches live at app.aero.xyz ("We shouldn't refer folks to aerodrome.finance anymore"). Link there, never to the retired Aerodrome app. Staking is left at the Aero app's default. AERO is the fourth pillar (7.11): neither minimized nor maximized. NockNock does not read AERO rewards yet (#93), so it must say "not read" rather than show them as zero, and it must not advise accumulating or selling AERO until a policy is decided there.
    - LP may hold slightly more NOCK than sits above the hard floor. Operator, 2026-11-14: "Because the LP sells a fraction every time the price moves, by putting in just a little bit more than what we have allowed as a trading limit we will actually be quite unlikely to sell it all unless there is a super rally, in which case we'll still have most of the hundred thousand... We need to trade more." The overage is bounded by `operator_profile.lp_floor_tolerance_bps`, and the engine must state the worst case rather than hide it. Do not re-impose a hard cap at the floor.
 9. **Agents May Improve the Strategy (2026-11-14)**:
    - "I am counting on you to make the strategy good — the strategy that we wrote may not be good. You are allowed to suggest adjustments, and even build them into the code."
    - This covers the soundness of the rules: internal consistency, guardrails, measurement, and removing ways the engine can contradict its own invariants. State each adjustment and its reason plainly. It does not extend to choosing the operator's allocation (how much to hold, deploy or reserve): those numbers stay the operator's decision.
 10. **No Hallucinations / Urbit Lore**:
    - Never hallucinate fake Urbit `@p` (e.g. `~urmanac` is invalid Hoon syntax). Stick strictly to verifiable protocol and mathematical facts.
+11. **Four Pillars (standing order, 2026-11-14)**:
+   - The wallet holds four things: NOCK, cash (USDC), gas (ETH) and AERO. "We neither minimize nor maximize the importance of the pillars. They just are. If they grow, that's good."
+   - No pillar is the point of the others, and NockNock puts no rebalancing pressure on any of them. LP positions are where the pillars work together, not a fifth pillar. Reasons: [`docs/lore/2026-11-14-four-pillars-no-hurry.md`](docs/lore/2026-11-14-four-pillars-no-hurry.md).
+   - The deviation matrix's under/over-funded labels measure against the operator's own targets. They are not instructions.
+12. **Gas Is Not Cash (standing order, 2026-11-14)**:
+   - ETH (and WETH held as gas) pays for transactions. It is counted as the gas pillar, never as cash: the cash reserve is wallet USDC plus USDC inside LP, never ETH.
+   - NockNock never advises spending gas on NOCK, and wallet ETH/WETH does not fund LP rebuild suggestions (#94).
+   - NockNock suggests no amount of ETH to hold. With no ETH it says once that every action on Base pays gas in ETH.
+13. **The Wallet Is the Record (operator decision, 2026-11-14)**:
+   - Balances, positions, fees and recorded buys are read from the chain. NockNock's database (high-water mark, charts, ledgers) is disposable: a convenience, not the record.
+   - There are no backups (issue #96 closed as not planned). Do not add backup tooling, and do not call any dump a backup.
+   - Recovery is a fresh start: an empty database, the latest release, the wallet and `config.yaml`. Plan progress can be restored by setting `accumulation_plan.starts_at` to the plan's real start and recording each buy's transaction hash again (`POST /v1/execute/record-accumulation`); NockNock re-verifies each receipt on-chain. Harvests re-record the same way. The high-water mark and charts restart. If `config.yaml` itself is lost, the positions are listed again by hand.
+14. **Building in Public (standing order, 2026-11-14)**:
+   - "We're building in public, which means we are always at risk of serving as an example to someone else." The rules for a newcomer are the rules for the operator.
+   - NockNock reads the wallet and states facts. It never chooses a user's numbers: plan budget, tranches and interval, NOCK floor, target weights, cash reserve, tax-reserve ratio. Unset means no rule, never someone else's number filled in.
+   - The operator's own numbers in docs and examples are labelled as one operator's, never as recommendations or defaults.
 
 ---
 
@@ -172,7 +188,7 @@
 Before pushing any PR or proposing a release tag, always execute the full verification battery:
 ```bash
 make test-brain       # 3 tests passing (WASM invariants & hashing)
-make test-worker      # 91 tests as of v0.5.0
-make test-frontend    # 45 tests as of v0.5.0
+make test-worker      # 140 tests as of v0.5.2 (132 worker + 8 MCP)
+make test-frontend    # 100 tests as of v0.5.2
 make dist             # Verifies packaging of dist/ binaries and tarballs
 ```

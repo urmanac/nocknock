@@ -1,75 +1,72 @@
-# NockNock — Sovereign Asset State Room & Dual-Growth Engine
+# NockNock — Sovereign Asset State Room
 
-> **"Observe and Protect"** — An asynchronous, zero-maintenance asset observation portal and tactical advisory engine for dual-token growth (**NOCK** and **USDC**) on Base network.
+> **"Observe and Protect"** — a read-only observation portal and advisory engine for a
+> single wallet on Base that holds NOCK, cash (USDC), gas (ETH) and AERO. NockNock reads
+> the wallet and the chain, states facts, and paces the plan you configure. It never
+> signs or sends a transaction.
 
----
-
-## 1. Strategic Philosophy & Portfolio Architecture
-
-NockNock monitors and guides a three-tier capital allocation strategy designed to grow the absolute holding of both **NOCK** and **USDC** while maintaining an invariant floor:
-
-```
-                            SOVEREIGN CAPITAL FLOW
- 
-  ┌────────────────────────────────────────────────────────────────────────┐
-  │ 1. SOURCING LIQUIDITY                                                 │
-  │    ┌───────────────────────────┐      ┌───────────────────────────┐   │
-  │    │ Uniswap V4 LP (Tranche 1) │      │  Aerodrome LP (Tranche 2) │   │
-  │    │ Range: $0.01237 - $2.028  │      │  Volatile Pool (0.3% fee) │   │
-  │    │ Automated DCA Scale-Out   │      │  Continuous Yield Engine  │   │
-  │    └─────────────┬─────────────┘      └─────────────┬─────────────┘   │
-  └──────────────────┼──────────────────────────────────┼─────────────────┘
-                     │                                  │
-                     ▼                                  ▼
-  ┌────────────────────────────────────────────────────────────────────────┐
-  │ 2. HARVESTING & ALLOCATION HUB (60/40 SPLIT RULE)                      │
-  │    When claimable fees cross $5.00 threshold:                          │
-  │    ├── 40% ➔ Tax Escrow (Cold reserve pre-funding capital gains liability)
-  │    └── 60% ➔ Growth Capital / The Vault (Dry powder for market dips)   │
-  └────────────────────────────────────────────────────────────────────────┘
-                     │
-                     ▼
-  ┌────────────────────────────────────────────────────────────────────────┐
-  │ 3. SOVEREIGN FOUNDATION (Tranche 3)                                    │
-  │    Untouchable Treasury Floor: >= 100,000 NOCK                         │
-  │    Hard safety floor — never liquidated, staked, or impaired.          │
-  └────────────────────────────────────────────────────────────────────────┘
-```
-
-### Strategic Portfolio (v2.0.0 — Uniswap-only; Aerodrome tranche liquidated 2026-10-23)
-
-The operator positions manually; the tracked positions are config-driven
-(`ingestion-worker/config.yaml`, discovery-verified identifiers in
-ONCHAIN_INTEGRATION.md §5):
-
-1. **Sovereign Treasury (~80% Target Allocation)**
-   - Hard Floor Invariant: **100,000 NOCK minimum**.
-   - Liquid cold wallet reserves protecting sovereign voting weight and governance posture.
-2. **Uniswap LP — all tracked positions (~15% Target Allocation)**
-   - Tracked live per position (protocol, fee tier, range, unclaimed fees):
-     - ETH/NOCK — Uniswap v4, 2% fee (NFT #3163432)
-     - USDC/NOCK — Uniswap v4, 0.75% fee (NFT #3163431; NOCK/USD price source)
-     - USDC/NOCK — Uniswap v4, 3% fee, wide raft (NFT #3163450)
-     - WETH/NOCK — Uniswap v3, 1% fee (NFT #6336662)
-   - Function: concentrated-liquidity fee accumulation. Yield is harvested and recycled.
-3. **Liquid USDC Buffer (~5% Target Allocation)**
-   - Dry powder from harvested yield, deployed on market retractions.
-4. **RETIRED: Aerodrome Engine (was 10%)** — liquidated 2026-10-23; kept only as
-   historical record (ONCHAIN_INTEGRATION.md §2).
+*Vibe-coded: AI agents wrote almost all of this, and the docs may contain hallucinations.
+The example numbers in this repository are one operator's, about one wallet. They are not
+recommendations.*
 
 ---
 
-## 2. Tactical Shot Advice Engine
+## 1. Philosophy: four pillars, and no hurry
 
-The backend continuously evaluates on-chain conditions and outputs dynamic recommendations:
+The reasoning behind NockNock is written up in
+[`docs/lore/2026-11-14-four-pillars-no-hurry.md`](docs/lore/2026-11-14-four-pillars-no-hurry.md).
+In short:
 
-| Trigger Condition | Posture | Strategic Action |
-|:---|:---|:---|
-| `total_nock < 100,000` | **DEFENSIVE LOCK** | Floor breach! All yield locked to restore 100,000 sovereign minimum. |
-| `spot_price < $0.020` | **DIP REINVESTMENT** | Spot price entered accumulation zone. Deploy saved USDC to buy discounted NOCK. |
-| `spot_price >= $2.028` | **RANGE EXIT FLASHPOINT** | V4 runway is 100% USDC. Take principal and construct single-sided high walls at $5.00+. |
-| `claimable_fees >= $5.00` | **BATCH HARVEST** | Gas efficiency optimal (>50x). Execute batch claim and enforce 60/40 Split Rule. |
-| Normal Market | **HOLD & ACCRETE** | AMMs generating dual yield; maintain current balanced posture. |
+- **Four pillars, not a pyramid.** The wallet holds NOCK, cash (USDC), gas (ETH) and AERO.
+  NockNock neither minimizes nor maximizes any of them. LP positions are where the pillars
+  work together, not a fifth pillar.
+- **Gas is not cash.** ETH pays for transactions. It is never counted toward a cash
+  reserve, and NockNock suggests no amount of it to hold
+  ([`OPERATOR_GUIDANCE.md`](OPERATOR_GUIDANCE.md) §7.12).
+- **The wallet is the record.** Balances, positions, fees and recorded buys are read from
+  the chain. NockNock's database (high-water mark, charts) is a convenience: if it is
+  lost, start fresh.
+- **Your numbers are yours.** A buying plan's budget, tranches and interval, a NOCK floor,
+  target weights, a cash reserve, a tax-reserve ratio: NockNock never chooses them. Leave
+  one unset and there is no rule.
+
+### What is tracked
+
+Everything comes from `ingestion-worker/config.yaml`:
+
+- `tracked_wallets`: the wallet to read.
+- `positions`: the LP positions to track (Uniswap v4, Uniswap v3, Aero volatile pools),
+  one of which is the NOCK/USD price source (`is_price_source: true`). Discovery-verified
+  identifiers for the original operator's positions are in
+  [`ONCHAIN_INTEGRATION.md`](ONCHAIN_INTEGRATION.md) §5.
+- `operator_profile`: an optional NOCK floor, target weights, tax-reserve ratio and LP
+  floor tolerance.
+- `accumulation_plan`: an optional dollar-cost-averaging plan that paces NOCK buys you
+  make yourself.
+
+The shipped `config.yaml.example` is loaded as the base layer and still carries the
+original operator's wallet, positions and limits. Set or clear every one of those in your
+own `config.yaml`; they are not defaults meant for you.
+
+---
+
+## 2. The directive engine
+
+Each ingestion cycle produces one directive. The first rule that applies wins:
+
+| # | Directive | When | What it says |
+|:--|:---|:---|:---|
+| 1 | **DEFENSIVE LOCK (Floor Recovery)** | You set `treasury_floor_nock` and total NOCK (wallet plus LP) is below it | How far below, and your plan's next step if you have one. Nothing is "locked"; NockNock does not size recovery buys. |
+| 2 | **OVEREXTENDED** | Daily RSI(14) is 70 or more (and the plan pauses when overextended) | No buy and no sale is advised while it stays there. A range exit or a due harvest still outranks it. |
+| 3 | **DCA TRANCHE DUE** | Your accumulation plan has a tranche due | Buy that tranche's size of NOCK yourself, then record the transaction; NockNock verifies it on-chain. |
+| 4 | **RANGE EXIT / BATCH HARVEST** | The price-source range has been exited, or uncollected LP fees reach the fixed $5.00 threshold | Facts about the exited range, or that fees are worth collecting. Harvest is advised only when no tranche is due. |
+| 5 | **Waiting plan** (DCA ON SCHEDULE, pending, paused, blocked) | A plan exists but nothing is due | When the next tranche is due and its size. |
+| 6 | **Planless arms** (nothing to track yet, build from zero, tax reserve short, dip zone) | No plan is configured | Facts only: what the wallet holds and where the price is. No buy is sized; the numbers are yours to set. |
+| 7 | **HOLD & ACCRETE** | Nothing above applies | What the LP positions are doing. No profit or loss is claimed (NockNock does not track cost basis). |
+
+Alongside the directive, the **LP rebuild bias** stands: while LP holds less than your
+LP target, NockNock suggests deposits into the positions you track. Rebuilding ranges is
+a reposition, with no net cash change. With no LP target configured it suggests nothing.
 
 ---
 
@@ -118,15 +115,21 @@ The backend continuously evaluates on-chain conditions and outputs dynamic recom
 ## 4. Quick Start
 
 ### Prerequisites
-- Docker & Docker Compose (or PostgreSQL 16 + Rust 1.80+ + Node 20+)
+- Docker & Docker Compose (or PostgreSQL 16 + Rust 1.80+ + Node 22+)
 - Alchemy API Key for Base Mainnet
 
 ### Running via Docker Compose
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/nocknock.git
+git clone https://github.com/urmanac/nocknock.git
 cd nocknock
+
+# Write your own config: your Alchemy key, your wallet, your positions (one of them
+# the NOCK/USD price source), and only the limits and plan you choose. The example's
+# wallet, positions, floor and targets are one operator's: replace or clear them.
+cp ingestion-worker/config.yaml.example ingestion-worker/config.yaml
+$EDITOR ingestion-worker/config.yaml
 
 # Start PostgreSQL, Ingestion Worker, and Frontend
 docker compose up -d --build
@@ -138,6 +141,9 @@ http://localhost:3000
 http://localhost:8080/v1/snapshot/latest
 http://localhost:8080/health
 ```
+
+If the first ingestion cycle fails (a placeholder key, no price source, an NFT the wallet
+does not own), the dashboard and `/v1/snapshot/latest` show the last ingestion error.
 
 ### Running in Persistent Background with Tmux (Recommended)
 
@@ -171,7 +177,7 @@ npm run dev -- --port 3000
 ## 5. Verification & Testing
 
 ```bash
-# 1. Run Frontend Contract Tests (12/12 passing)
+# 1. Run Frontend Tests (counts in AGENTS.md §9)
 cd frontend
 npm test -- --run
 
@@ -240,9 +246,12 @@ To connect NockNock to Claude Desktop, Gemini Antigravity, Cursor, or Mecris, ad
 ```
 
 **Exposed MCP Tools:**
-- `get_portfolio_state`: Real-time sovereign balances, NOCK floor buffer delta, and tranche allocations.
-- `get_shot_advice`: Dynamic tactical directives (Hold & Accrete, Batch Harvest, Dip Reinvestment).
-- `simulate_claim_fees`: Simulated gas expenditure vs gross/net claimable yields.
+- `get_portfolio_state`: Balances, the NOCK floor buffer (if you set a floor), and the directive.
+- `get_shot_advice`: The current directive, its details, and the harvest rule.
+- `simulate_claim_fees`: Gas versus uncollected LP fees across the tracked LP positions.
+- `get_accumulation_plan`: Your DCA plan's status, next tranche, verified buys, and the LP rebuild bias.
+
+Every answer ends with the snapshot's generation time and the worker's health.
 
 Automated GitHub Actions workflows (`.github/workflows/ci.yml`) test all three tiers on every pull request and publish GitHub Releases with release notes extracted from [CHANGELOG.md](CHANGELOG.md) upon pushing version tags (`git tag v0.1.0`). For release governance and step-by-step instructions, see the **[Release Runbook](RELEASE.md)**. For the strategic roadmap and future development priorities, refer to the **[Hand-Off Document](HANDOFF.md)**.
 

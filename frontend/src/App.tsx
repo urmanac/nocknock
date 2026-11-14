@@ -20,7 +20,7 @@ import {
   ReferenceLine,
   ReferenceArea,
 } from 'recharts';
-import { api } from './api/client';
+import { api, describeApiError } from './api/client';
 import { useFreshness, StaleBanner } from './hooks/useFreshness.tsx';
 
 /** market_price_history provenance tags (main.rs PRICE_SOURCE_*) → display names */
@@ -31,9 +31,10 @@ const SOURCE_LABELS: Record<string, string> = {
   aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
-import { POSITION_COLORS, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText } from './positions.ts';
+import { POSITION_COLORS, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText, velocityRowText } from './positions.ts';
 import { floorState, floorDeltaText, floorSummaryText, regimeLabel, regimeTone } from './floor.ts';
 import { buildChartRows, compositionReadout, syncWindowOrDefault, type ChartSeries, type GapRow } from './timeline.ts';
+import { ethUsdPrice, gasLine, hwmSubtitle, pillarLine } from './pillars.ts';
 
 function Dashboard() {
   // The worker's real cadence when the historical response reports it; 300 s otherwise.
@@ -83,7 +84,7 @@ function Dashboard() {
   if (error) {
     return (
       <div style={styles.container}>
-        <div style={styles.error}>Error: {error.message}</div>
+        <div style={styles.error}>{describeApiError(error)}</div>
         <button onClick={refetch} style={styles.button}>
           Retry
         </button>
@@ -116,21 +117,11 @@ function Dashboard() {
     status: a.status,
   }));
 
-  // Live ETH/USD derived from the same on-chain pool reads the worker used for USD
-  // valuation (ETH/WETH volatile_assets reserve_usd / reserve_amount). Null when no
-  // ETH leg exists or amounts are zero — zero-mock: never valued at a made-up price.
+  // Live ETH/USD: the snapshot's own eth_price_usd (2.3.0), the price the worker valued
+  // gas and LP WETH at. Only a pre-2.3.0 snapshot falls back to a pool-derived ratio.
+  // Null when neither exists — zero-mock: never valued at a made-up price.
   // NB: pool_mechanics is a sibling of derived_metrics on the snapshot data object.
-  const ethUsd = (() => {
-    for (const pm of rawData?.pool_mechanics || []) {
-      const eth = (pm.volatile_assets || []).find((a: any) => ['ETH', 'WETH'].includes(a.token_symbol));
-      if (eth) {
-        const amt = parseFloat(eth.reserve_amount);
-        const usd = parseFloat(eth.reserve_usd);
-        if (amt > 0 && usd > 0) return usd / amt;
-      }
-    }
-    return null;
-  })();
+  const ethUsd = ethUsdPrice(global, rawData?.pool_mechanics);
 
   const tickData = (metrics?.tick_bracket_hypervisor?.brackets || []).map((b: any, i: number) => {
     const pos = positionsList[i];
@@ -267,7 +258,7 @@ function Dashboard() {
             label="Portfolio Value (USD)"
             value={global?.total_portfolio_usd}
             prefix="$"
-            subtitle={`@ $${metrics?.tick_bracket_hypervisor?.current_price || '—'}/NOCK`}
+            subtitle={`${pillarLine(global)} · @ $${metrics?.tick_bracket_hypervisor?.current_price || '—'}/NOCK`}
           />
           <StatCard
             label="Claimable Yield (Net)"
@@ -287,8 +278,13 @@ function Dashboard() {
             label="High-Water Mark"
             value={global?.high_water_mark_usd}
             prefix="$"
-            subtitle="All-time high"
+            subtitle={hwmSubtitle(global?.high_water_mark_date)}
           />
+        </div>
+        {/* Pillars (issue #94): ETH is gas, a pillar line and never a "Goal". */}
+        <div style={styles.pillarLine}>
+          <span>Pillars: {pillarLine(global)}</span>
+          <span style={{ color: '#a78bfa' }}>{gasLine(global)}</span>
         </div>
       </header>
 
@@ -359,7 +355,7 @@ function Dashboard() {
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>LP Positions / Range Risk:</span>
             <span style={styles.shotPillText}>
-              {positionsSummary(positionsList)} Unclaimed fees live-tracked on-chain.
+              {positionsSummary(positionsList)} Uniswap LP fees are read on-chain; rewards on staked Aero LP are not read yet (#93).
             </span>
           </div>
         </div>
@@ -542,7 +538,7 @@ function Dashboard() {
           <div style={{ marginTop: 12, fontSize: '0.75rem', color: '#aaa', fontFamily: 'monospace', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span>Spot Price: <strong>${metrics?.tick_bracket_hypervisor?.current_price || '0.00'}</strong></span>
             {tickData.some((t: any) => t.converted) && (
-              <span style={{ color: '#8b949e' }}>ETH-denominated brackets converted to USD @ ${ethUsd ? ethUsd.toFixed(2) : '—'}/ETH (live pool-derived)</span>
+              <span style={{ color: '#8b949e' }}>ETH-denominated brackets converted to USD @ ${ethUsd ? ethUsd.toFixed(2) : '—'}/ETH ({global?.eth_price_usd ? 'snapshot ETH/USD' : 'pool-derived, older snapshot'})</span>
             )}
             {(() => {
               // Brackets are index-aligned with positions; the price source is not
@@ -606,7 +602,7 @@ function Dashboard() {
             <span><span style={{ color: '#10b981' }}>■</span> Actual: On Target</span>
             <span><span style={{ color: '#f59e0b' }}>■</span> Actual: Under-Funded</span>
             <span><span style={{ color: '#ef4444' }}>■</span> Actual: Over-Funded</span>
-            <span><span style={{ color: '#8b949e' }}>■</span> Actual: No Target Set</span>
+            <span><span style={{ color: '#8b949e' }}>■</span> Actual: No Target Set (incl. Gas: counted, never rebalanced)</span>
           </div>
         </CanvasPanel>
 
@@ -647,8 +643,11 @@ function Dashboard() {
                 {ro.stableUsd !== null && (
                   <> ({ro.pctOfNative === null ? 'no NOCK value to compare' : `${ro.pctOfNative.toFixed(1)}% of NOCK value`})</>
                 )}
+                {ro.ethUsd !== null && (
+                  <span style={{ color: '#a855f7' }}> · ETH {usd(ro.ethUsd)} (wallet gas + LP WETH; not cash)</span>
+                )}
                 {ro.otherUsd !== null && Math.abs(ro.otherUsd) >= 0.01 && (
-                  <span style={{ color: '#8b949e' }}> · {usd(ro.otherUsd)} in other legs (Total − NOCK − USDC, e.g. LP WETH)</span>
+                  <span style={{ color: '#8b949e' }}> · {usd(ro.otherUsd)} in other legs ({ro.ethUsd === null ? 'Total − NOCK − USDC, e.g. LP WETH' : 'Total − NOCK − USDC − ETH'})</span>
                 )}
               </div>
             );
@@ -734,7 +733,7 @@ function Dashboard() {
           <div style={{ marginTop: 8, fontSize: '0.75rem', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             {gasData.map((g: any) => (
               <span key={g.name} style={{ color: g.action === 'claim_now' ? '#10b981' : '#f59e0b' }}>
-                <strong>{g.name}:</strong> {g.action.toUpperCase()} (${g.claimable} earned / gas ${g.gasBreakEven} — {g.ratio.toFixed(0)}x ROI)
+                {velocityRowText(g)}
               </span>
             ))}
           </div>
@@ -824,6 +823,7 @@ const styles: Record<string, React.CSSProperties> = {
   error: { textAlign: 'center', padding: '2rem', color: '#e74c3c' },
   button: { padding: '0.5rem 1rem', background: '#3498db', border: 'none', borderRadius: 4, color: '#fff', cursor: 'pointer' },
   header: { marginBottom: '1.25rem', borderBottom: '1px solid #222', paddingBottom: '1.25rem' },
+  pillarLine: { display: 'flex', flexWrap: 'wrap', gap: '0.5rem 1.5rem', marginTop: '0.75rem', fontSize: '0.8rem', color: '#cbd5e1' },
   titleRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' },
   title: { margin: 0, fontSize: '1.6rem', fontWeight: 700, letterSpacing: '0.05em', color: '#3498db' },
   engineBadge: {

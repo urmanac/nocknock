@@ -324,24 +324,28 @@ export function compositionRow(dm: any, t: number): CompositionRow {
 /**
  * The Stable Reserve readout, from the LATEST snapshot's own totals (never the last
  * history row). The percentage of native value is null when native value is 0 or
- * unknown: undefined, not 0.0%. `other` is total − native − stable (LP WETH today).
+ * unknown: undefined, not 0.0%. `ethUsd` is total_eth_usd (2.3.0: wallet gas + LP WETH),
+ * null on an older snapshot. `other` is total − native − stable − ETH: about 0 on a
+ * 2.3.0 snapshot, and the LP WETH on an older one (which did not report ETH).
  */
 export function compositionReadout(globalStatus: any): {
   stableUsd: number | null;
   nativeUsd: number | null;
   totalUsd: number | null;
   pctOfNative: number | null;
+  ethUsd: number | null;
   otherUsd: number | null;
 } {
   const totalUsd = finiteOrNull(globalStatus?.total_portfolio_usd);
   const nativeUsd = finiteOrNull(globalStatus?.total_native_usd);
   const stableUsd = finiteOrNull(globalStatus?.total_stable_usd);
+  const ethUsd = finiteOrNull(globalStatus?.total_eth_usd);
   const pctOfNative = stableUsd !== null && nativeUsd !== null && nativeUsd > 0 ? (stableUsd / nativeUsd) * 100 : null;
   const otherUsd =
     totalUsd !== null && nativeUsd !== null && stableUsd !== null
-      ? Math.round((totalUsd - nativeUsd - stableUsd) * 100) / 100
+      ? Math.round((totalUsd - nativeUsd - stableUsd - (ethUsd ?? 0)) * 100) / 100
       : null;
-  return { stableUsd, nativeUsd, totalUsd, pctOfNative, otherUsd };
+  return { stableUsd, nativeUsd, totalUsd, pctOfNative, ethUsd, otherUsd };
 }
 
 function channelRows(latestMetrics: any): ChannelRow[] {

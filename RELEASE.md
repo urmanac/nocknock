@@ -100,7 +100,7 @@ Builds release binaries and verifies packaging:
 
 NockNock adheres strictly to **Semantic Versioning (SemVer 2.0.0)**:
 - **Patch Releases (`v0.1.x`)**: Reserved exclusively for bugfixes, UI reactivity fixes, RPC resilience, and data integrity repairs.
-  - **Core Tenet**: *Mock data in the production app is a bug.* Any hardcoded placeholder, static string pretending to be live math, or silent mock fallback must be triaged and resolved in a patch release.
+  - **Core Tenet**: *Mock data is a bug.* Any hardcoded placeholder, static string pretending to be live math, or silent mock fallback must be triaged and resolved in a patch release.
   - Patch releases (`v0.1.1`, `v0.1.2`, ...) can and should be shipped indefinitely until every active bug and data anomaly is eliminated.
 - **Minor Releases (`v0.2.0`)**: Reserved for backward-compatible architectural features, including:
   - Dynamic operator profile configuration (Issue #6).

@@ -1,5 +1,11 @@
 # NockNock Hand-Off & Tactical Command Dossier: Passing the Keys to Nemotron
 
+> **Historical document: 2026-10-12, v0.2.1.** Kept as a record; much of it no longer
+> describes NockNock (the "dual growth" frame, the positions, the test counts, "zero open
+> bugs"). For the current philosophy read [`docs/lore/`](docs/lore/) (start with
+> [`2026-11-14-four-pillars-no-hurry.md`](docs/lore/2026-11-14-four-pillars-no-hurry.md));
+> for the standing orders read [`OPERATOR_GUIDANCE.md`](OPERATOR_GUIDANCE.md) §7.
+
 > **"Observe and Protect"** — Sovereign Asset State Room & Dual-Growth Engine for NOCK and USDC on Base.
 
 **Custodian Transfer**: Antigravity / Google DeepMind $\longrightarrow$ **Nemotron**  

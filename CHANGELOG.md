@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-14
+
+### Fixed — wallet ETH is the gas pillar (#94; snapshot spec 2.3.0)
+- **Gas counts in the total.** Wallet ETH and WETH are read every cycle, and both reads are
+  now required: a failed read fails the cycle, as NOCK and USDC do. They are valued at the
+  live ETH/USD and included in `total_portfolio_usd`. ETH is gas: never cash, never in the
+  cash reserve or deployable dry powder, with no target and no rebalancing pressure.
+- **One definition of the portfolio.** Targets, deviation weights, the high-water mark and
+  history all use the full total, gas included. **One-time step:** when this ships the
+  total rises once by the wallet gas (about +$23 on 0.0125 ETH, about +1%), and the LP and
+  cash targets grow by the same ~1%. It is a definition change, not a gain. A total that
+  excluded wallet gas was rejected: moving ETH between the wallet and a WETH range would
+  then read as a gain or a drawdown.
+- **Three pillars.** New `global_status` fields `eth_price_usd`, `wallet_gas_eth`,
+  `wallet_gas_usd`, `total_eth_amount` and `total_eth_usd` (wallet gas plus the WETH inside
+  LP). NOCK + USDC + ETH = total. `total_native_usd` stays NOCK-only (the spec text that
+  said it included ETH is corrected). `wallet_balances` gains ETH and WETH rows after NOCK
+  and USDC.
+- **Every wallet token balance must be present.** A missing or null `tokenBalance` fails
+  the cycle instead of reading as 0.
+- **Deviation matrix** gains a "Gas (wallet ETH+WETH)" row with status `no_target`.
+- **High-water mark date** is the time of the earliest stored snapshot at the peak, not the
+  snapshot time. An empty table starts a new mark, and a database error fails the cycle
+  instead of silently resetting the mark to the current value.
+- **ETH/USD stale-pool guard.** A price pool with no in-range liquidity fails the cycle, as
+  the NOCK spot's does.
+- **LP rebuild never funds an ETH leg from wallet gas.** Positions with an ETH or WETH leg
+  are excluded ("needs ETH/WETH, which is gas, not investable capital") and their share goes
+  to the other eligible positions. The 0.002 ETH `REBUILD_GAS_BUFFER_ETH` is removed.
+- **Removed** the unused $2,500 ETH price serde default.
+- **MCP** state text adds `Pillars: NOCK $x · USDC $y · ETH $z` and a "Gas held" line, or
+  "not reported (snapshot predates 2.3.0)".
+- **Dashboard** shows the pillar line and the gas held (never as a "Goal"), ETH in the
+  composition readout, the snapshot's own ETH/USD for ETH brackets, and when the
+  high-water mark was set.
+
+### Fixed — surfaces (v0.5.2)
+- **`GET /v1/snapshot/{id}`** returned 500 `CORRUPTED_DATA` for every stored row: the
+  handler parsed the `data` column as a whole envelope, but `store_snapshot` writes only
+  the payload. It now parses `SnapshotData` and builds the envelope from the row
+  (`envelope_from_stored`).
+- **First-run errors are visible.** The 503 `NO_SNAPSHOT` body (latest snapshot and the
+  claim payload) carries the last ingestion error as `detail`, and MCP appends it to "No
+  snapshot available yet". The dashboard and the Lite cockpit show that cause instead of
+  "Worker unreachable"; "unreachable" is now said only when the worker did not answer.
+- **Aero pools whose `claimFees()` reverts** read "not LP-claimable (claimFees()
+  reverts); AERO rewards not read (#93)" in the velocity panel, the MCP claim simulation
+  and the Lite cockpit, never "$0 earned". In the claim payload the action reports
+  `simulation: "not_claimable"` instead of "RPC unavailable", gets no gas estimate, and
+  no longer nulls `estimated_gas_usd` and `net_after_gas_usd` for the actions that can
+  execute.
+- **MCP honesty (both transports).** "Live API" and "Tier 1 Connected" are gone; every
+  answer ends with the snapshot's generation time and the worker's health. The harvest
+  rule says BATCH HARVEST is advised only when no DCA tranche is due. Tool descriptions say
+  "LP" instead of "Uniswap" for all positions.
+- Specs: `recommended_action` lists the values the worker emits (`claim_now`,
+  `claim_recommended`, `accumulate`, `not_claimable`); `simulation` adds `not_claimable`.
+
+### Docs
+- README §1–2 rewritten: the retired portfolio and the operator's numbers presented as
+  "the strategy" are gone; example numbers are one operator's, not recommendations; the
+  current directive precedence and the LP rebuild bias; link to the four-pillars lore.
+  Quick Start: `urmanac/nocknock`, a config step, Node 22+.
+- OPERATOR_GUIDANCE §7.11–7.14: four pillars, gas is not cash, the wallet is the record,
+  building in public; the AERO item reworded in pillar terms.
+- ONCHAIN_INTEGRATION: dated "superseded in v0.5.0" notes; HANDOFF.md marked historical;
+  AGENTS.md §10 points to the lore; design note §8.2 records that the no-plan arm was
+  retired in v0.5.1; "in production" dropped from the mock-data invariant headings.
+
 ### Deferred to Future Releases
 - [ ] **Koinly On-Chain Transaction Classifier (Issue #56, v0.4.0)**: reconcile on-chain fee-claim harvests directly with Koinly's Base wallet sync as ordinary income — explicitly NOT manual CSV download buttons/tooling (duplicate transactions and burns the annual 1,000-transaction budget on the $99 tier; Koinly misclassifying claims as "Liquidity Removals" corrupts LP cost basis).
 - [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).
@@ -18,7 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [ ] **Unsigned add-liquidity transactions** for LP rebuild suggestions (encoding to be verified by simulation).
 - [ ] **Aero concentrated (CL) positions (Issue #91)**, starting with WETH/NOCK CL200.
 - [ ] **AERO reward accounting (Issue #93)**: read, value and ledger rewards from staked Aero positions.
-- [ ] **Count ETH** in portfolio totals (#94, next patch); externalise the legacy advice constants.
+- [ ] **Externalise the legacy advice constants.**
 
 ## [0.5.1] - 2026-11-14
 

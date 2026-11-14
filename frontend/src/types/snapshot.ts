@@ -127,6 +127,16 @@ export interface GlobalStatus {
   rsi_14?: string | null;
   /** Wilder RSI(14) over daily closes — the "daily RSI"; drives `regime` */
   rsi_14_1d?: string | null;
+  /** Live ETH/USD used to value gas and LP WETH (2.3.0); null when unpriced */
+  eth_price_usd?: string | null;
+  /** Wallet ETH + WETH in ETH: gas (2.3.0). Counted in the total; not cash, not deployable, no target */
+  wallet_gas_eth?: string | null;
+  /** wallet_gas_eth in USD (2.3.0) */
+  wallet_gas_usd?: string | null;
+  /** The ETH pillar in ETH: wallet gas + ETH/WETH legs of tracked LP (2.3.0) */
+  total_eth_amount?: string | null;
+  /** The ETH pillar in USD (2.3.0). native + stable + eth = total */
+  total_eth_usd?: string | null;
 }
 
 export interface AssetAggregationSeries {
@@ -210,7 +220,8 @@ export interface FeeCollectionIndex {
   claimable_usd: string;
   gas_break_even_usd: string;
   efficiency_ratio: number;
-  recommended_action: 'claim_now' | 'wait' | 'not_worthwhile';
+  /** What the worker emits; 'not_claimable' is an Aero pool whose claimFees() reverts. */
+  recommended_action: 'claim_now' | 'claim_recommended' | 'accumulate' | 'not_claimable';
 }
 
 // ============================================================

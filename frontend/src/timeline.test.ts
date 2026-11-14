@@ -364,7 +364,17 @@ describe('compositionReadout', () => {
   });
 
   it('unknown fields stay unknown', () => {
-    expect(compositionReadout(undefined)).toEqual({ stableUsd: null, nativeUsd: null, totalUsd: null, pctOfNative: null, otherUsd: null });
+    expect(compositionReadout(undefined)).toEqual({ stableUsd: null, nativeUsd: null, totalUsd: null, pctOfNative: null, ethUsd: null, otherUsd: null });
+  });
+
+  it('2.3.0: ETH is its own pillar, so nothing is left over and ETH is never called USDC', () => {
+    // Live 2026-11-14 figures plus ~0.0125 ETH of wallet gas.
+    const r = compositionReadout({
+      total_portfolio_usd: '2413.57', total_native_usd: '1312.88', total_stable_usd: '1033.71', total_eth_usd: '66.98',
+    });
+    expect(r.ethUsd).toBe(66.98);
+    expect(r.stableUsd).toBe(1033.71);
+    expect(r.otherUsd).toBe(0);
   });
 });
 

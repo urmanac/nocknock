@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
                         "tools": [
                             {
                                 "name": "get_portfolio_state",
-                                "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, native token balance, and tracked Uniswap LP position totals.",
+                                "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, native token balance, and tracked LP position totals.",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {},
@@ -101,7 +101,7 @@ async fn main() -> Result<()> {
                             },
                             {
                                 "name": "simulate_claim_fees",
-                                "description": "Simulates gas expenditure vs uncollected yield across the tracked Uniswap v3/v4 positions.",
+                                "description": "Simulates gas expenditure vs uncollected LP fees across the tracked LP positions.",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {},
@@ -188,17 +188,23 @@ async fn handle_tool_call(client: &Client, tool_name: &str) -> String {
 
     // Fallback: try snapshot API
     if let Ok(resp) = client.get(format!("{}/v1/snapshot/latest", api_base())).timeout(Duration::from_secs(2)).send().await {
-        if resp.status().is_success() {
-            if let Ok(snap) = resp.json::<Value>().await {
+        let status = resp.status();
+        if let Ok(snap) = resp.json::<Value>().await {
+            if status.is_success() {
                 if let Some(data) = snap.get("data") {
-                    return match tool_name {
+                    let body = match tool_name {
                         "get_portfolio_state" => format_portfolio_state(data),
                         "get_shot_advice" => format_shot_advice(data),
                         "simulate_claim_fees" => format_claim_simulation(data),
                         "get_accumulation_plan" => format_accumulation_plan(data),
-                        _ => format!("Unknown tool: {tool_name}"),
+                        _ => return format!("Unknown tool: {tool_name}"),
                     };
+                    let health = worker_health(client).await;
+                    return format!("{body}\n{}", snapshot_source_line(&snap, health.as_deref()));
                 }
+            } else if let Some(text) = no_snapshot_text(&snap) {
+                // The worker is up but has no snapshot yet: report its stated cause.
+                return text;
             }
         }
     }
@@ -206,6 +212,40 @@ async fn handle_tool_call(client: &Client, tool_name: &str) -> String {
     // 2. Worker unreachable: report that, and nothing NockNock has not read through it.
     zero_db_fallback_text(tool_name, &api_base())
 }
+
+/// The worker's /health verdict ("ok", "degraded", "starting"), if it answers.
+async fn worker_health(client: &Client) -> Option<String> {
+    let resp = client.get(format!("{}/health", api_base())).timeout(Duration::from_secs(2)).send().await.ok()?;
+    let v = resp.json::<Value>().await.ok()?;
+    v.get("status").and_then(|s| s.as_str()).map(|s| s.to_string())
+}
+
+/// When the snapshot was generated and the worker's health, in place of the old
+/// "Live API" label that was printed for any snapshot however old. Pure.
+fn snapshot_source_line(snap: &Value, health: Option<&str>) -> String {
+    let generated = snap
+        .pointer("/meta/generated_at")
+        .and_then(|v| v.as_str())
+        .unwrap_or("at an unknown time");
+    format!(
+        "Snapshot generated {generated} · worker health: {}",
+        health.unwrap_or("unavailable")
+    )
+}
+
+/// Text for a 503 NO_SNAPSHOT body, carrying the worker's last ingestion error. Pure.
+fn no_snapshot_text(body: &Value) -> Option<String> {
+    if body.get("error").and_then(|e| e.as_str()) != Some("NO_SNAPSHOT") {
+        return None;
+    }
+    Some(match body.get("detail").and_then(|d| d.as_str()).filter(|d| !d.trim().is_empty()) {
+        Some(d) => format!("No snapshot available yet. Last ingestion error: {d}"),
+        None => "No snapshot available yet; the first ingestion cycle has not completed.".to_string(),
+    })
+}
+
+/// Same text as the worker's HARVEST_RULE_TEXT (main.rs): the directive engine's precedence.
+const HARVEST_RULE_TEXT: &str = "BATCH HARVEST is advised once uncollected LP fees reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).";
 
 /// Compact plan view for the snapshot-API fallback (the worker's own /v1/mcp gives
 /// the full text and is tried first).
@@ -273,16 +313,31 @@ fn format_portfolio_state(data: &Value) -> String {
     let hwm = usd("high_water_mark_usd");
     let advice = get("shot_advice_action").unwrap_or("unavailable");
     let floor = floor_clause(global);
+    // Pillars and gas (snapshot 2.3.0, issue #94). Absent fields say so, never $0.00.
+    let not_reported = "not reported (snapshot predates 2.3.0)";
+    let pillar = |k: &str| get(k).map(|v| format!("${v}")).unwrap_or_else(|| not_reported.to_string());
+    let pillars = format!(
+        "NOCK {} · USDC {} · ETH {}",
+        pillar("total_native_usd"),
+        pillar("total_stable_usd"),
+        pillar("total_eth_usd")
+    );
+    let gas = match (get("wallet_gas_eth"), get("wallet_gas_usd")) {
+        (Some(eth), Some(usd)) => format!("{eth} ETH (${usd}), counted in the total; not cash, not deployable"),
+        (Some(eth), None) => format!("{eth} ETH (USD value not reported), counted in the total; not cash, not deployable"),
+        _ => not_reported.to_string(),
+    };
 
     format!(
-        "📈 NockNock Sovereign Portfolio State (Live API)\n\
+        "📈 NockNock Sovereign Portfolio State\n\
          =========================================\n\
          • Total Value: {total_usd}\n\
+         • Pillars: {pillars}\n\
          • Sovereign NOCK Stack: {total_nock} ({floor})\n\
          • Stable Stack: {total_usdc}\n\
+         • Gas held (wallet ETH+WETH): {gas}\n\
          • High-Water Mark: {hwm}\n\
-         • Tactical Directive: {advice}\n\
-         • Mode: Tier 1 Connected (Verified Persistent Snapshot)"
+         • Tactical Directive: {advice}"
     )
 }
 
@@ -307,7 +362,7 @@ fn format_shot_advice(data: &Value) -> String {
          • Decision Matrix Details: {details}\n\
          • Uncollected Claimable Fees: {claimable_usd}\n\
          • Net of two claims' gas: {gas_delta}\n\
-         • Harvest rule: BATCH HARVEST is advised when uncollected LP fees reach the fixed $5.00 threshold and no DCA tranche is due."
+         • Harvest rule: {HARVEST_RULE_TEXT}"
     )
 }
 
@@ -323,6 +378,11 @@ fn format_claim_simulation(data: &Value) -> String {
             let amount = fee.get("amount").and_then(|a| a.as_str()).unwrap_or("0");
             let amount_usd = fee.get("amount_usd").and_then(|a| a.as_str()).unwrap_or("0.00");
             let gas_str = fee.get("gas_break_even_usd").and_then(|g| g.as_str()).unwrap_or_default();
+            if amount.starts_with("not LP-claimable") {
+                // An Aero pool whose claimFees() reverts: nothing to claim, no gas to count.
+                details.push_str(&format!("  - {symbol}: {amount}\n"));
+                continue;
+            }
             match gas_str.parse::<f64>() {
                 Ok(g) => {
                     // Live per-contract gas break-even; take the max as representative.
@@ -407,6 +467,24 @@ mod tests {
     }
 
     #[test]
+    fn test_fallback_state_reports_gas_and_pillars() {
+        let mut data = from_zero_snapshot();
+        let g = &mut data["derived_metrics"]["global_status"];
+        g["total_native_usd"] = json!("0.00");
+        g["total_stable_usd"] = json!("500.00");
+        g["total_eth_usd"] = json!("30.00");
+        g["wallet_gas_eth"] = json!("0.010000");
+        g["wallet_gas_usd"] = json!("30.00");
+        let text = format_portfolio_state(&data);
+        assert!(text.contains("Pillars: NOCK $0.00 · USDC $500.00 · ETH $30.00"), "{text}");
+        assert!(text.contains("Gas held (wallet ETH+WETH): 0.010000 ETH ($30.00), counted in the total; not cash, not deployable"), "{text}");
+        // A pre-2.3.0 snapshot: not reported, never $0.00.
+        let old = format_portfolio_state(&from_zero_snapshot());
+        assert!(old.contains("Gas held (wallet ETH+WETH): not reported (snapshot predates 2.3.0)"), "{old}");
+        assert!(old.contains("ETH not reported (snapshot predates 2.3.0)"), "{old}");
+    }
+
+    #[test]
     fn test_fallback_formatters_use_the_snapshot_floor_and_invent_nothing() {
         let data = from_zero_snapshot();
         let state = format_portfolio_state(&data);
@@ -460,6 +538,47 @@ mod tests {
         let text = format_accumulation_plan(&data);
         assert!(text.contains("Next tranche: 2 of 5 — $20.00 when due"), "{text}");
         assert!(!text.contains("due now"));
+    }
+
+    #[test]
+    fn test_fallback_shows_snapshot_time_and_health_not_live_api() {
+        let data = from_zero_snapshot();
+        for text in [format_portfolio_state(&data), format_shot_advice(&data)] {
+            assert!(!text.contains("Live API") && !text.contains("Tier 1 Connected"), "{text}");
+        }
+        let snap = json!({ "meta": { "generated_at": "2026-11-14T06:00:00+00:00" }, "data": data });
+        assert_eq!(
+            snapshot_source_line(&snap, Some("ok")),
+            "Snapshot generated 2026-11-14T06:00:00+00:00 · worker health: ok"
+        );
+        assert!(snapshot_source_line(&json!({}), None).contains("worker health: unavailable"));
+        // The harvest rule states the engine's precedence.
+        assert!(format_shot_advice(&data).contains("only when no DCA tranche is due"));
+    }
+
+    #[test]
+    fn test_fallback_no_snapshot_reports_the_last_ingestion_error() {
+        let body = json!({ "error": "NO_SNAPSHOT", "message": "No snapshot available yet", "detail": "No Alchemy key configured" });
+        assert_eq!(
+            no_snapshot_text(&body).unwrap(),
+            "No snapshot available yet. Last ingestion error: No Alchemy key configured"
+        );
+        let bare = json!({ "error": "NO_SNAPSHOT", "message": "No snapshot available yet" });
+        assert!(no_snapshot_text(&bare).unwrap().contains("first ingestion cycle has not completed"));
+        assert!(no_snapshot_text(&json!({ "error": "NOT_FOUND" })).is_none());
+    }
+
+    #[test]
+    fn test_fallback_claim_text_marks_non_claimable_aero_pool() {
+        let data = json!({ "contract_fees": [
+            { "fee_token_symbol": "USDC+NOCK (Aerodrome)", "amount": "not LP-claimable (claimFees() reverts); AERO rewards not read (#93)",
+              "amount_usd": "0.000000", "claimable": false, "gas_break_even_usd": "0.0037" },
+            { "fee_token_symbol": "USDC+NOCK (Uniswap V4 #1)", "amount": "0.1 USDC + 2 NOCK",
+              "amount_usd": "0.12", "claimable": true, "gas_break_even_usd": "0.0014" }
+        ] });
+        let text = format_claim_simulation(&data);
+        assert!(text.contains("USDC+NOCK (Aerodrome): not LP-claimable (claimFees() reverts); AERO rewards not read (#93)\n"), "{text}");
+        assert!(text.contains("Estimated Gas: ~$0.0014 USD"), "{text}");
     }
 
     #[test]

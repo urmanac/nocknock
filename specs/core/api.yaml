@@ -84,7 +84,9 @@ paths:
         '304':
           description: Not modified (client has current snapshot)
         '503':
-          description: No snapshot available yet (ingestion not run)
+          description: >
+            No snapshot available yet (error NO_SNAPSHOT). When an ingestion cycle has
+            failed, the body's `detail` string carries the last ingestion error.
           content:
             application/json:
               schema:
@@ -563,8 +565,11 @@ components:
           nullable: true
         simulation:
           type: string
-          enum: [success, failed, unavailable]
-          description: Clients MUST only dispatch "success"
+          enum: [success, failed, unavailable, not_claimable]
+          description: >
+            Clients MUST only dispatch "success". not_claimable: the Aero pool's
+            claimFees() reverts (no LP-claimable fees); the action is excluded from
+            estimated_gas_usd and net_after_gas_usd.
         simulation_detail:
           type: string
           nullable: true

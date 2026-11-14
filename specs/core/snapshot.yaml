@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: NockNock Snapshot Data Model
-  version: 2.2.0
+  version: 2.3.0
   description: Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
   license:
     name: ISC
@@ -124,6 +124,11 @@ components:
     # ============================================================
     WalletBalance:
       type: object
+      description: |
+        One wallet token balance. Rows are NOCK, USDC, then (2.3.0) ETH (zero address)
+        and WETH: the gas pillar. Every row is a required live read; a failed read fails
+        the cycle, never reads as 0. Gas rows are counted in total_portfolio_usd but are
+        never cash, never deployable dry powder and never fund an LP deposit.
       required: [wallet_address, token_symbol, token_address, amount, amount_usd]
       properties:
         wallet_address:
@@ -140,8 +145,8 @@ components:
           example: "0x0000000000000000000000000000000000000000"
         amount:
           type: string
-          description: Raw amount as decimal string (no floating point)
-          example: "1250000000000000000000"
+          description: Amount in human token units as a decimal string (ETH and WETH to 6 decimals)
+          example: "115747.8001"
         amount_usd:
           type: string
           description: USD value at snapshot time (decimal string)
@@ -547,7 +552,7 @@ components:
             $ref: '#/components/schemas/LpSuggestion'
         excluded:
           type: array
-          description: Tracked positions deliberately left out, with the reason (2.2.0)
+          description: Tracked positions deliberately left out, with the reason (2.2.0). Since 2.3.0 a position with an ETH or WETH leg is always excluded (wallet ETH is gas, not investable capital) and its share goes to the eligible positions.
           items:
             type: object
             properties:
@@ -610,13 +615,18 @@ components:
       properties:
         total_portfolio_usd:
           type: string
-          description: Total portfolio value in USD
+          description: |
+            Total portfolio value in USD across every pillar: wallet NOCK + wallet USDC +
+            wallet ETH/WETH gas + tracked LP. Includes wallet gas since 2.3.0 (a one-time
+            step of the gas value when it started counting). Equals total_native_usd +
+            total_stable_usd + total_eth_usd. Cash and LP targets, deviation weights, the
+            high-water mark and history all use this one total.
         total_native_usd:
           type: string
-          description: Value of native tokens (NOCK, ETH, etc.)
+          description: NOCK only, wallet plus LP, in USD. ETH is its own pillar (total_eth_usd).
         total_stable_usd:
           type: string
-          description: Value of stablecoins (USDC, USDT, etc.)
+          description: USDC, wallet plus LP, in USD
         total_fees_accrued_usd:
           type: string
           description: All unclaimed fees across contracts
@@ -628,11 +638,11 @@ components:
           description: Net value after gas costs
         high_water_mark_usd:
           type: string
-          description: All-time high portfolio value
+          description: Highest total_portfolio_usd stored since this database began (or the current total if higher)
         high_water_mark_date:
           type: string
           format: date-time
-          description: When the high-water mark was set
+          description: When the high-water mark was set, the earliest stored snapshot at the peak (or now when the current total sets a new mark). Before 2.3.0 this was always the snapshot time.
         total_nock_amount:
           type: string
           description: Total NOCK token units aggregated across all tranches
@@ -669,6 +679,26 @@ components:
           type: string
           nullable: true
           description: Latest Wilder RSI(14) over daily NOCK closes (the industry-standard "daily RSI"); drives `regime` and the Overextension Cooldown
+        eth_price_usd:
+          type: string
+          nullable: true
+          description: Live ETH/USD from the configured WETH/USDC pool (guarded against a pool with no in-range liquidity), used to value gas and LP WETH (2.3.0). Null when unpriced or absent from an older snapshot.
+        wallet_gas_eth:
+          type: string
+          nullable: true
+          description: Wallet ETH + WETH in ETH, the gas pillar (2.3.0). Counted in total_portfolio_usd; not cash, not deployable, no target. Null when not measured; never a stand-in 0.
+        wallet_gas_usd:
+          type: string
+          nullable: true
+          description: wallet_gas_eth valued at eth_price_usd (2.3.0)
+        total_eth_amount:
+          type: string
+          nullable: true
+          description: The ETH pillar in ETH, wallet gas plus every ETH/WETH leg of tracked LP (2.3.0)
+        total_eth_usd:
+          type: string
+          nullable: true
+          description: The ETH pillar in USD (2.3.0). total_native_usd + total_stable_usd + total_eth_usd = total_portfolio_usd.
 
     AssetAggregationSeries:
       type: object
@@ -722,7 +752,7 @@ components:
           type: array
           items:
             type: string
-          description: Total portfolio USD at each point
+          description: total_portfolio_usd at each point (includes wallet gas from 2.3.0)
         token_price_series:
           type: array
           items:
@@ -787,10 +817,10 @@ components:
           example: "Aerodrome NOCK/USDC"
         target_weight_bps:
           type: integer
-          description: Target allocation in basis points (sum = 10000)
+          description: Target allocation in basis points (targets sum = 10000). The "Gas (wallet ETH+WETH)" row (2.3.0) has no target (0, status no_target).
         actual_weight_bps:
           type: integer
-          description: Actual allocation in basis points
+          description: Actual allocation in basis points of total_portfolio_usd (gas included); 0 when the total is 0
         deviation_bps:
           type: integer
           description: Actual - target (positive = over-funded)
@@ -933,8 +963,11 @@ components:
           description: claimable_usd / gas_break_even_usd
         recommended_action:
           type: string
-          enum: [claim_now, wait, not_worthwhile]
-          description: Gas-economic recommendation
+          enum: [claim_now, claim_recommended, accumulate, not_claimable]
+          description: >
+            Gas-economic recommendation. not_claimable marks an Aero pool whose
+            claimFees() reverts: its fees are not LP-claimable and AERO rewards are
+            not read (#93); claimable_usd is then 0.00 and is not an amount earned.
 
     # ============================================================
     # INPUT TYPES FOR WASM FUNCTIONS
