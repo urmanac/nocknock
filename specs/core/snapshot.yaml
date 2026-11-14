@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: NockNock Snapshot Data Model
-  version: 2.0.0
+  version: 2.1.0
   description: Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
   license:
     name: ISC
@@ -416,6 +416,14 @@ components:
           $ref: '#/components/schemas/VelocityGasSandbox'
         sovereign_ledger:
           $ref: '#/components/schemas/SovereignLedger'
+        accumulation_plan:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/AccumulationPlanStatus'
+          nullable: true
+          description: Dollar-cost-averaging plan status (2.1.0); null when no plan is configured
+        lp_rebuild:
+          $ref: '#/components/schemas/LpRebuild'
 
     SovereignLedger:
       type: object
@@ -441,6 +449,85 @@ components:
           type: string
           format: date-time
           nullable: true
+
+    AccumulationPlanStatus:
+      type: object
+      description: |
+        Progress of the operator's dollar-cost-averaging plan (2.1.0). Derived only from
+        the `accumulation_plan` config and receipt-verified rows in the accumulation
+        ledger — never from assumed fills. The plan paces buys; it does not execute them.
+      required: [plan_id, status, venue, tranche_index, tranches_total, tranche_usdc, nominal_tranche_usdc, budget_usdc, spent_usdc, remaining_usdc, acquired_nock, fills]
+      properties:
+        plan_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, tranche_due, waiting, paused, blocked, complete, invalid]
+        venue:
+          type: string
+          description: Where the operator executes (label)
+        tranche_index:
+          type: integer
+          description: 1-based index of the next tranche (verified fills + 1)
+        tranches_total:
+          type: integer
+        tranche_usdc:
+          type: string
+          description: Amount advised now, after guardrails ("0.00" unless status is tranche_due)
+        nominal_tranche_usdc:
+          type: string
+          description: budget / tranches, before guardrails
+        next_due_at:
+          type: string
+          format: date-time
+          nullable: true
+        budget_usdc:
+          type: string
+        spent_usdc:
+          type: string
+        remaining_usdc:
+          type: string
+        acquired_nock:
+          type: string
+        fills:
+          type: integer
+          description: Number of receipt-verified buys
+        last_fill_at:
+          type: string
+          format: date-time
+          nullable: true
+        avg_price_usd:
+          type: string
+          nullable: true
+          description: Total USDC spent / total NOCK received; null before the first fill
+        lump_sum_nock:
+          type: string
+          nullable: true
+          description: NOCK the whole budget would have bought at the first fill's price; null before the first fill
+        binding_constraint:
+          type: string
+          nullable: true
+          description: Reason when paused/blocked/invalid, or the guardrail that shrank a due tranche
+
+    LpRebuild:
+      type: object
+      description: |
+        Standing bias toward re-establishing LP ranges (2.1.0). Moving NOCK and USDC the
+        wallet already holds into positions is a reposition, not a purchase:
+        total_stable_usd (wallet USDC + USDC inside positions) does not change.
+      properties:
+        status:
+          type: string
+          enum: [under_target, on_target, over_target]
+        target_usd:
+          type: string
+        actual_usd:
+          type: string
+        gap_usd:
+          type: string
+          description: target - actual, floored at zero
+        target_weight_bps:
+          type: integer
 
     GlobalStatus:
       type: object

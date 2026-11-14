@@ -1,5 +1,6 @@
 import React from 'react';
 import { LiteCockpit, WalletConnectBadge } from './components/LiteCockpit';
+import { AccumulationPlanPanel } from './components/AccumulationPlanPanel';
 import { createRoot } from 'react-dom/client';
 import {
   AreaChart,
@@ -681,6 +682,15 @@ function Dashboard() {
               </div>
             );
           })()}
+        </CanvasPanel>
+
+        {/* 5a. Accumulation Plan — DCA pacing + standing LP-rebuild bias (v0.5.0) */}
+        <CanvasPanel title="Accumulation Plan (Dollar-Cost-Averaged NOCK Buys)">
+          <AccumulationPlanPanel
+            plan={metrics?.accumulation_plan}
+            lpRebuild={metrics?.lp_rebuild}
+            onRecorded={refetch}
+          />
         </CanvasPanel>
 
         {/* 5b. Sovereign 60/40 Ledger — dual dials + live P/L vs high-water mark */}

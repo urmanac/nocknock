@@ -106,6 +106,45 @@ fn default_network() -> String {
     "base".to_string()
 }
 
+/// Dollar-cost-averaging plan for NOCK accumulation (issue #79). Optional: without
+/// this section the advice engine behaves as before. The plan only PACES buys — the
+/// operator executes each one and records its transaction hash; nothing here signs
+/// or sends a transaction.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct AccumulationPlanConfig {
+    /// Operator-chosen label; keys the accumulation ledger.
+    pub id: String,
+    /// Total USDC to deploy over the whole plan.
+    pub budget_usdc: f64,
+    /// Number of equal tranches the budget is split into.
+    pub tranches: u32,
+    /// Minimum spacing between buys.
+    pub interval_hours: f64,
+    /// First tranche is not due before this instant (default: immediately).
+    #[serde(default)]
+    pub starts_at: Option<DateTime<Utc>>,
+    /// Where the operator executes (label only in Phase 1).
+    #[serde(default = "default_plan_venue")]
+    pub venue: String,
+    /// Optional ceiling: tranches pause while spot is above this price.
+    #[serde(default)]
+    pub max_price_usd: Option<f64>,
+    /// Pause while daily RSI(14) >= 70 (default true).
+    #[serde(default = "default_true")]
+    pub pause_when_overextended: bool,
+    /// Never advise spending liquid USDC below `target_weights_bps.cash` (default true).
+    #[serde(default = "default_true")]
+    pub respect_cash_target: bool,
+}
+
+fn default_plan_venue() -> String {
+    "Aerodrome".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
 fn default_eth_price_pool() -> Option<String> {
     Some(DEFAULT_ETH_PRICE_POOL.to_string())
 }
@@ -143,6 +182,9 @@ struct AppConfig {
     mcp_bearer_token: Option<String>,
     #[serde(default)]
     operator_profile: OperatorProfile,
+    /// Optional dollar-cost-averaging plan (issue #79).
+    #[serde(default)]
+    accumulation_plan: Option<AccumulationPlanConfig>,
     #[serde(default)]
     notifications: NotificationConfig,
     #[serde(default)]
@@ -432,6 +474,384 @@ struct DerivedMetrics {
     velocity_gas_sandbox: VelocityGasSandbox,
     #[serde(default)]
     sovereign_ledger: SovereignLedger,
+    /// Dollar-cost-averaging plan status (snapshot 2.1.0); null when no plan is configured.
+    #[serde(default)]
+    accumulation_plan: Option<AccumulationPlanStatus>,
+    /// Standing LP-rebuild bias (snapshot 2.1.0).
+    #[serde(default)]
+    lp_rebuild: LpRebuild,
+}
+
+/// Plan progress as emitted in snapshots. Everything here derives from the plan
+/// config plus receipt-verified rows in `accumulation_events` (zero-mock).
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct AccumulationPlanStatus {
+    plan_id: String,
+    /// pending | tranche_due | waiting | paused | blocked | complete | invalid
+    status: String,
+    venue: String,
+    /// 1-based index of the NEXT tranche (verified fills + 1).
+    tranche_index: u32,
+    tranches_total: u32,
+    /// Amount advised for the next tranche after all guardrails ("0.00" unless due).
+    tranche_usdc: String,
+    /// budget / tranches, before guardrails.
+    nominal_tranche_usdc: String,
+    next_due_at: Option<String>,
+    budget_usdc: String,
+    spent_usdc: String,
+    remaining_usdc: String,
+    acquired_nock: String,
+    fills: i64,
+    last_fill_at: Option<String>,
+    /// Σ USDC spent / Σ NOCK received across verified fills; null before the first fill.
+    avg_price_usd: Option<String>,
+    /// NOCK the whole budget would have bought at the first fill's price — the
+    /// "bought it all on day one" counterfactual; null before the first fill.
+    lump_sum_nock: Option<String>,
+    /// Plain-words reason when paused / blocked / invalid, or the limiting guardrail
+    /// when a due tranche was sized below nominal.
+    binding_constraint: Option<String>,
+}
+
+/// Standing bias toward re-establishing LP ranges. Moving NOCK and USDC the wallet
+/// already holds into positions is a reposition, not a purchase: the stable total
+/// (`total_stable_usd` = wallet USDC + USDC inside positions) does not change.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct LpRebuild {
+    /// under_target | on_target | over_target
+    status: String,
+    target_usd: String,
+    actual_usd: String,
+    /// target − actual, floored at zero.
+    gap_usd: String,
+    target_weight_bps: i32,
+}
+
+/// Aggregate of receipt-verified fills for one plan id.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+struct PlanFills {
+    count: i64,
+    spent_usdc: f64,
+    acquired_nock: f64,
+    last_at: Option<DateTime<Utc>>,
+    /// Effective price of the earliest fill (USDC per NOCK).
+    first_price: Option<f64>,
+}
+
+/// Live inputs the plan must respect. All in USD except `spot_price` (USD per NOCK).
+#[derive(Debug, Default, Clone, Copy)]
+struct PlanGuards {
+    overextended: bool,
+    spot_price: f64,
+    /// Liquid USDC in the wallet (USDC inside LP positions cannot be spent).
+    wallet_usdc: f64,
+    tax_reserve_usd: f64,
+    cash_target_usd: f64,
+}
+
+/// Everything `compute_derived_metrics` needs about the plan for one cycle.
+#[derive(Debug, Clone)]
+struct PlanContext {
+    cfg: Option<AccumulationPlanConfig>,
+    fills: PlanFills,
+    /// True when the accumulation ledger could not be read this cycle. The plan then
+    /// reports `blocked` — never "zero fills", which would re-advise a buy already made.
+    ledger_unavailable: bool,
+    now: DateTime<Utc>,
+}
+
+impl PlanContext {
+    fn none() -> Self {
+        Self { cfg: None, fills: PlanFills::default(), ledger_unavailable: false, now: Utc::now() }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum PlanDirective {
+    Invalid { reason: String },
+    Pending { starts_at: DateTime<Utc> },
+    TrancheDue { usdc: f64, limited_by: Option<String> },
+    Waiting { next_due_at: DateTime<Utc> },
+    Paused { reason: String },
+    Blocked { reason: String },
+    Complete,
+}
+
+/// Below this a tranche is not worth advising (and rounding dust never keeps a plan open).
+const PLAN_DUST_USDC: f64 = 1.0;
+
+/// Pure plan decision: is a tranche due right now, and for how much? The clock is an
+/// argument so this is deterministic and unit-testable.
+///
+/// Rules: progress counts verified fills only (a failed or unsigned transaction can
+/// never advance the plan); missed windows do NOT stack — after any absence exactly
+/// one tranche is due and the plan simply ends later; a pause defers without
+/// consuming a tranche; guardrails can shrink a tranche but never enlarge it.
+fn plan_directive(
+    cfg: &AccumulationPlanConfig,
+    fills: &PlanFills,
+    guards: &PlanGuards,
+    ledger_unavailable: bool,
+    now: DateTime<Utc>,
+) -> PlanDirective {
+    if !(cfg.budget_usdc > 0.0) || cfg.tranches == 0 || !(cfg.interval_hours >= 0.0) || cfg.id.trim().is_empty() {
+        return PlanDirective::Invalid {
+            reason: "accumulation_plan needs a non-empty id, budget_usdc > 0, tranches > 0 and interval_hours >= 0".to_string(),
+        };
+    }
+    if ledger_unavailable {
+        return PlanDirective::Blocked {
+            reason: "the accumulation ledger could not be read this cycle, so plan progress is unknown".to_string(),
+        };
+    }
+    let remaining = cfg.budget_usdc - fills.spent_usdc;
+    if remaining < PLAN_DUST_USDC {
+        return PlanDirective::Complete;
+    }
+    if let Some(starts_at) = cfg.starts_at {
+        if now < starts_at {
+            return PlanDirective::Pending { starts_at };
+        }
+    }
+    if let Some(last) = fills.last_at {
+        let next_due_at = last + chrono::Duration::seconds((cfg.interval_hours * 3600.0).round() as i64);
+        if now < next_due_at {
+            return PlanDirective::Waiting { next_due_at };
+        }
+    }
+    if cfg.pause_when_overextended && guards.overextended {
+        return PlanDirective::Paused {
+            reason: "daily RSI(14) is at or above 70 (overextended); the tranche is deferred, not skipped".to_string(),
+        };
+    }
+    if let Some(max_price) = cfg.max_price_usd {
+        if guards.spot_price > max_price {
+            return PlanDirective::Paused {
+                reason: format!(
+                    "spot ${:.5} is above the plan ceiling ${:.5}; the tranche is deferred, not skipped",
+                    guards.spot_price, max_price
+                ),
+            };
+        }
+    }
+
+    let nominal = cfg.budget_usdc / cfg.tranches as f64;
+    // Candidate limits, smallest wins. The label names the guardrail in plain words.
+    let mut usdc = nominal;
+    let mut limited_by: Option<String> = None;
+    let mut cap = |limit: f64, label: String| {
+        if limit < usdc - 0.005 {
+            usdc = limit;
+            limited_by = Some(label);
+        }
+    };
+    cap(remaining, format!("only ${:.2} of the plan budget remains", remaining));
+    cap(
+        guards.wallet_usdc - guards.tax_reserve_usd,
+        format!(
+            "wallet USDC ${:.2} less the ${:.2} virtual tax reserve",
+            guards.wallet_usdc, guards.tax_reserve_usd
+        ),
+    );
+    if cfg.respect_cash_target {
+        cap(
+            guards.wallet_usdc - guards.cash_target_usd,
+            format!(
+                "wallet USDC ${:.2} less the ${:.2} cash target",
+                guards.wallet_usdc, guards.cash_target_usd
+            ),
+        );
+    }
+    if usdc < PLAN_DUST_USDC {
+        return PlanDirective::Blocked {
+            reason: format!(
+                "nothing spendable: {}",
+                limited_by.unwrap_or_else(|| "tranche size is below $1".to_string())
+            ),
+        };
+    }
+    PlanDirective::TrancheDue { usdc, limited_by }
+}
+
+/// Snapshot view of a plan: config + verified fills + this cycle's directive.
+fn build_plan_status(
+    cfg: &AccumulationPlanConfig,
+    fills: &PlanFills,
+    directive: &PlanDirective,
+) -> AccumulationPlanStatus {
+    let (status, tranche_usdc, next_due_at, binding_constraint) = match directive {
+        PlanDirective::Invalid { reason } => ("invalid", 0.0, None, Some(reason.clone())),
+        PlanDirective::Pending { starts_at } => ("pending", 0.0, Some(starts_at.to_rfc3339()), None),
+        PlanDirective::TrancheDue { usdc, limited_by } => ("tranche_due", *usdc, None, limited_by.clone()),
+        PlanDirective::Waiting { next_due_at } => ("waiting", 0.0, Some(next_due_at.to_rfc3339()), None),
+        PlanDirective::Paused { reason } => ("paused", 0.0, None, Some(reason.clone())),
+        PlanDirective::Blocked { reason } => ("blocked", 0.0, None, Some(reason.clone())),
+        PlanDirective::Complete => ("complete", 0.0, None, None),
+    };
+    let fills_done = fills.count.max(0) as u32;
+    let complete = matches!(directive, PlanDirective::Complete);
+    let tranche_index = if complete { fills_done } else { fills_done + 1 };
+    let avg_price = if fills.acquired_nock > 0.0 {
+        Some(fills.spent_usdc / fills.acquired_nock)
+    } else {
+        None
+    };
+    let nominal = if cfg.tranches > 0 { cfg.budget_usdc / cfg.tranches as f64 } else { 0.0 };
+    AccumulationPlanStatus {
+        plan_id: cfg.id.clone(),
+        status: status.to_string(),
+        venue: cfg.venue.clone(),
+        tranche_index,
+        // A plan whose tranches were shrunk by guardrails can need more buys than planned.
+        tranches_total: cfg.tranches.max(tranche_index),
+        tranche_usdc: format!("{:.2}", tranche_usdc),
+        nominal_tranche_usdc: format!("{:.2}", nominal),
+        next_due_at,
+        budget_usdc: format!("{:.2}", cfg.budget_usdc),
+        spent_usdc: format!("{:.2}", fills.spent_usdc),
+        remaining_usdc: format!("{:.2}", (cfg.budget_usdc - fills.spent_usdc).max(0.0)),
+        acquired_nock: format!("{:.4}", fills.acquired_nock),
+        fills: fills.count,
+        last_fill_at: fills.last_at.map(|t| t.to_rfc3339()),
+        avg_price_usd: avg_price.map(|p| format!("{:.6}", p)),
+        lump_sum_nock: fills
+            .first_price
+            .filter(|p| *p > 0.0)
+            .map(|p| format!("{:.4}", cfg.budget_usdc / p)),
+        binding_constraint,
+    }
+}
+
+/// Advice text for an active (not complete) plan.
+fn plan_advice(ps: &AccumulationPlanStatus, spot_price: f64) -> (String, String) {
+    let progress = format!(
+        "Plan \"{}\": ${} of ${} deployed over {} verified buy(s){}.",
+        ps.plan_id,
+        ps.spent_usdc,
+        ps.budget_usdc,
+        ps.fills,
+        ps.avg_price_usd
+            .as_ref()
+            .map(|p| format!(", average cost ${}", p))
+            .unwrap_or_default()
+    );
+    let n = format!("{} of {}", ps.tranche_index, ps.tranches_total);
+    match ps.status.as_str() {
+        "tranche_due" => (
+            format!("DCA TRANCHE DUE ({n})"),
+            format!(
+                "Buy ${} of NOCK on {} (spot ${:.5}).{} {} After buying, record the transaction hash so the plan advances.",
+                ps.tranche_usdc,
+                ps.venue,
+                spot_price,
+                ps.binding_constraint
+                    .as_ref()
+                    .map(|c| format!(" Sized below the nominal ${} tranche: {}.", ps.nominal_tranche_usdc, c))
+                    .unwrap_or_default(),
+                progress
+            ),
+        ),
+        "waiting" => (
+            format!("DCA ON SCHEDULE ({n} next)"),
+            format!(
+                "Nothing to buy yet: the next ${} tranche is due at {}. {}",
+                ps.nominal_tranche_usdc,
+                ps.next_due_at.clone().unwrap_or_default(),
+                progress
+            ),
+        ),
+        "pending" => (
+            "DCA PLAN PENDING".to_string(),
+            format!(
+                "The plan starts at {}. {}",
+                ps.next_due_at.clone().unwrap_or_default(),
+                progress
+            ),
+        ),
+        "paused" => (
+            format!("DCA PAUSED ({n})"),
+            format!(
+                "Tranche held back: {}. {}",
+                ps.binding_constraint.clone().unwrap_or_default(),
+                progress
+            ),
+        ),
+        "blocked" => (
+            format!("DCA BLOCKED ({n})"),
+            format!(
+                "Tranche cannot be funded: {}. {}",
+                ps.binding_constraint.clone().unwrap_or_default(),
+                progress
+            ),
+        ),
+        _ => (
+            "DCA PLAN INVALID".to_string(),
+            format!(
+                "The configured plan cannot run: {}.",
+                ps.binding_constraint.clone().unwrap_or_default()
+            ),
+        ),
+    }
+}
+
+/// LP weight vs target, with the same tolerance band as the deviation matrix.
+fn lp_rebuild_status(lp_usd: f64, total_portfolio_usd: f64, target_weight_bps: i32) -> LpRebuild {
+    let target_usd = total_portfolio_usd * (target_weight_bps as f64 / 10000.0);
+    let weight_bps = if total_portfolio_usd > 0.0 {
+        ((lp_usd / total_portfolio_usd) * 10000.0) as i32
+    } else {
+        0
+    };
+    let dev = weight_bps - target_weight_bps;
+    let tol = (target_weight_bps as f64 * 0.20).max(100.0) as i32;
+    let status = if total_portfolio_usd <= 0.0 || target_weight_bps <= 0 {
+        "on_target"
+    } else if dev < -tol {
+        "under_target"
+    } else if dev > tol {
+        "over_target"
+    } else {
+        "on_target"
+    };
+    LpRebuild {
+        status: status.to_string(),
+        target_usd: format!("{:.2}", target_usd),
+        actual_usd: format!("{:.2}", lp_usd),
+        gap_usd: format!("{:.2}", (target_usd - lp_usd).max(0.0)),
+        target_weight_bps,
+    }
+}
+
+/// Standing bias (operator order, 2026-11-14): rebuilding LP tranches leaves the net
+/// cash position unchanged, so it is always worth doing. When LP is under target the
+/// rebuild becomes the primary directive whenever the engine would otherwise say
+/// "nothing to do", and is appended to every other directive. It never outranks a due
+/// tranche or a safety directive, so those transitions still notify.
+fn apply_lp_rebuild_bias(action: String, details: String, lp: &LpRebuild) -> (String, String) {
+    if lp.status != "under_target" {
+        return (action, details);
+    }
+    let sentence = format!(
+        "LP holds ${} against a ${} target ({:.0}% of portfolio), ${} short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves.",
+        lp.actual_usd,
+        lp.target_usd,
+        lp.target_weight_bps as f64 / 100.0,
+        lp.gap_usd
+    );
+    let idle = action.starts_with("HOLD & ACCRETE")
+        || action.starts_with("DCA ON SCHEDULE")
+        || action.starts_with("DCA PLAN PENDING")
+        || action.starts_with("DCA PAUSED")
+        || action.starts_with("DCA BLOCKED");
+    if idle {
+        (
+            "REBUILD LP TRANCHES (No Net Cash Change)".to_string(),
+            format!("{} Meanwhile: {} — {}", sentence, action, details),
+        )
+    } else {
+        (action, format!("{} Standing bias: {}", details, sentence))
+    }
 }
 
 /// Virtual 60/40 sub-ledger over receipt-verified harvests (no on-chain address change).
@@ -736,6 +1156,14 @@ async fn main() -> Result<()> {
         .route(
             "/v1/execute/record-harvest",
             axum::routing::post(record_harvest_handler),
+        )
+        .route(
+            "/v1/execute/record-accumulation",
+            axum::routing::post(record_accumulation_handler),
+        )
+        .route(
+            "/v1/accumulation/events",
+            axum::routing::get(accumulation_events_handler),
         )
         .route(
             "/v1/tax/export",
@@ -1130,6 +1558,46 @@ pub fn format_shot_advice_text(data: &serde_json::Value) -> String {
     )
 }
 
+pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
+    let s = |v: Option<&serde_json::Value>, k: &str| -> String {
+        v.and_then(|p| p.get(k))
+            .and_then(|x| x.as_str())
+            .map(|x| x.to_string())
+            .unwrap_or_else(|| "n/a".to_string())
+    };
+    let lp = data.pointer("/derived_metrics/lp_rebuild");
+    let lp_line = format!(
+        "• LP rebuild bias: {} (holds ${} of a ${} target, ${} short). Rebuilding ranges is a reposition: no net cash change.",
+        s(lp, "status"), s(lp, "actual_usd"), s(lp, "target_usd"), s(lp, "gap_usd")
+    );
+    let plan = data.pointer("/derived_metrics/accumulation_plan").filter(|p| !p.is_null());
+    let Some(_) = plan else {
+        return format!(
+            "🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n{lp_line}"
+        );
+    };
+    let n = |k: &str| plan.and_then(|p| p.get(k)).and_then(|x| x.as_u64()).unwrap_or(0);
+    let fills = plan.and_then(|p| p.get("fills")).and_then(|x| x.as_i64()).unwrap_or(0);
+    format!(
+        "🪜 Accumulation Plan \"{}\" ({})\n====================\n\
+         • Status: {}\n\
+         • Next tranche: {} of {} — ${} due now (nominal ${})\n\
+         • Next due at: {}\n\
+         • Progress: ${} of ${} spent over {} verified buy(s); ${} remaining\n\
+         • Acquired: {} NOCK at average ${}\n\
+         • Lump-sum counterfactual (whole budget at first fill price): {} NOCK\n\
+         • Constraint: {}\n\
+         {lp_line}",
+        s(plan, "plan_id"), s(plan, "venue"), s(plan, "status"),
+        n("tranche_index"), n("tranches_total"), s(plan, "tranche_usdc"), s(plan, "nominal_tranche_usdc"),
+        s(plan, "next_due_at"),
+        s(plan, "spent_usdc"), s(plan, "budget_usdc"), fills, s(plan, "remaining_usdc"),
+        s(plan, "acquired_nock"), s(plan, "avg_price_usd"),
+        s(plan, "lump_sum_nock"),
+        s(plan, "binding_constraint"),
+    )
+}
+
 pub fn format_claim_simulation_text(data: &serde_json::Value) -> String {
     let fees = data.get("contract_fees").and_then(|f| f.as_array());
     let mut details = String::new();
@@ -1264,6 +1732,15 @@ async fn mcp_http_handler(
                             "properties": {},
                             "required": []
                         }
+                    },
+                    {
+                        "name": "get_accumulation_plan",
+                        "description": "Returns the dollar-cost-averaging plan: whether a NOCK tranche is due, its size, progress from receipt-verified buys, average cost, and the LP-rebuild bias.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {},
+                            "required": []
+                        }
                     }
                 ]
             }
@@ -1282,6 +1759,7 @@ async fn mcp_http_handler(
                     "get_portfolio_state" => format_portfolio_state_text(&data_val),
                     "get_shot_advice" => format_shot_advice_text(&data_val),
                     "simulate_claim_fees" => format_claim_simulation_text(&data_val),
+                    "get_accumulation_plan" => format_accumulation_plan_text(&data_val),
                     _ => format!("Unknown tool: {tool_name}"),
                 }
             } else {
@@ -1485,8 +1963,9 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
         overextended: rsi_1d.map_or(false, |r| r >= RSI_OVERBOUGHT),
     };
 
-    let derived_metrics = compute_derived_metrics(&raw_data, prev_hwm, &profile, structural_channels,
-        &counterfactual_history, &ledger_agg, &regime);
+    let plan_ctx = load_plan_context(state).await;
+    let derived_metrics = compute_derived_metrics_with_plan(&raw_data, prev_hwm, &profile, structural_channels,
+        &counterfactual_history, &ledger_agg, &regime, &plan_ctx);
     // Capture directive strings before the metrics move into the snapshot envelope
     let next_directive_action = derived_metrics.global_status.shot_advice_action.clone();
     let next_directive_details = derived_metrics.global_status.shot_advice_details.clone();
@@ -1528,7 +2007,7 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
         meta: SnapshotMeta {
             generated_at: now,
             state_hash: state_hash.clone(),
-            version: "2.0.0".to_string(),
+            version: "2.1.0".to_string(),
             snapshot_id: Uuid::new_v4(),
         },
         data: snapshot_data,
@@ -1596,6 +2075,46 @@ async fn post_rpc_with_retry(
 
 /// Fire-and-forget directive-transition notifications (issue #28). Delivery
 /// failures are logged and never fatal to the ingestion cycle.
+/// Load the configured accumulation plan together with its receipt-verified fills.
+/// A ledger read failure is surfaced (plan reports `blocked`) rather than treated as
+/// "no buys yet", which would re-advise a tranche that was already bought.
+async fn load_plan_context(state: &Arc<AppState>) -> PlanContext {
+    let now = Utc::now();
+    let Some(cfg) = state.config.accumulation_plan.clone() else {
+        return PlanContext { cfg: None, fills: PlanFills::default(), ledger_unavailable: false, now };
+    };
+    let row = sqlx::query(
+        "SELECT COUNT(*) AS fills, \
+                COALESCE(SUM(usdc_spent::numeric)::float8, 0) AS spent, \
+                COALESCE(SUM(nock_received::numeric)::float8, 0) AS acquired, \
+                MAX(confirmed_at) AS last_at, \
+                (SELECT effective_price_usd::float8 FROM accumulation_events \
+                  WHERE plan_id = $1 ORDER BY confirmed_at ASC, id ASC LIMIT 1) AS first_price \
+         FROM accumulation_events WHERE plan_id = $1",
+    )
+    .bind(&cfg.id)
+    .fetch_one(&state.db)
+    .await;
+    match row {
+        Ok(r) => PlanContext {
+            fills: PlanFills {
+                count: r.try_get::<i64, _>("fills").unwrap_or(0),
+                spent_usdc: r.try_get::<f64, _>("spent").unwrap_or(0.0),
+                acquired_nock: r.try_get::<f64, _>("acquired").unwrap_or(0.0),
+                last_at: r.try_get::<Option<DateTime<Utc>>, _>("last_at").ok().flatten(),
+                first_price: r.try_get::<Option<f64>, _>("first_price").ok().flatten(),
+            },
+            cfg: Some(cfg),
+            ledger_unavailable: false,
+            now,
+        },
+        Err(e) => {
+            tracing::error!("Accumulation ledger query failed: {e}");
+            PlanContext { cfg: Some(cfg), fills: PlanFills::default(), ledger_unavailable: true, now }
+        }
+    }
+}
+
 async fn dispatch_notifications(state: &Arc<AppState>, text: &str) {
     let cfg = &state.config.notifications;
     if let (Some(token), Some(chat)) = (&cfg.telegram_bot_token, &cfg.telegram_chat_id) {
@@ -2629,6 +3148,241 @@ fn parse_harvest_transfers(receipt: &serde_json::Value, wallet: &str) -> Vec<Par
         });
     }
     out
+}
+
+/// Net effect of a transaction on the sovereign wallet for a USDC→NOCK purchase:
+/// `(usdc_spent_raw, nock_received_raw)`. Sums every USDC/NOCK Transfer log touching
+/// the wallet (multi-hop routes and refunds net out) and returns `None` unless the
+/// wallet ended with strictly less USDC and strictly more NOCK. Pure — unit-testable.
+fn parse_accumulation_swap(receipt: &serde_json::Value, wallet: &str) -> Option<(u128, u128)> {
+    let wallet_padded = format!(
+        "000000000000000000000000{}",
+        wallet.trim_start_matches("0x").to_lowercase()
+    );
+    let logs = receipt.get("logs").and_then(|l| l.as_array())?;
+    let (mut usdc_out, mut usdc_in, mut nock_out, mut nock_in) = (0u128, 0u128, 0u128, 0u128);
+    for log in logs {
+        let Some(topics) = log.get("topics").and_then(|t| t.as_array()) else { continue };
+        if topics.len() < 3 {
+            continue;
+        }
+        let (Some(t0), Some(from_word), Some(to_word)) =
+            (topics[0].as_str(), topics[1].as_str(), topics[2].as_str())
+        else {
+            continue;
+        };
+        if !t0.eq_ignore_ascii_case(TRANSFER_EVENT_TOPIC) {
+            continue;
+        }
+        let Some(token) = log.get("address").and_then(|a| a.as_str()) else { continue };
+        let is_usdc = token.eq_ignore_ascii_case(USDC_BASE);
+        let is_nock = token.eq_ignore_ascii_case(NOCK_BASE);
+        if !is_usdc && !is_nock {
+            continue;
+        }
+        let Some(amount) = log
+            .get("data")
+            .and_then(|d| d.as_str())
+            .and_then(|d| u128::from_str_radix(d.trim_start_matches("0x"), 16).ok())
+        else {
+            continue;
+        };
+        let from_wallet = from_word.trim_start_matches("0x").eq_ignore_ascii_case(&wallet_padded);
+        let to_wallet = to_word.trim_start_matches("0x").eq_ignore_ascii_case(&wallet_padded);
+        match (is_usdc, from_wallet, to_wallet) {
+            (true, true, false) => usdc_out = usdc_out.saturating_add(amount),
+            (true, false, true) => usdc_in = usdc_in.saturating_add(amount),
+            (false, true, false) => nock_out = nock_out.saturating_add(amount),
+            (false, false, true) => nock_in = nock_in.saturating_add(amount),
+            _ => {}
+        }
+    }
+    if usdc_out > usdc_in && nock_in > nock_out {
+        Some((usdc_out - usdc_in, nock_in - nock_out))
+    } else {
+        None
+    }
+}
+
+#[derive(Deserialize)]
+struct RecordAccumulationRequest {
+    tx_hash: String,
+}
+
+/// POST /v1/execute/record-accumulation — attach a confirmed USDC→NOCK purchase to
+/// the configured accumulation plan (issue #79). The swap may have been made anywhere
+/// (the Aerodrome UI, a wallet's swap screen): acceptance depends only on the on-chain
+/// receipt showing USDC leaving, and NOCK entering, the tracked wallet. Amounts come
+/// from the Transfer logs. Idempotent on tx_hash.
+async fn record_accumulation_handler(
+    Extension(state): Extension<Arc<AppState>>,
+    Json(req): Json<RecordAccumulationRequest>,
+) -> impl IntoResponse {
+    let err = |code: StatusCode, error: &str, detail: &str| {
+        (code, Json(json!({ "error": error, "detail": detail }))).into_response()
+    };
+    let Some(plan) = state.config.accumulation_plan.clone() else {
+        return err(StatusCode::CONFLICT, "NO_PLAN", "No accumulation_plan is configured; nothing to record against");
+    };
+    if !is_valid_tx_hash(&req.tx_hash) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "INVALID_TX_HASH", "tx_hash must be a 32-byte hex string");
+    }
+    let tx_hash = if req.tx_hash.starts_with("0x") {
+        req.tx_hash.to_lowercase()
+    } else {
+        format!("0x{}", req.tx_hash.to_lowercase())
+    };
+    let alchemy_key = state.config.alchemy_api_keys.first().cloned().unwrap_or_default();
+    if alchemy_key.is_empty() || alchemy_key == "YOUR_ALCHEMY_API_KEY" {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "NO_RPC", "No Alchemy RPC key configured; cannot verify receipts");
+    }
+    let alchemy_url = format!("https://base-mainnet.g.alchemy.com/v2/{}", alchemy_key);
+    let Some(wallet) = state.config.tracked_wallets.first().cloned() else {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "NO_TRACKED_WALLET", "No tracked wallet configured; cannot verify receipts");
+    };
+
+    let receipt_payload = json!({
+        "jsonrpc": "2.0", "method": "eth_getTransactionReceipt", "params": [tx_hash], "id": 42
+    });
+    let receipt = match post_rpc_with_retry(&state.http_client, &alchemy_url, &receipt_payload, 2).await {
+        Some(res) => res.get("result").cloned().unwrap_or(serde_json::Value::Null),
+        None => return err(StatusCode::SERVICE_UNAVAILABLE, "RPC_UNAVAILABLE", "Could not query receipt; not recorded"),
+    };
+    if receipt.is_null() {
+        return err(
+            StatusCode::NOT_FOUND,
+            "RECEIPT_NOT_FOUND",
+            "Transaction not found on-chain. If the wallet shows it approved, it may still be pending broadcast; retry once it lands.",
+        );
+    }
+    if receipt.get("status").and_then(|s| s.as_str()) != Some("0x1") {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "TX_REVERTED", "Receipt status is not success; nothing recorded");
+    }
+    let Some((usdc_raw, nock_raw)) = parse_accumulation_swap(&receipt, &wallet) else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "NOT_A_NOCK_PURCHASE",
+            "Receipt does not show USDC leaving and NOCK entering the sovereign wallet",
+        );
+    };
+    let usdc_spent = format_units(usdc_raw, 6);
+    let nock_received = format_units(nock_raw, 16);
+    let (usdc_f, nock_f) = (
+        usdc_spent.parse::<f64>().unwrap_or(0.0),
+        nock_received.parse::<f64>().unwrap_or(0.0),
+    );
+    if !(usdc_f > 0.0 && nock_f > 0.0) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "NOT_A_NOCK_PURCHASE", "Parsed amounts are not positive");
+    }
+    let effective_price = format!("{:.8}", usdc_f / nock_f);
+
+    let block_number: i64 = receipt
+        .get("blockNumber")
+        .and_then(|b| b.as_str())
+        .and_then(|s| i64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(0);
+    // The fill time drives the plan's cadence, so it must be the block time. Unlike
+    // the harvest ledger there is no wall-clock fallback: a wrong time would shift
+    // when the next tranche comes due.
+    let block_payload = json!({
+        "jsonrpc": "2.0", "id": 43, "method": "eth_getBlockByNumber",
+        "params": [format!("0x{block_number:x}"), false]
+    });
+    let confirmed_at: Option<DateTime<Utc>> = if block_number > 0 {
+        post_rpc_with_retry(&state.http_client, &alchemy_url, &block_payload, 2)
+            .await
+            .and_then(|res| res.get("result").cloned())
+            .and_then(|blk| {
+                blk.get("timestamp")
+                    .and_then(|t| t.as_str())
+                    .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+            })
+            .and_then(|ts| Utc.timestamp_opt(ts as i64, 0).single())
+    } else {
+        None
+    };
+    let Some(confirmed_at) = confirmed_at else {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "RPC_UNAVAILABLE", "Could not read the block timestamp; not recorded");
+    };
+
+    let res = sqlx::query(
+        "INSERT INTO accumulation_events \
+            (plan_id, tx_hash, venue, usdc_spent_raw, nock_received_raw, usdc_spent, nock_received, effective_price_usd, block_number, confirmed_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
+         ON CONFLICT (tx_hash) DO NOTHING",
+    )
+    .bind(&plan.id)
+    .bind(&tx_hash)
+    .bind(&plan.venue)
+    .bind(usdc_raw.to_string())
+    .bind(nock_raw.to_string())
+    .bind(&usdc_spent)
+    .bind(&nock_received)
+    .bind(&effective_price)
+    .bind(block_number)
+    .bind(confirmed_at)
+    .execute(&state.db)
+    .await;
+    match res {
+        Ok(r) => Json(json!({
+            "recorded": r.rows_affected() > 0,
+            "duplicate": r.rows_affected() == 0,
+            "plan_id": plan.id,
+            "tx_hash": tx_hash,
+            "usdc_spent": usdc_spent,
+            "nock_received": nock_received,
+            "effective_price_usd": effective_price,
+            "block_number": block_number,
+            "confirmed_at": confirmed_at.to_rfc3339(),
+            "note": "Plan status updates on the next ingestion cycle (POST /v1/ingest to refresh now)."
+        }))
+        .into_response(),
+        Err(e) => {
+            tracing::error!("Failed to insert accumulation event: {e}");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "DB_ERROR", "Ledger insert failed; nothing recorded")
+        }
+    }
+}
+
+/// GET /v1/accumulation/events — receipt-verified fills, oldest first.
+async fn accumulation_events_handler(Extension(state): Extension<Arc<AppState>>) -> impl IntoResponse {
+    let rows = sqlx::query(
+        "SELECT plan_id, tx_hash, venue, usdc_spent, nock_received, effective_price_usd, block_number, confirmed_at \
+         FROM accumulation_events ORDER BY confirmed_at ASC, id ASC",
+    )
+    .fetch_all(&state.db)
+    .await;
+    match rows {
+        Ok(rows) => {
+            let events: Vec<serde_json::Value> = rows
+                .iter()
+                .map(|r| {
+                    json!({
+                        "plan_id": r.try_get::<String, _>("plan_id").unwrap_or_default(),
+                        "tx_hash": r.try_get::<String, _>("tx_hash").unwrap_or_default(),
+                        "venue": r.try_get::<String, _>("venue").unwrap_or_default(),
+                        "usdc_spent": r.try_get::<String, _>("usdc_spent").unwrap_or_default(),
+                        "nock_received": r.try_get::<String, _>("nock_received").unwrap_or_default(),
+                        "effective_price_usd": r.try_get::<String, _>("effective_price_usd").unwrap_or_default(),
+                        "block_number": r.try_get::<i64, _>("block_number").unwrap_or(0),
+                        "confirmed_at": r
+                            .try_get::<DateTime<Utc>, _>("confirmed_at")
+                            .map(|t| t.to_rfc3339())
+                            .unwrap_or_default(),
+                    })
+                })
+                .collect();
+            Json(json!({ "events": events })).into_response()
+        }
+        Err(e) => {
+            tracing::error!("Accumulation events query failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "DB_ERROR", "detail": "Could not read the accumulation ledger" })),
+            )
+                .into_response()
+        }
+    }
 }
 
 fn is_valid_tx_hash(s: &str) -> bool {
@@ -4166,7 +4920,14 @@ fn recommended_claim_action(claimable_usd: f64, gas_break_even_usd: f64) -> &'st
     }
 }
 
+/// Plan-less entry point (unit tests and callers without an accumulation plan).
+#[allow(dead_code)]
 fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_history: &[(DateTime<Utc>, f64, f64)], ledger: &LedgerAggregate, regime: &MarketRegime) -> DerivedMetrics {
+    compute_derived_metrics_with_plan(raw, prev_hwm, profile, structural_channels, counterfactual_history, ledger, regime, &PlanContext::none())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_history: &[(DateTime<Utc>, f64, f64)], ledger: &LedgerAggregate, regime: &MarketRegime, plan: &PlanContext) -> DerivedMetrics {
     // 1. Spot price: live NOCK/USD from the designated price-source position pool
     //    (zero-mock: the cycle fails upstream when the read fails).
     let spot_price = raw.spot_price_nock_usd;
@@ -4252,6 +5013,32 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
     let deployable_usdc = (total_stable_usd - tax_reserve_usd).max(0.0);
     let tax_guardrail_blocked = tax_reserve_usd > 0.0 && total_stable_usd < tax_reserve_usd;
 
+    // Cash target (issue #79): the advised spend never dips liquid USDC below
+    // target_weights_bps.cash. Only wallet USDC is spendable; USDC inside LP is not.
+    let cash_target_usd = total_portfolio_usd * (profile.target_weights_bps.cash as f64 / 10000.0);
+    let deployable_usdc = deployable_usdc.min((wallet_usdc - cash_target_usd).max(0.0));
+
+    // Accumulation plan (issue #79): pure decision over config + verified fills.
+    let plan_status: Option<AccumulationPlanStatus> = plan.cfg.as_ref().map(|cfg| {
+        let guards = PlanGuards {
+            overextended: regime.overextended,
+            spot_price,
+            wallet_usdc,
+            tax_reserve_usd,
+            cash_target_usd,
+        };
+        let directive = plan_directive(cfg, &plan.fills, &guards, plan.ledger_unavailable, plan.now);
+        build_plan_status(cfg, &plan.fills, &directive)
+    });
+    // While a plan exists it owns the buy decision: the lump-sum dip arms are retired
+    // (a completed plan must not be followed by "deploy everything that is left").
+    let plan_configured = plan_status.is_some();
+    let active_plan = plan_status.as_ref().filter(|p| p.status != "complete");
+    // An operator who opts out of the RSI pause keeps buying through an overextension.
+    let plan_overrides_cooldown = active_plan.is_some()
+        && plan.cfg.as_ref().map_or(false, |c| !c.pause_when_overextended);
+    let lp_rebuild = lp_rebuild_status(lp_usd, total_portfolio_usd, profile.target_weights_bps.uniswap_lp);
+
     // Dynamic Shot Advice Engine
     let (advice_action, advice_details) = if total_nock < floor {
         (
@@ -4261,7 +5048,7 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                 total_nock, floor, floor - total_nock
             ),
         )
-    } else if regime.overextended {
+    } else if regime.overextended && !plan_overrides_cooldown {
         (
             "SWEEP TO STABLE / ACCUMULATE DRY POWDER (Overextension Cooldown)".to_string(),
             format!(
@@ -4270,7 +5057,9 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                 regime.rsi_1d.unwrap_or(0.0)
             ),
         )
-    } else if spot_price > 0.0 && spot_price < 0.020 && tax_guardrail_blocked {
+    } else if let Some(ps) = active_plan {
+        plan_advice(ps, spot_price)
+    } else if !plan_configured && spot_price > 0.0 && spot_price < 0.020 && tax_guardrail_blocked {
         (
             "SWEEP TO STABLE / ACCUMULATE DRY POWDER (Tax Guardrail)".to_string(),
             format!(
@@ -4278,12 +5067,12 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
                 spot_price, tax_reserve_usd, total_stable_usd
             ),
         )
-    } else if spot_price > 0.0 && spot_price < 0.020 {
+    } else if !plan_configured && spot_price > 0.0 && spot_price < 0.020 && deployable_usdc >= PLAN_DUST_USDC {
         (
             "DIP REINVESTMENT SHOT (Deploy USDC)".to_string(),
             format!(
-                "Spot price (${:.5}) has breached the $0.020 accumulation boundary! Deploy ${:.2} of saved USDC (${:.2} available; ${:.2} protected as virtual tax reserve) to purchase NOCK at discount and compound buffer toward 120,000.",
-                spot_price, deployable_usdc, total_stable_usd, tax_reserve_usd
+                "Spot price (${:.5}) has breached the $0.020 accumulation boundary! Deploy ${:.2} of saved USDC (${:.2} available; ${:.2} protected as virtual tax reserve, ${:.2} kept as cash target) to purchase NOCK at discount and compound buffer toward 120,000.",
+                spot_price, deployable_usdc, total_stable_usd, tax_reserve_usd, cash_target_usd
             ),
         )
     } else if spot_price > 0.0 && range_top_price.map_or(false, |top| top > 0.0 && spot_price >= top) {
@@ -4318,6 +5107,8 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
             ),
         )
     };
+
+    let (advice_action, advice_details) = apply_lp_rebuild_bias(advice_action, advice_details, &lp_rebuild);
 
     DerivedMetrics {
         global_status: GlobalStatus {
@@ -4458,6 +5249,8 @@ fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profile: &Operat
             harvest_count: ledger.harvest_count,
             last_harvest_at: ledger.last_at.map(|dt| dt.to_rfc3339()),
         },
+        accumulation_plan: plan_status,
+        lp_rebuild,
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: fee_entries
                 .iter()
@@ -4850,13 +5643,368 @@ database_url: "postgresql://localhost/test"
         assert!(metrics.global_status.shot_advice_action.contains("Tax Guardrail"));
         assert!(metrics.global_status.shot_advice_details.contains("Deployment suppressed"));
 
-        // Small harvest ledger: reserve 40 * 0.40 = 16 <= stable stack -> DIP advice fires
+        // Small harvest ledger: reserve 40 * 0.40 = 16 <= stable stack, so the tax
+        // guardrail passes — but $10 of liquid USDC is below the 5% cash target, so
+        // there is still nothing to deploy (issue #79 cash-target rule).
         let small = LedgerAggregate { total_usd: 40.0, harvest_count: 1, last_at: None };
+        let metrics = compute_derived_metrics(
+            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &small, &MarketRegime::default(),
+        );
+        assert!(!metrics.global_status.shot_advice_action.contains("DIP REINVESTMENT SHOT"));
+        assert!(!metrics.global_status.shot_advice_action.contains("Tax Guardrail"));
+
+        // Liquid USDC well above the cash target -> DIP advice fires, sized to keep the target.
+        raw.wallet_balances[1].amount = "5000.0".to_string();
         let metrics = compute_derived_metrics(
             &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &small, &MarketRegime::default(),
         );
         assert!(metrics.global_status.shot_advice_action.contains("DIP REINVESTMENT SHOT"));
         assert!(metrics.global_status.shot_advice_details.contains("protected as virtual tax reserve"));
+        assert!(metrics.global_status.shot_advice_details.contains("kept as cash target"));
+        let total: f64 = metrics.global_status.total_portfolio_usd.parse().unwrap();
+        let advised = 5000.0 - total * 0.05;
+        assert!(
+            metrics.global_status.shot_advice_details.contains(&format!("Deploy ${:.2}", advised)),
+            "advised spend must leave the 5% cash target: {}",
+            metrics.global_status.shot_advice_details
+        );
+    }
+
+    // ---------------- Accumulation plan (issue #79) ----------------
+
+    fn plan_cfg() -> AccumulationPlanConfig {
+        AccumulationPlanConfig {
+            id: "test-plan".to_string(),
+            budget_usdc: 500.0,
+            tranches: 5,
+            interval_hours: 24.0,
+            starts_at: None,
+            venue: "Aerodrome".to_string(),
+            max_price_usd: None,
+            pause_when_overextended: true,
+            respect_cash_target: true,
+        }
+    }
+
+    fn roomy_guards() -> PlanGuards {
+        PlanGuards { overextended: false, spot_price: 0.0123, wallet_usdc: 1053.0, tax_reserve_usd: 0.0, cash_target_usd: 124.0 }
+    }
+
+    fn t(s: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc)
+    }
+
+    #[test]
+    fn test_plan_first_tranche_due_immediately_at_nominal_size() {
+        let d = plan_directive(&plan_cfg(), &PlanFills::default(), &roomy_guards(), false, t("2026-11-15T12:00:00Z"));
+        assert_eq!(d, PlanDirective::TrancheDue { usdc: 100.0, limited_by: None });
+    }
+
+    #[test]
+    fn test_plan_pending_before_start() {
+        let mut cfg = plan_cfg();
+        cfg.starts_at = Some(t("2026-11-20T00:00:00Z"));
+        let d = plan_directive(&cfg, &PlanFills::default(), &roomy_guards(), false, t("2026-11-15T12:00:00Z"));
+        assert_eq!(d, PlanDirective::Pending { starts_at: t("2026-11-20T00:00:00Z") });
+    }
+
+    #[test]
+    fn test_plan_waits_out_the_interval_then_is_due() {
+        let fills = PlanFills { count: 1, spent_usdc: 100.0, acquired_nock: 8000.0, last_at: Some(t("2026-11-15T12:00:00Z")), first_price: Some(0.0125) };
+        let early = plan_directive(&plan_cfg(), &fills, &roomy_guards(), false, t("2026-11-16T11:59:00Z"));
+        assert_eq!(early, PlanDirective::Waiting { next_due_at: t("2026-11-16T12:00:00Z") });
+        let on_time = plan_directive(&plan_cfg(), &fills, &roomy_guards(), false, t("2026-11-16T12:00:00Z"));
+        assert_eq!(on_time, PlanDirective::TrancheDue { usdc: 100.0, limited_by: None });
+    }
+
+    #[test]
+    fn test_plan_missed_windows_do_not_stack() {
+        // Operator away for ten intervals: exactly one nominal tranche is due, never ten.
+        let fills = PlanFills { count: 1, spent_usdc: 100.0, acquired_nock: 8000.0, last_at: Some(t("2026-11-15T12:00:00Z")), first_price: Some(0.0125) };
+        let d = plan_directive(&plan_cfg(), &fills, &roomy_guards(), false, t("2026-11-25T12:00:00Z"));
+        assert_eq!(d, PlanDirective::TrancheDue { usdc: 100.0, limited_by: None });
+    }
+
+    #[test]
+    fn test_plan_pauses_when_overextended_unless_opted_out() {
+        let mut guards = roomy_guards();
+        guards.overextended = true;
+        let d = plan_directive(&plan_cfg(), &PlanFills::default(), &guards, false, t("2026-11-15T12:00:00Z"));
+        assert!(matches!(d, PlanDirective::Paused { ref reason } if reason.contains("RSI")));
+        let mut cfg = plan_cfg();
+        cfg.pause_when_overextended = false;
+        let d = plan_directive(&cfg, &PlanFills::default(), &guards, false, t("2026-11-15T12:00:00Z"));
+        assert!(matches!(d, PlanDirective::TrancheDue { .. }));
+    }
+
+    #[test]
+    fn test_plan_pauses_above_price_ceiling() {
+        let mut cfg = plan_cfg();
+        cfg.max_price_usd = Some(0.0100);
+        let d = plan_directive(&cfg, &PlanFills::default(), &roomy_guards(), false, t("2026-11-15T12:00:00Z"));
+        assert!(matches!(d, PlanDirective::Paused { ref reason } if reason.contains("ceiling")));
+    }
+
+    #[test]
+    fn test_plan_tranche_shrinks_to_cash_target_and_names_it() {
+        // $160 liquid, $124 cash target -> only $36 spendable, below the $100 nominal.
+        let mut guards = roomy_guards();
+        guards.wallet_usdc = 160.0;
+        match plan_directive(&plan_cfg(), &PlanFills::default(), &guards, false, t("2026-11-15T12:00:00Z")) {
+            PlanDirective::TrancheDue { usdc, limited_by } => {
+                assert!((usdc - 36.0).abs() < 1e-9);
+                assert!(limited_by.unwrap().contains("cash target"));
+            }
+            other => panic!("expected a shrunk tranche, got {other:?}"),
+        }
+        // Opting out of the cash target restores the nominal size.
+        let mut cfg = plan_cfg();
+        cfg.respect_cash_target = false;
+        assert_eq!(
+            plan_directive(&cfg, &PlanFills::default(), &guards, false, t("2026-11-15T12:00:00Z")),
+            PlanDirective::TrancheDue { usdc: 100.0, limited_by: None }
+        );
+    }
+
+    #[test]
+    fn test_plan_blocked_when_nothing_is_spendable() {
+        let mut guards = roomy_guards();
+        guards.wallet_usdc = 100.0; // below the $124 cash target
+        let d = plan_directive(&plan_cfg(), &PlanFills::default(), &guards, false, t("2026-11-15T12:00:00Z"));
+        assert!(matches!(d, PlanDirective::Blocked { ref reason } if reason.contains("cash target")));
+        // Tax reserve larger than the wallet blocks too, and is named.
+        let mut guards = roomy_guards();
+        guards.tax_reserve_usd = 2000.0;
+        let d = plan_directive(&plan_cfg(), &PlanFills::default(), &guards, false, t("2026-11-15T12:00:00Z"));
+        assert!(matches!(d, PlanDirective::Blocked { ref reason } if reason.contains("tax reserve")));
+    }
+
+    #[test]
+    fn test_plan_last_tranche_is_capped_to_remaining_budget_then_completes() {
+        let fills = PlanFills { count: 5, spent_usdc: 470.0, acquired_nock: 38000.0, last_at: Some(t("2026-11-10T00:00:00Z")), first_price: Some(0.0125) };
+        match plan_directive(&plan_cfg(), &fills, &roomy_guards(), false, t("2026-11-15T12:00:00Z")) {
+            PlanDirective::TrancheDue { usdc, limited_by } => {
+                assert!((usdc - 30.0).abs() < 1e-9);
+                assert!(limited_by.unwrap().contains("plan budget remains"));
+            }
+            other => panic!("expected the remainder tranche, got {other:?}"),
+        }
+        let done = PlanFills { spent_usdc: 499.60, ..fills };
+        assert_eq!(plan_directive(&plan_cfg(), &done, &roomy_guards(), false, t("2026-11-15T12:00:00Z")), PlanDirective::Complete);
+    }
+
+    #[test]
+    fn test_plan_invalid_config_and_unreadable_ledger_are_explicit() {
+        let mut cfg = plan_cfg();
+        cfg.tranches = 0;
+        assert!(matches!(
+            plan_directive(&cfg, &PlanFills::default(), &roomy_guards(), false, t("2026-11-15T12:00:00Z")),
+            PlanDirective::Invalid { .. }
+        ));
+        // Zero-mock: an unreadable ledger must never look like "no buys yet".
+        let d = plan_directive(&plan_cfg(), &PlanFills::default(), &roomy_guards(), true, t("2026-11-15T12:00:00Z"));
+        assert!(matches!(d, PlanDirective::Blocked { ref reason } if reason.contains("ledger")));
+    }
+
+    #[test]
+    fn test_plan_status_reports_average_cost_and_lump_sum_counterfactual() {
+        let fills = PlanFills { count: 2, spent_usdc: 200.0, acquired_nock: 17000.0, last_at: Some(t("2026-11-16T12:00:00Z")), first_price: Some(0.0125) };
+        let d = plan_directive(&plan_cfg(), &fills, &roomy_guards(), false, t("2026-11-16T13:00:00Z"));
+        let ps = build_plan_status(&plan_cfg(), &fills, &d);
+        assert_eq!(ps.status, "waiting");
+        assert_eq!(ps.tranche_index, 3);
+        assert_eq!(ps.tranches_total, 5);
+        assert_eq!(ps.spent_usdc, "200.00");
+        assert_eq!(ps.remaining_usdc, "300.00");
+        assert_eq!(ps.avg_price_usd.as_deref(), Some("0.011765")); // 200 / 17000
+        assert_eq!(ps.lump_sum_nock.as_deref(), Some("40000.0000")); // 500 / 0.0125
+        assert_eq!(ps.next_due_at.as_deref(), Some("2026-11-17T12:00:00+00:00"));
+        // Before any fill there is no average and no counterfactual (never fabricated).
+        let empty = build_plan_status(&plan_cfg(), &PlanFills::default(), &PlanDirective::TrancheDue { usdc: 100.0, limited_by: None });
+        assert_eq!(empty.avg_price_usd, None);
+        assert_eq!(empty.lump_sum_nock, None);
+        assert_eq!(empty.tranche_usdc, "100.00");
+    }
+
+    #[test]
+    fn test_accumulation_plan_config_parses_with_defaults() {
+        let cfg: AppConfig = serde_yaml::from_str(
+            "accumulation_plan:\n  id: reentry\n  budget_usdc: 500\n  tranches: 5\n  interval_hours: 24\n",
+        )
+        .unwrap();
+        let plan = cfg.accumulation_plan.expect("plan parsed");
+        assert_eq!(plan.venue, "Aerodrome");
+        assert!(plan.pause_when_overextended && plan.respect_cash_target);
+        assert!(plan.starts_at.is_none() && plan.max_price_usd.is_none());
+        // Absent section keeps the feature off.
+        let none: AppConfig = serde_yaml::from_str("port: 8080\n").unwrap();
+        assert!(none.accumulation_plan.is_none());
+    }
+
+    fn liquid_wallet_fixture() -> RawOnChainData {
+        // The 2026-11-14 wallet: fully liquid, every tracked position emptied.
+        let mut raw = four_position_fixture();
+        raw.spot_price_nock_usd = 0.01229;
+        for p in raw.positions.iter_mut() {
+            p.liquidity = 0;
+            p.amount0 = 0.0;
+            p.amount1 = 0.0;
+            p.fee0 = 0.0;
+            p.fee1 = 0.0;
+        }
+        raw.wallet_balances[0].amount = "115747.8001".to_string();
+        raw.wallet_balances[1].amount = "1053.0".to_string();
+        raw
+    }
+
+    fn metrics_with_plan(raw: &RawOnChainData, ctx: &PlanContext, regime: &MarketRegime) -> DerivedMetrics {
+        compute_derived_metrics_with_plan(
+            raw, 0.0, &OperatorProfile::default(), StructuralChannels { channels: vec![] }, &[],
+            &LedgerAggregate::default(), regime, ctx,
+        )
+    }
+
+    #[test]
+    fn test_advice_plan_replaces_lump_sum_dip_shot() {
+        let raw = liquid_wallet_fixture();
+        assert_eq!(raw.wallet_balances[0].token_symbol, "NOCK");
+        assert_eq!(raw.wallet_balances[1].token_symbol, "USDC");
+        // No plan: the legacy arm still fires, but now leaves the cash target behind.
+        let legacy = metrics_with_plan(&raw, &PlanContext::none(), &MarketRegime::default());
+        assert!(legacy.global_status.shot_advice_action.contains("DIP REINVESTMENT SHOT"));
+        assert!(legacy.accumulation_plan.is_none());
+
+        let ctx = PlanContext { cfg: Some(plan_cfg()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-15T12:00:00Z") };
+        let m = metrics_with_plan(&raw, &ctx, &MarketRegime::default());
+        assert_eq!(m.global_status.shot_advice_action, "DCA TRANCHE DUE (1 of 5)");
+        assert!(m.global_status.shot_advice_details.contains("Buy $100.00 of NOCK on Aerodrome"));
+        assert!(!m.global_status.shot_advice_details.contains("Deploy $"));
+        let ps = m.accumulation_plan.expect("plan status emitted");
+        assert_eq!(ps.status, "tranche_due");
+        assert_eq!(ps.tranche_usdc, "100.00");
+    }
+
+    #[test]
+    fn test_advice_lp_rebuild_bias_leads_when_idle_and_rides_along_when_due() {
+        let raw = liquid_wallet_fixture(); // LP is 0% against a 15% target
+        // A due tranche stays the primary directive; the rebuild bias is appended.
+        let due = PlanContext { cfg: Some(plan_cfg()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-15T12:00:00Z") };
+        let m = metrics_with_plan(&raw, &due, &MarketRegime::default());
+        assert!(m.global_status.shot_advice_action.starts_with("DCA TRANCHE DUE"));
+        assert!(m.global_status.shot_advice_details.contains("Standing bias: LP holds $0.00"));
+        assert_eq!(m.lp_rebuild.status, "under_target");
+
+        // Between tranches there is nothing to buy, so the rebuild leads.
+        let fills = PlanFills { count: 1, spent_usdc: 100.0, acquired_nock: 8000.0, last_at: Some(t("2026-11-15T12:00:00Z")), first_price: Some(0.0125) };
+        let waiting = PlanContext { cfg: Some(plan_cfg()), fills, ledger_unavailable: false, now: t("2026-11-15T18:00:00Z") };
+        let m = metrics_with_plan(&raw, &waiting, &MarketRegime::default());
+        assert_eq!(m.global_status.shot_advice_action, "REBUILD LP TRANCHES (No Net Cash Change)");
+        assert!(m.global_status.shot_advice_details.contains("reposition, not a purchase"));
+        assert!(m.global_status.shot_advice_details.contains("DCA ON SCHEDULE (2 of 5 next)"));
+        assert_eq!(m.accumulation_plan.unwrap().status, "waiting");
+
+        // Safety directives are never displaced, only annotated.
+        let hot = MarketRegime { rsi_5m: None, rsi_1d: Some(82.0), overextended: true };
+        let m = metrics_with_plan(&raw, &due, &hot);
+        assert!(m.global_status.shot_advice_action.contains("Overextension Cooldown"));
+        assert!(m.global_status.shot_advice_details.contains("Standing bias"));
+        assert_eq!(m.accumulation_plan.unwrap().status, "paused");
+    }
+
+    #[test]
+    fn test_advice_completed_plan_does_not_fall_back_to_lump_sum() {
+        let raw = liquid_wallet_fixture();
+        let fills = PlanFills { count: 5, spent_usdc: 500.0, acquired_nock: 40500.0, last_at: Some(t("2026-11-15T12:00:00Z")), first_price: Some(0.0125) };
+        let ctx = PlanContext { cfg: Some(plan_cfg()), fills, ledger_unavailable: false, now: t("2026-11-20T12:00:00Z") };
+        let m = metrics_with_plan(&raw, &ctx, &MarketRegime::default());
+        assert!(!m.global_status.shot_advice_action.contains("DIP REINVESTMENT SHOT"));
+        assert!(!m.global_status.shot_advice_action.starts_with("DCA"));
+        let ps = m.accumulation_plan.unwrap();
+        assert_eq!(ps.status, "complete");
+        assert_eq!(ps.tranche_index, 5);
+    }
+
+    #[test]
+    fn test_lp_rebuild_status_uses_the_deviation_matrix_tolerance() {
+        // 15% target on $1,000: tolerance is 20% of target = 300 bps -> under below 12%.
+        assert_eq!(lp_rebuild_status(0.0, 1000.0, 1500).status, "under_target");
+        assert_eq!(lp_rebuild_status(119.0, 1000.0, 1500).status, "under_target");
+        assert_eq!(lp_rebuild_status(130.0, 1000.0, 1500).status, "on_target");
+        assert_eq!(lp_rebuild_status(200.0, 1000.0, 1500).status, "over_target");
+        let lp = lp_rebuild_status(0.0, 2475.27, 1500);
+        assert_eq!(lp.target_usd, "371.29");
+        assert_eq!(lp.gap_usd, "371.29");
+        // On target: the bias leaves advice untouched.
+        let on = lp_rebuild_status(150.0, 1000.0, 1500);
+        let (a, d) = apply_lp_rebuild_bias("HOLD & ACCRETE (x)".to_string(), "details".to_string(), &on);
+        assert_eq!((a.as_str(), d.as_str()), ("HOLD & ACCRETE (x)", "details"));
+    }
+
+    fn transfer_log(token: &str, from: &str, to: &str, amount: u128) -> serde_json::Value {
+        let pad = |a: &str| format!("0x000000000000000000000000{}", a.trim_start_matches("0x").to_lowercase());
+        json!({
+            "address": token,
+            "topics": [TRANSFER_EVENT_TOPIC, pad(from), pad(to)],
+            "data": format!("0x{:064x}", amount)
+        })
+    }
+
+    #[test]
+    fn test_parse_accumulation_swap_nets_wallet_flows() {
+        let wallet = "0xeE114cC97eC5adeB34bA5645e315B497D8487a45";
+        let pool = "0x85f1aa3a70fedd1c52705c15baed143e675cd626";
+        let other = "0x1111111111111111111111111111111111111111";
+        // $100 USDC out, 8,100 NOCK in (16 decimals); an unrelated transfer is ignored.
+        let receipt = json!({ "logs": [
+            transfer_log(USDC_BASE, wallet, pool, 100_000_000),
+            transfer_log(NOCK_BASE, pool, wallet, 81_000_000_000_000_000_000),
+            transfer_log(NOCK_BASE, pool, other, 5_000_000_000_000_000_000),
+        ]});
+        assert_eq!(parse_accumulation_swap(&receipt, wallet), Some((100_000_000, 81_000_000_000_000_000_000)));
+        assert_eq!(format_units(81_000_000_000_000_000_000, 16), "8100");
+
+        // A partial USDC refund nets out.
+        let refund = json!({ "logs": [
+            transfer_log(USDC_BASE, wallet, pool, 100_000_000),
+            transfer_log(USDC_BASE, pool, wallet, 1_000_000),
+            transfer_log(NOCK_BASE, pool, wallet, 80_000_000_000_000_000_000),
+        ]});
+        assert_eq!(parse_accumulation_swap(&refund, wallet), Some((99_000_000, 80_000_000_000_000_000_000)));
+
+        // A SELL (NOCK out, USDC in), a fee claim (both in) and someone else's swap are rejected.
+        let sell = json!({ "logs": [
+            transfer_log(NOCK_BASE, wallet, pool, 80_000_000_000_000_000_000),
+            transfer_log(USDC_BASE, pool, wallet, 99_000_000),
+        ]});
+        assert_eq!(parse_accumulation_swap(&sell, wallet), None);
+        let claim = json!({ "logs": [
+            transfer_log(USDC_BASE, pool, wallet, 1_000_000),
+            transfer_log(NOCK_BASE, pool, wallet, 10_000_000_000_000_000),
+        ]});
+        assert_eq!(parse_accumulation_swap(&claim, wallet), None);
+        let foreign = json!({ "logs": [
+            transfer_log(USDC_BASE, other, pool, 100_000_000),
+            transfer_log(NOCK_BASE, pool, other, 81_000_000_000_000_000_000),
+        ]});
+        assert_eq!(parse_accumulation_swap(&foreign, wallet), None);
+        assert_eq!(parse_accumulation_swap(&json!({}), wallet), None);
+    }
+
+    #[test]
+    fn test_accumulation_plan_mcp_text() {
+        let raw = liquid_wallet_fixture();
+        let ctx = PlanContext { cfg: Some(plan_cfg()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-15T12:00:00Z") };
+        let m = metrics_with_plan(&raw, &ctx, &MarketRegime::default());
+        let data = json!({ "derived_metrics": serde_json::to_value(&m).unwrap() });
+        let text = format_accumulation_plan_text(&data);
+        assert!(text.contains("Status: tranche_due"));
+        assert!(text.contains("1 of 5"));
+        assert!(text.contains("$100.00 due now"));
+        assert!(text.contains("LP rebuild bias: under_target"));
+        // Before the first fill the average is "n/a", never a made-up number.
+        assert!(text.contains("average $n/a"));
+        let none = format_accumulation_plan_text(&json!({ "derived_metrics": { "lp_rebuild": {} } }));
+        assert!(none.contains("No accumulation_plan is configured"));
     }
 
     #[test]
@@ -5077,6 +6225,8 @@ database_url: "postgresql://localhost/test"
                     rsi_14_1d: None,
                 },
                 sovereign_ledger: Default::default(),
+                accumulation_plan: None,
+                lp_rebuild: LpRebuild::default(),
                 asset_aggregation_series: AssetAggregationSeries {
                     time_points: vec!["2026-10-11T00:00:00Z".to_string()],
                     safe_haven_series: vec!["48.00".to_string()],

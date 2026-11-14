@@ -37,6 +37,43 @@ export interface DerivedMetrics {
   structural_channels: StructuralChannels;
   strategy_counterfactual: StrategyCounterfactual;
   velocity_gas_sandbox: VelocityGasSandbox;
+  /** Dollar-cost-averaging plan status (2.1.0); null/absent when no plan is configured */
+  accumulation_plan?: AccumulationPlanStatus | null;
+  /** Standing LP-rebuild bias (2.1.0) */
+  lp_rebuild?: LpRebuild;
+}
+
+/** Plan progress, derived from config + receipt-verified buys only (2.1.0) */
+export interface AccumulationPlanStatus {
+  plan_id: string;
+  status: 'pending' | 'tranche_due' | 'waiting' | 'paused' | 'blocked' | 'complete' | 'invalid';
+  venue: string;
+  /** 1-based index of the next tranche (verified fills + 1) */
+  tranche_index: number;
+  tranches_total: number;
+  /** Advised now, after guardrails ("0.00" unless a tranche is due) */
+  tranche_usdc: string;
+  nominal_tranche_usdc: string;
+  next_due_at?: string | null;
+  budget_usdc: string;
+  spent_usdc: string;
+  remaining_usdc: string;
+  acquired_nock: string;
+  fills: number;
+  last_fill_at?: string | null;
+  avg_price_usd?: string | null;
+  /** NOCK the whole budget would have bought at the first fill's price */
+  lump_sum_nock?: string | null;
+  binding_constraint?: string | null;
+}
+
+/** LP weight vs target; rebuilding is a reposition with no net cash change (2.1.0) */
+export interface LpRebuild {
+  status: 'under_target' | 'on_target' | 'over_target';
+  target_usd: string;
+  actual_usd: string;
+  gap_usd: string;
+  target_weight_bps: number;
 }
 
 export interface GlobalStatus {

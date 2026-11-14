@@ -180,6 +180,81 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /execute/record-accumulation:
+    post:
+      tags: [Execution]
+      summary: Attach a confirmed USDC to NOCK purchase to the accumulation plan
+      operationId: recordAccumulation
+      description: |
+        Called after the operator buys a dollar-cost-averaging tranche, wherever the
+        swap was made. The worker fetches the Base transaction receipt, verifies
+        success, and nets the USDC/NOCK Transfer logs touching the sovereign wallet;
+        the transaction is accepted only if the wallet ended with less USDC and more
+        NOCK. Amounts come from the logs, never from the request. Idempotent on tx_hash.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tx_hash]
+              properties:
+                tx_hash:
+                  type: string
+                  description: 32-byte hex transaction hash (0x-prefixed or bare)
+      responses:
+        '200':
+          description: Fill recorded (or already present)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recorded: { type: boolean }
+                  duplicate: { type: boolean }
+                  plan_id: { type: string }
+                  tx_hash: { type: string }
+                  usdc_spent: { type: string }
+                  nock_received: { type: string }
+                  effective_price_usd: { type: string }
+                  block_number: { type: integer }
+                  confirmed_at: { type: string, format: date-time }
+        '404':
+          description: Receipt not found on-chain yet (retry once the transaction lands)
+        '409':
+          description: No accumulation_plan is configured
+        '422':
+          description: Invalid hash, reverted transaction, or not a USDC to NOCK purchase by the tracked wallet
+        '503':
+          description: RPC unavailable; nothing recorded
+
+  /accumulation/events:
+    get:
+      tags: [Execution]
+      summary: List receipt-verified accumulation fills, oldest first
+      operationId: listAccumulationEvents
+      responses:
+        '200':
+          description: Fills
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        plan_id: { type: string }
+                        tx_hash: { type: string }
+                        venue: { type: string }
+                        usdc_spent: { type: string }
+                        nock_received: { type: string }
+                        effective_price_usd: { type: string }
+                        block_number: { type: integer }
+                        confirmed_at: { type: string, format: date-time }
+
   /execute/record-harvest:
     post:
       tags: [Execution]
