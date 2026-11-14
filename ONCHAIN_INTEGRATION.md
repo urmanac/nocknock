@@ -277,8 +277,21 @@ For comparison, the new Aero volatile NOCK/USDC pool `0x770fe8fc…` held about 
   but reward emissions stopped at the merger and current fee distribution was not
   confirmed. (aero.xyz states that new-Aero pool revenue goes to AERO stakers; its pool
   page lists separate AERO and fee reward rates for depositors.)
-- **Staked LP.** A balance staked in a gauge is not read; only LP tokens held in the
-  wallet count. Staking would make the position look empty.
-- The live read has only been exercised with a zero balance. The share-of-reserves and
-  fee paths are covered by unit tests against the reserves above.
+- Rewards earned by staked LP (AERO emissions) are not read or valued.
+
+### First live deposits (2026-11-14, operator, via app.aero.xyz)
+
+| | USDC/NOCK Basic Volatile | WETH/NOCK CL200 |
+|---|---|---|
+| Tx | `0x127c4f4f…f185f0` (block 57425187) | `0x80277e2b…c93ddb` (block 57425824) |
+| In | 31.986644 USDC + 2,755 NOCK | 0.081995 ETH + 2,755 NOCK |
+| Pool | `0x770fE8Fc9248c6382950A86E39a9391B41D59e0A` | `0x957256c98d61A714081DE2EE70ae3A96c9b40874` |
+| Receipt | 29684955447174 LP tokens | NFT #2914490 on `0x4857db576ee0e45f10525ec59527bfd10beec60b` |
+| Staked in | gauge `0xc82782ee66d82c4d19db0429652091a085083526` | gauge `0x3bf70c880adc8370917994ab0df68e763b7a60fd` |
+| NockNock | tracked (`gauge_address`) | **not tracked** (issue #91) |
+
+Both went through the Aero router `0x0fef9e88…ee98` (`execute`, §6), which staked the
+receipt automatically. For the volatile pool `gauge.balanceOf(wallet)` returned the
+minted amount exactly and `gauge.stakingToken()` is the pool; the wallet's share was
+3.38% of reserves, equal to what was deposited.
 

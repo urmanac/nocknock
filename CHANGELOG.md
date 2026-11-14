@@ -29,7 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no sell-out multiple (it sells NOCK gradually as price rises and never empties).
   v0.4.0 had removed Aerodrome support, so such a position was invisible. A pool whose
   `claimFees()` reverts (the new Aero pools) reads as having no LP-claimable fees
-  instead of failing the cycle.
+  instead of failing the cycle. `gauge_address` adds LP tokens staked in the pool's
+  gauge to the wallet's balance.
 - **Price source.** The example config makes the legacy Aerodrome NOCK/USDC vAMM the
   NOCK/USD price source (spot = reserve ratio). On 2026-11-14 it carried about $110k/day
   of NOCK volume against about $3.5k/day for the Uniswap v4 3% pool, and the RSI history
@@ -136,9 +137,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when nothing is spendable. Previously the 5% cash target was displayed but never applied.
 
 ### Known Limitations in 0.5.0
-- The Aerodrome position read has only run live against a zero LP balance; the
-  share-of-reserves and fee paths are unit-tested with real reserves. A gauge-staked
-  balance is not read.
+- Aerodrome-type positions: LP staked in a gauge is read only when the position's
+  `gauge_address` is configured (the aero.xyz app stakes on deposit). Rewards earned by
+  staked LP are not reported.
 - The Aerodrome rebuild suggestion links to the legacy Aerodrome app's deposit page for
   the pair (the new aero.xyz app does not list that pool). The page was only checked up
   to wallet connection. `positions[].deposit_url` overrides the link.

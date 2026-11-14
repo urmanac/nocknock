@@ -92,11 +92,14 @@ positions:
   # New Aero "Basic Volatile" NOCK/USDC pool (the one app.aero.xyz lists). Tracked so a
   # deposit there is visible; rebuild_weight_bps: 0 keeps it out of suggestions until
   # you decide it should receive part of the LP target. Its claimFees() reverts, so no
-  # LP-claimable fees are reported. A balance staked in a gauge is not read.
+  # LP-claimable fees are reported. Staked LP is read through gauge_address.
   - id: "aero-basic-nock-usdc"
     protocol: "aerodrome"
     network: "base"
     pool_address: "0x770fE8Fc9248c6382950A86E39a9391B41D59e0A"
+    # Gauge for this pool (verified 2026-11-14: stakingToken() is the pool). The
+    # aero.xyz app stakes LP on deposit, so the staked balance is what the wallet owns.
+    gauge_address: "0xc82782ee66d82c4d19db0429652091a085083526"
     rebuild_weight_bps: 0
     deposit_url: "https://app.aero.xyz/deposit/8453-0x770fE8Fc9248c6382950A86E39a9391B41D59e0A"
     is_price_source: false

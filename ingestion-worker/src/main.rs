@@ -90,6 +90,11 @@ pub struct PositionConfig {
     /// aerodrome only: swap fee in basis points, for display (default 30 = 0.30%).
     #[serde(default)]
     pub fee_bps: Option<u32>,
+    /// aerodrome only: the pool's gauge. LP tokens staked there (the aero.xyz app stakes
+    /// on deposit) are added to the wallet's own balance; without it a staked position
+    /// reads as empty.
+    #[serde(default)]
+    pub gauge_address: Option<String>,
     /// Where the operator adds liquidity to this position, when the default link is
     /// wrong (for example a pool on the new Aero app:
     /// https://app.aero.xyz/deposit/8453-<pool address>).
@@ -5540,7 +5545,18 @@ async fn fetch_aerodrome_position(
     let reserves = read(call("0x0902f1ac".to_string(), None, 72), "getReserves").await?;
     let supply = read(call("0x18160ddd".to_string(), None, 73), "totalSupply").await?;
     let balance = read(call(format!("0x70a08231{wallet_word}"), None, 74), "balanceOf").await?;
-    let lp_balance = word(&balance, 0, "balanceOf")?;
+    let mut lp_balance = word(&balance, 0, "balanceOf")?;
+    // LP tokens staked in the gauge still belong to the wallet (issue #88 follow-up:
+    // the operator's first aero.xyz deposit was staked automatically and read as $0).
+    if let Some(gauge) = cfg.gauge_address.as_ref().filter(|g| !g.trim().is_empty()) {
+        let payload = json!({
+            "jsonrpc": "2.0", "method": "eth_call", "id": 76,
+            "params": [{ "to": gauge, "data": format!("0x70a08231{wallet_word}") }, "latest"]
+        });
+        let staked_hex = read(payload, "gauge balanceOf").await?;
+        let staked = word(&staked_hex, 0, "gauge balanceOf")?;
+        lp_balance = lp_balance.saturating_add(staked);
+    }
     // claimFees() simulated from the wallet returns exactly what a claim would pay.
     // With no LP there is nothing to simulate, so the call is skipped.
     //
