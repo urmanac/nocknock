@@ -1,5 +1,5 @@
 # Multi-stage Rust build with SQLX offline mode
-FROM rust:1.89-slim-bookworm AS builder
+FROM docker.io/library/rust:1.89-slim-bookworm AS builder
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ ENV SQLX_OFFLINE=true
 RUN cargo build --release
 
 # Minimal runtime stage
-FROM debian:bookworm-slim
+FROM docker.io/library/debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata && rm -rf /var/lib/apt/lists/*
 
