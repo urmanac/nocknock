@@ -163,3 +163,70 @@ Position D (added by the 2026-10-24 change request): identified via the mint's
    `positions(uint256)`, resolve the pool via factory `getPool`.
 4. Update `config.yaml positions:` (identifiers + ticks for v4) and re-verify with the
    magnitude cross-check against the operator's UI before trusting the pipeline.
+
+---
+
+## 6. Aero Transition (Aerodrome → aero.xyz) — Observed Record, 2026-11-14
+
+Aerodrome and Velodrome merged into **Aero** (front end `aero.xyz`), live since
+2026-10-21; legacy contracts stopped emitting rewards at launch. NockNock holds no
+Aero LP, so this affects only **where NOCK buys are executed** (the accumulation plan)
+and one third-party history feed.
+
+> **Verification status.** Everything below was read from Base mainnet. No official
+> Aero contract list was found, so the *identity* of these contracts is inferred:
+> `0x0fef9e88…` is labelled the registered Aero router by a third-party analytics
+> repository only. Treat the addresses as observed, not endorsed, and re-verify
+> before building any transaction against them.
+
+### Evidence transaction
+
+`0x5d0c02d9929f49f71526e0c8d91d1bd99ec19f116befc285d67f6bf9412a3f0e` — block 57228848,
+2026-11-14T06:02:25Z, status success, sent by the sovereign wallet from aero.xyz.
+First tranche of plan `2026-11-reentry`.
+
+| Item | Value |
+|---|---|
+| Router (`to`) | `0x0fef9e88a7b76bcdbf451780c6774fe32965ee98` |
+| Selector | `0x3593564c` — `execute(bytes,bytes[],uint256)` (universal-router style) |
+| Pool factory (all three hops) | `0x9cb220581b91b0c83223012fe69688b92ad07a76` |
+| Wallet net flows | −20.000000 USDC, +1597.934048 NOCK |
+| Effective price | $0.01251616 per NOCK (engine spot $0.01229, +1.8%) |
+
+Route (concentrated pools; `fee()` and `tickSpacing()` as returned on-chain, units per
+that factory's convention and not independently confirmed):
+
+| Hop | Pool | Pair | `fee()` | `tickSpacing()` |
+|---|---|---|---:|---:|
+| 1 | `0xd448990883e3bf9cdd8ebca368a3ecf9d629aaf7` | USDC / USDT | 8 | 1 |
+| 2 | `0x2dbe0e264c7c246e05c6614794899937f264cf7b` | WETH / USDT | 435 | 100 |
+| 3 | `0x957256c98d61a714081de2ee70ae3a96c9b40874` | WETH / NOCK | 9700 | 200 |
+
+If `fee()` is in hundredths of a basis point (the Uniswap-v3 convention these pools
+otherwise follow), the hops charge 0.0008%, 0.0435% and 0.97%: the WETH/NOCK hop
+accounts for most of the 1.8% paid over spot.
+
+### Legacy Aerodrome pool
+
+The NOCK/USDC vAMM `0x85f1aa3a70fedd1c52705c15baed143e675cd626` (factory
+`0x420dd381b31aef6683db6b902084cb0ffece40da`) was **not** on the route. At the same
+time it still held about 379,809 USDC and 30.96M NOCK (implied $0.012268) and emitted
+18 logs in the preceding ~9,000 blocks, so it is alive but no longer where aero.xyz
+sends a NOCK buy. The legacy router address still has code; whether it still executes
+swaps was not tested.
+
+### Consequences for NockNock
+
+- **Receipt verification is unaffected.** `record-accumulation` nets USDC/NOCK Transfer
+  logs touching the wallet and never inspects the router, so multi-hop and
+  universal-router trades record correctly (the transaction above did).
+- **Execution cost is higher than first estimated.** The design note assumed the direct
+  vAMM (~0.3% fee plus negligible impact). The observed route cost ~1.8% over spot.
+- **Phase 2 cannot use the original encoding.** `Router.swapExactTokensForTokens` and
+  `pool.getAmountOut` on the vAMM do not describe how Aero routes. See the design note
+  §8.5.
+- **History feed dependency.** `market_data.pool_address` is pinned to the legacy vAMM
+  for OHLCV/RSI history because it was still the highest-volume NOCK/USDC market. If
+  that pool goes quiet the feed degrades fail-open (warnings, widening gaps); re-point
+  it then. The live spot is unaffected: it comes from the Uniswap v4 3% pool.
+

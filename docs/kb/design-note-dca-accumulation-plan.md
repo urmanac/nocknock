@@ -323,13 +323,43 @@ First plan: $100 over five buys, 24 hours apart.
 
 ### 8.3 Surface
 
-- Config: optional `accumulation_plan` (see `config.yaml.example`).
+- Config: optional `accumulation_plan` (see `config.yaml.example`); venue label defaults
+  to "Aero".
 - Ledger: `accumulation_events` (migration `20261114000005`).
 - API: `POST /v1/execute/record-accumulation { tx_hash }`, `GET /v1/accumulation/events`.
 - Snapshot 2.1.0 (additive): `derived_metrics.accumulation_plan`, `derived_metrics.lp_rebuild`.
 - MCP: `get_accumulation_plan` (HTTP and stdio). The stdio server also honours
   `NOCKNOCK_API_URL` so it can read a remote deployment instead of `127.0.0.1:8080`.
 - Dashboard: "Accumulation Plan" panel with a RECORD BUY field.
+
+### 8.5 Aero transition (Issue #81) — Phase 2 must be redesigned
+
+Sections 2 and 4.5 were written assuming Aerodrome's classic router and the direct
+NOCK/USDC vAMM. Aerodrome became Aero (aero.xyz) on 2026-10-21, and the first plan
+tranche shows what that means in practice (full record: ONCHAIN_INTEGRATION.md §6):
+
+- **Cost.** §2 estimated ~0.3% fee plus ~0.03% impact per $105 tranche. The first real
+  $20 tranche paid about **1.8% over spot**, because aero.xyz routed USDC → USDT → WETH
+  → NOCK through three concentrated pools and the WETH/NOCK hop alone charges ~0.97%.
+  The §2 conclusion still holds (DCA here is about timing, not cost), but each tranche
+  is roughly six times more expensive to execute than that table says.
+- **Encoding.** The trade went through a universal-router style
+  `execute(bytes,bytes[],uint256)` on `0x0fef9e88…`, not `swapExactTokensForTokens`.
+  Phase 2 as drafted in §4.5 would build the wrong transaction.
+- **Quoting.** `pool.getAmountOut` on the vAMM no longer predicts what the operator
+  receives, since the route does not touch that pool.
+
+What Phase 2 needs before any payload is built: an official Aero contract list (none
+found yet; the router identity is so far third-party-labelled only), the command
+encoding for `execute`, and a quoting source that matches Aero's routing. An option
+worth weighing instead of reimplementing routing: keep Phase 1's model (the operator
+swaps in the app, the worker verifies the receipt), which is already
+router-agnostic, and spend Phase 2 on **measuring** execution cost per fill against
+spot at the fill's block so the state room shows what each venue actually costs.
+
+The legacy vAMM still holds deep NOCK/USDC liquidity at a better implied price than
+the routed fill. Whether it is still safely tradable through the legacy router is
+untested and is the operator's call, not something the engine should assume.
 
 ### 8.4 Still open
 

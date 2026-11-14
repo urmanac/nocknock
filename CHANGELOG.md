@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lump-sum counterfactual, the LP-rebuild note and a RECORD BUY field.
 
 ### Changed
+- **Aerodrome is now Aero (Issue #81).** Aerodrome and Velodrome merged into Aero
+  (aero.xyz) on 2026-10-21. The plan's default venue label is "Aero"; wording that
+  described current behaviour as Aerodrome is corrected (historical references stay).
+  The observed Aero router, pool factory and the three-hop route of the first plan
+  tranche are recorded in ONCHAIN_INTEGRATION.md §6, marked unverified against official
+  documentation. Receipt verification is contract-agnostic and needed no change.
 - **Advised spend respects the cash target.** `DIP REINVESTMENT SHOT` (the no-plan path)
   no longer advises spending liquid USDC below `target_weights_bps.cash`, and is skipped
   when nothing is spendable. Previously the 5% cash target was displayed but never applied.
