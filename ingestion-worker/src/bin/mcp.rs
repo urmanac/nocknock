@@ -273,13 +273,29 @@ fn format_portfolio_state(data: &Value) -> String {
     let hwm = usd("high_water_mark_usd");
     let advice = get("shot_advice_action").unwrap_or("unavailable");
     let floor = floor_clause(global);
+    // Pillars and gas (snapshot 2.3.0, issue #94). Absent fields say so, never $0.00.
+    let not_reported = "not reported (snapshot predates 2.3.0)";
+    let pillar = |k: &str| get(k).map(|v| format!("${v}")).unwrap_or_else(|| not_reported.to_string());
+    let pillars = format!(
+        "NOCK {} · USDC {} · ETH {}",
+        pillar("total_native_usd"),
+        pillar("total_stable_usd"),
+        pillar("total_eth_usd")
+    );
+    let gas = match (get("wallet_gas_eth"), get("wallet_gas_usd")) {
+        (Some(eth), Some(usd)) => format!("{eth} ETH (${usd}), counted in the total; not cash, not deployable"),
+        (Some(eth), None) => format!("{eth} ETH (USD value not reported), counted in the total; not cash, not deployable"),
+        _ => not_reported.to_string(),
+    };
 
     format!(
         "📈 NockNock Sovereign Portfolio State (Live API)\n\
          =========================================\n\
          • Total Value: {total_usd}\n\
+         • Pillars: {pillars}\n\
          • Sovereign NOCK Stack: {total_nock} ({floor})\n\
          • Stable Stack: {total_usdc}\n\
+         • Gas held (wallet ETH+WETH): {gas}\n\
          • High-Water Mark: {hwm}\n\
          • Tactical Directive: {advice}\n\
          • Mode: Tier 1 Connected (Verified Persistent Snapshot)"
@@ -404,6 +420,24 @@ mod tests {
             },
             "contract_fees": []
         })
+    }
+
+    #[test]
+    fn test_fallback_state_reports_gas_and_pillars() {
+        let mut data = from_zero_snapshot();
+        let g = &mut data["derived_metrics"]["global_status"];
+        g["total_native_usd"] = json!("0.00");
+        g["total_stable_usd"] = json!("500.00");
+        g["total_eth_usd"] = json!("30.00");
+        g["wallet_gas_eth"] = json!("0.010000");
+        g["wallet_gas_usd"] = json!("30.00");
+        let text = format_portfolio_state(&data);
+        assert!(text.contains("Pillars: NOCK $0.00 · USDC $500.00 · ETH $30.00"), "{text}");
+        assert!(text.contains("Gas held (wallet ETH+WETH): 0.010000 ETH ($30.00), counted in the total; not cash, not deployable"), "{text}");
+        // A pre-2.3.0 snapshot: not reported, never $0.00.
+        let old = format_portfolio_state(&from_zero_snapshot());
+        assert!(old.contains("Gas held (wallet ETH+WETH): not reported (snapshot predates 2.3.0)"), "{old}");
+        assert!(old.contains("ETH not reported (snapshot predates 2.3.0)"), "{old}");
     }
 
     #[test]

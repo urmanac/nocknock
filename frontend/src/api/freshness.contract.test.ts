@@ -190,8 +190,30 @@ describe('Freshness Contract', () => {
     expect(Array.isArray(ag?.positions_nock)).toBe(true);
     expect(ag.positions_nock.length).toBe(data.positions.length);
     expect(ag.tranche_1_nock).toBeUndefined();
-    // Meta version bumped with the breaking model change.
-    expect(latestSnapshot!.meta.version).toBe('2.0.0');
+    // Meta version: the current snapshot spec (specs/core/snapshot.yaml info.version).
+    expect(latestSnapshot!.meta.version).toBe('2.3.0');
+  });
+
+  it('2.3.0 pillars partition the total and the wallet reports its gas', () => {
+    if (!latestSnapshot) {
+      console.log('Skipping contract test: backend not reachable in isolated environment');
+      return;
+    }
+    const data = latestSnapshot!.data as any;
+    const g = data.derived_metrics?.global_status;
+    const n = (k: string) => parseFloat(g[k]);
+    expect(Math.abs(n('total_native_usd') + n('total_stable_usd') + n('total_eth_usd') - n('total_portfolio_usd'))).toBeLessThan(0.03);
+    expect(n('eth_price_usd')).toBeGreaterThan(0);
+    expect(n('wallet_gas_eth')).toBeGreaterThanOrEqual(0);
+    expect(n('total_eth_usd')).toBeGreaterThanOrEqual(n('wallet_gas_usd'));
+    const symbols = (data.wallet_balances || []).map((w: any) => w.token_symbol);
+    expect(symbols.slice(0, 2)).toEqual(['NOCK', 'USDC']);
+    expect(symbols).toContain('ETH');
+    expect(symbols).toContain('WETH');
+    // Gas has a deviation row with no target.
+    const gas = data.derived_metrics.portfolio_deviation_matrix.allocations.find((a: any) => a.bucket_name.startsWith('Gas'));
+    expect(gas?.target_weight_bps).toBe(0);
+    expect(gas?.status).toBe('no_target');
   });
 });
 

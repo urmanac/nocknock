@@ -364,7 +364,9 @@ struct SnapshotData {
     derived_metrics: DerivedMetrics,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+/// One cycle's live reads. Built only by fetch_raw_data (and test fixtures); it is never
+/// deserialized, so no field carries a serde default that could stand in for a live read.
+#[derive(Debug, Default)]
 struct RawOnChainData {
     wallet_balances: Vec<WalletBalance>,
     pool_mechanics: Vec<PoolMechanic>,
@@ -372,27 +374,23 @@ struct RawOnChainData {
     contract_fees: Vec<ContractFee>,
     /// Per-position on-chain reads (v2.0.0) — replaces live_tranche_1_*/2_* and
     /// the Aerodrome LP-share/claimFees inputs.
-    #[serde(default)]
     positions: Vec<RawPosition>,
     /// Live NOCK/USD spot from the designated price-source position pool.
-    #[serde(default)]
     spot_price_nock_usd: f64,
-    #[serde(default)]
     live_gas_cost_usd: f64,
-    #[serde(default = "default_eth_price")]
+    /// Live ETH/USD from the configured WETH/USDC pool (stale-pool guarded). 0.0 only in
+    /// test fixtures that do not set it: ETH is then unpriced, never priced at a default.
     live_eth_price_usd: f64,
     /// In-range liquidity of each tracked position's pool, keyed by position_id
     /// (decimal string). A missing key means the read failed this cycle: unknown, not zero.
-    #[serde(default)]
     pool_liquidity: HashMap<String, String>,
-    /// Native ETH and WETH held by the wallet; None when not read. Used only to check
-    /// that a suggested deposit can be funded — not counted in portfolio totals.
-    #[serde(default)]
+    /// Native ETH and WETH held by the wallet: the gas pillar (issue #94). Both reads
+    /// are required in production (a failed read fails the cycle); None is reachable only
+    /// in test fixtures and makes every gas field null, never zero. Gas is counted in
+    /// the portfolio total but is never cash, never dry powder and never funds an LP leg.
     wallet_eth: Option<f64>,
-    #[serde(default)]
     wallet_weth: Option<f64>,
     /// Per-position rebuild controls from config, keyed by position_id.
-    #[serde(default)]
     rebuild_rules: HashMap<String, RebuildRule>,
 }
 
@@ -511,10 +509,6 @@ struct RawPosition {
     fee1: f64,
     in_range: bool,
     is_price_source: bool,
-}
-
-fn default_eth_price() -> f64 {
-    2500.0
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -725,16 +719,16 @@ struct RebuildFunds {
     /// Liquid USDC above what must stay in the wallet (cash target, tax reserve and
     /// the accumulation plan's remaining tranches).
     usdc: f64,
-    /// ETH + WETH less a gas buffer; None when balances were not read.
-    eth: Option<f64>,
 }
 
 /// Smallest deposit worth suggesting. Below this a suggestion is noise (a $2 top-up
 /// costs attention and gas for nothing) and the position is listed as not fundable.
 const LP_SUGGESTION_MIN_USD: f64 = 5.0;
 
-/// ETH kept back for gas when sizing a deposit that needs ETH/WETH.
-const REBUILD_GAS_BUFFER_ETH: f64 = 0.002;
+/// Why a position with an ETH or WETH leg is never filled (issue #94): wallet ETH and
+/// WETH are gas, counted in the total but never deployed. Its share goes to the others.
+const LP_GAS_LEG_REASON: &str =
+    "needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions";
 
 /// Uniswap's tick bounds; a position spanning both is full range (it can never go
 /// out of range). Aerodrome volatile pools are modelled this way.
@@ -789,8 +783,11 @@ fn amounts_per_usd(p: &RawPosition, nock_usd: f64, eth_usd: f64) -> Option<(f64,
 ///
 /// Eligibility: the pool must have in-range liquidity (a dead pool's price is frozen,
 /// so a deposit there would sit alone at a stale price), and the position must be in
-/// range unless its config makes an exception. Funding: a suggestion is scaled down,
-/// never up, to what the wallet can supply; the limit is named.
+/// range unless its config makes an exception, and it must not need ETH/WETH: wallet
+/// ETH is gas, not investable capital (issue #94), so a position with an ETH or WETH
+/// leg is excluded and its share is redistributed to the eligible positions. Funding:
+/// a suggestion is scaled down, never up, to what the wallet can supply; the limit is
+/// named.
 fn lp_rebuild_suggestions(
     raw: &RawOnChainData,
     lp_target_usd: f64,
@@ -829,13 +826,25 @@ fn lp_rebuild_suggestions(
             skip("position is out of range (out-of-range positions are not filled by default)");
             continue;
         }
+        if is_eth_token(&p.token0) || is_eth_token(&p.token1) {
+            skip(LP_GAS_LEG_REASON);
+            continue;
+        }
         eligible.push((p, rule.weight_bps));
     }
 
     // Weights: explicit bps where given; positions without one share what is left equally.
+    // When every eligible position has an explicit weight and they sum to less than the
+    // whole, they are scaled up in proportion: the share of an excluded position (an
+    // ETH/WETH one, a dead pool) goes to the eligible ones, so the LP target can be met.
     let explicit: u32 = eligible.iter().filter_map(|(_, w)| *w).sum();
     let unweighted = eligible.iter().filter(|(_, w)| w.is_none()).count() as f64;
     let leftover = (10000.0 - explicit as f64).max(0.0);
+    let explicit_scale = if unweighted == 0.0 && explicit > 0 && explicit < 10000 {
+        10000.0 / explicit as f64
+    } else {
+        1.0
+    };
 
     // Pass 1: what each position wants, and what that takes of each token.
     struct Want<'a> {
@@ -849,7 +858,7 @@ fn lp_rebuild_suggestions(
     let mut wants: Vec<Want> = Vec::new();
     for (p, w) in eligible {
         let weight = match w {
-            Some(bps) => bps as f64,
+            Some(bps) => bps as f64 * explicit_scale,
             None => leftover / unweighted,
         } / 10000.0;
         let p0 = leg_usd_price(&p.token0, nock_usd, eth_usd);
@@ -902,28 +911,25 @@ fn lp_rebuild_suggestions(
     enum Src {
         Nock,
         Usdc,
-        Eth,
         Unfundable,
     }
+    // ETH/WETH legs never reach here (excluded at eligibility): gas is not a source.
     let src_of = |t: &PositionTokenInfo| {
         if is_nock_token(t) {
             Src::Nock
         } else if is_usdc_token(t) {
             Src::Usdc
-        } else if is_eth_token(t) {
-            Src::Eth
         } else {
             Src::Unfundable
         }
     };
-    let (mut need_nock, mut need_usdc, mut need_eth) = (0.0f64, 0.0f64, 0.0f64);
+    let (mut need_nock, mut need_usdc) = (0.0f64, 0.0f64);
     for w in &wants {
         for (tok, per) in [(&w.p.token0, w.per0), (&w.p.token1, w.per1)] {
             let amt = per * w.want_usd;
             match src_of(tok) {
                 Src::Nock => need_nock += amt,
                 Src::Usdc => need_usdc += amt,
-                Src::Eth => need_eth += amt,
                 Src::Unfundable => {}
             }
         }
@@ -954,15 +960,6 @@ fn lp_rebuild_suggestions(
             funds.usdc.max(0.0)
         ),
     );
-    let eth_f = match funds.eth {
-        Some(e) => (
-            factor(e, need_eth),
-            format!("wallet holds {:.5} ETH/WETH after a {} ETH gas buffer", e.max(0.0), REBUILD_GAS_BUFFER_ETH),
-        ),
-        // Zero-mock: an unread balance is not assumed sufficient.
-        None => (0.0, "ETH/WETH balance was not read this cycle".to_string()),
-    };
-
     let mut suggestions = Vec::new();
     for w in wants {
         let p = w.p;
@@ -975,7 +972,6 @@ fn lp_rebuild_suggestions(
             let (f, why) = match src_of(tok) {
                 Src::Nock => (nock_f.0, nock_f.1.clone()),
                 Src::Usdc => (usdc_f.0, usdc_f.1.clone()),
-                Src::Eth => (eth_f.0, eth_f.1.clone()),
                 Src::Unfundable => (0.0, format!("{} is not a token the engine can fund", tok.symbol)),
             };
             if f < scale - 1e-9 {
@@ -1531,6 +1527,61 @@ struct GlobalStatus {
     /// drives `regime` and the Overextension Cooldown
     #[serde(default)]
     rsi_14_1d: Option<String>,
+    /// Live ETH/USD used to value gas and LP WETH (2.3.0). Null when unpriced or absent
+    /// from an older snapshot: every 2.3.0 field is optional so stored rows still parse.
+    #[serde(default)]
+    eth_price_usd: Option<String>,
+    /// Wallet ETH + WETH, the gas pillar (2.3.0). Counted in total_portfolio_usd; never
+    /// cash, never deployable, no target.
+    #[serde(default)]
+    wallet_gas_eth: Option<String>,
+    #[serde(default)]
+    wallet_gas_usd: Option<String>,
+    /// The ETH pillar: wallet gas plus the ETH/WETH legs of tracked LP (2.3.0).
+    #[serde(default)]
+    total_eth_amount: Option<String>,
+    #[serde(default)]
+    total_eth_usd: Option<String>,
+}
+
+/// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
+const SNAPSHOT_SPEC_VERSION: &str = "2.3.0";
+
+/// The gas (wallet ETH + WETH) and ETH pillar figures, each None when it cannot be
+/// measured: unread wallet balances or an unpriced ETH. Never a zero stand-in.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+struct GasPillars {
+    wallet_gas_eth: Option<f64>,
+    wallet_gas_usd: Option<f64>,
+    total_eth_amount: Option<f64>,
+    total_eth_usd: Option<f64>,
+}
+
+/// Pure: wallet gas and the ETH pillar from the wallet reads, the ETH inside LP and the
+/// live ETH price. The pillar is wallet gas plus LP ETH/WETH legs.
+fn gas_pillars(wallet_eth: Option<f64>, wallet_weth: Option<f64>, lp_eth: f64, eth_px: f64) -> GasPillars {
+    let priced = eth_px.is_finite() && eth_px > 0.0;
+    let gas_eth = match (wallet_eth, wallet_weth) {
+        (Some(e), Some(w)) => Some(e + w),
+        _ => None,
+    };
+    let total_eth = gas_eth.map(|g| g + lp_eth);
+    GasPillars {
+        wallet_gas_eth: gas_eth,
+        wallet_gas_usd: gas_eth.filter(|_| priced).map(|g| g * eth_px),
+        total_eth_amount: total_eth,
+        total_eth_usd: total_eth.filter(|_| priced).map(|t| t * eth_px),
+    }
+}
+
+/// The high-water mark's date (issue #94, N2): the time of the earliest stored row at the
+/// peak, unless the current total sets a new mark, in which case it is now. `prev` is
+/// the peak row (value, generated_at) or None on an empty table. Pure.
+fn resolve_high_water_mark_date(prev: Option<(f64, DateTime<Utc>)>, current_total_usd: f64, now: &str) -> String {
+    match prev {
+        Some((v, at)) if v >= current_total_usd => at.to_rfc3339(),
+        _ => now.to_string(),
+    }
 }
 
 /// A stored payload without the field has no known floor: "" reads as unavailable,
@@ -2239,13 +2290,29 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
     let hwm = usd("high_water_mark_usd");
     let advice = get("shot_advice_action").unwrap_or("unavailable");
     let floor = floor_clause(global);
+    // Pillars and gas (snapshot 2.3.0, issue #94). Absent fields say so, never $0.00.
+    let not_reported = "not reported (snapshot predates 2.3.0)";
+    let pillar = |k: &str| get(k).map(|v| format!("${v}")).unwrap_or_else(|| not_reported.to_string());
+    let pillars = format!(
+        "NOCK {} · USDC {} · ETH {}",
+        pillar("total_native_usd"),
+        pillar("total_stable_usd"),
+        pillar("total_eth_usd")
+    );
+    let gas = match (get("wallet_gas_eth"), get("wallet_gas_usd")) {
+        (Some(eth), Some(usd)) => format!("{eth} ETH (${usd}), counted in the total; not cash, not deployable"),
+        (Some(eth), None) => format!("{eth} ETH (USD value not reported), counted in the total; not cash, not deployable"),
+        _ => not_reported.to_string(),
+    };
 
     format!(
         "📈 NockNock Sovereign Portfolio State (Live API)\n\
          =========================================\n\
          • Total Value: {total_usd}\n\
+         • Pillars: {pillars}\n\
          • Sovereign NOCK Stack: {total_nock} ({floor})\n\
          • Stable Stack: {total_usdc}\n\
+         • Gas held (wallet ETH+WETH): {gas}\n\
          • High-Water Mark: {hwm}\n\
          • Tactical Directive: {advice}\n\
          • Mode: Tier 1 Connected (Verified Persistent Snapshot)"
@@ -2566,13 +2633,28 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // Fetch raw data from Alchemy (parallelized on-chain calls)
     let raw_data = fetch_raw_data(state).await?;
 
-    // Query persistent high-water mark from snapshots table
-    let prev_hwm: f64 = sqlx::query_scalar::<_, f64>(
-        "SELECT COALESCE(MAX((data->'derived_metrics'->'global_status'->>'total_portfolio_usd')::float8), 0.0) FROM snapshots"
+    // Persistent high-water mark: the peak stored total and the earliest row that reached
+    // it (issue #94, N2). An empty table (a fresh start) has no mark yet. A database error
+    // fails the cycle: it must never silently reset the mark to the current value.
+    let hwm_row = sqlx::query(
+        r#"SELECT generated_at, (data->'derived_metrics'->'global_status'->>'total_portfolio_usd')::float8 AS v
+           FROM snapshots
+           WHERE (data->'derived_metrics'->'global_status'->>'total_portfolio_usd') IS NOT NULL
+           ORDER BY v DESC, generated_at ASC
+           LIMIT 1"#,
     )
-    .fetch_one(&state.db)
+    .fetch_optional(&state.db)
     .await
-    .unwrap_or(0.0);
+    .map_err(|e| anyhow::anyhow!("High-water mark query failed: {e}"))?;
+    let prev_peak: Option<(f64, DateTime<Utc>)> = match hwm_row {
+        None => None,
+        Some(r) => Some((
+            r.try_get::<f64, _>("v").map_err(|e| anyhow::anyhow!("High-water mark value unreadable: {e}"))?,
+            r.try_get::<DateTime<Utc>, _>("generated_at")
+                .map_err(|e| anyhow::anyhow!("High-water mark date unreadable: {e}"))?,
+        )),
+    };
+    let prev_hwm: f64 = prev_peak.map(|(v, _)| v).unwrap_or(0.0);
 
     // Compute structural channels from historical data — most recent 50 snapshots,
     // oldest first, with their real snapshot timestamps
@@ -2722,8 +2804,13 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     };
 
     let plan_ctx = load_plan_context(state).await;
-    let derived_metrics = compute_derived_metrics_with_plan(&raw_data, prev_hwm, &profile, structural_channels,
+    let mut derived_metrics = compute_derived_metrics_with_plan(&raw_data, prev_hwm, &profile, structural_channels,
         &counterfactual_history, &ledger_agg, &regime, &plan_ctx);
+    {
+        let gs = &mut derived_metrics.global_status;
+        let current_total: f64 = gs.total_portfolio_usd.parse().unwrap_or(f64::INFINITY);
+        gs.high_water_mark_date = resolve_high_water_mark_date(prev_peak, current_total, &gs.high_water_mark_date);
+    }
     // Capture directive strings before the metrics move into the snapshot envelope
     let next_directive_action = derived_metrics.global_status.shot_advice_action.clone();
     let next_directive_details = derived_metrics.global_status.shot_advice_details.clone();
@@ -2769,7 +2856,7 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
         meta: SnapshotMeta {
             generated_at: now,
             state_hash: state_hash.clone(),
-            version: "2.2.0".to_string(),
+            version: SNAPSHOT_SPEC_VERSION.to_string(),
             snapshot_id: Uuid::new_v4(),
         },
         data: snapshot_data,
@@ -4910,6 +4997,28 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
             eth_price_pool
         ));
     }
+    // 0b. Stale-price guard (issue #94), as for the NOCK spot: wallet gas and LP WETH are
+    //     valued in the total, so a frozen pool's price would be a mock number.
+    let eth_liq_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{ "to": eth_price_pool, "data": V3_LIQUIDITY }, "latest"],
+        "id": 98
+    });
+    let eth_pool_liquidity = post_rpc_with_retry(&state.http_client, &alchemy_url, &eth_liq_payload, 2)
+        .await
+        .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .and_then(|s| {
+            let clean = s.trim_start_matches("0x");
+            if clean.len() < 64 {
+                return None;
+            }
+            u128::from_str_radix(&clean[clean.len() - 32..], 16).ok()
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!("Failed to query in-range liquidity of the ETH/USD price pool ({})", eth_price_pool)
+        })?;
+    check_eth_price_pool_liquidity(&eth_price_pool, eth_pool_liquidity)?;
 
     // 1. Fetch live gas price (eth_gasPrice) — required input, fail explicitly on error
     let gas_payload = json!({
@@ -5002,33 +5111,10 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         "id": 2
     });
 
-    let mut nock_balance = 0.0f64;
-    let mut usdc_balance = 0.0f64;
-    let mut balances_found = false;
-
-    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &balances_payload, 2).await {
-        if let Some(balances) = res_json.get("result").and_then(|r| r.get("tokenBalances")).and_then(|t| t.as_array()) {
-            for b in balances {
-                let addr = b.get("contractAddress").and_then(|a| a.as_str()).unwrap_or_default().to_lowercase();
-                let hex_bal = b.get("tokenBalance").and_then(|h| h.as_str()).unwrap_or("0x0").trim_start_matches("0x");
-                if addr == "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" {
-                    if let Ok(val) = u128::from_str_radix(hex_bal, 16) {
-                        usdc_balance = val as f64 / 1e6;
-                        balances_found = true;
-                    }
-                } else if addr == "0x9b5e262cf9bb04869ab40b19af91d2dc85761722" {
-                    if let Ok(val) = u128::from_str_radix(hex_bal, 16) {
-                        nock_balance = val as f64 / 1e16;
-                        balances_found = true;
-                    }
-                }
-            }
-        }
-    }
-
-    if !balances_found {
-        return Err(anyhow::anyhow!("Failed to query live token balances from Alchemy RPC"));
-    }
+    let balances_json = post_rpc_with_retry(&state.http_client, &alchemy_url, &balances_payload, 2)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("Failed to query live token balances from Alchemy RPC"))?;
+    let (nock_balance, usdc_balance) = parse_wallet_token_balances(&balances_json)?;
 
     let nock_balance_usd = nock_balance * spot_price;
     let now_str = Utc::now().to_rfc3339();
@@ -5046,7 +5132,8 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
             Err(e) => tracing::warn!("pool liquidity read failed for {}: {e}", p.position_id),
         }
     }
-    // 5b. ETH and WETH balances, used only to check a suggested deposit can be funded.
+    // 5b. ETH and WETH balances: the gas pillar (issue #94). Counted in the total, so both
+    //     reads are required, like NOCK and USDC: a failed read fails the cycle.
     let eth_balance_payload = json!({
         "jsonrpc": "2.0", "method": "eth_getBalance", "params": [wallet_addr, "latest"], "id": 60
     });
@@ -5068,6 +5155,7 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         .filter(|h| h.len() > 2)
         .and_then(|h| u128::from_str_radix(h.trim_start_matches("0x"), 16).ok())
         .map(|wei| wei as f64 / 1e18);
+    let (gas_eth, gas_weth) = require_gas_balances(wallet_eth, wallet_weth)?;
     // 5c. Per-position rebuild rules from config, keyed like RawPosition.position_id.
     let rebuild_rules: HashMap<String, RebuildRule> = state
         .config
@@ -5115,6 +5203,23 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
                 amount_usd: format!("{:.2}", usdc_balance),
                 updated_at: now_str.clone(),
             },
+            // Gas rows (2.3.0) come after NOCK and USDC, which keep indexes 0 and 1.
+            WalletBalance {
+                wallet_address: wallet_addr.clone(),
+                token_symbol: "ETH".to_string(),
+                token_address: NATIVE_ETH.to_string(),
+                amount: format!("{:.6}", gas_eth),
+                amount_usd: format!("{:.2}", gas_eth * live_eth_price_usd),
+                updated_at: now_str.clone(),
+            },
+            WalletBalance {
+                wallet_address: wallet_addr.clone(),
+                token_symbol: "WETH".to_string(),
+                token_address: WETH_BASE.to_string(),
+                amount: format!("{:.6}", gas_weth),
+                amount_usd: format!("{:.2}", gas_weth * live_eth_price_usd),
+                updated_at: now_str.clone(),
+            },
         ],
         pool_mechanics,
         concentrated_liquidity: vec![], // DEPRECATED since v2.0.0 — see `positions`
@@ -5124,10 +5229,79 @@ async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
         live_gas_cost_usd,
         live_eth_price_usd,
         pool_liquidity,
-        wallet_eth,
-        wallet_weth,
+        wallet_eth: Some(gas_eth),
+        wallet_weth: Some(gas_weth),
         rebuild_rules,
     })
+}
+
+const USDC_BASE_LC: &str = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+const NOCK_BASE_LC: &str = "0x9b5e262cf9bb04869ab40b19af91d2dc85761722";
+
+/// Wallet NOCK and USDC from an `alchemy_getTokenBalances` response, in human units.
+/// Every token must be present with a readable balance: a missing entry, an error, or a
+/// null `tokenBalance` fails the cycle instead of reading as 0 (issue #94, N14). Pure.
+fn parse_wallet_token_balances(res_json: &serde_json::Value) -> Result<(f64, f64)> {
+    let balances = res_json
+        .get("result")
+        .and_then(|r| r.get("tokenBalances"))
+        .and_then(|t| t.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Failed to query live token balances from Alchemy RPC: no tokenBalances in the response"))?;
+    let read = |want: &str, symbol: &str, decimals: i32| -> Result<f64> {
+        let entry = balances
+            .iter()
+            .find(|b| {
+                b.get("contractAddress").and_then(|a| a.as_str()).map(|a| a.to_lowercase()).as_deref() == Some(want)
+            })
+            .ok_or_else(|| anyhow::anyhow!("Wallet {symbol} balance missing from the token balance response"))?;
+        if let Some(err) = entry.get("error").filter(|e| !e.is_null()) {
+            return Err(anyhow::anyhow!("Wallet {symbol} balance read failed: {err}"));
+        }
+        let hex = entry
+            .get("tokenBalance")
+            .and_then(|h| h.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Wallet {symbol} balance is null in the token balance response; not read as 0"))?;
+        let clean = hex.trim_start_matches("0x");
+        let raw = if clean.is_empty() {
+            0u128 // "0x" is an explicit zero balance
+        } else {
+            u128::from_str_radix(clean, 16)
+                .map_err(|_| anyhow::anyhow!("Wallet {symbol} balance '{hex}' is not a hex quantity"))?
+        };
+        Ok(raw as f64 / 10f64.powi(decimals))
+    };
+    let usdc = read(USDC_BASE_LC, "USDC", 6)?;
+    let nock = read(NOCK_BASE_LC, "NOCK", 16)?;
+    Ok((nock, usdc))
+}
+
+/// The wallet's ETH and WETH (gas) balances are counted in the total, so both reads
+/// are required: a failed read fails the cycle rather than counting gas as zero. Pure.
+fn require_gas_balances(eth: Option<f64>, weth: Option<f64>) -> Result<(f64, f64)> {
+    match (eth, weth) {
+        (Some(e), Some(w)) => Ok((e, w)),
+        (e, w) => Err(anyhow::anyhow!(
+            "Failed to read wallet {} (gas) balance: gas is counted in the portfolio total, so the cycle fails rather than counting it as 0",
+            match (e.is_none(), w.is_none()) {
+                (true, true) => "ETH and WETH",
+                (true, false) => "ETH",
+                _ => "WETH",
+            }
+        )),
+    }
+}
+
+/// The ETH/USD price pool must have in-range liquidity, or its price is frozen and would
+/// value gas and LP WETH at a stale number (issue #94). Pure — unit-testable.
+fn check_eth_price_pool_liquidity(pool: &str, in_range_liquidity: u128) -> Result<()> {
+    if in_range_liquidity == 0 {
+        return Err(anyhow::anyhow!(
+            "Stale ETH/USD price: price pool {} has zero in-range liquidity, so its price is frozen. \
+             Set eth_price_pool to a WETH/USDC pool with active liquidity.",
+            pool
+        ));
+    }
+    Ok(())
 }
 
 /// In-range (active) liquidity of the price-source pool: StateView `getLiquidity(poolId)`
@@ -6112,6 +6286,8 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
     let mut lp_usd = 0.0f64;
     let mut lp_fee_nock = 0.0f64;
     let mut lp_fee_usd = 0.0f64;
+    // ETH/WETH inside tracked LP: the LP part of the ETH pillar (issue #94).
+    let mut lp_eth = 0.0f64;
     // Per-position (address, label, fee_usd) tuples for the velocity panel.
     let mut fee_entries: Vec<(String, String, f64)> = Vec::new();
     for p in &raw.positions {
@@ -6122,6 +6298,8 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
         if is_usdc_token(&p.token1) { lp_usdc += p.amount1; }
         if is_nock_token(&p.token0) { lp_nock += p.amount0; }
         if is_nock_token(&p.token1) { lp_nock += p.amount1; }
+        if is_eth_token(&p.token0) { lp_eth += p.amount0; }
+        if is_eth_token(&p.token1) { lp_eth += p.amount1; }
         let fee_usd = p.fee0 * p0 + p.fee1 * p1;
         lp_fee_usd += fee_usd;
         if is_nock_token(&p.token0) { lp_fee_nock += p.fee0; }
@@ -6165,7 +6343,18 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
         .and_then(|w| w.amount.parse().ok())
         .unwrap_or(0.0);
 
-    let total_portfolio_usd = lp_usd + t3_usd + wallet_usdc;
+    // Gas pillar (issue #94): wallet ETH + WETH, counted in the total at the live ETH
+    // price, but never cash, never dry powder, never a funding source and never under a
+    // target. Unread (tests only) or unpriced gas is null, never zero.
+    let eth_px = raw.live_eth_price_usd;
+    let eth_priced = eth_px.is_finite() && eth_px > 0.0;
+    let pillars = gas_pillars(raw.wallet_eth, raw.wallet_weth, lp_eth, eth_px);
+    let wallet_gas_usd = pillars.wallet_gas_usd.unwrap_or(0.0);
+
+    // One definition of the portfolio: every pillar, gas included. Targets, weights, the
+    // high-water mark and history all use it.
+    let total_portfolio_usd = lp_usd + t3_usd + wallet_usdc + wallet_gas_usd;
+    // NOCK only (wallet + LP); ETH is its own pillar (total_eth_usd).
     let total_native_usd = (lp_nock + t3_nock) * spot_price;
     let total_stable_usd = lp_usdc + wallet_usdc;
 
@@ -6269,10 +6458,6 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
             floor_tolerance_nock,
             floor_set: floor > 0.0,
             usdc: wallet_usdc - liquid_floor,
-            eth: match (raw.wallet_eth, raw.wallet_weth) {
-                (None, None) => None,
-                (e, w) => Some(e.unwrap_or(0.0) + w.unwrap_or(0.0) - REBUILD_GAS_BUFFER_ETH),
-            },
         };
         let (suggestions, excluded) = lp_rebuild_suggestions(raw, lp_target_usd, funds);
         // Worst case for the floor: every range sells all its NOCK, so only wallet
@@ -6394,12 +6579,20 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
                 ),
             },
         }
-    } else if !plan_configured && total_portfolio_usd <= 0.0 && total_nock <= 0.0 {
+    } else if !plan_configured && total_portfolio_usd - wallet_gas_usd <= 0.0 && total_nock <= 0.0 {
+        // Gas alone is not something to track or deploy: a gas-only wallet is still empty.
+        let gas_held = match pillars.wallet_gas_eth {
+            Some(g) if g > 0.0 => format!(
+                " It holds {:.6} ETH/WETH for gas, counted in the total; gas is not cash and is never deployed.",
+                g
+            ),
+            _ => String::new(),
+        };
         (
             "NOTHING TO TRACK YET (Empty Wallet)".to_string(),
             format!(
-                "{} holds no NOCK, no USDC and no LP value that NockNock reads. Once it is funded NockNock reports it here. To have NOCK buys paced, {}; set operator_profile.treasury_floor_nock only if you want a floor alarm.{}",
-                wallet_label, own_plan_hint, gas_note
+                "{} holds no NOCK, no USDC and no LP value that NockNock reads. Once it is funded NockNock reports it here. To have NOCK buys paced, {}; set operator_profile.treasury_floor_nock only if you want a floor alarm.{}{}",
+                wallet_label, own_plan_hint, gas_note, gas_held
             ),
         )
     } else if regime.overextended && !plan_overrides_cooldown {
@@ -6503,6 +6696,8 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
             // Signed: fees less two claims' gas. A negative net is shown, never clamped to 0.
             gas_to_fee_delta_usd: format!("{:.2}", total_fees_usd - (gas_cost * 2.0)),
             high_water_mark_usd: format!("{:.2}", current_hwm),
+            // The cycle replaces this with the peak row's own time when the mark was set
+            // earlier (resolve_high_water_mark_date); here it is a new mark.
             high_water_mark_date: now_str.clone(),
             total_nock_amount: format!("{:.0}", total_nock),
             nock_floor_delta: format!("{:.0}", nock_floor_delta),
@@ -6513,6 +6708,11 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
             regime: regime_label(&regime).to_string(),
             rsi_14: regime.rsi_5m.map(|r| format!("{:.1}", r)),
             rsi_14_1d: regime.rsi_1d.map(|r| format!("{:.1}", r)),
+            eth_price_usd: eth_priced.then(|| format!("{:.2}", eth_px)),
+            wallet_gas_eth: pillars.wallet_gas_eth.map(|v| format!("{:.6}", v)),
+            wallet_gas_usd: pillars.wallet_gas_usd.map(|v| format!("{:.2}", v)),
+            total_eth_amount: pillars.total_eth_amount.map(|v| format!("{:.6}", v)),
+            total_eth_usd: pillars.total_eth_usd.map(|v| format!("{:.2}", v)),
         },
         asset_aggregation_series: AssetAggregationSeries {
             time_points: vec![now_str.clone()],
@@ -6606,6 +6806,9 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
                 let usdc_weight = weight(wallet_usdc);
                 let usdc_dev = usdc_weight - w.cash;
 
+                // Gas has no target: shown as a measured share, never under pressure.
+                let gas_weight = weight(wallet_gas_usd);
+
                 vec![
                     AllocationDeviation {
                         bucket_name: "Sovereign Treasury".to_string(),
@@ -6627,6 +6830,13 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
                         actual_weight_bps: usdc_weight,
                         deviation_bps: usdc_dev,
                         status: calc_status(usdc_dev, w.cash),
+                    },
+                    AllocationDeviation {
+                        bucket_name: "Gas (wallet ETH+WETH)".to_string(),
+                        target_weight_bps: 0,
+                        actual_weight_bps: gas_weight,
+                        deviation_bps: gas_weight,
+                        status: "no_target".to_string(),
                     },
                 ]
             },
@@ -7700,11 +7910,13 @@ database_url: "postgresql://localhost/test"
         aero.liquidity = 0;
         raw.pool_liquidity.insert(aero.position_id.clone(), "342542824101829799".to_string());
         raw.positions.push(aero);
-        let (s, _) = lp_rebuild_suggestions(&raw, 400.0, roomy_funds());
-        // Four eligible positions (the dead 0.75% pool stays out): a quarter each.
-        assert_eq!(s.len(), 4);
+        let (s, x) = lp_rebuild_suggestions(&raw, 400.0, roomy_funds());
+        // Two eligible positions: the dead 0.75% pool stays out, and the two ranges with
+        // an ETH/WETH leg are gas-excluded (issue #94). Half each.
+        assert_eq!(s.len(), 2);
+        assert_eq!(x.iter().filter(|e| e.reason.contains("gas")).count(), 2);
         let a = s.iter().find(|x| x.protocol == "aerodrome").expect("aerodrome suggested");
-        assert_eq!(a.target_usd, "100.00");
+        assert_eq!(a.target_usd, "200.00");
         assert_eq!(a.nock_sold_out_at_multiple, None);
         // The link is the pool's deposit page in the Aero app: never aerodrome.finance
         // (retired) and never a Uniswap link.
@@ -7722,7 +7934,7 @@ database_url: "postgresql://localhost/test"
         // the pool's own price; this fixture's engine spot ($0.01229) sits 6% above the
         // pool's ($0.0116), so the NOCK leg is valued slightly higher here.
         let usdc_leg: f64 = a.amount0.parse().unwrap();
-        assert!((45.0..=55.0).contains(&usdc_leg), "USDC leg {usdc_leg}");
+        assert!((90.0..=110.0).contains(&usdc_leg), "USDC leg {usdc_leg}");
         // A config weight makes it the core holding.
         raw.rebuild_rules.insert(
             "aerodrome:base:0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
@@ -7730,7 +7942,7 @@ database_url: "postgresql://localhost/test"
         );
         let (s, _) = lp_rebuild_suggestions(&raw, 400.0, roomy_funds());
         assert_eq!(s.iter().find(|x| x.protocol == "aerodrome").unwrap().target_usd, "280.00");
-        assert_eq!(sg(&s, 3163450).target_usd, "40.00");
+        assert_eq!(sg(&s, 3163450).target_usd, "120.00");
 
         // Funded: its value and NOCK count in LP totals; its bracket is flagged full range.
         let mut funded = rebuild_fixture();
@@ -7746,16 +7958,17 @@ database_url: "postgresql://localhost/test"
 
     #[test]
     fn test_rebuild_fills_only_the_gap_when_other_positions_are_above_their_share() {
-        // The 2026-11-14 situation: two Uniswap ranges hold ~$179 each, Aerodrome is
-        // empty, and the LP target is raised to $486 (20%). Equal thirds would be $162
-        // each: the Uniswap ranges are over their share and are left alone, and the
-        // Aerodrome suggestion is the remaining gap ($128), not its full $162 share.
+        // LP holds $358 ($250 in the USDC/NOCK range, $108 in the WETH/NOCK range),
+        // Aerodrome is empty, and the LP target is $486. The WETH/NOCK range is
+        // gas-excluded (issue #94), so the two eligible positions share $243 each: the
+        // USDC/NOCK range is over its share and is left alone, and the Aerodrome
+        // suggestion is the remaining gap ($128), not its full $243 share.
         let mut raw = rebuild_fixture();
         let spot = raw.spot_price_nock_usd;
         for p in raw.positions.iter_mut() {
             match p.nft_id {
-                3163450 => { p.amount0 = 71.0; p.amount1 = (179.0 - 71.0) / spot; }
-                6336662 => { p.amount0 = 0.0; p.amount1 = 179.0 / spot; }
+                3163450 => { p.amount0 = 71.0; p.amount1 = (250.0 - 71.0) / spot; }
+                6336662 => { p.amount0 = 0.0; p.amount1 = 108.0 / spot; }
                 _ => {}
             }
         }
@@ -7766,7 +7979,7 @@ database_url: "postgresql://localhost/test"
         raw.pool_liquidity.insert(aero.position_id.clone(), "342542824101829799".to_string());
         raw.positions.push(aero);
         let (s, _) = lp_rebuild_suggestions(&raw, 486.0, roomy_funds());
-        assert_eq!(s.len(), 2, "only positions below their share are suggested: {s:?}");
+        assert_eq!(s.len(), 1, "only positions below their share are suggested: {s:?}");
         let total: f64 = s.iter().map(|x| x.add_usd.parse::<f64>().unwrap()).sum();
         assert!((total - 128.0).abs() < 0.05, "suggestions must sum to the $128 gap, got {total}");
         // Neither funded Uniswap range is asked to change.
@@ -7800,7 +8013,7 @@ database_url: "postgresql://localhost/test"
         // LP is under target but only dust could be added (the 2026-11-14 state after
         // the operator's deposits used up the floor tolerance: 89 NOCK of headroom).
         let raw = rebuild_fixture();
-        let dust = RebuildFunds { nock: 89.0, floor_tolerance_nock: 10_000.0, floor_set: true, usdc: 10_000.0, eth: Some(10.0) };
+        let dust = RebuildFunds { nock: 89.0, floor_tolerance_nock: 10_000.0, floor_set: true, usdc: 10_000.0 };
         let (s, x) = lp_rebuild_suggestions(&raw, 300.0, dust);
         assert!(s.is_empty(), "a ~$2 top-up is not worth suggesting: {s:?}");
         assert!(x.iter().any(|e| e.reason.contains("cannot be funded")));
@@ -7827,7 +8040,7 @@ database_url: "postgresql://localhost/test"
     }
 
     fn roomy_funds() -> RebuildFunds {
-        RebuildFunds { nock: 1_000_000.0, floor_tolerance_nock: 0.0, floor_set: true, usdc: 10_000.0, eth: Some(10.0) }
+        RebuildFunds { nock: 1_000_000.0, floor_tolerance_nock: 0.0, floor_set: true, usdc: 10_000.0 }
     }
 
     #[test]
@@ -7902,16 +8115,17 @@ database_url: "postgresql://localhost/test"
         let dead = x.iter().find(|e| e.nft_id == 3163431).expect("dead pool excluded");
         assert!(dead.reason.contains("no in-range liquidity"));
         assert!(raw.positions.iter().find(|p| p.nft_id == 3163431).unwrap().in_range);
-        // Three live, in-range positions share the target equally.
-        assert_eq!(s.len(), 3);
-        for nft in [3163432u64, 6336662, 3163450] {
-            let one = sg(&s, nft);
-            assert_eq!(one.target_usd, "100.00");
-            assert_eq!(one.add_usd, "100.00");
-            assert_eq!(one.limited_by, None);
+        // Of the three live, in-range positions two need ETH/WETH, which is gas (issue
+        // #94): the USDC/NOCK range takes the whole target.
+        assert_eq!(s.len(), 1);
+        let one = sg(&s, 3163450);
+        assert_eq!(one.target_usd, "300.00");
+        assert_eq!(one.add_usd, "300.00");
+        assert_eq!(one.limited_by, None);
+        for nft in [3163432u64, 6336662] {
+            assert!(x.iter().any(|e| e.nft_id == nft && e.reason.contains("gas, not investable capital")));
         }
         assert_eq!(sg(&s, 3163450).url, "https://app.uniswap.org/positions/v4/base/3163450");
-        assert_eq!(sg(&s, 6336662).url, "https://app.uniswap.org/positions/v3/base/6336662");
         // The USDC/NOCK range spans spot, so its deposit takes both tokens.
         let wide = sg(&s, 3163450);
         assert_eq!((wide.token0_symbol.as_str(), wide.token1_symbol.as_str()), ("USDC", "NOCK"));
@@ -7926,17 +8140,31 @@ database_url: "postgresql://localhost/test"
         let (s, x) = lp_rebuild_suggestions(&raw, 300.0, roomy_funds());
         assert!(s.iter().all(|one| one.nft_id != 3163432));
         assert!(x.iter().any(|e| e.nft_id == 3163432 && e.reason.contains("out of range")));
-        // The remaining two now take half each.
-        assert_eq!(s.len(), 2);
-        assert_eq!(sg(&s, 3163450).target_usd, "150.00");
-        assert_eq!(sg(&s, 6336662).target_usd, "150.00");
-        // "Generally": a per-position exception brings it back.
+        // The USDC/NOCK range takes the whole target (the WETH/NOCK range is gas-excluded).
+        assert_eq!(s.len(), 1);
+        assert_eq!(sg(&s, 3163450).target_usd, "300.00");
+        // "Generally": a per-position exception brings an out-of-range USDC/NOCK range back.
+        let mut raw = rebuild_fixture();
+        raw.positions.iter_mut().find(|p| p.nft_id == 3163450).unwrap().in_range = false;
+        let (s, x) = lp_rebuild_suggestions(&raw, 300.0, roomy_funds());
+        assert!(s.is_empty());
+        assert!(x.iter().any(|e| e.nft_id == 3163450 && e.reason.contains("out of range")));
+        raw.rebuild_rules.insert(
+            "uniswap-v4:base:3163450".to_string(),
+            RebuildRule { weight_bps: None, when_out_of_range: true, deposit_url: None },
+        );
+        let (s, _) = lp_rebuild_suggestions(&raw, 300.0, roomy_funds());
+        assert_eq!(s.len(), 1);
+        // The exception never overrides the gas rule: an ETH-leg range stays out.
+        let mut raw = rebuild_fixture();
+        raw.positions.iter_mut().find(|p| p.nft_id == 3163432).unwrap().in_range = false;
         raw.rebuild_rules.insert(
             "uniswap-v4:base:3163432".to_string(),
             RebuildRule { weight_bps: None, when_out_of_range: true, deposit_url: None },
         );
-        let (s, _) = lp_rebuild_suggestions(&raw, 300.0, roomy_funds());
-        assert_eq!(s.len(), 3);
+        let (s, x) = lp_rebuild_suggestions(&raw, 300.0, roomy_funds());
+        assert!(s.iter().all(|one| one.nft_id != 3163432));
+        assert!(x.iter().any(|e| e.nft_id == 3163432 && e.reason.contains("gas")));
     }
 
     #[test]
@@ -7945,16 +8173,41 @@ database_url: "postgresql://localhost/test"
         raw.rebuild_rules.insert("uniswap-v4:base:3163450".to_string(), RebuildRule { weight_bps: Some(7000), when_out_of_range: false, deposit_url: None });
         raw.rebuild_rules.insert("uniswap-v4:base:3163432".to_string(), RebuildRule { weight_bps: Some(0), when_out_of_range: false, deposit_url: None });
         let (s, x) = lp_rebuild_suggestions(&raw, 1000.0, roomy_funds());
-        assert_eq!(sg(&s, 3163450).target_usd, "700.00");
-        // The one unweighted eligible position takes what is left.
-        assert_eq!(sg(&s, 6336662).target_usd, "300.00");
+        // The only unweighted position (#6336662, WETH/NOCK) is gas-excluded, so its share
+        // is redistributed: the one eligible position's 7000 bps scales to the whole.
+        assert_eq!(sg(&s, 3163450).target_usd, "1000.00");
+        assert!(s.iter().all(|one| one.nft_id != 6336662));
+        assert!(x.iter().any(|e| e.nft_id == 6336662 && e.reason.contains("gas")));
         assert!(x.iter().any(|e| e.nft_id == 3163432 && e.reason.contains("rebuild_weight_bps: 0")));
+        // With an unweighted eligible position, explicit weights are kept as set and the
+        // unweighted one takes what is left.
+        let mut aero = aero_position(false);
+        aero.amount0 = 0.0;
+        aero.amount1 = 0.0;
+        aero.liquidity = 0;
+        raw.pool_liquidity.insert(aero.position_id.clone(), "342542824101829799".to_string());
+        raw.positions.push(aero);
+        let (s, _) = lp_rebuild_suggestions(&raw, 1000.0, roomy_funds());
+        assert_eq!(sg(&s, 3163450).target_usd, "700.00");
+        assert_eq!(s.iter().find(|x| x.protocol == "aerodrome").unwrap().target_usd, "300.00");
     }
 
     #[test]
     fn test_rebuild_never_places_floor_nock_in_lp_and_scales_fairly() {
-        let raw = rebuild_fixture();
-        // Unconstrained NOCK demand for the three deposits.
+        // Two eligible NOCK-bearing positions: the USDC/NOCK range and an empty Aero pool
+        // (the ETH-leg ranges are gas-excluded).
+        let with_aero = || {
+            let mut raw = rebuild_fixture();
+            let mut aero = aero_position(false);
+            aero.amount0 = 0.0;
+            aero.amount1 = 0.0;
+            aero.liquidity = 0;
+            raw.pool_liquidity.insert(aero.position_id.clone(), "342542824101829799".to_string());
+            raw.positions.push(aero);
+            raw
+        };
+        let raw = with_aero();
+        // Unconstrained NOCK demand for the two deposits.
         let (free, _) = lp_rebuild_suggestions(&raw, 900.0, roomy_funds());
         let nock_of = |v: &[LpSuggestion]| -> f64 {
             v.iter()
@@ -7967,23 +8220,25 @@ database_url: "postgresql://localhost/test"
         let demand = nock_of(&free);
         assert!(demand > 1000.0);
         // Only half of that sits above the floor.
-        let tight = RebuildFunds { nock: demand / 2.0, floor_tolerance_nock: 0.0, floor_set: true, usdc: 10_000.0, eth: Some(10.0) };
+        let tight = RebuildFunds { nock: demand / 2.0, floor_tolerance_nock: 0.0, floor_set: true, usdc: 10_000.0 };
         let (s, _) = lp_rebuild_suggestions(&raw, 900.0, tight);
         assert!(nock_of(&s) <= demand / 2.0 + 3.0, "LP NOCK {} must stay within the {} above the floor", nock_of(&s), demand / 2.0);
         // Every position that needs NOCK is scaled by the same factor and says why.
+        assert_eq!(s.len(), 2);
         for one in &s {
-            assert_eq!(one.add_usd, "150.00", "{} should be halved from $300", one.label);
+            assert_eq!(one.add_usd, "225.00", "{} should be halved from $450", one.label);
             assert!(one.limited_by.as_ref().unwrap().contains("hard floor"));
         }
         // Order independence: reversing the config order changes nothing.
-        let mut reversed = rebuild_fixture();
+        let mut reversed = with_aero();
         reversed.positions.reverse();
         let (r, _) = lp_rebuild_suggestions(&reversed, 900.0, tight);
         for one in &s {
-            assert_eq!(sg(&r, one.nft_id).add_usd, one.add_usd);
+            let twin = r.iter().find(|x| x.position_id == one.position_id).unwrap();
+            assert_eq!(twin.add_usd, one.add_usd);
         }
         // Nothing above the floor at all: no NOCK-bearing deposit is suggested.
-        let none = RebuildFunds { nock: 0.0, floor_tolerance_nock: 0.0, floor_set: true, usdc: 10_000.0, eth: Some(10.0) };
+        let none = RebuildFunds { nock: 0.0, floor_tolerance_nock: 0.0, floor_set: true, usdc: 10_000.0 };
         let (s, x) = lp_rebuild_suggestions(&raw, 900.0, none);
         assert!(s.is_empty());
         assert!(x.iter().any(|e| e.reason.contains("cannot be funded") && e.reason.contains("hard floor")));
@@ -7997,15 +8252,17 @@ database_url: "postgresql://localhost/test"
         let (s, x) = lp_rebuild_suggestions(&raw, 300.0, roomy_funds());
         assert!(s.iter().all(|one| one.nft_id != 3163450));
         assert!(x.iter().any(|e| e.nft_id == 3163450 && e.reason.contains("could not be read")));
-        // ETH balance not read: the WETH/NOCK deposit is withheld, the others stand.
-        let raw = rebuild_fixture();
-        let (s, x) = lp_rebuild_suggestions(&raw, 300.0, RebuildFunds { nock: 1_000_000.0, floor_tolerance_nock: 0.0, floor_set: true, usdc: 10_000.0, eth: None });
-        let weth_needed = raw.positions.iter().find(|p| p.nft_id == 6336662).map(|p| amounts_per_usd(p, raw.spot_price_nock_usd, raw.live_eth_price_usd).unwrap().0 > 0.0).unwrap();
-        if weth_needed {
-            assert!(s.iter().all(|one| one.nft_id != 6336662));
-            assert!(x.iter().any(|e| e.nft_id == 6336662 && e.reason.contains("not read")));
+        // Wallet gas is never a funding source, read or not: the ETH-leg ranges are
+        // excluded either way, with the gas reason, and the USDC/NOCK range stands.
+        for (eth, weth) in [(None, None), (Some(0.114226), Some(0.0)), (Some(10.0), Some(10.0))] {
+            let mut raw = rebuild_fixture();
+            raw.wallet_eth = eth;
+            raw.wallet_weth = weth;
+            let (s, x) = lp_rebuild_suggestions(&raw, 300.0, roomy_funds());
+            assert!(s.iter().all(|one| one.nft_id != 6336662 && one.nft_id != 3163432));
+            assert!(x.iter().any(|e| e.nft_id == 6336662 && e.reason.contains("gas")));
+            assert!(s.iter().any(|one| one.nft_id == 3163450));
         }
-        assert!(s.iter().any(|one| one.nft_id == 3163450));
     }
 
     #[test]
@@ -8360,6 +8617,7 @@ database_url: "postgresql://localhost/test"
                     regime: "normal".to_string(),
                     rsi_14: None,
                     rsi_14_1d: None,
+                    ..Default::default()
                 },
                 sovereign_ledger: Default::default(),
                 accumulation_plan: None,
@@ -9318,7 +9576,9 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
         assert_eq!(m.lp_rebuild.status, "no_positions");
         assert!(m.lp_rebuild.suggestions.is_empty() && m.lp_rebuild.excluded.is_empty());
         let w: Vec<i32> = m.portfolio_deviation_matrix.allocations.iter().map(|a| a.actual_weight_bps).collect();
-        assert_eq!(w, vec![0, 0, 10000]);
+        // The fourth row is gas: a measured share with no target.
+        assert_eq!(w, vec![0, 0, 10000, 0]);
+        assert_eq!(m.portfolio_deviation_matrix.allocations[3].status, "no_target");
         assert!(m.tick_bracket_hypervisor.brackets.is_empty());
         assert!(m.asset_aggregation_series.positions_nock.is_empty());
         assert!(m.velocity_gas_sandbox.contracts.is_empty());
@@ -9338,13 +9598,21 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
         assert_eq!(m.global_status.total_portfolio_usd, "0.00");
         assert_eq!(m.global_status.high_water_mark_usd, "0.00");
         let w: Vec<i32> = m.portfolio_deviation_matrix.allocations.iter().map(|a| a.actual_weight_bps).collect();
-        assert_eq!(w, vec![0, 0, 0]);
+        assert_eq!(w, vec![0, 0, 0, 0]);
         assert_eq!(m.lp_rebuild.status, "no_positions");
         // Gas held: the gas fact is not stated.
         let mut gas = from_zero_raw(0.0, 0.0);
         gas.wallet_eth = Some(0.01);
         let m = zero_metrics(&gas, &OperatorProfile::default(), &PlanContext::none());
         assert!(!m.global_status.shot_advice_details.contains("no ETH"));
+        // A gas-only wallet is still empty: the gas counts in the total (0.01 x $3000)
+        // but is never something to deploy.
+        assert_eq!(m.global_status.shot_advice_action, "NOTHING TO TRACK YET (Empty Wallet)");
+        assert_eq!(m.global_status.total_portfolio_usd, "30.00");
+        assert_eq!(m.global_status.wallet_gas_usd.as_deref(), Some("30.00"));
+        assert!(m.global_status.shot_advice_details.contains("never deployed"));
+        let w: Vec<i32> = m.portfolio_deviation_matrix.allocations.iter().map(|a| a.actual_weight_bps).collect();
+        assert_eq!(w, vec![0, 0, 0, 10000]);
     }
 
     #[test]
@@ -9689,7 +9957,7 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
             (if sg.token0_symbol == "NOCK" { sg.amount0.parse::<f64>().unwrap() } else { 0.0 })
                 + (if sg.token1_symbol == "NOCK" { sg.amount1.parse::<f64>().unwrap() } else { 0.0 })
         }).sum();
-        let tight = RebuildFunds { nock: demand / 2.0, floor_tolerance_nock: 0.0, floor_set: false, usdc: 10_000.0, eth: Some(10.0) };
+        let tight = RebuildFunds { nock: demand / 2.0, floor_tolerance_nock: 0.0, floor_set: false, usdc: 10_000.0 };
         let (s, _) = lp_rebuild_suggestions(&raw, 300.0, tight);
         let limited: Vec<&String> = s.iter().filter_map(|sg| sg.limited_by.as_ref()).collect();
         assert!(!limited.is_empty());
@@ -9847,5 +10115,235 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
             .execute(&pool)
             .await
             .unwrap();
+    }
+
+    // ---------------- Gas pillar (issue #94) ----------------
+
+    fn gas_metrics(raw: &RawOnChainData) -> DerivedMetrics {
+        compute_derived_metrics_with_plan(
+            raw, 0.0, &operator_profile_2026_11(), StructuralChannels { channels: vec![] }, &[],
+            &LedgerAggregate::default(), &MarketRegime::default(), &PlanContext::none(),
+        )
+    }
+
+    fn usd_of(v: &str) -> f64 {
+        v.parse::<f64>().unwrap()
+    }
+
+    #[test]
+    fn test_gas_counted_in_total_never_cash_or_deployable() {
+        let mut no_gas = four_position_fixture();
+        no_gas.wallet_eth = Some(0.0);
+        no_gas.wallet_weth = Some(0.0);
+        let mut gas = four_position_fixture();
+        gas.wallet_eth = Some(0.0125);
+        gas.wallet_weth = Some(0.0);
+        let (a, b) = (gas_metrics(&no_gas), gas_metrics(&gas));
+        let px = 2373.14;
+        let (ga, gb) = (&a.global_status, &b.global_status);
+        // The total rises by exactly the wallet gas.
+        assert!((usd_of(&gb.total_portfolio_usd) - usd_of(&ga.total_portfolio_usd) - 0.0125 * px).abs() <= 0.011);
+        assert_eq!(gb.wallet_gas_eth.as_deref(), Some("0.012500"));
+        assert_eq!(gb.wallet_gas_usd.as_deref(), Some(format!("{:.2}", 0.0125 * px).as_str()));
+        assert_eq!(gb.eth_price_usd.as_deref(), Some("2373.14"));
+        // Gas is never cash: the stable pillar and the USDC amount are unchanged.
+        assert_eq!(ga.total_stable_usd, gb.total_stable_usd);
+        assert_eq!(ga.total_usdc_amount, gb.total_usdc_amount);
+        // ...and never dry powder: the liquid dry powder sentence names wallet USDC only.
+        for g in [ga, gb] {
+            assert!(!g.shot_advice_details.contains("ETH is deployable"));
+            if let Some(i) = g.shot_advice_details.find("Liquid dry powder") {
+                let rest = &g.shot_advice_details[i..];
+                let sentence = &rest[..rest.find(").").map(|j| j + 2).unwrap_or(rest.len())];
+                assert!(!sentence.contains("ETH"), "dry powder must be USDC only: {sentence}");
+            }
+        }
+        // The liquid USDC bucket measures wallet USDC only; gas has its own row, no target.
+        let row = |m: &DerivedMetrics, name: &str| m.portfolio_deviation_matrix.allocations.iter().find(|r| r.bucket_name.starts_with(name)).cloned().unwrap();
+        let gas_row = row(&b, "Gas");
+        assert_eq!((gas_row.target_weight_bps, gas_row.status.as_str()), (0, "no_target"));
+        assert!(gas_row.actual_weight_bps > 0);
+        let usdc_b = row(&b, "Liquid USDC");
+        let expect = ((134.4148 / usd_of(&gb.total_portfolio_usd)) * 10000.0) as i32;
+        assert_eq!(usdc_b.actual_weight_bps, expect);
+        // Weights are shares of the one full total: the four rows cover it.
+        let sum: i32 = b.portfolio_deviation_matrix.allocations.iter().map(|r| r.actual_weight_bps).sum();
+        assert!((9996..=10000).contains(&sum), "weights sum to {sum}");
+    }
+
+    #[test]
+    fn test_pillars_partition_total() {
+        let mut raw = four_position_fixture();
+        raw.wallet_eth = Some(0.0125);
+        raw.wallet_weth = Some(0.003);
+        let m = gas_metrics(&raw);
+        let g = &m.global_status;
+        let native = usd_of(&g.total_native_usd);
+        let stable = usd_of(&g.total_stable_usd);
+        let eth = usd_of(g.total_eth_usd.as_deref().unwrap());
+        let total = usd_of(&g.total_portfolio_usd);
+        assert!((native + stable + eth - total).abs() <= 0.02, "{native} + {stable} + {eth} != {total}");
+        // The ETH pillar is wallet gas plus every ETH/WETH leg in LP.
+        let lp_eth: f64 = raw.positions.iter().map(|p| {
+            (if is_eth_token(&p.token0) { p.amount0 } else { 0.0 }) + (if is_eth_token(&p.token1) { p.amount1 } else { 0.0 })
+        }).sum();
+        assert!(lp_eth > 0.0, "fixture must hold ETH in LP");
+        let amount = usd_of(g.total_eth_amount.as_deref().unwrap());
+        assert!((amount - (0.0155 + lp_eth)).abs() < 1e-6, "{amount}");
+        assert!(eth >= usd_of(g.wallet_gas_usd.as_deref().unwrap()));
+    }
+
+    #[test]
+    fn test_moving_eth_wallet_to_lp_is_total_neutral() {
+        let mut before = four_position_fixture();
+        before.wallet_eth = Some(0.05);
+        before.wallet_weth = Some(0.0);
+        let mut after = four_position_fixture();
+        after.wallet_eth = Some(0.04);
+        after.wallet_weth = Some(0.0);
+        after.positions.iter_mut().find(|p| p.nft_id == 6336662).unwrap().amount0 += 0.01;
+        let (a, b) = (gas_metrics(&before), gas_metrics(&after));
+        assert!((usd_of(&a.global_status.total_portfolio_usd) - usd_of(&b.global_status.total_portfolio_usd)).abs() <= 0.01);
+        assert!((usd_of(a.global_status.total_eth_usd.as_deref().unwrap()) - usd_of(b.global_status.total_eth_usd.as_deref().unwrap())).abs() <= 0.01);
+        // The high-water mark sees no gain from the move.
+        assert!((usd_of(&a.global_status.high_water_mark_usd) - usd_of(&b.global_status.high_water_mark_usd)).abs() <= 0.01);
+    }
+
+    #[test]
+    fn test_unread_or_unpriced_gas_is_null_never_zero() {
+        let mut raw = four_position_fixture();
+        raw.wallet_eth = None;
+        raw.wallet_weth = Some(0.0);
+        let m = gas_metrics(&raw);
+        let g = &m.global_status;
+        assert!(g.wallet_gas_eth.is_none() && g.wallet_gas_usd.is_none());
+        assert!(g.total_eth_amount.is_none() && g.total_eth_usd.is_none());
+        let v = serde_json::to_value(g).unwrap();
+        for k in ["wallet_gas_eth", "wallet_gas_usd", "total_eth_amount", "total_eth_usd"] {
+            assert!(v[k].is_null(), "{k} must be null, got {}", v[k]);
+        }
+        // Unpriced ETH: the amount is known, its USD value is not.
+        let mut raw = four_position_fixture();
+        raw.wallet_eth = Some(0.01);
+        raw.wallet_weth = Some(0.0);
+        raw.live_eth_price_usd = 0.0;
+        let g = gas_metrics(&raw).global_status;
+        assert_eq!(g.wallet_gas_eth.as_deref(), Some("0.010000"));
+        assert!(g.wallet_gas_usd.is_none() && g.total_eth_usd.is_none() && g.eth_price_usd.is_none());
+        // Older snapshots without the 2.3.0 fields still parse.
+        let old: GlobalStatus = serde_json::from_value(json!({
+            "total_portfolio_usd": "1", "total_native_usd": "1", "total_stable_usd": "0",
+            "total_fees_accrued_usd": "0", "total_fees_claimable_usd": "0", "gas_to_fee_delta_usd": "0",
+            "high_water_mark_usd": "1", "high_water_mark_date": "x"
+        })).unwrap();
+        assert!(old.total_eth_usd.is_none() && old.eth_price_usd.is_none());
+    }
+
+    #[test]
+    fn test_gas_pillars_helper() {
+        let p = gas_pillars(Some(0.01), Some(0.002), 0.02, 2000.0);
+        assert!((p.wallet_gas_eth.unwrap() - 0.012).abs() < 1e-12);
+        assert!((p.wallet_gas_usd.unwrap() - 24.0).abs() < 1e-9);
+        assert!((p.total_eth_amount.unwrap() - 0.032).abs() < 1e-12);
+        assert!((p.total_eth_usd.unwrap() - 64.0).abs() < 1e-9);
+        assert_eq!(gas_pillars(Some(0.01), None, 0.02, 2000.0), GasPillars::default());
+        assert_eq!(gas_pillars(Some(0.01), Some(0.0), 0.0, f64::NAN).wallet_gas_usd, None);
+    }
+
+    #[test]
+    fn test_gas_balances_required() {
+        assert_eq!(require_gas_balances(Some(0.0125), Some(0.0)).unwrap(), (0.0125, 0.0));
+        let e = require_gas_balances(None, Some(0.0)).unwrap_err().to_string();
+        assert!(e.contains("ETH") && e.contains("gas"), "{e}");
+        let w = require_gas_balances(Some(0.1), None).unwrap_err().to_string();
+        assert!(w.contains("WETH"), "{w}");
+        assert!(require_gas_balances(None, None).unwrap_err().to_string().contains("ETH and WETH"));
+    }
+
+    #[test]
+    fn test_every_wallet_token_balance_must_be_present() {
+        let ok = json!({"result": {"tokenBalances": [
+            {"contractAddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "tokenBalance": "0x3b9aca00"},
+            {"contractAddress": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722", "tokenBalance": "0x2386f26fc10000"}
+        ]}});
+        let (nock, usdc) = parse_wallet_token_balances(&ok).unwrap();
+        assert!((usdc - 1000.0).abs() < 1e-9 && (nock - 1.0).abs() < 1e-9, "{nock} {usdc}");
+        // A null balance is a failed read, never 0.
+        let null_usdc = json!({"result": {"tokenBalances": [
+            {"contractAddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "tokenBalance": null},
+            {"contractAddress": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722", "tokenBalance": "0x1"}
+        ]}});
+        assert!(parse_wallet_token_balances(&null_usdc).unwrap_err().to_string().contains("USDC"));
+        // A missing token fails too (one present token used to be enough).
+        let only_usdc = json!({"result": {"tokenBalances": [
+            {"contractAddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "tokenBalance": "0x1"}
+        ]}});
+        assert!(parse_wallet_token_balances(&only_usdc).unwrap_err().to_string().contains("NOCK"));
+        let errored = json!({"result": {"tokenBalances": [
+            {"contractAddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", "tokenBalance": "0x1"},
+            {"contractAddress": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722", "tokenBalance": null, "error": "rate limited"}
+        ]}});
+        assert!(parse_wallet_token_balances(&errored).is_err());
+        assert!(parse_wallet_token_balances(&json!({"error": {"code": 429}})).is_err());
+        // "0x" is an explicit zero balance, not a failed read.
+        let zero = json!({"result": {"tokenBalances": [
+            {"contractAddress": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", "tokenBalance": "0x"},
+            {"contractAddress": "0x9b5e262cf9bb04869ab40b19af91d2dc85761722", "tokenBalance": "0x0"}
+        ]}});
+        assert_eq!(parse_wallet_token_balances(&zero).unwrap(), (0.0, 0.0));
+    }
+
+    #[test]
+    fn test_eth_price_pool_needs_in_range_liquidity() {
+        assert!(check_eth_price_pool_liquidity("0xd0b5", 1).is_ok());
+        let e = check_eth_price_pool_liquidity("0xd0b5", 0).unwrap_err().to_string();
+        assert!(e.contains("Stale ETH/USD") && e.contains("0xd0b5"), "{e}");
+    }
+
+    #[test]
+    fn test_hwm_date_is_the_peak_rows_time_not_now() {
+        let peak_at = t("2026-11-14T04:38:29Z");
+        let now = "2026-11-14T18:11:04+00:00";
+        // Below the stored peak: the date is when the peak was set.
+        assert_eq!(resolve_high_water_mark_date(Some((2475.27, peak_at)), 2390.58, now), peak_at.to_rfc3339());
+        // A tie keeps the earlier mark (the query orders ties by generated_at ASC).
+        assert_eq!(resolve_high_water_mark_date(Some((2475.27, peak_at)), 2475.27, now), peak_at.to_rfc3339());
+        // A new mark is set now.
+        assert_eq!(resolve_high_water_mark_date(Some((2475.27, peak_at)), 2500.0, now), now);
+        // Empty table (a fresh start): the current value is the first mark.
+        assert_eq!(resolve_high_water_mark_date(None, 10.0, now), now);
+    }
+
+    #[test]
+    fn test_snapshot_version_matches_the_spec() {
+        let spec = include_str!("../../specs/core/snapshot.yaml");
+        assert!(
+            spec.contains(&format!("version: {}", SNAPSHOT_SPEC_VERSION))
+                || spec.contains(&format!("version: \"{}\"", SNAPSHOT_SPEC_VERSION))
+                || spec.contains(&format!("version: '{}'", SNAPSHOT_SPEC_VERSION)),
+            "specs/core/snapshot.yaml info.version must be {SNAPSHOT_SPEC_VERSION}"
+        );
+    }
+
+    #[test]
+    fn test_mcp_state_text_reports_gas_and_pillars() {
+        let data = json!({"derived_metrics": {"global_status": {
+            "total_portfolio_usd": "2413.57", "total_native_usd": "1312.88", "total_stable_usd": "1033.71",
+            "total_eth_usd": "66.98", "wallet_gas_eth": "0.012500", "wallet_gas_usd": "22.99",
+            "total_nock_amount": "115000", "nock_floor_target": "0", "nock_floor_delta": "115000",
+            "total_usdc_amount": "1033.71", "high_water_mark_usd": "2475.27", "shot_advice_action": "HOLD"
+        }}});
+        let text = format_portfolio_state_text(&data);
+        assert!(text.contains("Pillars: NOCK $1312.88 · USDC $1033.71 · ETH $66.98"), "{text}");
+        assert!(text.contains("Gas held (wallet ETH+WETH): 0.012500 ETH ($22.99), counted in the total; not cash, not deployable"), "{text}");
+        // A pre-2.3.0 snapshot says so, never $0.00.
+        let mut old = data.clone();
+        for k in ["total_eth_usd", "wallet_gas_eth", "wallet_gas_usd"] {
+            old["derived_metrics"]["global_status"].as_object_mut().unwrap().remove(k);
+        }
+        let text = format_portfolio_state_text(&old);
+        assert!(text.contains("ETH not reported (snapshot predates 2.3.0)"), "{text}");
+        assert!(text.contains("Gas held (wallet ETH+WETH): not reported (snapshot predates 2.3.0)"), "{text}");
+        assert!(!text.contains("$0.00"));
     }
 }
