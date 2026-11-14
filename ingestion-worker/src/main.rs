@@ -806,7 +806,7 @@ fn lp_rebuild_suggestions(
         let target_usd = lp_target_usd * weight;
         let want_usd = target_usd - current_usd;
         if want_usd < 1.0 {
-            continue; // already at or above its share
+            continue; // already at or above its share: never suggest unwinding
         }
         match amounts_per_usd(p, nock_usd, eth_usd) {
             Some((per0, per1)) => wants.push(Want { p, target_usd, current_usd, want_usd, per0, per1 }),
@@ -816,6 +816,27 @@ fn lp_rebuild_suggestions(
                 label: position_label(p),
                 reason: "the range holds no value at the current price, or a leg cannot be priced".to_string(),
             }),
+        }
+    }
+
+    // Never suggest more than the aggregate gap. Positions already above their share
+    // are left alone (no unwinding), so the others' shares can add up to more than
+    // what LP as a whole is short by; scale them down together so a completed rebuild
+    // lands on the LP target instead of overshooting it.
+    let lp_now: f64 = raw
+        .positions
+        .iter()
+        .map(|p| {
+            p.amount0 * leg_usd_price(&p.token0, nock_usd, eth_usd)
+                + p.amount1 * leg_usd_price(&p.token1, nock_usd, eth_usd)
+        })
+        .sum();
+    let lp_gap = (lp_target_usd - lp_now).max(0.0);
+    let total_want: f64 = wants.iter().map(|w| w.want_usd).sum();
+    if total_want > lp_gap && total_want > 0.0 {
+        let k = lp_gap / total_want;
+        for w in wants.iter_mut() {
+            w.want_usd *= k;
         }
     }
 
@@ -7157,6 +7178,37 @@ database_url: "postgresql://localhost/test"
         assert!(b.full_range && b.distance_bps.is_none());
         assert_eq!(m.asset_aggregation_series.positions_nock.last().unwrap().position_id,
             "aerodrome:base:0x85f1aa3a70fedd1c52705c15baed143e675cd626");
+    }
+
+    #[test]
+    fn test_rebuild_fills_only_the_gap_when_other_positions_are_above_their_share() {
+        // The 2026-11-14 situation: two Uniswap ranges hold ~$179 each, Aerodrome is
+        // empty, and the LP target is raised to $486 (20%). Equal thirds would be $162
+        // each: the Uniswap ranges are over their share and are left alone, and the
+        // Aerodrome suggestion is the remaining gap ($128), not its full $162 share.
+        let mut raw = rebuild_fixture();
+        let spot = raw.spot_price_nock_usd;
+        for p in raw.positions.iter_mut() {
+            match p.nft_id {
+                3163450 => { p.amount0 = 71.0; p.amount1 = (179.0 - 71.0) / spot; }
+                6336662 => { p.amount0 = 0.0; p.amount1 = 179.0 / spot; }
+                _ => {}
+            }
+        }
+        let mut aero = aero_position(false);
+        aero.amount0 = 0.0;
+        aero.amount1 = 0.0;
+        aero.liquidity = 0;
+        raw.pool_liquidity.insert(aero.position_id.clone(), "342542824101829799".to_string());
+        raw.positions.push(aero);
+        let (s, _) = lp_rebuild_suggestions(&raw, 486.0, roomy_funds());
+        assert_eq!(s.len(), 2, "only positions below their share are suggested: {s:?}");
+        let total: f64 = s.iter().map(|x| x.add_usd.parse::<f64>().unwrap()).sum();
+        assert!((total - 128.0).abs() < 0.05, "suggestions must sum to the $128 gap, got {total}");
+        // Neither funded Uniswap range is asked to change.
+        assert!(s.iter().all(|x| x.nft_id != 3163450 && x.nft_id != 6336662));
+        let a = s.iter().find(|x| x.protocol == "aerodrome").unwrap();
+        assert!(a.add_usd.parse::<f64>().unwrap() > 60.0);
     }
 
     // ---------------- LP rebuild suggestions (issue #83) ----------------
