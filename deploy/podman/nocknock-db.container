@@ -1,0 +1,27 @@
+[Unit]
+Description=NockNock PostgreSQL (TimescaleDB)
+
+[Container]
+ContainerName=nocknock-db
+Image=docker.io/timescale/timescaledb:latest-pg16
+Network=nocknock.network
+NetworkAlias=db
+# Not published to the host: only the worker reaches it over the nocknock network.
+Environment=POSTGRES_USER=postgres
+Environment=POSTGRES_DB=nocknock
+Secret=nocknock-db-password,type=env,target=POSTGRES_PASSWORD
+Volume=nocknock-db.volume:/var/lib/postgresql/data
+Volume=%h/nocknock/src/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+HealthCmd=pg_isready -U postgres -d nocknock
+HealthInterval=5s
+HealthTimeout=5s
+HealthRetries=10
+# The unit only becomes "started" once Postgres answers, so the worker can order after it.
+Notify=healthy
+
+[Service]
+Restart=always
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

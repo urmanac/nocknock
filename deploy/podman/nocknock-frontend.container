@@ -1,0 +1,17 @@
+[Unit]
+Description=NockNock dashboard (nginx, proxies /v1 to the worker)
+Requires=nocknock-worker.service
+After=nocknock-worker.service
+
+[Container]
+ContainerName=nocknock-frontend
+Image=localhost/nocknock-frontend:latest
+Network=nocknock.network
+PublishPort=3000:80
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
