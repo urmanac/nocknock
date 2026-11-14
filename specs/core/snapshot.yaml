@@ -676,6 +676,11 @@ components:
             type: string
             format: date-time
           description: Timestamps for each data point (aligned with series)
+        wallet_nock_series:
+          type: array
+          items:
+            type: string
+          description: Wallet NOCK in TOKEN UNITS at each point (2.2.0). The floor chart plots this; safe_haven_series is the same holding valued in USD.
         safe_haven_series:
           type: array
           items:

@@ -1356,7 +1356,11 @@ fn default_floor_target_string() -> String {
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 struct AssetAggregationSeries {
     time_points: Vec<String>,
+    /// Wallet NOCK valued in USD (kept for the dollar composition panels).
     safe_haven_series: Vec<String>,
+    /// Wallet NOCK in token units (issue #85): what the floor chart must plot.
+    #[serde(default)]
+    wallet_nock_series: Vec<String>,
     active_protocol_series: Vec<String>,
     #[serde(default)]
     positions_nock: Vec<PositionNockSeries>,
@@ -1458,24 +1462,71 @@ struct AppState {
     config: Arc<AppConfig>,
     latest_snapshot: Mutex<Option<SnapshotEnvelope>>,
     last_sync_duration_ms: std::sync::atomic::AtomicU64,
+    /// Error from the most recent ingestion cycle, cleared by the next success (issue #87).
+    last_ingest_error: std::sync::Mutex<Option<(DateTime<Utc>, String)>>,
+}
+
+/// Grace added to the sync window before health calls the data stale; matches the
+/// dashboard's own freshness allowance.
+const HEALTH_SYNC_GRACE_SECONDS: i64 = 90;
+
+/// Health verdict (issue #87). Pure. A snapshot existing is not enough to be "ok":
+/// the most recent cycle must have succeeded and the data must be inside the sync
+/// window plus grace.
+fn health_status(has_snapshot: bool, lag_seconds: i64, sync_window_seconds: i64, last_cycle_failed: bool) -> &'static str {
+    if last_cycle_failed {
+        "degraded"
+    } else if !has_snapshot {
+        "starting"
+    } else if lag_seconds > sync_window_seconds + HEALTH_SYNC_GRACE_SECONDS {
+        "degraded"
+    } else {
+        "ok"
+    }
+}
+
+/// Run one ingestion cycle and remember whether it failed, for /health.
+async fn run_cycle_tracked(state: &Arc<AppState>) -> Result<()> {
+    let result = run_ingestion_cycle(state).await;
+    if let Ok(mut slot) = state.last_ingest_error.lock() {
+        *slot = result.as_ref().err().map(|e| (Utc::now(), e.to_string()));
+    }
+    result
 }
 
 // ============================================================
 // Main
 // ============================================================
 
+/// Build the worker config from layered sources (issue #86).
+///
+/// `example_path` is the base layer. It is loaded with an explicit YAML format: the
+/// `config` crate infers format from the file extension, and `.example` is not one it
+/// knows, so `File::with_name("config.yaml.example")` was silently skipped and a
+/// partial config.yaml (for instance one without `positions:`) failed ingestion.
+/// `config_path` None means "config.{yaml,toml,json,...}" in the working directory.
+fn load_app_config(example_path: &str, config_path: Option<&str>, include_env: bool) -> Result<AppConfig> {
+    let mut builder = Config::builder()
+        .add_source(config::File::new(example_path, config::FileFormat::Yaml).required(false));
+    builder = match config_path {
+        Some(path) => builder.add_source(config::File::new(path, config::FileFormat::Yaml).required(false)),
+        None => builder.add_source(config::File::with_name("config").required(false)),
+    };
+    if include_env {
+        builder = builder
+            .add_source(config::Environment::with_prefix("APP").separator("__"))
+            .add_source(config::Environment::default());
+    }
+    Ok(builder.build()?.try_deserialize::<AppConfig>()?)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    // Load config (falls back gracefully to config.yaml.example or env vars)
-    let config = Config::builder()
-        .add_source(config::File::with_name("config.yaml.example").required(false))
-        .add_source(config::File::with_name("config").required(false))
-        .add_source(config::Environment::with_prefix("APP").separator("__"))
-        .add_source(config::Environment::default())
-        .build()?
-        .try_deserialize::<AppConfig>()?;
+    // Load config: config.yaml.example is the base layer, config.yaml overrides it,
+    // environment variables override both.
+    let config = load_app_config("config.yaml.example", None, true)?;
 
     // Initialize database
     let db = PgPool::connect(&config.database_url)
@@ -1526,6 +1577,7 @@ async fn main() -> Result<()> {
         config: Arc::new(config),
         latest_snapshot: Mutex::new(initial_latest),
         last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
+        last_ingest_error: std::sync::Mutex::new(None),
     });
 
     // Historical price backfill (v0.3.0): heal multi-hour/multi-day gaps left by
@@ -1537,7 +1589,7 @@ async fn main() -> Result<()> {
     let state_clone = state.clone();
     tokio::spawn(async move {
         // Run immediately on boot to guarantee freshness
-        if let Err(e) = run_ingestion_cycle(&state_clone).await {
+        if let Err(e) = run_cycle_tracked(&state_clone).await {
             eprintln!("Initial ingestion error: {e}");
         }
         let mut interval = tokio::time::interval(
@@ -1548,7 +1600,7 @@ async fn main() -> Result<()> {
         interval.tick().await; // consume first tick since we just ran
         loop {
             interval.tick().await;
-            if let Err(e) = run_ingestion_cycle(&state_clone).await {
+            if let Err(e) = run_cycle_tracked(&state_clone).await {
                 eprintln!("Ingestion error: {e}");
             }
         }
@@ -1662,7 +1714,8 @@ async fn shutdown_signal() {
 async fn health_handler(Extension(state): Extension<Arc<AppState>>) -> impl IntoResponse {
     let latest = state.latest_snapshot.lock().await;
     let latest = &*latest;
-    let status: &str = if latest.is_some() { "ok" } else { "starting" };
+    let last_error: Option<(DateTime<Utc>, String)> =
+        state.last_ingest_error.lock().ok().and_then(|slot| slot.clone());
     let last_sync: Option<DateTime<Utc>> = latest.as_ref().map(|s| s.meta.generated_at);
     let ingestion_lag_seconds: i64 = last_sync
         .map(|ts| {
@@ -1672,8 +1725,16 @@ async fn health_handler(Extension(state): Extension<Arc<AppState>>) -> impl Into
 
     let sync_duration_ms = state.last_sync_duration_ms.load(std::sync::atomic::Ordering::Relaxed);
 
+    let status = health_status(
+        latest.is_some(),
+        ingestion_lag_seconds,
+        state.config.sync_window_seconds as i64,
+        last_error.is_some(),
+    );
     Json(json!({
         "status": status,
+        "last_error": last_error.as_ref().map(|(_, e)| e.clone()),
+        "last_error_at": last_error.as_ref().map(|(t, _)| t.to_rfc3339()),
         "last_sync": last_sync.map(|dt| dt.to_rfc3339()),
         "ingestion_lag_seconds": ingestion_lag_seconds,
         "sync_duration_ms": sync_duration_ms,
@@ -1752,7 +1813,7 @@ async fn get_latest_snapshot_handler(
 async fn trigger_ingest_handler(
     Extension(state): Extension<Arc<AppState>>,
 ) -> impl IntoResponse {
-    match run_ingestion_cycle(&state).await {
+    match run_cycle_tracked(&state).await {
         Ok(_) => (
             StatusCode::OK,
             Json(json!({
@@ -3949,6 +4010,12 @@ struct ClaimFeesPayload {
     actions: Vec<ClaimFeeAction>,
 }
 
+/// True when a position has no liquidity and no unclaimed fees. Pure.
+fn nothing_to_collect(liquidity: &str, owed0: &str, owed1: &str) -> bool {
+    let zero = |v: &str| v.parse::<f64>().map_or(false, |x| x == 0.0);
+    zero(liquidity) && zero(owed0) && zero(owed1)
+}
+
 /// Fill expected amounts + token-aware USD valuation from the matching snapshot
 /// position and simulate the collect via eth_call. Shared by the v4 and v3 action
 /// builders so both payload halves behave identically (zero-mock: degrades to None).
@@ -3974,6 +4041,13 @@ async fn finish_claim_action(
     if let Some(p) = snapshot.data.positions.iter().find(|p| p.position_id == pos_id) {
         action.expected_amount_0 = Some(p.tokens_owed_0.clone());
         action.expected_amount_1 = Some(p.tokens_owed_1.clone());
+        if nothing_to_collect(&p.liquidity_amount, &p.tokens_owed_0, &p.tokens_owed_1) {
+            // An empty position's collect reverts; that is not an RPC outage (issue #87).
+            action.expected_usd = Some("0.0000".to_string());
+            action.simulation_detail =
+                Some("Nothing to collect: this position holds no liquidity and no fees".to_string());
+            return;
+        }
         if let (Ok(v0), Ok(v1)) = (
             p.tokens_owed_0.parse::<f64>(),
             p.tokens_owed_1.parse::<f64>(),
@@ -5752,6 +5826,7 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
         asset_aggregation_series: AssetAggregationSeries {
             time_points: vec![now_str.clone()],
             safe_haven_series: vec![format!("{:.2}", t3_usd)],
+            wallet_nock_series: vec![format!("{:.4}", t3_nock)],
             active_protocol_series: vec![format!("{:.2}", lp_usd)],
             positions_nock: raw
                 .positions
@@ -6640,6 +6715,75 @@ database_url: "postgresql://localhost/test"
         assert!(t("2026-11-06T03:23:19Z") >= plan_anchor(Some(t("2026-11-01T00:00:00Z")), registered));
     }
 
+    // ---------------- Pre-0.5.0 fixes (issues #85, #86, #87) ----------------
+
+    #[test]
+    fn test_wallet_nock_series_is_token_units_not_dollars() {
+        let raw = liquid_wallet_fixture(); // 115,747.8001 NOCK at $0.01229
+        let m = metrics_with_plan(&raw, &PlanContext::none(), &MarketRegime::default());
+        let ag = &m.asset_aggregation_series;
+        assert_eq!(ag.wallet_nock_series, vec!["115747.8001".to_string()]);
+        // The USD series is unchanged and is NOT the token count.
+        let usd: f64 = ag.safe_haven_series[0].parse().unwrap();
+        assert!((usd - 115_747.8001 * 0.01229).abs() < 0.01);
+        assert!(usd < 2_000.0);
+    }
+
+    #[test]
+    fn test_example_config_is_the_base_layer() {
+        let dir = std::env::temp_dir().join(format!("nocknock-cfg-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let example = dir.join("config.yaml.example");
+        let main = dir.join("config.yaml");
+        std::fs::write(
+            &example,
+            "alchemy_api_keys: [\"YOUR_ALCHEMY_API_KEY\"]\nport: 8080\nsync_window_seconds: 300\npositions:\n  - id: \"p1\"\n    protocol: \"uniswap-v4\"\n    nft_id: 3163450\n    is_price_source: true\noperator_profile:\n  treasury_floor_nock: 100000.0\n",
+        )
+        .unwrap();
+        // A partial operator config: key and port only, exactly the shape that failed
+        // ingestion on 2026-11-14 with "No positions configured".
+        std::fs::write(&main, "alchemy_api_keys: [\"real-key\"]\nport: 8081\noperator_profile:\n  lp_floor_tolerance_bps: 500\n").unwrap();
+        let cfg = load_app_config(example.to_str().unwrap(), Some(main.to_str().unwrap()), false).unwrap();
+        assert_eq!(cfg.positions.len(), 1, "positions must come from the example base layer");
+        assert_eq!(cfg.positions[0].nft_id, 3163450);
+        assert_eq!(cfg.alchemy_api_keys, vec!["real-key".to_string()]);
+        assert_eq!(cfg.port, 8081);
+        // Nested sections merge key by key.
+        assert_eq!(cfg.operator_profile.treasury_floor_nock, 100000.0);
+        assert_eq!(cfg.operator_profile.lp_floor_tolerance_bps, 500);
+        // With no config.yaml at all the example alone still parses.
+        let only = load_app_config(example.to_str().unwrap(), Some(dir.join("absent.yaml").to_str().unwrap()), false).unwrap();
+        assert_eq!(only.positions.len(), 1);
+        assert_eq!(only.port, 8080);
+        let _ = std::fs::remove_file(&example);
+        let _ = std::fs::remove_file(&main);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn test_health_status_is_not_ok_when_ingestion_is_failing_or_stale() {
+        // Healthy: fresh snapshot, last cycle fine.
+        assert_eq!(health_status(true, 10, 300, false), "ok");
+        assert_eq!(health_status(true, 390, 300, false), "ok"); // inside window + 90s grace
+        // The 2026-11-14 incident: old snapshot, every cycle failing, lag 491s.
+        assert_eq!(health_status(true, 491, 300, true), "degraded");
+        // Failing counts even while the last snapshot is still recent.
+        assert_eq!(health_status(true, 5, 300, true), "degraded");
+        // Stale without a recorded error (scheduler stuck) is degraded too.
+        assert_eq!(health_status(true, 391, 300, false), "degraded");
+        // Boot: nothing yet and nothing failed is "starting"; a failed first cycle is not.
+        assert_eq!(health_status(false, 0, 300, false), "starting");
+        assert_eq!(health_status(false, 0, 300, true), "degraded");
+    }
+
+    #[test]
+    fn test_nothing_to_collect_only_for_truly_empty_positions() {
+        assert!(nothing_to_collect("0", "0.000000", "0.000000"));
+        assert!(!nothing_to_collect("0", "0.000001", "0.000000")); // fees left behind
+        assert!(!nothing_to_collect("48295502692597", "0.000000", "0.000000")); // funded
+        assert!(!nothing_to_collect("not-a-number", "0", "0")); // unknown is not "empty"
+    }
+
     // ---------------- LP rebuild suggestions (issue #83) ----------------
 
     /// Liquid wallet with every tracked pool live except the v4 0.75% pool (#3163431),
@@ -7189,6 +7333,7 @@ database_url: "postgresql://localhost/test"
                 asset_aggregation_series: AssetAggregationSeries {
                     time_points: vec!["2026-10-11T00:00:00Z".to_string()],
                     safe_haven_series: vec!["48.00".to_string()],
+                    wallet_nock_series: vec![],
                     active_protocol_series: vec!["2.00".to_string()],
                     positions_nock: vec![],
                 },

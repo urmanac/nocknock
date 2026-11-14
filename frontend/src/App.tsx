@@ -30,7 +30,7 @@ const SOURCE_LABELS: Record<string, string> = {
   aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
-import { POSITION_COLORS, positionLabel, positionRangeText, rangeStatus } from './positions.ts';
+import { POSITION_COLORS, positionLabel, positionRangeText, rangeStatus, walletNockUnits } from './positions.ts';
 
 function Dashboard() {
   const { snapshot, loading, error, freshness, refetch, ageDisplay } = useFreshness<
@@ -109,10 +109,17 @@ function Dashboard() {
     key: `pos${i}`,
     name: positionLabel(positionsList.find((p: any) => p.position_id === s.position_id)),
   }));
-  const rowFromAg = (ag: any, i: number, time: string) => {
+  // `dm` is the derived_metrics of the SAME snapshot as `ag`, so a pre-0.5.0 snapshot's
+  // wallet NOCK can be recovered from its own USD value and spot (issue #85).
+  const rowFromAg = (ag: any, i: number, time: string, dm: any) => {
+    const spot = parseFloat(
+      dm?.total_value_vs_baseline?.token_price_series?.[i] ?? dm?.tick_bracket_hypervisor?.current_price ?? '',
+    );
+    const walletNock = walletNockUnits(ag, i, spot);
     const row: any = {
       time,
-      safeHaven: parseFloat(ag?.safe_haven_series?.[i] || '0'),
+      // Token units: this chart is NOCK against the NOCK floor, never dollars.
+      safeHaven: walletNock === null ? null : Math.round(walletNock),
       activeProtocol: parseFloat(ag?.active_protocol_series?.[i] || '0'),
     };
     let lpTotal = 0;
@@ -121,17 +128,17 @@ function Dashboard() {
       row[`pos${j}`] = Math.round(v);
       lpTotal += v;
     });
-    row.totalNock = Math.round(lpTotal + row.safeHaven);
+    row.totalNock = walletNock === null ? null : Math.round(lpTotal + walletNock);
     return row;
   };
 
   const assetSeries = hasHistory
     ? history.map(s => {
         const dm = s.data?.derived_metrics ?? s.data;
-        return rowFromAg(dm?.asset_aggregation_series, 0, formatSnapshotTime(s.meta?.generated_at, spansMultipleDays));
+        return rowFromAg(dm?.asset_aggregation_series, 0, formatSnapshotTime(s.meta?.generated_at, spansMultipleDays), dm);
       })
     : assetTimePoints.map((t: string, i: number) =>
-        rowFromAg(metrics?.asset_aggregation_series, i, formatSnapshotTime(t, false)),
+        rowFromAg(metrics?.asset_aggregation_series, i, formatSnapshotTime(t, false), metrics),
       );
 
   const valueTimePoints: string[] = metrics?.total_value_vs_baseline?.time_points || [];

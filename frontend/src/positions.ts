@@ -47,3 +47,24 @@ export function rangeStatus(p: { in_range: boolean; pool_active?: boolean | null
   if (p.pool_active === false) return { label: '● STALE POOL', tone: 'stale' };
   return p.in_range ? { label: '● IN RANGE', tone: 'good' } : { label: '● OUT OF RANGE', tone: 'warn' };
 }
+
+/**
+ * Wallet NOCK in TOKEN UNITS for the floor chart (issue #85).
+ *
+ * `safe_haven_series` is the wallet's NOCK valued in USD; plotting it against the
+ * 100,000 NOCK floor drew a 95,599-NOCK stack at 1,095. Snapshots from v0.5.0 carry
+ * `wallet_nock_series` directly. Older snapshots do not, so the units are recovered
+ * exactly from the same snapshot's own numbers (USD value ÷ its spot price). When
+ * neither is available the point is null: a gap in the line, never a guess.
+ */
+export function walletNockUnits(
+  ag: { wallet_nock_series?: string[]; safe_haven_series?: string[] } | null | undefined,
+  i: number,
+  spotUsd: number | null | undefined,
+): number | null {
+  const direct = parseFloat(ag?.wallet_nock_series?.[i] ?? '');
+  if (Number.isFinite(direct)) return direct;
+  const usd = parseFloat(ag?.safe_haven_series?.[i] ?? '');
+  if (Number.isFinite(usd) && spotUsd && spotUsd > 0) return usd / spotUsd;
+  return null;
+}
