@@ -76,6 +76,28 @@ export interface LpRebuild {
   actual_usd: string;
   gap_usd: string;
   target_weight_bps: number;
+  /** Concrete deposits that would close the gap (2.2.0) */
+  suggestions?: LpSuggestion[];
+  /** Tracked positions deliberately left out, with the reason (2.2.0) */
+  excluded?: Array<{ position_id: string; nft_id: number; label: string; reason: string }>;
+}
+
+/** A suggested deposit into an existing tracked position (2.2.0) */
+export interface LpSuggestion {
+  position_id: string;
+  nft_id: number;
+  protocol: string;
+  label: string;
+  target_usd: string;
+  current_usd: string;
+  add_usd: string;
+  token0_symbol: string;
+  amount0: string;
+  token1_symbol: string;
+  amount1: string;
+  limited_by?: string | null;
+  /** The position's page in the Uniswap app */
+  url: string;
 }
 
 export interface GlobalStatus {
@@ -271,6 +293,8 @@ export interface Position {
   liquidity_amount: string;
   in_range: boolean;
   is_price_source: boolean;
+  /** False when the pool has no in-range liquidity (frozen price); null/absent = unknown (2.2.0) */
+  pool_active?: boolean | null;
 }
 
 export interface RawSnapshotData {

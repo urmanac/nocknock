@@ -127,3 +127,30 @@ describe('accumulation plan display helpers', () => {
     vi.unstubAllGlobals();
   });
 });
+
+// ---------------- LP rebuild suggestion display (v0.5.0, issue #83) ----------------
+import { suggestionLegs } from '../accumulation';
+import { rangeStatus } from '../positions';
+
+describe('LP rebuild suggestion display', () => {
+  it('lists both legs of a deposit and drops a zero leg', () => {
+    expect(suggestionLegs({ amount0: '78.20', token0_symbol: 'USDC', amount1: '8730', token1_symbol: 'NOCK' })).toBe(
+      '78.20 USDC + 8,730 NOCK',
+    );
+    expect(suggestionLegs({ amount0: '0.000000', token0_symbol: 'ETH', amount1: '10070', token1_symbol: 'NOCK' })).toBe(
+      '10,070 NOCK',
+    );
+    expect(suggestionLegs({ amount0: '0.016400', token0_symbol: 'WETH', amount1: '0', token1_symbol: 'NOCK' })).toBe(
+      '0.016400 WETH',
+    );
+  });
+
+  it('never shows a dead pool as in range', () => {
+    expect(rangeStatus({ in_range: true, pool_active: false })).toEqual({ label: '● STALE POOL', tone: 'stale' });
+    expect(rangeStatus({ in_range: true, pool_active: true }).tone).toBe('good');
+    expect(rangeStatus({ in_range: false, pool_active: true }).tone).toBe('warn');
+    // Unknown pool state (older snapshot, failed read) falls back to the tick-based answer.
+    expect(rangeStatus({ in_range: true }).label).toBe('● IN RANGE');
+    expect(rangeStatus({ in_range: true, pool_active: null }).tone).toBe('good');
+  });
+});

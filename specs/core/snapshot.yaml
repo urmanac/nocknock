@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: NockNock Snapshot Data Model
-  version: 2.1.0
+  version: 2.2.0
   description: Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
   license:
     name: ISC
@@ -229,6 +229,10 @@ components:
         is_price_source:
           type: boolean
           description: True for the one position whose pool supplies the NOCK/USD spot
+        pool_active:
+          type: boolean
+          nullable: true
+          description: False when the position's pool has no in-range liquidity (frozen price; in_range is then meaningless). Null when the pool read failed. (2.2.0)
 
     PositionToken:
       type: object
@@ -532,6 +536,49 @@ components:
           description: target - actual, floored at zero
         target_weight_bps:
           type: integer
+        suggestions:
+          type: array
+          description: Concrete deposits that would close the gap, one per eligible tracked position (2.2.0)
+          items:
+            $ref: '#/components/schemas/LpSuggestion'
+        excluded:
+          type: array
+          description: Tracked positions deliberately left out, with the reason (2.2.0)
+          items:
+            type: object
+            properties:
+              position_id: { type: string }
+              nft_id: { type: integer }
+              label: { type: string }
+              reason: { type: string }
+
+    LpSuggestion:
+      type: object
+      description: |
+        A suggested deposit into an existing tracked position (2.2.0). Amounts are what the
+        position's range takes at its pool's current price for `add_usd` of value. Only
+        positions whose pool is live and which are in range are suggested (unless config
+        makes an exception); NOCK below the hard floor is never placed in LP. The operator
+        makes the deposit; the worker then reads the liquidity on-chain.
+      properties:
+        position_id: { type: string }
+        nft_id: { type: integer }
+        protocol: { type: string }
+        label: { type: string }
+        target_usd: { type: string, description: This position's share of the LP target }
+        current_usd: { type: string }
+        add_usd: { type: string }
+        token0_symbol: { type: string }
+        amount0: { type: string }
+        token1_symbol: { type: string }
+        amount1: { type: string }
+        limited_by:
+          type: string
+          nullable: true
+          description: Guardrail that shrank the suggestion below its target
+        url:
+          type: string
+          description: The position's page in the Uniswap app
 
     GlobalStatus:
       type: object

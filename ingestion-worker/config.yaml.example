@@ -23,6 +23,12 @@ token_addresses:
 # Identifiers below are RPC-discovery-verified (2026-10-24; ONCHAIN_INTEGRATION.md §5).
 # The portfolio is Uniswap-only: the Aerodrome tranche was liquidated 2026-10-23.
 # After a repositioning, re-run the Phase-1 discovery runbook and update this list.
+#
+# LP rebuild suggestions (v0.5.0): while LP is under target the engine sizes a deposit
+# for each eligible position. By default the LP target is split equally across positions
+# whose pool is live and which are in range. Optional per-position controls:
+#     rebuild_weight_bps: 7000          # this position's share of the LP target (0 = never)
+#     rebuild_when_out_of_range: true   # exception to "do not fill out-of-range positions"
 positions:
   # Position B — NOCK/USDC, Uniswap v4, 0.75% fee. No longer the price source: after the
   # 2026-11 liquidation this pool has zero in-range liquidity, so its price is frozen.

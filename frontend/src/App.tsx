@@ -30,7 +30,7 @@ const SOURCE_LABELS: Record<string, string> = {
   aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
-import { POSITION_COLORS, positionLabel, positionRangeText } from './positions.ts';
+import { POSITION_COLORS, positionLabel, positionRangeText, rangeStatus } from './positions.ts';
 
 function Dashboard() {
   const { snapshot, loading, error, freshness, refetch, ageDisplay } = useFreshness<
@@ -453,11 +453,13 @@ function Dashboard() {
                 <span style={styles.positionValue}>${p.amount_usd}</span>
                 <span style={{
                   ...styles.rangePill,
-                  ...(p.in_range
+                  ...(rangeStatus(p).tone === 'good'
                     ? { background: '#064e3b', color: '#a7f3d0', border: '1px solid #059669' }
-                    : { background: '#78350f', color: '#fcd34d', border: '1px solid #d97706' }),
-                }}>
-                  {p.in_range ? '● IN RANGE' : '● OUT OF RANGE'}
+                    : rangeStatus(p).tone === 'stale'
+                      ? { background: '#3f1d1d', color: '#fca5a5', border: '1px solid #b91c1c' }
+                      : { background: '#78350f', color: '#fcd34d', border: '1px solid #d97706' }),
+                }} title={rangeStatus(p).tone === 'stale' ? 'This pool has no in-range liquidity, so its price is frozen.' : undefined}>
+                  {rangeStatus(p).label}
                 </span>
               </div>
               <div style={styles.positionCardMeta}>

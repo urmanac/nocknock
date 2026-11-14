@@ -9,6 +9,7 @@
 import { useState } from 'react';
 import { api } from '../api/client';
 import type { AccumulationPlanStatus, LpRebuild } from '../types/snapshot';
+import { LpRebuildSteps } from './LpRebuildSteps';
 import {
   PLAN_STATUS_COLOR,
   PLAN_STATUS_LABEL,
@@ -81,6 +82,7 @@ export function AccumulationPlanPanel({
       against a ${lpRebuild.target_usd} target ({(lpRebuild.target_weight_bps / 100).toFixed(0)}% of portfolio), $
       {lpRebuild.gap_usd} short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase:
       the stable total is unchanged, only its location moves.
+      <LpRebuildSteps lp={lpRebuild} />
     </div>
   );
 
