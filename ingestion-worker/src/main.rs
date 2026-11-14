@@ -400,19 +400,20 @@ struct RebuildRule {
 /// Where the operator goes to make a suggested deposit.
 ///
 /// - Uniswap: the position's page in the Uniswap web app.
-/// - Aerodrome: the legacy Aerodrome app's deposit page for the pair (`type=-1` is a
-///   volatile pool). Checked 2026-11-14: aerodrome.finance still serves this route,
-///   while app.aero.xyz answers "Pool not found" for the legacy NOCK/USDC pool.
+/// - Aero (protocol `aerodrome`): the pool's deposit page in the Aero app,
+///   `https://app.aero.xyz/deposit/<chain id>-<pool>`. Operator instruction 2026-11-14:
+///   never send anyone to the retired aerodrome.finance app.
 /// - A config `deposit_url` overrides both.
 fn deposit_url_for(p: &RawPosition, rule: &RebuildRule) -> String {
     if let Some(url) = rule.deposit_url.as_ref().filter(|u| !u.trim().is_empty()) {
         return url.clone();
     }
     if p.protocol == "aerodrome" {
-        format!(
-            "https://aerodrome.finance/deposit?token0={}&token1={}&type=-1",
-            p.token0.address, p.token1.address
-        )
+        match p.network.as_str() {
+            "base" => format!("https://app.aero.xyz/deposit/8453-{}", p.pool_id),
+            // Unknown chain id: the pool list, rather than a link that may not resolve.
+            _ => "https://app.aero.xyz/liquidity/pools".to_string(),
+        }
     } else {
         format!(
             "https://app.uniswap.org/positions/{}/base/{}",
@@ -718,6 +719,10 @@ struct RebuildFunds {
     eth: Option<f64>,
 }
 
+/// Smallest deposit worth suggesting. Below this a suggestion is noise (a $2 top-up
+/// costs attention and gas for nothing) and the position is listed as not fundable.
+const LP_SUGGESTION_MIN_USD: f64 = 5.0;
+
 /// ETH kept back for gas when sizing a deposit that needs ETH/WETH.
 const REBUILD_GAS_BUFFER_ETH: f64 = 0.002;
 
@@ -733,7 +738,7 @@ fn is_full_range(tick_lower: i32, tick_upper: i32) -> bool {
 fn position_label(p: &RawPosition) -> String {
     if p.protocol == "aerodrome" {
         return format!(
-            "Aerodrome {}/{} {:.2}% (full range)",
+            "Aero {}/{} {:.2}% (full range)",
             p.token0.symbol,
             p.token1.symbol,
             p.fee_tier_bps as f64 / 100.0
@@ -842,8 +847,8 @@ fn lp_rebuild_suggestions(
         let current_usd = p.amount0 * p0 + p.amount1 * p1;
         let target_usd = lp_target_usd * weight;
         let want_usd = target_usd - current_usd;
-        if want_usd < 1.0 {
-            continue; // already at or above its share: never suggest unwinding
+        if want_usd < LP_SUGGESTION_MIN_USD {
+            continue; // at, above or within dust of its share: never suggest unwinding
         }
         match amounts_per_usd(p, nock_usd, eth_usd) {
             Some((per0, per1)) => wants.push(Want { p, target_usd, current_usd, want_usd, per0, per1 }),
@@ -967,7 +972,7 @@ fn lp_rebuild_suggestions(
             }
         }
         let add_usd = w.want_usd * scale;
-        if add_usd < 1.0 {
+        if add_usd < LP_SUGGESTION_MIN_USD {
             excluded.push(LpExclusion {
                 position_id: p.position_id.clone(),
                 nft_id: p.nft_id,
@@ -1380,6 +1385,11 @@ fn apply_lp_rebuild_bias(action: String, details: String, lp: &LpRebuild) -> (St
             .unwrap_or_default();
         format!("{} Suggested: {}.{}", sentence, steps.join("; "), worst)
     };
+    // With nothing fundable the note is informational only: it must not replace the
+    // directive, or "rebuild" would sit on top permanently with no step to take.
+    if lp.suggestions.is_empty() {
+        return (action, format!("{} Standing bias: {}", details, sentence));
+    }
     let idle = action.starts_with("HOLD & ACCRETE")
         || action.starts_with("DCA ON SCHEDULE")
         || action.starts_with("DCA PLAN PENDING")
@@ -4327,7 +4337,7 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
         };
         let mut action = ClaimFeeAction {
             platform: "aerodrome".to_string(),
-            label: format!("Claim Aerodrome LP fees ({})", pos.id),
+            label: format!("Claim Aero LP fees ({})", pos.id),
             to: pool.to_string(),
             data: "0xd294f093".to_string(),
             value: "0x0".to_string(),
@@ -5432,6 +5442,47 @@ async fn fetch_v4_position(
     })
 }
 
+/// `eth_call` that distinguishes "the contract reverted" from "the node did not answer".
+/// `post_rpc_with_retry` folds both into `None`, which is right for reads that must
+/// succeed but wrong where a revert is itself the answer.
+///   Ok(Some(hex)) = returned data (without 0x) · Ok(None) = reverted · Err = no answer.
+async fn eth_call_allow_revert(
+    client: &Client,
+    url: &str,
+    payload: &serde_json::Value,
+) -> Result<Option<String>> {
+    let mut last = String::from("no response");
+    for attempt in 0..3u32 {
+        match client.post(url).json(payload).send().await {
+            Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+                Ok(v) => return classify_eth_call_response(&v),
+                Err(e) => last = format!("unparseable response: {e}"),
+            },
+            Ok(resp) => last = format!("HTTP {}", resp.status()),
+            Err(e) => last = format!("network error: {e}"),
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(150 * (1 << attempt))).await;
+    }
+    Err(anyhow::anyhow!(last))
+}
+
+/// Pure part of `eth_call_allow_revert`. JSON-RPC error code 3 is "execution reverted";
+/// nodes also say so in the message. Any other error is not a revert.
+fn classify_eth_call_response(v: &serde_json::Value) -> Result<Option<String>> {
+    if let Some(hex) = v.get("result").and_then(|r| r.as_str()) {
+        return Ok(Some(hex.trim_start_matches("0x").to_string()));
+    }
+    if let Some(err) = v.get("error") {
+        let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(0);
+        let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("").to_lowercase();
+        if code == 3 || msg.contains("revert") {
+            return Ok(None);
+        }
+        return Err(anyhow::anyhow!("RPC error {code}: {msg}"));
+    }
+    Err(anyhow::anyhow!("response has neither result nor error"))
+}
+
 /// Pure core of the Aerodrome read (issue #88): turn pool reserves, LP supply, the
 /// wallet's LP balance and its claimable fees into a RawPosition. A volatile pool is
 /// x*y=k across every price, so it is modelled as a full-range position: the wallet
@@ -5566,23 +5617,18 @@ async fn fetch_aerodrome_position(
     // the node gave no answer at all, fails the cycle.
     let (fee0_raw, fee1_raw) = if lp_balance > 0 {
         let payload = call("0xd294f093".to_string(), Some(wallet.to_string()), 75);
-        match post_rpc_with_retry(http_client, alchemy_url, &payload, 2).await {
-            None => {
-                return Err(anyhow::anyhow!("position {}: Aerodrome claimFees read failed", cfg.id));
+        match eth_call_allow_revert(http_client, alchemy_url, &payload).await {
+            Err(e) => {
+                return Err(anyhow::anyhow!("position {}: Aerodrome claimFees read failed: {e}", cfg.id));
             }
-            Some(res) => match res.get("result").and_then(|v| v.as_str()) {
-                Some(hex) => {
-                    let hex = hex.trim_start_matches("0x");
-                    (word(hex, 0, "claimFees")?, word(hex, 1, "claimFees")?)
-                }
-                None => {
-                    tracing::info!(
-                        "position {}: claimFees() reverted; this pool has no LP-claimable fees",
-                        cfg.id
-                    );
-                    (0, 0)
-                }
-            },
+            Ok(Some(hex)) => (word(&hex, 0, "claimFees")?, word(&hex, 1, "claimFees")?),
+            Ok(None) => {
+                tracing::info!(
+                    "position {}: claimFees() reverted; this pool has no LP-claimable fees",
+                    cfg.id
+                );
+                (0, 0)
+            }
         }
     } else {
         (0, 0)
@@ -6989,7 +7035,10 @@ database_url: "postgresql://localhost/test"
 
     #[test]
     fn test_advice_lp_rebuild_bias_leads_when_idle_and_rides_along_when_due() {
-        let raw = liquid_wallet_fixture(); // LP is 0% against a 15% target
+        // LP is 0% against a 15% target, and pools are readable, so deposits can be suggested.
+        // (Without a fundable suggestion the rebuild note never leads; see
+        // test_rebuild_does_not_lead_or_nag_when_nothing_is_fundable.)
+        let raw = rebuild_fixture();
         // A due tranche stays the primary directive; the rebuild bias is appended.
         let due = PlanContext { cfg: Some(plan_cfg()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-15T12:00:00Z") };
         let m = metrics_with_plan(&raw, &due, &MarketRegime::default());
@@ -7166,7 +7215,7 @@ database_url: "postgresql://localhost/test"
         // Full range: always in range, never "sells out".
         assert!(p.in_range && is_full_range(p.tick_lower, p.tick_upper));
         assert_eq!(nock_sell_out_multiple(&p), None);
-        assert_eq!(position_label(&p), "Aerodrome USDC/NOCK 0.30% (full range)");
+        assert_eq!(position_label(&p), "Aero USDC/NOCK 0.30% (full range)");
         // An x*y=k position is 50/50 by value at the pool's own price.
         let spot = 369_321.72 / 31_839_446.0;
         let (usdc_per_usd, nock_per_usd) = amounts_per_usd(&p, spot, 1830.0).unwrap();
@@ -7220,23 +7269,17 @@ database_url: "postgresql://localhost/test"
         let a = s.iter().find(|x| x.protocol == "aerodrome").expect("aerodrome suggested");
         assert_eq!(a.target_usd, "100.00");
         assert_eq!(a.nock_sold_out_at_multiple, None);
-        // The link is the legacy Aerodrome deposit page for the pair, not an explorer
-        // page and never a Uniswap link.
-        assert_eq!(
-            a.url,
-            format!("https://aerodrome.finance/deposit?token0={USDC_BASE}&token1={NOCK_BASE}&type=-1")
-        );
-        // A config override wins (for example a pool on the new Aero app).
+        // The link is the pool's deposit page in the Aero app: never aerodrome.finance
+        // (retired) and never a Uniswap link.
+        assert_eq!(a.url, "https://app.aero.xyz/deposit/8453-0x85f1aa3a70fedd1c52705c15baed143e675cd626");
+        assert!(!a.url.contains("aerodrome.finance") && !a.url.contains("uniswap"));
+        // A config override wins.
         raw.rebuild_rules.insert(
             "aerodrome:base:0x85f1aa3a70fedd1c52705c15baed143e675cd626".to_string(),
-            RebuildRule {
-                weight_bps: None,
-                when_out_of_range: false,
-                deposit_url: Some("https://app.aero.xyz/deposit/8453-0x770fE8Fc9248c6382950A86E39a9391B41D59e0A".to_string()),
-            },
+            RebuildRule { weight_bps: None, when_out_of_range: false, deposit_url: Some("https://app.aero.xyz/portfolio".to_string()) },
         );
         let (o, _) = lp_rebuild_suggestions(&raw, 400.0, roomy_funds());
-        assert!(o.iter().find(|x| x.protocol == "aerodrome").unwrap().url.starts_with("https://app.aero.xyz/deposit/8453-"));
+        assert_eq!(o.iter().find(|x| x.protocol == "aerodrome").unwrap().url, "https://app.aero.xyz/portfolio");
         raw.rebuild_rules.clear();
         // About half the deposit is USDC and half NOCK. The split is exactly 50/50 at
         // the pool's own price; this fixture's engine spot ($0.01229) sits 6% above the
@@ -7296,6 +7339,39 @@ database_url: "postgresql://localhost/test"
         // The stated target is what is being filled: nothing is reported as held back.
         assert_eq!(a.target_usd, a.add_usd);
         assert_eq!(a.limited_by, None);
+    }
+
+    #[test]
+    fn test_eth_call_revert_is_an_answer_not_a_failure() {
+        // Returned data.
+        assert_eq!(
+            classify_eth_call_response(&json!({ "jsonrpc": "2.0", "id": 1, "result": "0x00ff" })).unwrap(),
+            Some("00ff".to_string())
+        );
+        // The new Aero pool's claimFees(): Alchemy answers code 3, "execution reverted".
+        // This failed the whole ingestion cycle on 2026-11-14 once LP was held there.
+        let reverted = json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": 3, "message": "execution reverted" } });
+        assert_eq!(classify_eth_call_response(&reverted).unwrap(), None);
+        // A node-side problem is NOT a revert and must still fail the read.
+        let limited = json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": 429, "message": "rate limit exceeded" } });
+        assert!(classify_eth_call_response(&limited).is_err());
+        assert!(classify_eth_call_response(&json!({ "jsonrpc": "2.0", "id": 1 })).is_err());
+    }
+
+    #[test]
+    fn test_rebuild_does_not_lead_or_nag_when_nothing_is_fundable() {
+        // LP is under target but only dust could be added (the 2026-11-14 state after
+        // the operator's deposits used up the floor tolerance: 89 NOCK of headroom).
+        let raw = rebuild_fixture();
+        let dust = RebuildFunds { nock: 89.0, floor_tolerance_nock: 10_000.0, usdc: 10_000.0, eth: Some(10.0) };
+        let (s, x) = lp_rebuild_suggestions(&raw, 300.0, dust);
+        assert!(s.is_empty(), "a ~$2 top-up is not worth suggesting: {s:?}");
+        assert!(x.iter().any(|e| e.reason.contains("cannot be funded")));
+        // With no step to take, the rebuild note annotates the directive instead of replacing it.
+        let lp = LpRebuild { status: "under_target".to_string(), target_usd: "468.00".to_string(), actual_usd: "423.00".to_string(), gap_usd: "45.00".to_string(), target_weight_bps: 2000, ..Default::default() };
+        let (action, details) = apply_lp_rebuild_bias("DCA ON SCHEDULE (2 of 5 next)".to_string(), "Nothing to buy yet.".to_string(), &lp);
+        assert_eq!(action, "DCA ON SCHEDULE (2 of 5 next)");
+        assert!(details.contains("No tracked position is eligible"));
     }
 
     // ---------------- LP rebuild suggestions (issue #83) ----------------

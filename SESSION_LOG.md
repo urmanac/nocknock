@@ -9,9 +9,10 @@ One entry per working session, newest first. Longer sessions keep their full log
 | 2026-10-10 | pi → antigravity (Gemini) | v0.1.0 | Below |
 
 **Headline of the latest session:** NockNock now runs on `chudmax` as standing
-infrastructure, models the real portfolio again (two Uniswap ranges plus a tracked
-Aerodrome full-range tranche), paces NOCK buys with a receipt-verified ledger, and turns
-"rebuild LP" into concrete deposits. Standing orders from that session are in
+infrastructure, models the real portfolio again (two Uniswap ranges plus a staked Aero
+full-range tranche), paces NOCK buys with a receipt-verified ledger, and turns
+"rebuild LP" into concrete deposits. One position is not visible yet: the operator's
+Aero WETH/NOCK CL200 range (issue #91). Standing orders from that session are in
 `OPERATOR_GUIDANCE.md` §7.
 
 ---

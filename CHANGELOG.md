@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [ ] **Accumulation plan Phase 2**: redesign for Aero's router, or keep operator-executed swaps and measure execution cost per fill against spot.
 - [ ] **Unsigned add-liquidity transactions** for LP rebuild suggestions (encoding to be verified by simulation).
 - [ ] **Aero concentrated (CL) positions (Issue #91)**, starting with WETH/NOCK CL200.
+- [ ] **AERO reward accounting (Issue #93)**: read, value and ledger rewards from staked Aero positions.
 - [ ] **Count ETH** in portfolio totals; externalise the legacy advice constants.
 
 ## [0.5.0] - 2026-11-14
@@ -31,14 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `claimFees()` reverts (the new Aero pools) reads as having no LP-claimable fees
   instead of failing the cycle. `gauge_address` adds LP tokens staked in the pool's
   gauge to the wallet's balance.
-- **Price source.** The example config makes the legacy Aerodrome NOCK/USDC vAMM the
-  NOCK/USD price source (spot = reserve ratio). On 2026-11-14 it carried about $110k/day
-  of NOCK volume against about $3.5k/day for the Uniswap v4 3% pool, and the RSI history
-  already came from it.
+- **Shipped config.** Tracks the Aero Basic Volatile NOCK/USDC pool listed on
+  app.aero.xyz (`0x770fE8Fc…9e0A`) with its gauge. The legacy Aerodrome NOCK/USDC pool
+  is still the deepest market but the Aero app does not list it, so it is not tracked as
+  a position. The two empty Uniswap v4 positions (#3163431 on a dead pool, #3163432 out
+  of range) are retired from the shipped position list. A volatile pool can serve as the NOCK/USD price source (spot = reserve
+  ratio); the shipped config keeps the Uniswap v4 3% pool as the source.
+- **Deposit links** go to the Aero app (`https://app.aero.xyz/deposit/<chain>-<pool>`),
+  never to the retired aerodrome.finance. Display names say "Aero"; the `aerodrome`
+  protocol key is kept for ledger continuity.
 - Positions and brackets carry `full_range`; the dashboard shows FULL RANGE, draws no
   bracket for it, and no longer assumes the price source is the first position.
 - Suggestion buttons name their real destination ("Open position in Uniswap web app",
-  "Open deposit on aerodrome.finance"); the label was hardcoded to "Open in Uniswap"
+  "Open deposit on aero.xyz"); the label was hardcoded to "Open in Uniswap"
   for every venue. A suggestion capped by the aggregate LP gap reports the share being
   filled, not "$128 of $162 wanted".
 
@@ -60,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Honest `/health` (Issue #87).** `degraded` when the last ingestion cycle failed or
   the data is older than the sync window plus grace, with `last_error`. It used to
   report `ok` whenever any snapshot existed.
+- The dashboard's positions summary is computed from the positions. It used to hardcode
+  "0% realized losses", call every position a "concentrated Uniswap position" and count
+  a dead pool as in range.
 - The claim-fees payload says "Nothing to collect" for an empty position instead of
   "RPC unavailable", and the plan's MCP text no longer says "$0.00 due now" while waiting.
 
@@ -137,16 +146,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when nothing is spendable. Previously the 5% cash target was displayed but never applied.
 
 ### Known Limitations in 0.5.0
-- Aerodrome-type positions: LP staked in a gauge is read only when the position's
-  `gauge_address` is configured (the aero.xyz app stakes on deposit). Rewards earned by
-  staked LP are not reported.
-- The Aerodrome rebuild suggestion links to the legacy Aerodrome app's deposit page for
-  the pair (the new aero.xyz app does not list that pool). The page was only checked up
-  to wallet connection. `positions[].deposit_url` overrides the link.
-- Aero's concentrated (CL) pools, such as WETH/NOCK CL200, are not tracked: a position
-  there is invisible to NockNock (Issue #91). Its Basic Volatile NOCK/USDC pool is
-  tracked but excluded from suggestions by default (`rebuild_weight_bps: 0`).
+- **Aero concentrated (CL) pools are not tracked (Issue #91).** The operator holds a
+  WETH/NOCK CL200 position (about $180 at deposit, NFT #2914490); it is invisible to
+  NockNock, so portfolio and LP totals understate by that amount and the LP weight reads
+  lower than it is.
+- **AERO rewards are not read, valued or ledgered (Issue #93).** Aero positions are
+  staked by the Aero app and earn AERO.
+- Aero volatile positions are read only through a configured `gauge_address` (plus any
+  LP held directly in the wallet). The first live read matched the deposit exactly.
+- ETH is not counted in portfolio totals, so ETH moved into a position leaves the
+  tracked total without appearing anywhere.
 - Suggested LP deposits are sized, not built: the operator makes them in the venue's app.
+- A rebuild suggestion smaller than $5 is not shown; the position is listed as not
+  fundable, and the rebuild note then annotates the directive instead of leading it.
 - Notification delivery for `DCA TRANCHE DUE` has not been exercised on the on-prem
   deployment (Epic #89).
 - 17 frontend dependency advisories remain with no upstream fix (unchanged from 0.4.0).

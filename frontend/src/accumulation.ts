@@ -41,7 +41,6 @@ export function suggestionLinkLabel(url: string): string {
     return 'OPEN LINK ↗';
   }
   if (host === 'app.uniswap.org') return 'OPEN POSITION IN UNISWAP WEB APP ↗';
-  if (host === 'aerodrome.finance') return 'OPEN DEPOSIT ON AERODROME.FINANCE ↗';
   if (host === 'app.aero.xyz') return 'OPEN DEPOSIT ON AERO.XYZ ↗';
   if (host === 'basescan.org') return 'VIEW POOL ON BASESCAN ↗';
   return `OPEN ${host.toUpperCase()} ↗`;

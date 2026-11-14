@@ -44,7 +44,9 @@ portfolio again, paces NOCK buys, and tells the operator which LP deposits to ma
    stack chart was plotting dollars as NOCK; the example config was never loaded as a
    base layer; `/health` said "ok" while ingestion failed; Aerodrome full-range
    positions are tracked again and included in guidance; nightly database backups.
-9. **v0.5.0** released and deployed to chudmax.
+9. **Aero app pools** (PR #92): the operator deposited through app.aero.xyz. Staked LP
+   is read through the pool's gauge; suggestion links and names follow the Aero app.
+10. **v0.5.0** released and deployed to chudmax.
 
 ## Operator decisions and standing orders recorded this session
 
@@ -58,25 +60,37 @@ All are in `OPERATOR_GUIDANCE.md` §7.
 - The overlap between the 100,000 NOCK floor and LP is deliberate: ranges sell
   gradually, the aim is to trade more and earn fees. Exposure is bounded by a tolerance
   and reported, not forbidden. (The agent first imposed a hard cap and was overruled.)
-- A full-range Aerodrome position is the intended long-term core: it cannot go out of
-  range, so it never forces a re-range.
+- A full-range Aero position is the intended long-term core: it cannot go out of
+  range, so it never forces a re-range. Exposure to both USDC/NOCK and WETH/NOCK on Aero
+  is wanted.
+- Aero tranches live at app.aero.xyz. Never send anyone to the retired
+  aerodrome.finance app.
+- Staking on Aero is kept at the platform default. AERO rewards were not planned for:
+  be conservative, do not assume the operator wants to accumulate AERO (issue #93).
 - Agents may improve the soundness of the strategy and build that into code, saying what
   changed and why. Choosing the operator's allocation stays with the operator.
 - NockNock's ledger is a second record so nothing on-chain is a surprise at tax time.
   It is not a compliance system.
 
-## State at the end of the session (2026-11-14 ~17:00 UTC)
+## State at the end of the session (2026-11-14 ~17:15 UTC)
 
 | | |
 |---|---|
-| Wallet | 95,599 NOCK, 962.77 USDC, plus some ETH (not counted in totals, not re-read at session end) |
-| Uniswap v4 USDC/NOCK 3% #3163450 | ~$180, in range |
-| Uniswap v3 WETH/NOCK 1% #6336662 | ~$179, in range |
-| Aerodrome NOCK/USDC (full range) | tracked, not yet funded |
-| Total | ~$2,430; 115,922 NOCK including LP |
+| Wallet | 90,089 NOCK, 930.78 USDC, 0.0125 ETH (ETH is not counted in totals) |
+| Uniswap v4 USDC/NOCK 3% #3163450 | ~$179, in range, price source |
+| Uniswap v3 WETH/NOCK 1% #6336662 | ~$178, in range |
+| Aero Basic Volatile USDC/NOCK (full range) | $63.76: 31.99 USDC + 2,755 NOCK, staked, tracked |
+| Aero CL200 WETH/NOCK, NFT #2914490 | ~$180: 0.082 ETH + 2,755 NOCK, staked, **not tracked** (#91) |
+| Tracked total | ~$2,390; 113,055 NOCK including tracked LP (true total is ~$180 higher) |
 | Plan `2026-11-reentry` | $20 of $100 deployed, tranche 2 of 5 due 2026-11-15T06:02Z |
 | Limits | LP target 20%, floor tolerance 10%, cash reserve $950 |
-| Live directive | `REBUILD LP TRANCHES`: add ~$64 USDC + ~5,500 NOCK to Aerodrome |
+| Live directive | `DCA ON SCHEDULE (2 of 5 next)`; LP reads on target (17.6% of 20%) |
+
+The operator sized the two Aero deposits themselves (2,755 NOCK each) rather than taking
+the engine's single $128 suggestion, and chose a CL range for WETH/NOCK from the 3-month
+history, assuming NOCK holds above about $0.01. The app staked both automatically; the
+operator is keeping that default and the AERO rewards it earns. The two empty Uniswap v4
+positions (#3163431, #3163432) were retired from tracking at the operator's request.
 
 ## Infrastructure now in place
 
@@ -88,11 +102,8 @@ All are in `OPERATOR_GUIDANCE.md` §7.
 
 ## Not verified, stated plainly
 
-- The Aerodrome read with a non-zero LP balance. It works against the live pool at a
-  zero balance and in unit tests with real reserves.
-- The legacy Aerodrome deposit page past wallet connection (aero.xyz does not list the
-  pool; aerodrome.finance still serves its deposit route), and what an unstaked LP earns
-  there now. A gauge-staked balance is not read.
+- AERO rewards on the staked positions: not read, valued or ledgered (issue #93).
+- The Aero CL position: not read at all (issue #91).
 - WalletConnect pairing and a real fee claim on the Vite 8 frontend build.
 - Notification delivery: no notifier is configured on chudmax.
 - No official Aero contract list was found; router identity is observed on-chain plus
@@ -107,15 +118,20 @@ All are in `OPERATOR_GUIDANCE.md` §7.
 - Imposed a hard "no floor NOCK in LP" cap without asking what the overlap was for.
 - Chained test, commit and push in one command and pushed a commit with a failing test
   (fixed in the next commit; `main` never saw it red).
+- Hardcoded "Open in Uniswap" on every suggestion button, including the Aero one, then
+  pointed that one at the retired aerodrome.finance app. The operator caught both.
+- Assumed a reverted `claimFees()` would come back as a revert; the RPC helper folds
+  reverts into "no answer", so ingestion failed for about eight minutes once the staked
+  balance was read. `/health` reported it as degraded, which is how it was noticed.
 - Quoted an eight-hour-old price as current. Sessions here span long gaps: re-read the
   snapshot before quoting numbers.
 
 ## Open work
 
 - **Epic #89**: phone install flow, notifications, TLS for the internal deployment.
-- **Issue #91**: Aero concentrated (CL) positions. The operator wants exposure to both
-  USDC/NOCK and WETH/NOCK on Aero; the CL200 WETH/NOCK pool cannot be read yet, so a
-  deposit there is invisible. The Basic Volatile USDC/NOCK pool on aero.xyz is tracked.
+- **Issue #91** (do this first): read Aero concentrated (CL) positions. The operator's
+  ~$180 WETH/NOCK CL200 position is invisible, so totals and the LP weight understate.
+- **Issue #93**: account for AERO rewards from the staked Aero positions.
 - **Phase 2** of the accumulation plan needs redesign for Aero's router; an alternative
   is to keep the operator-swaps model and measure execution cost per fill instead.
 - Build the unsigned add-liquidity transaction for LP suggestions (encoding must be

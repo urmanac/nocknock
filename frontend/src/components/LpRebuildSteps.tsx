@@ -73,9 +73,9 @@ export function LpRebuildSteps({ lp }: { lp: LpRebuild }) {
           <div style={{ fontSize: '0.72rem', color: '#8b949e' }}>
             Amounts are what each position takes at its pool's current price and drift as price moves; the app you
             deposit through shows the exact figures. Uniswap links open that position in the Uniswap web app, where
-            you connect your wallet. The Aerodrome link opens the legacy Aerodrome app's deposit page for the pair:
-            the new aero.xyz app does not list that pool. Keep the LP tokens in your wallet, unstaked, or NockNock
-            will not see them. Nothing needs recording afterwards: the worker reads each position on-chain.
+            you connect your wallet. Aero links open the pool's deposit page at app.aero.xyz, which stakes the LP for
+            you; NockNock reads the staked balance. Nothing needs recording afterwards: the worker reads each
+            position on-chain.
             {lp.worst_case_nock && (
               <>
                 {' '}
