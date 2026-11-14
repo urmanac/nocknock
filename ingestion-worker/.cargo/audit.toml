@@ -1,0 +1,13 @@
+# cargo-audit configuration.
+#
+# Both advisories below are for crates that appear in Cargo.lock only because sqlx's
+# macro crate lists every database backend as an optional dependency. NockNock enables
+# the `postgres` feature only, so neither crate is compiled or linked:
+#   cargo tree -i rsa             -> "nothing to print"
+#   cargo tree -i libsqlite3-sys  -> "nothing to print"
+# Re-check with the commands above before removing or extending this list.
+[advisories]
+ignore = [
+    "RUSTSEC-2023-0071", # rsa (Marvin attack) — sqlx-mysql only, not in the build graph
+    "RUSTSEC-2026-0459", # libsqlite3-sys (SQLite CVE) — sqlx-sqlite only, not in the build graph
+]

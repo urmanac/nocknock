@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Deferred to Future Releases
+- [ ] **Koinly On-Chain Transaction Classifier (Issue #56, v0.4.0)**: reconcile on-chain fee-claim harvests directly with Koinly's Base wallet sync as ordinary income — explicitly NOT manual CSV download buttons/tooling (duplicate transactions and burns the annual 1,000-transaction budget on the $99 tier; Koinly misclassifying claims as "Liquidity Removals" corrupts LP cost basis).
+- [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).
+- [ ] **Multi-Pool Dynamic Ingestion**: Discovering and tracking secondary AMM pools on Base.
+- [ ] **Coinbase Staked-ETH Connector**: CDP API integration to monitor staked ETH balances.
+- [ ] **Urbit Native (%nocknock Desk)**: Hoon data structures and Gall agent.
+
+## [0.4.0] - 2026-11-13
+
+### Security — Dependency Advisories (Issue #75)
+- **Ingestion worker: 16 → 0 actionable advisories** (`cargo audit`).
+  - `sqlx` 0.7.4 → 0.8.6 (RUSTSEC-2024-0363, binary protocol misinterpretation), which also
+    drops the whole legacy TLS chain it pulled in (`rustls` 0.21, `rustls-webpki` 0.101,
+    `webpki-roots` 0.25).
+  - Lockfile refresh for the TLS stack that authenticates the Alchemy Base RPC endpoint:
+    `rustls` 0.23.45 → 0.23.46 (RUSTSEC-2026-0346/0347/0348/0349), `rustls-webpki` →
+    0.103.17 (RUSTSEC-2026-0382, distrusted intermediates), `webpki-roots` → 1.0.12
+    (RUSTSEC-2026-0381).
+  - `rsa` (RUSTSEC-2023-0071) and `libsqlite3-sys` (RUSTSEC-2026-0459) remain in
+    `Cargo.lock` only as sqlx's unused MySQL/SQLite backends; neither is compiled
+    (`cargo tree -i` prints nothing). Recorded with justification in
+    `ingestion-worker/.cargo/audit.toml`.
+- **`ingestion-worker/Cargo.lock` is now tracked.** It was gitignored while the Dockerfile
+  copies it, so a clean checkout could not build the image and dependency versions were
+  neither reproducible nor auditable.
+- **Frontend: 27 → 17 advisories, both criticals cleared** (`npm audit`): `vitest` 2 → 5
+  (GHSA-5gmw-xhrv-c9v3, GHSA-5xrq-8626-4rwp), `vite` 5 → 8 (GHSA-4w7w-66w2-5vf9),
+  `openapi-typescript` 6 → 7 (`undici`, `@fastify/busboy`), `@typescript-eslint` 7 → 8,
+  `@vitejs/plugin-react` 4 → 6, plus `npm audit fix` for `follow-redirects`.
+- **Known remaining, no upstream fix**: `zod` < 4.6.6 (GHSA-mrhx-c7xc-m3w5, memory
+  exhaustion on oversized input) inside `@walletconnect/ethereum-provider` 2.26.0 →
+  `@reown/appkit`, which accounts for 11 of the 17; and `minimatch` (moderate, lint-time
+  only) inside `@typescript-eslint`. The only offered remedy for the first is downgrading
+  WalletConnect to 2.19.4; forcing `zod` 4 under a library written for `zod` 3 was not done
+  because the wallet-pairing path cannot be exercised without a paired phone.
+
+### Fixed — Stale Spot From an Illiquid Price-Source Pool (Issue #76)
+- **Zero-mock guard**: each cycle the worker reads the price-source pool's in-range
+  liquidity (StateView `getLiquidity(bytes32)` for v4, `liquidity()` for v3) and fails the
+  cycle explicitly when it is zero. Previously a pool emptied by the operator's own
+  withdrawal kept reporting its frozen tick as live spot ($0.01695 vs a $0.0123 market,
+  overstating the portfolio by about $540 and skewing daily RSI from 36.5 to 56.6).
+- **`config.yaml.example`**: `is_price_source` moved from the v4 0.75% pool to the v4 3%
+  pool; `market_data.pool_address` pinned to the Aerodrome NOCK/USDC vAMM (deepest market)
+  for OHLCV/RSI history.
+
+### Added — Rootless Podman Deployment for Internal Hosts
+- `deploy/podman/`: quadlet units (database, worker, frontend, network, volume) and
+  `deploy.sh [host]`, which ships the working tree minus gitignored files, builds both
+  images on the host and (re)starts the stack as systemd user services. `config.yaml`
+  (Alchemy key) and a generated database password live in Podman secrets, never in an
+  image; the database is not published to the host. See DEPLOYMENT.md, Option D.
+- Dockerfiles use fully qualified base images (`docker.io/library/...`) so Podman builds
+  without unqualified-search registries; the frontend builds on Node 22 and accepts
+  `VITE_WALLETCONNECT_PROJECT_ID` as a build argument.
+
 ### Changed — Uniswap-Only Portfolio (Aerodrome tranche liquidated 2026-10-23)
 - **Snapshot model v2.0.0 (breaking)**: `SnapshotData.positions` is an N-capable list
   (network, wallet, protocol incl. real `uniswap-v3`, nft_id, pool, fee tier, tokens,
@@ -42,13 +98,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built from per-position series; tick hypervisor renders one bracket per position.
 - **Docs**: ONCHAIN_INTEGRATION.md §2/§4 marked HISTORICAL with the full Uniswap-only
   discovery record in §5; README portfolio section rewritten.
-
-### Deferred to Future Releases
-- [ ] **Koinly On-Chain Transaction Classifier (Issue #56, v0.4.0)**: reconcile on-chain fee-claim harvests directly with Koinly's Base wallet sync as ordinary income — explicitly NOT manual CSV download buttons/tooling (duplicate transactions and burns the annual 1,000-transaction budget on the $99 tier; Koinly misclassifying claims as "Liquidity Removals" corrupts LP cost basis).
-- [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).
-- [ ] **Multi-Pool Dynamic Ingestion**: Discovering and tracking secondary AMM pools on Base.
-- [ ] **Coinbase Staked-ETH Connector**: CDP API integration to monitor staked ETH balances.
-- [ ] **Urbit Native (%nocknock Desk)**: Hoon data structures and Gall agent.
 
 ## [0.3.0] - 2026-10-13
 
