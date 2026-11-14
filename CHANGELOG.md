@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-14
+
 ### Fixed — wallet ETH is the gas pillar (#94; snapshot spec 2.3.0)
 - **Gas counts in the total.** Wallet ETH and WETH are read every cycle, and both reads are
   now required: a failed read fails the cycle, as NOCK and USDC do. They are valued at the
