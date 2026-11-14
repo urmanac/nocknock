@@ -115,7 +115,8 @@
 8. **LP Rebuild Rules (standing orders, 2026-11-14)**:
    - Split the LP target equally across eligible tracked positions unless config sets weights.
    - "We should not generally aim to fill positions that are out of range." Out-of-range positions are skipped unless config makes an explicit exception.
-   - Never suggest a deposit into a pool with no in-range liquidity, and never place NOCK below the hard floor into LP (a range can sell it as price rises).
+   - Never suggest a deposit into a pool with no in-range liquidity.
+   - LP may hold slightly more NOCK than sits above the hard floor. Operator, 2026-11-14: "Because the LP sells a fraction every time the price moves, by putting in just a little bit more than what we have allowed as a trading limit we will actually be quite unlikely to sell it all unless there is a super rally, in which case we'll still have most of the hundred thousand... We need to trade more." The overage is bounded by `operator_profile.lp_floor_tolerance_bps`, and the engine must state the worst case rather than hide it. Do not re-impose a hard cap at the floor.
 9. **Agents May Improve the Strategy (2026-11-14)**:
    - "I am counting on you to make the strategy good — the strategy that we wrote may not be good. You are allowed to suggest adjustments, and even build them into the code."
    - This covers the soundness of the rules: internal consistency, guardrails, measurement, and removing ways the engine can contradict its own invariants. State each adjustment and its reason plainly. It does not extend to choosing the operator's allocation (how much to hold, deploy or reserve): those numbers stay the operator's decision.

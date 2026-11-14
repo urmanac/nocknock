@@ -80,6 +80,10 @@ export interface LpRebuild {
   suggestions?: LpSuggestion[];
   /** Tracked positions deliberately left out, with the reason (2.2.0) */
   excluded?: Array<{ position_id: string; nft_id: number; label: string; reason: string }>;
+  /** NOCK tolerated below the floor in a full LP sell-out */
+  floor_tolerance_nock?: string | null;
+  /** Total NOCK left if every range sold all its NOCK */
+  worst_case_nock?: string | null;
 }
 
 /** A suggested deposit into an existing tracked position (2.2.0) */
@@ -96,6 +100,8 @@ export interface LpSuggestion {
   token1_symbol: string;
   amount1: string;
   limited_by?: string | null;
+  /** Price multiple at which this range has sold all its NOCK (e.g. "1.44") */
+  nock_sold_out_at_multiple?: string | null;
   /** The position's page in the Uniswap app */
   url: string;
 }

@@ -96,6 +96,12 @@ operator_profile:
   # Hard floor invariant: Minimum sovereign NOCK holding required before capital deployment.
   treasury_floor_nock: 100000.0
 
+  # LP floor tolerance: how far below the floor the stack may fall if every LP range
+  # sold ALL its NOCK, in basis points of the floor (500 = 5% = 5,000 NOCK of 100,000).
+  # Ranges sell gradually as price rises, so a small overage lets more NOCK trade and
+  # earn fees. 0 (default) keeps every floor NOCK out of LP.
+  lp_floor_tolerance_bps: 0
+
   # Virtual 60/40 split rule: fraction of realized fee harvests (and measurable net
   # capital gains) earmarked to the virtual tax reserve buffer. The remainder is
   # liquid growth dry powder. Purely internal accounting — no on-chain address change.

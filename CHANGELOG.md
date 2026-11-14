@@ -19,9 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dead pools are never suggested**, and positions gain `pool_active`. A pool with no
   in-range liquidity has a frozen price, so `in_range` judged against its own tick is
   meaningless; the dashboard now shows STALE POOL instead of a green "in range" pill.
-- **Floor NOCK is never placed in LP.** A range sells its NOCK as price rises, so only
-  NOCK above `treasury_floor_nock` may be suggested. Without this an equal split could
-  let a rally sell the stack below the hard floor and trip `DEFENSIVE LOCK`.
+- **LP exposure of floor NOCK is bounded and reported.** A range sells its NOCK as
+  price rises. Suggestions may place the NOCK above `treasury_floor_nock` plus
+  `operator_profile.lp_floor_tolerance_bps` of the floor (default 0). The operator
+  accepts a small overage on purpose: ranges sell gradually, so only a large rally
+  sells everything, and more NOCK in range means more trading and fees. Each suggestion
+  states the price multiple at which it would have sold all its NOCK, and
+  `lp_rebuild.worst_case_nock` states what would remain if every range sold out.
 - **Funding is checked, never assumed.** Suggestions leave liquid USDC for the cash
   target, tax reserve and remaining DCA tranches, and keep an ETH gas buffer. A short
   source scales every position that uses it by the same factor (independent of config

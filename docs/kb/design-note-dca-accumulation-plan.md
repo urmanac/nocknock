@@ -375,9 +375,17 @@ authorised fixing these in code (OPERATOR_GUIDANCE §7.9):
    100,000 floor, but a range sells its NOCK as price rises. An equal split of the LP
    target would have placed about 18,900 NOCK in ranges with only 17,346 above the
    floor, so a rally could sell the stack below the floor and trip `DEFENSIVE LOCK`.
-   Fix: only NOCK above the floor may be suggested for LP. Observed live on
-   2026-11-14: both suggestions were scaled from $185.62 to $170.09 and together
-   placed exactly 17,346 NOCK.
+   First fix: a hard cap at the NOCK above the floor (observed live: both
+   suggestions scaled from $185.62 to $170.09, placing exactly 17,346 NOCK).
+   **The operator overruled the hard cap the same day**: the overlap is deliberate.
+   Ranges sell gradually, so only a large rally sells everything, and the point is to
+   trade more and earn fees. Final rule: LP may hold the NOCK above the floor plus
+   `lp_floor_tolerance_bps` of the floor (operator's config: 500, i.e. up to 5,000
+   NOCK). The engine no longer forbids the exposure; it bounds and reports it. Each
+   suggestion shows the price multiple at which it has sold all its NOCK, and
+   `worst_case_nock` shows what remains if every range sells out. Those multiples
+   differ a lot between ranges: on 2026-11-14 the wide USDC/NOCK range needed a
+   ~3.6x rise to sell out, the narrow WETH/NOCK range only ~1.44x (against ETH).
 2. **"In range" was reported for a dead pool.** `in_range` compares a position's ticks
    with its own pool's tick. NFT #3163431's pool has no in-range liquidity, so its tick
    is frozen at $0.0169 while the market is at $0.0123; it read "in range" and would

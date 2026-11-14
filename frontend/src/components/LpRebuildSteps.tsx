@@ -40,6 +40,11 @@ export function LpRebuildSteps({ lp }: { lp: LpRebuild }) {
                     Add <strong style={{ color: '#f0f6fc' }}>{suggestionLegs(sg)}</strong> (${sg.add_usd}
                     {shrunk ? ` of $${wanted.toFixed(2)} wanted` : ''})
                   </div>
+                  {sg.nock_sold_out_at_multiple && (
+                    <div style={{ fontSize: '0.72rem', color: '#8b949e' }}>
+                      Sells its NOCK gradually as price rises; all of it by a {sg.nock_sold_out_at_multiple}× rise.
+                    </div>
+                  )}
                   {sg.limited_by && (
                     <div style={{ color: '#f59e0b', fontSize: '0.72rem' }}>Limited: {sg.limited_by}.</div>
                   )}
@@ -69,6 +74,15 @@ export function LpRebuildSteps({ lp }: { lp: LpRebuild }) {
             Amounts are what each range takes at its pool's current price and drift as price moves; the Uniswap app
             shows the exact figures when you add liquidity. Nothing needs recording afterwards: the worker reads the
             position on-chain.
+            {lp.worst_case_nock && (
+              <>
+                {' '}
+                If every range sold all its NOCK, {Number(lp.worst_case_nock).toLocaleString('en-US')} NOCK would remain
+                {lp.floor_tolerance_nock && Number(lp.floor_tolerance_nock) > 0
+                  ? ` (you tolerate up to ${Number(lp.floor_tolerance_nock).toLocaleString('en-US')} below the floor).`
+                  : '.'}
+              </>
+            )}
           </div>
         </div>
       ) : (

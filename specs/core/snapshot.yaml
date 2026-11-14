@@ -551,6 +551,14 @@ components:
               nft_id: { type: integer }
               label: { type: string }
               reason: { type: string }
+        floor_tolerance_nock:
+          type: string
+          nullable: true
+          description: NOCK the operator tolerates below the floor in a full LP sell-out
+        worst_case_nock:
+          type: string
+          nullable: true
+          description: Total NOCK left if every range, existing and suggested, sold all its NOCK
 
     LpSuggestion:
       type: object
@@ -576,6 +584,10 @@ components:
           type: string
           nullable: true
           description: Guardrail that shrank the suggestion below its target
+        nock_sold_out_at_multiple:
+          type: string
+          nullable: true
+          description: Price multiple (NOCK against the pool's other token) at which the range has sold all its NOCK
         url:
           type: string
           description: The position's page in the Uniswap app

@@ -25,6 +25,12 @@ use uuid::Uuid;
 pub struct OperatorProfile {
     #[serde(default = "default_treasury_floor")]
     pub treasury_floor_nock: f64,
+    /// How far below the floor the stack may fall if every LP range sold all its NOCK,
+    /// in basis points of the floor (operator decision, 2026-11-14). A range sells
+    /// gradually as price rises, so the operator accepts placing a little more NOCK in
+    /// LP than sits above the floor, to trade more and earn fees. 0 = none.
+    #[serde(default)]
+    pub lp_floor_tolerance_bps: u32,
     #[serde(default = "default_tax_reserve_ratio")]
     pub tax_reserve_ratio: f64,
     #[serde(default = "default_target_weights")]
@@ -61,6 +67,7 @@ impl Default for OperatorProfile {
     fn default() -> Self {
         Self {
             treasury_floor_nock: default_treasury_floor(),
+            lp_floor_tolerance_bps: 0,
             tax_reserve_ratio: default_tax_reserve_ratio(),
             target_weights_bps: default_target_weights(),
         }
@@ -577,6 +584,12 @@ struct LpRebuild {
     /// Tracked positions deliberately left out, with the reason (2.2.0).
     #[serde(default)]
     excluded: Vec<LpExclusion>,
+    /// NOCK the operator tolerates below the floor in a full LP sell-out (2.2.0).
+    #[serde(default)]
+    floor_tolerance_nock: Option<String>,
+    /// Total NOCK left if every range, existing and suggested, sold all its NOCK (2.2.0).
+    #[serde(default)]
+    worst_case_nock: Option<String>,
 }
 
 /// One suggested deposit into an existing tracked position. Amounts are what the
@@ -598,8 +611,30 @@ struct LpSuggestion {
     amount1: String,
     /// Guardrail that shrank the suggestion below its target, in plain words.
     limited_by: Option<String>,
+    /// Price multiple (NOCK against the pool's other token) at which this range has
+    /// sold ALL of its NOCK: 1.44 means a 44% rise empties it. Selling is gradual on
+    /// the way there. Null when the range holds no NOCK at the current price.
+    #[serde(default)]
+    nock_sold_out_at_multiple: Option<String>,
     /// Where to act: the position's page in the Uniswap app.
     url: String,
+}
+
+/// How far NOCK must rise against the pool's other token before the range has sold all
+/// of its NOCK. NOCK as token1 is exhausted at the lower tick, as token0 at the upper.
+/// Pure.
+fn nock_sell_out_multiple(p: &RawPosition) -> Option<f64> {
+    let ticks = if is_nock_token(&p.token1) {
+        p.tick - p.tick_lower
+    } else if is_nock_token(&p.token0) {
+        p.tick_upper - p.tick
+    } else {
+        return None;
+    };
+    if ticks <= 0 {
+        return None; // already past the edge: the range holds no NOCK
+    }
+    Some(1.0001f64.powi(ticks))
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
@@ -613,7 +648,10 @@ struct LpExclusion {
 /// What the wallet can put into LP without breaking another rule.
 #[derive(Debug, Default, Clone, Copy)]
 struct RebuildFunds {
+    /// NOCK that may go into LP: what sits above the floor plus the tolerated overage.
     nock: f64,
+    /// The tolerated overage included in `nock` (for the explanation text).
+    floor_tolerance_nock: f64,
     /// Liquid USDC above what must stay in the wallet (cash target, tax reserve and
     /// the accumulation plan's remaining tranches).
     usdc: f64,
@@ -779,10 +817,18 @@ fn lp_rebuild_suggestions(
     // (scale factor, plain-words reason) per source.
     let nock_f = (
         factor(funds.nock, need_nock),
-        format!(
-            "only {:.0} NOCK sits above the hard floor (a range can sell its NOCK as price rises, so floor NOCK is never placed in LP)",
-            funds.nock.max(0.0)
-        ),
+        if funds.floor_tolerance_nock > 0.0 {
+            format!(
+                "only {:.0} NOCK may go into LP: what sits above the hard floor plus the {:.0} tolerated below it (a range sells its NOCK as price rises)",
+                funds.nock.max(0.0),
+                funds.floor_tolerance_nock
+            )
+        } else {
+            format!(
+                "only {:.0} NOCK sits above the hard floor (a range can sell its NOCK as price rises, so floor NOCK is never placed in LP)",
+                funds.nock.max(0.0)
+            )
+        },
     );
     let usdc_f = (
         factor(funds.usdc, need_usdc),
@@ -853,6 +899,7 @@ fn lp_rebuild_suggestions(
             token1_symbol: p.token1.symbol.clone(),
             amount1: fmt_amt(&p.token1, amt1),
             limited_by,
+            nock_sold_out_at_multiple: nock_sell_out_multiple(p).map(|m| format!("{:.2}", m)),
             url: format!(
                 "https://app.uniswap.org/positions/{}/base/{}",
                 if p.protocol == "uniswap-v3" { "v3" } else { "v4" },
@@ -1183,6 +1230,8 @@ fn lp_rebuild_status(lp_usd: f64, total_portfolio_usd: f64, target_weight_bps: i
         target_weight_bps,
         suggestions: Vec::new(),
         excluded: Vec::new(),
+        floor_tolerance_nock: None,
+        worst_case_nock: None,
     }
 }
 
@@ -1216,10 +1265,24 @@ fn apply_lp_rebuild_bias(action: String, details: String, lp: &LpRebuild) -> (St
                 if sg.amount1.parse::<f64>().map_or(false, |a| a > 0.0) {
                     legs.push(format!("{} {}", sg.amount1, sg.token1_symbol));
                 }
-                format!("add {} (${}) to {}", legs.join(" + "), sg.add_usd, sg.label)
+                format!(
+                    "add {} (${}) to {}{}",
+                    legs.join(" + "),
+                    sg.add_usd,
+                    sg.label,
+                    sg.nock_sold_out_at_multiple
+                        .as_ref()
+                        .map(|m| format!(" (sells all its NOCK by a {}x rise)", m))
+                        .unwrap_or_default()
+                )
             })
             .collect();
-        format!("{} Suggested: {}.", sentence, steps.join("; "))
+        let worst = lp
+            .worst_case_nock
+            .as_ref()
+            .map(|w| format!(" If every range sold out, {} NOCK would remain.", w))
+            .unwrap_or_default();
+        format!("{} Suggested: {}.{}", sentence, steps.join("; "), worst)
     };
     let idle = action.starts_with("HOLD & ACCRETE")
         || action.starts_with("DCA ON SCHEDULE")
@@ -5565,11 +5628,14 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
             .and_then(|p| p.remaining_usdc.parse::<f64>().ok())
             .unwrap_or(0.0);
         let liquid_floor = cash_target_usd.max(tax_reserve_usd + plan_remaining);
+        let floor_tolerance_nock = floor * (profile.lp_floor_tolerance_bps as f64 / 10000.0);
         let funds = RebuildFunds {
-            // A range sells its NOCK as price rises, so NOCK placed in LP can be
-            // converted away entirely. Only NOCK above the hard floor may go in:
-            // even a full conversion then leaves the floor intact.
-            nock: wallet_nock - floor,
+            // A range sells its NOCK as price rises, so in a large enough rally NOCK
+            // placed in LP is converted away entirely. LP may hold the NOCK above the
+            // hard floor plus the operator's tolerated overage, which bounds how far
+            // below the floor a full sell-out of every range could leave the stack.
+            nock: wallet_nock - floor + floor_tolerance_nock,
+            floor_tolerance_nock,
             usdc: wallet_usdc - liquid_floor,
             eth: match (raw.wallet_eth, raw.wallet_weth) {
                 (None, None) => None,
@@ -5577,6 +5643,17 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
             },
         };
         let (suggestions, excluded) = lp_rebuild_suggestions(raw, lp_target_usd, funds);
+        // Worst case for the floor: every range sells all its NOCK, so only wallet
+        // NOCK not being deposited remains.
+        let suggested_nock: f64 = suggestions
+            .iter()
+            .map(|sg| {
+                (if sg.token0_symbol == "NOCK" { sg.amount0.parse::<f64>().unwrap_or(0.0) } else { 0.0 })
+                    + (if sg.token1_symbol == "NOCK" { sg.amount1.parse::<f64>().unwrap_or(0.0) } else { 0.0 })
+            })
+            .sum();
+        lp_rebuild.worst_case_nock = Some(format!("{:.0}", wallet_nock - suggested_nock));
+        lp_rebuild.floor_tolerance_nock = Some(format!("{:.0}", floor_tolerance_nock));
         lp_rebuild.suggestions = suggestions;
         lp_rebuild.excluded = excluded;
     }
@@ -6579,7 +6656,55 @@ database_url: "postgresql://localhost/test"
     }
 
     fn roomy_funds() -> RebuildFunds {
-        RebuildFunds { nock: 1_000_000.0, usdc: 10_000.0, eth: Some(10.0) }
+        RebuildFunds { nock: 1_000_000.0, floor_tolerance_nock: 0.0, usdc: 10_000.0, eth: Some(10.0) }
+    }
+
+    #[test]
+    fn test_floor_tolerance_lets_lp_hold_a_bounded_overage() {
+        // Operator decision: a little more NOCK than sits above the floor may go into
+        // LP, because ranges sell gradually. The overage is bounded and reported.
+        let raw = rebuild_fixture(); // wallet 115,747.8 NOCK; floor 100,000
+        let strict = metrics_with_plan(&raw, &PlanContext::none(), &MarketRegime::default());
+        let nock_in = |m: &DerivedMetrics| -> f64 {
+            m.lp_rebuild.suggestions.iter().map(|sg| {
+                (if sg.token0_symbol == "NOCK" { sg.amount0.parse::<f64>().unwrap() } else { 0.0 })
+                    + (if sg.token1_symbol == "NOCK" { sg.amount1.parse::<f64>().unwrap() } else { 0.0 })
+            }).sum()
+        };
+        assert!(nock_in(&strict) <= 15_747.8 + 3.0);
+        assert_eq!(strict.lp_rebuild.floor_tolerance_nock.as_deref(), Some("0"));
+
+        let mut profile = OperatorProfile::default();
+        profile.lp_floor_tolerance_bps = 500; // 5% of the floor = 5,000 NOCK
+        let loose = compute_derived_metrics_with_plan(
+            &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[],
+            &LedgerAggregate::default(), &MarketRegime::default(), &PlanContext::none(),
+        );
+        assert_eq!(loose.lp_rebuild.floor_tolerance_nock.as_deref(), Some("5000"));
+        // More NOCK may go in than strictly sits above the floor, but never beyond the tolerance.
+        assert!(nock_in(&loose) >= nock_in(&strict));
+        assert!(nock_in(&loose) <= 15_747.8 + 5_000.0 + 3.0);
+        // The worst case (every range sells out) is stated and stays within the tolerance.
+        let worst: f64 = loose.lp_rebuild.worst_case_nock.as_deref().unwrap().parse().unwrap();
+        assert!((worst - (115_747.8001 - nock_in(&loose))).abs() < 2.0);
+        assert!(worst >= 100_000.0 - 5_000.0 - 3.0, "worst case {worst} must stay within 5% of the floor");
+        assert!(loose.global_status.shot_advice_details.contains("If every range sold out"));
+    }
+
+    #[test]
+    fn test_nock_sell_out_multiple_from_ticks() {
+        let raw = rebuild_fixture();
+        // The 2026-11-14 live ticks: the wide USDC/NOCK range needs a ~3.6x rise to sell
+        // all its NOCK; the narrow WETH/NOCK ladder only ~1.44x.
+        let mut wide = raw.positions.iter().find(|p| p.nft_id == 3163450).unwrap().clone();
+        wide.tick = 274970;
+        assert!((nock_sell_out_multiple(&wide).unwrap() - 3.586).abs() < 0.01);
+        let mut ladder = raw.positions.iter().find(|p| p.nft_id == 6336662).unwrap().clone();
+        ladder.tick = 74039;
+        assert!((nock_sell_out_multiple(&ladder).unwrap() - 1.439).abs() < 0.01);
+        // Past the edge the range holds no NOCK, so there is nothing left to sell.
+        ladder.tick = ladder.tick_lower;
+        assert_eq!(nock_sell_out_multiple(&ladder), None);
     }
 
     fn sg<'a>(v: &'a [LpSuggestion], nft: u64) -> &'a LpSuggestion {
@@ -6671,7 +6796,7 @@ database_url: "postgresql://localhost/test"
         let demand = nock_of(&free);
         assert!(demand > 1000.0);
         // Only half of that sits above the floor.
-        let tight = RebuildFunds { nock: demand / 2.0, usdc: 10_000.0, eth: Some(10.0) };
+        let tight = RebuildFunds { nock: demand / 2.0, floor_tolerance_nock: 0.0, usdc: 10_000.0, eth: Some(10.0) };
         let (s, _) = lp_rebuild_suggestions(&raw, 900.0, tight);
         assert!(nock_of(&s) <= demand / 2.0 + 3.0, "LP NOCK {} must stay within the {} above the floor", nock_of(&s), demand / 2.0);
         // Every position that needs NOCK is scaled by the same factor and says why.
@@ -6687,7 +6812,7 @@ database_url: "postgresql://localhost/test"
             assert_eq!(sg(&r, one.nft_id).add_usd, one.add_usd);
         }
         // Nothing above the floor at all: no NOCK-bearing deposit is suggested.
-        let none = RebuildFunds { nock: 0.0, usdc: 10_000.0, eth: Some(10.0) };
+        let none = RebuildFunds { nock: 0.0, floor_tolerance_nock: 0.0, usdc: 10_000.0, eth: Some(10.0) };
         let (s, x) = lp_rebuild_suggestions(&raw, 900.0, none);
         assert!(s.is_empty());
         assert!(x.iter().any(|e| e.reason.contains("cannot be funded") && e.reason.contains("hard floor")));
@@ -6703,7 +6828,7 @@ database_url: "postgresql://localhost/test"
         assert!(x.iter().any(|e| e.nft_id == 3163450 && e.reason.contains("could not be read")));
         // ETH balance not read: the WETH/NOCK deposit is withheld, the others stand.
         let raw = rebuild_fixture();
-        let (s, x) = lp_rebuild_suggestions(&raw, 300.0, RebuildFunds { nock: 1_000_000.0, usdc: 10_000.0, eth: None });
+        let (s, x) = lp_rebuild_suggestions(&raw, 300.0, RebuildFunds { nock: 1_000_000.0, floor_tolerance_nock: 0.0, usdc: 10_000.0, eth: None });
         let weth_needed = raw.positions.iter().find(|p| p.nft_id == 6336662).map(|p| amounts_per_usd(p, raw.spot_price_nock_usd, raw.live_eth_price_usd).unwrap().0 > 0.0).unwrap();
         if weth_needed {
             assert!(s.iter().all(|one| one.nft_id != 6336662));
