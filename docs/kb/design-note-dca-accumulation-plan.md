@@ -135,7 +135,7 @@ When a plan is configured and not complete, the dip-reinvestment arm is replaced
 plan's directive. Precedence becomes:
 
 1. `DEFENSIVE LOCK` (unchanged)
-2. `SWEEP TO STABLE` overextension cooldown (unchanged; plan shows `Paused`)
+2. Overextension cooldown, `OVEREXTENDED (Daily RSI ≥ 70, No Buy Advised)` since v0.5.1 (was `SWEEP TO STABLE`; plan shows `Paused`)
 3. Tax guardrail (unchanged; plan shows `Blocked`)
 4. **`DCA TRANCHE DUE (3 of 10)`**: "Buy $X of NOCK on Aerodrome. $Y remains in the plan;
    average cost so far $Z."

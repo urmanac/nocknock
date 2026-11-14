@@ -529,7 +529,8 @@ components:
       properties:
         status:
           type: string
-          enum: [under_target, on_target, over_target]
+          description: no_positions when no LP position is tracked; no_target when no LP target weight is configured (target_weights_bps.uniswap_lp unset or 0). Neither carries suggestions or bias text.
+          enum: [under_target, on_target, over_target, no_positions, no_target]
         target_usd:
           type: string
         actual_usd:
@@ -655,11 +656,11 @@ components:
         shot_advice_details:
           type: string
           description: Detailed explanation of tactical advisory status
-          example: "Total NOCK held is 107,123 (+7,123 above 100k hard floor). AMMs are generating dual yield. Maintain posture."
+          example: "Total NOCK held is 113863 (+13863 above the 100000 floor). 3 LP positions tracked: 2 ranged (2 in range), 1 full range. $0.30 of LP fees uncollected. Liquid dry powder: none (wallet USDC $930.78 less the larger of the $119.53 cash target and the $0.00 virtual tax reserve)."
         regime:
           type: string
-          description: Market regime from daily RSI(14) overextension detection (see rsi_14_1d)
-          enum: [normal, overextended]
+          description: Market regime from daily RSI(14) overextension detection (see rsi_14_1d); unknown when no daily RSI was computed (too little history, or a flat series)
+          enum: [normal, overextended, unknown]
         rsi_14:
           type: string
           nullable: true
@@ -795,8 +796,8 @@ components:
           description: Actual - target (positive = over-funded)
         status:
           type: string
-          enum: [on_target, over_funded, under_funded, fast_running]
-          description: Visual anchor for the frontend
+          enum: [on_target, over_funded, under_funded, fast_running, no_target]
+          description: Visual anchor for the frontend; no_target when the operator set no weight for the bucket (target_weight_bps 0)
 
     StructuralChannels:
       type: object

@@ -4,7 +4,6 @@ use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 use std::time::Duration;
 
-const DEFAULT_BASE_RPC: &str = "https://mainnet.base.org";
 /// Worker base URL when NOCKNOCK_API_URL is unset. Point the variable at a remote
 /// deployment (e.g. `http://chudmax:8081`) to read it instead of a local worker.
 const DEFAULT_API_BASE: &str = "http://127.0.0.1:8080";
@@ -16,9 +15,6 @@ fn api_base() -> String {
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| DEFAULT_API_BASE.to_string())
 }
-const WALLET_ADDR: &str = "0xeE114cC97eC5adeB34bA5645e315B497D8487a45";
-#[allow(dead_code)]
-const WALLET_PADDED: &str = "000000000000000000000000ee114cc97ec5adeb34ba5645e315b497d8487a45";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -207,8 +203,8 @@ async fn handle_tool_call(client: &Client, tool_name: &str) -> String {
         }
     }
 
-    // 2. Fallback to direct decentralized Base RPC (Zero-DB mode)
-    handle_direct_rpc_fallback(client, tool_name).await
+    // 2. Worker unreachable: report that, and nothing NockNock has not read through it.
+    zero_db_fallback_text(tool_name, &api_base())
 }
 
 /// Compact plan view for the snapshot-API fallback (the worker's own /v1/mcp gives
@@ -217,44 +213,74 @@ fn format_accumulation_plan(data: &Value) -> String {
     let lp = data.pointer("/derived_metrics/lp_rebuild");
     let lp_status = lp.and_then(|l| l.get("status")).and_then(|v| v.as_str()).unwrap_or("n/a");
     let lp_gap = lp.and_then(|l| l.get("gap_usd")).and_then(|v| v.as_str()).unwrap_or("n/a");
-    let lp_line = format!("• LP rebuild bias: {lp_status} (${lp_gap} short of target; rebuilding is a reposition, no net cash change)");
+    let lp_line = if lp_status == "no_positions" {
+        "• No LP positions are tracked; NockNock suggests deposits only into positions you list under positions:".to_string()
+    } else if lp_status == "no_target" {
+        "• No LP target is configured (operator_profile.target_weights_bps.uniswap_lp), so NockNock suggests no rebuild.".to_string()
+    } else {
+        format!("• LP rebuild bias: {lp_status} (${lp_gap} short of target; rebuilding is a reposition, no net cash change)")
+    };
     match data.pointer("/derived_metrics/accumulation_plan").filter(|p| !p.is_null()) {
         None => format!("🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n{lp_line}"),
         Some(plan) => {
             let s = |k: &str| plan.get(k).and_then(|v| v.as_str()).unwrap_or("n/a").to_string();
             let n = |k: &str| plan.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+            // Same rule as the worker's text: only a due tranche is "due now".
+            let next = match s("status").as_str() {
+                "complete" => "none (plan complete)".to_string(),
+                "tranche_due" => format!(
+                    "{} of {} — ${} due now (nominal ${})",
+                    n("tranche_index"), n("tranches_total"), s("tranche_usdc"), s("nominal_tranche_usdc")
+                ),
+                _ => format!("{} of {} — ${} when due", n("tranche_index"), n("tranches_total"), s("nominal_tranche_usdc")),
+            };
             format!(
                 "🪜 Accumulation Plan \"{}\"\n====================\n\
                  • Status: {}\n\
-                 • Next tranche: {} of {} — ${} due now\n\
+                 • Next tranche: {}\n\
                  • Next due at: {}\n\
                  • Progress: ${} of ${} spent; average ${}\n\
                  {lp_line}",
-                s("plan_id"), s("status"), n("tranche_index"), n("tranches_total"), s("tranche_usdc"),
+                s("plan_id"), s("status"), next,
                 s("next_due_at"), s("spent_usdc"), s("budget_usdc"), s("avg_price_usd"),
             )
         }
     }
 }
 
+/// Floor clause from the snapshot's own `nock_floor_target` (never a hardcoded 100k).
+fn floor_clause(global: Option<&Value>) -> String {
+    let get = |k: &str| global.and_then(|g| g.get(k)).and_then(|v| v.as_str());
+    let target = get("nock_floor_target").and_then(|t| t.trim().parse::<f64>().ok());
+    let delta = get("nock_floor_delta").and_then(|d| d.trim().parse::<f64>().ok());
+    match (target, delta) {
+        (None, _) => "floor unavailable".to_string(),
+        (Some(t), _) if t <= 0.0 => "no floor configured".to_string(),
+        (Some(t), Some(d)) if d < 0.0 => format!("{:.0} below the {:.0} NOCK floor", -d, t),
+        (Some(t), Some(d)) => format!("+{:.0} above the {:.0} NOCK floor", d, t),
+        (Some(t), None) => format!("{:.0} NOCK floor; buffer unavailable", t),
+    }
+}
+
 fn format_portfolio_state(data: &Value) -> String {
     let global = data.pointer("/derived_metrics/global_status");
-    let total_usd = global.and_then(|g| g.get("total_portfolio_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
-    let total_nock = global.and_then(|g| g.get("total_nock_amount")).and_then(|v| v.as_str()).unwrap_or("0");
-    let nock_delta = global.and_then(|g| g.get("nock_floor_delta")).and_then(|v| v.as_str()).unwrap_or("0");
-    let total_usdc = global.and_then(|g| g.get("total_usdc_amount")).and_then(|v| v.as_str()).unwrap_or("0.00");
-    let hwm = global.and_then(|g| g.get("high_water_mark_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
-    let advice = global.and_then(|g| g.get("shot_advice_action")).and_then(|v| v.as_str()).unwrap_or("HOLD");
-
-    let delta_prefix = if nock_delta.starts_with('-') { "" } else { "+" };
+    // Missing fields say so: never an invented 0.00 or HOLD.
+    let get = |k: &str| global.and_then(|g| g.get(k)).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
+    let usd = |k: &str| get(k).map(|v| format!("${v} USD")).unwrap_or_else(|| "unavailable".to_string());
+    let total_usd = usd("total_portfolio_usd");
+    let total_nock = get("total_nock_amount").map(|v| format!("{v} NOCK")).unwrap_or_else(|| "unavailable".to_string());
+    let total_usdc = get("total_usdc_amount").map(|v| format!("{v} USDC")).unwrap_or_else(|| "unavailable".to_string());
+    let hwm = usd("high_water_mark_usd");
+    let advice = get("shot_advice_action").unwrap_or("unavailable");
+    let floor = floor_clause(global);
 
     format!(
         "📈 NockNock Sovereign Portfolio State (Live API)\n\
          =========================================\n\
-         • Total Value: ${total_usd} USD\n\
-         • Sovereign NOCK Stack: {total_nock} NOCK (Floor buffer delta: {delta_prefix}{nock_delta} above 100k)\n\
-         • Stable Stack: {total_usdc} USDC\n\
-         • High-Water Mark: ${hwm} USD\n\
+         • Total Value: {total_usd}\n\
+         • Sovereign NOCK Stack: {total_nock} ({floor})\n\
+         • Stable Stack: {total_usdc}\n\
+         • High-Water Mark: {hwm}\n\
          • Tactical Directive: {advice}\n\
          • Mode: Tier 1 Connected (Verified Persistent Snapshot)"
     )
@@ -262,19 +288,26 @@ fn format_portfolio_state(data: &Value) -> String {
 
 fn format_shot_advice(data: &Value) -> String {
     let global = data.pointer("/derived_metrics/global_status");
-    let action = global.and_then(|g| g.get("shot_advice_action")).and_then(|v| v.as_str()).unwrap_or("HOLD");
-    let details = global.and_then(|g| g.get("shot_advice_details")).and_then(|v| v.as_str()).unwrap_or("Accreting");
-    let claimable_usd = global.and_then(|g| g.get("total_fees_claimable_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
-    let gas_delta = global.and_then(|g| g.get("gas_to_fee_delta_usd")).and_then(|v| v.as_str()).unwrap_or("0.00");
+    let get = |k: &str| global.and_then(|g| g.get(k)).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
+    let action = get("shot_advice_action").unwrap_or("unavailable");
+    let details = get("shot_advice_details").unwrap_or("unavailable");
+    let claimable_usd = get("total_fees_claimable_usd").map(|v| format!("${v} USD")).unwrap_or_else(|| "unavailable".to_string());
+    // Signed as the worker reports it: a negative net is never shown as +$0.00.
+    let gas_delta = get("gas_to_fee_delta_usd")
+        .map(|v| match v.trim().strip_prefix('-') {
+            Some(abs) => format!("-${abs} USD"),
+            None => format!("+${v} USD"),
+        })
+        .unwrap_or_else(|| "unavailable".to_string());
 
     format!(
         "🎯 Tactical Shot Advice Engine\n\
          ===============================\n\
          • Recommended Action: {action}\n\
          • Decision Matrix Details: {details}\n\
-         • Uncollected Claimable Fees: ${claimable_usd} USD\n\
-         • Net Gas-to-Fee Profitability: +${gas_delta} USD\n\
-         • Execution rule: claim advised when claimable yield ≥ 2× live gas break-even."
+         • Uncollected Claimable Fees: {claimable_usd}\n\
+         • Net of two claims' gas: {gas_delta}\n\
+         • Harvest rule: BATCH HARVEST is advised when uncollected LP fees reach the fixed $5.00 threshold and no DCA tranche is due."
     )
 }
 
@@ -330,108 +363,118 @@ fn format_claim_simulation(data: &Value) -> String {
     )
 }
 
-async fn handle_direct_rpc_fallback(client: &Client, tool_name: &str) -> String {
-    // Direct decentralized query to Base mainnet. The Aerodrome tranche was liquidated
-    // on 2026-10-23; the tracked LP is now Uniswap-only, so the NOCK spot comes from
-    // the tracked v4 NOCK/USDC pool slot0 (discovery-verified identifiers).
-    const NOCK_USDC_POOL_ID: &str = "0x91a9ef0a8dd231b99fa53a2a145a9e8bca7897e0d85852107abb997916f9f99c";
-    const NOCK_TOKEN: &str = "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722";
-
-    let slot0 = json!({
-        "jsonrpc": "2.0",
-        "method": "eth_call",
-        "params": [{
-            "to": "0xa3c0c9b65bad0b08107aa264b0f3db444b867a71", // Uniswap v4 StateView
-            "data": format!("0xc815641c{}", NOCK_USDC_POOL_ID.trim_start_matches("0x"))
-        }, "latest"],
-        "id": 1
-    });
-
-    let nock_balance_call = json!({
-        "jsonrpc": "2.0",
-        "method": "eth_call",
-        "params": [{
-            "to": NOCK_TOKEN,
-            "data": format!("0x70a082310000000000000000{}", WALLET_ADDR.trim_start_matches("0x"))
-        }, "latest"],
-        "id": 2
-    });
-
-    let mut spot_price: Option<f64> = None;
-    let mut nock_balance: Option<f64> = None;
-
-    if let Ok(resp) = client.post(DEFAULT_BASE_RPC).json(&slot0).send().await {
-        if let Ok(val) = resp.json::<Value>().await {
-            if let Some(hex_str) = val.get("result").and_then(|r| r.as_str()) {
-                let clean = hex_str.trim_start_matches("0x");
-                if clean.len() >= 64 {
-                    if let Ok(s) = u128::from_str_radix(&clean[..64], 16) {
-                        // token0 = USDC (6 dec), token1 = NOCK (16 dec):
-                        // raw = NOCK_raw per USDC_raw -> USDC per NOCK = 1e10 / raw
-                        let raw = (s as f64 / 79228162514264337593543950336.0).powi(2);
-                        if raw > 0.0 {
-                            spot_price = Some(1e10 / raw);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if let Ok(resp) = client.post(DEFAULT_BASE_RPC).json(&nock_balance_call).send().await {
-        if let Ok(val) = resp.json::<Value>().await {
-            if let Some(hex_str) = val.get("result").and_then(|r| r.as_str()) {
-                if let Ok(v) = u128::from_str_radix(hex_str.trim_start_matches("0x"), 16) {
-                    nock_balance = Some(v as f64 / 1e16);
-                }
-            }
-        }
-    }
-
-    let price_str = spot_price
-        .map(|p| format!("${:.6} USD", p))
-        .unwrap_or_else(|| "Unavailable (RPC query failed)".to_string());
-    let nock_str = nock_balance
-        .map(|b| format!("{:.2} NOCK", b))
-        .unwrap_or_else(|| "Unavailable".to_string());
-    let nock_usd_str = match (nock_balance, spot_price) {
-        (Some(b), Some(p)) => format!("~${:.2} USD", b * p),
-        _ => "Unavailable".to_string(),
+/// The worker is unreachable on both its MCP endpoint and its snapshot API. Say so,
+/// and report nothing the worker has not read: no wallet, no pool price, no directive.
+fn zero_db_fallback_text(tool_name: &str, api_base: &str) -> String {
+    let header = match tool_name {
+        "get_portfolio_state" => "📈 NockNock Sovereign State (worker unreachable)",
+        "get_shot_advice" => "🎯 Tactical Shot Advice Engine (worker unreachable)",
+        "simulate_claim_fees" => "⚡ Fee Claim Simulation (worker unreachable)",
+        "get_accumulation_plan" => "🪜 Accumulation Plan (worker unreachable)",
+        _ => return format!("Unknown tool: {tool_name}"),
     };
+    format!(
+        "{header}\n\
+         =========================================\n\
+         • The NockNock worker at {api_base} is unreachable (set NOCKNOCK_API_URL to a running deployment).\n\
+         • Nothing is reported that the worker has not read: no balances, prices, positions or directive."
+    )
+}
 
-    let advice = "ACCRUE (fee claims need the worker's simulated Golden Path payload; open the cockpit)";
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    match tool_name {
-        "get_portfolio_state" => format!(
-            "📈 NockNock Sovereign State (Decentralized Direct RPC Mode)\n\
-             ===========================================================\n\
-             • NOCK Spot Price: {price_str}\n\
-             • Wallet NOCK Balance: {nock_str} ({nock_usd_str})\n\
-             • LP Positions: Uniswap-only portfolio (full breakdown needs the worker/DB)\n\
-             • Mode: Zero-DB Edge RPC Fallback (Database and Worker Offline)\n\
-             • Status: Sovereign RPC Connected directly to Base mainnet."
-        ),
-        "get_shot_advice" => format!(
-            "🎯 Tactical Shot Advice Engine (Decentralized RPC Mode)\n\
-             =======================================================\n\
-             • Recommended Action: {advice}\n\
-             • NOCK Spot Price: {price_str}\n\
-             • Gas Estimate: unavailable in zero-DB mode\n\
-             • Mode: Zero-DB Edge RPC Fallback"
-        ),
-        "simulate_claim_fees" => format!(
-            "⚡ Fee Claim Simulation (Decentralized RPC Mode)\n\
-             ===============================================\n\
-             • Unclaimed LP fees: not simulated in zero-DB mode (no fabricated estimates)\n\
-             • NOCK Spot Price: {price_str}\n\
-             • Estimated Gas Cost: unavailable in zero-DB mode\n\
-             • Claim decision needs the worker's pre-simulated payload — open the cockpit"
-        ),
-        "get_accumulation_plan" => "🪜 Accumulation Plan (Decentralized RPC Mode)\n\
-             =============================================\n\
-             • Plan progress lives in the worker's receipt-verified ledger and is not available in zero-DB mode (no fabricated progress).\n\
-             • Start the worker, or set NOCKNOCK_API_URL to a running deployment."
-            .to_string(),
-        _ => format!("Unknown tool: {tool_name}"),
+    fn from_zero_snapshot() -> Value {
+        json!({
+            "derived_metrics": {
+                "global_status": {
+                    "total_portfolio_usd": "500.00",
+                    "total_nock_amount": "0",
+                    "nock_floor_delta": "0",
+                    "nock_floor_target": "0",
+                    "total_usdc_amount": "500.00",
+                    "high_water_mark_usd": "500.00",
+                    "shot_advice_action": "BUILD FROM ZERO (No Buy Plan Configured)",
+                    "total_fees_claimable_usd": "0.00",
+                    "gas_to_fee_delta_usd": "0.00"
+                },
+                "accumulation_plan": null,
+                "lp_rebuild": { "status": "no_positions", "actual_usd": "0.00", "target_usd": "0.00", "gap_usd": "0.00", "suggestions": [], "excluded": [] }
+            },
+            "contract_fees": []
+        })
+    }
+
+    #[test]
+    fn test_fallback_formatters_use_the_snapshot_floor_and_invent_nothing() {
+        let data = from_zero_snapshot();
+        let state = format_portfolio_state(&data);
+        assert!(state.contains("Sovereign NOCK Stack: 0 NOCK (no floor configured)"), "{state}");
+        assert!(!state.contains("100k"));
+
+        let mut below = from_zero_snapshot();
+        below["derived_metrics"]["global_status"]["nock_floor_target"] = json!("100000");
+        below["derived_metrics"]["global_status"]["nock_floor_delta"] = json!("-100000");
+        let text = format_portfolio_state(&below);
+        assert!(text.contains("100000 below the 100000 NOCK floor"), "{text}");
+        assert!(!text.contains("above"));
+
+        let plan = format_accumulation_plan(&data);
+        assert!(plan.contains("No accumulation_plan is configured"));
+        assert!(plan.contains("No LP positions are tracked"));
+        assert!(!plan.contains("rebuilding is a reposition"));
+
+        let empty = format_shot_advice(&json!({}));
+        assert!(empty.contains("Recommended Action: unavailable"));
+        assert!(!empty.contains("HOLD") && !empty.contains("Accreting") && !empty.contains("0.00"));
+        let empty_state = format_portfolio_state(&json!({}));
+        assert!(empty_state.contains("Tactical Directive: unavailable"));
+        assert!(empty_state.contains("floor unavailable"));
+        assert!(!empty_state.contains("HOLD") && !empty_state.contains("0.00"));
+    }
+
+    #[test]
+    fn test_fallback_shot_advice_states_the_real_rule_and_a_signed_net() {
+        let mut data = from_zero_snapshot();
+        data["derived_metrics"]["global_status"]["gas_to_fee_delta_usd"] = json!("-0.01");
+        let text = format_shot_advice(&data);
+        assert!(text.contains("fixed $5.00 threshold"), "{text}");
+        assert!(!text.contains("2× live gas"), "{text}");
+        assert!(text.contains("-$0.01 USD") && !text.contains("+$-"), "{text}");
+
+        let mut no_target = from_zero_snapshot();
+        no_target["derived_metrics"]["lp_rebuild"]["status"] = json!("no_target");
+        let plan = format_accumulation_plan(&no_target);
+        assert!(plan.contains("No LP target is configured"), "{plan}");
+        assert!(!plan.contains("short of target"), "{plan}");
+    }
+
+    #[test]
+    fn test_fallback_plan_text_never_says_due_now_while_waiting() {
+        let data = json!({ "derived_metrics": { "accumulation_plan": {
+            "plan_id": "p", "status": "waiting", "tranche_index": 2, "tranches_total": 5,
+            "tranche_usdc": "0.00", "nominal_tranche_usdc": "20.00", "next_due_at": "2026-11-16T12:00:00+00:00",
+            "spent_usdc": "20.00", "budget_usdc": "100.00", "avg_price_usd": "0.011530"
+        }, "lp_rebuild": { "status": "on_target", "gap_usd": "0.00" } } });
+        let text = format_accumulation_plan(&data);
+        assert!(text.contains("Next tranche: 2 of 5 — $20.00 when due"), "{text}");
+        assert!(!text.contains("due now"));
+    }
+
+    #[test]
+    fn test_zero_db_fallback_reports_nothing_unread() {
+        for tool in ["get_portfolio_state", "get_shot_advice", "simulate_claim_fees", "get_accumulation_plan"] {
+            let text = zero_db_fallback_text(tool, "http://127.0.0.1:8080");
+            assert!(text.contains("unreachable") && text.contains("NOCKNOCK_API_URL"), "{text}");
+            assert!(text.contains("http://127.0.0.1:8080"));
+            assert!(!text.to_lowercase().contains("0xee114cc9"));
+            assert!(!text.contains("Spot Price") && !text.contains("ACCRUE"));
+        }
+        // The headers the MCP playtest pins survive.
+        assert!(zero_db_fallback_text("get_portfolio_state", "x").contains("NockNock Sovereign State"));
+        assert!(zero_db_fallback_text("get_shot_advice", "x").contains("Tactical Shot Advice Engine"));
+        assert!(zero_db_fallback_text("simulate_claim_fees", "x").contains("Fee Claim Simulation"));
+        assert_eq!(zero_db_fallback_text("nope", "x"), "Unknown tool: nope");
     }
 }

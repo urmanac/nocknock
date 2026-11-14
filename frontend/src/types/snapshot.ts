@@ -71,7 +71,7 @@ export interface AccumulationPlanStatus {
 
 /** LP weight vs target; rebuilding is a reposition with no net cash change (2.1.0) */
 export interface LpRebuild {
-  status: 'under_target' | 'on_target' | 'over_target';
+  status: 'under_target' | 'on_target' | 'over_target' | 'no_positions' | 'no_target';
   target_usd: string;
   actual_usd: string;
   gap_usd: string;
@@ -122,7 +122,7 @@ export interface GlobalStatus {
   shot_advice_action?: string;
   shot_advice_details?: string;
   /** Market regime from daily RSI(14) overextension detection (v0.3.0) */
-  regime?: 'normal' | 'overextended';
+  regime?: 'normal' | 'overextended' | 'unknown';
   /** Wilder RSI(14) over 5-minute snapshot closes (short-term momentum) */
   rsi_14?: string | null;
   /** Wilder RSI(14) over daily closes — the "daily RSI"; drives `regime` */
@@ -170,7 +170,7 @@ export interface AllocationDeviation {
   target_weight_bps: number;
   actual_weight_bps: number;
   deviation_bps: number;
-  status: 'on_target' | 'over_funded' | 'under_funded' | 'fast_running';
+  status: 'on_target' | 'over_funded' | 'under_funded' | 'fast_running' | 'no_target';
 }
 
 export interface StructuralChannels {

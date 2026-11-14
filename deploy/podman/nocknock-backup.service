@@ -1,8 +1,0 @@
-[Unit]
-Description=NockNock database backup (pg_dump of the ledgers and snapshot history)
-Requires=nocknock-db.service
-After=nocknock-db.service
-
-[Service]
-Type=oneshot
-ExecStart=%h/nocknock/src/deploy/podman/nocknock-backup.sh

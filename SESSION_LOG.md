@@ -5,15 +5,21 @@ One entry per working session, newest first. Longer sessions keep their full log
 
 | Dates | Agent | Releases | Log |
 |---|---|---|---|
+| 2026-11-14 (afternoon) | Claude (Fable 5.2, then Opus 5.5) | none: planning | [Planning v0.5.1 and v0.5.2, lore, the mining reply](docs/kb/session-2026-11-14-planning-lore-mining.md) |
 | 2026-11-13 → 2026-11-14 | Claude (Opus 5.5, then Fable 5.2) | v0.4.0, v0.5.0 | [On-prem deployment, DCA plan, LP guidance, Aerodrome tranche](docs/kb/session-2026-11-13-chudmax-dca-aerodrome.md) |
 | 2026-10-10 | pi → antigravity (Gemini) | v0.1.0 | Below |
 
-**Headline of the latest session:** NockNock now runs on `chudmax` as standing
-infrastructure, models the real portfolio again (two Uniswap ranges plus a staked Aero
-full-range tranche), paces NOCK buys with a receipt-verified ledger, and turns
-"rebuild LP" into concrete deposits. One position is not visible yet: the operator's
-Aero WETH/NOCK CL200 range (issue #91). Standing orders from that session are in
-`OPERATOR_GUIDANCE.md` §7.
+**Headline of the latest session:** a planning session, with no code changed.
+
+- **Two patches are planned:**
+  - **v0.5.1, "Honest numbers":** due before the DCA plan completes around 2026-11-18,
+    when HOLD's false "0% realized loss" would return.
+  - **v0.5.2, "From zero":** lets a newcomer start from an empty portfolio.
+- **The lore** sets out the operator's four-pillar position.
+- **The L1 mining handoff** got a verified reply and a proposed milestone.
+
+The previous session put NockNock on `chudmax` as standing infrastructure; its standing
+orders are in `OPERATOR_GUIDANCE.md` §7.
 
 ---
 
