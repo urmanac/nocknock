@@ -450,6 +450,27 @@ on chudmax first (`systemctl --user disable --now nocknock-backup.timer`), remov
 files, and only then drop the files and the Makefile's `db-backup`/`db-restore` targets
 from the repo.
 
+## Open points from the cross-area critique
+
+The critic arrived after this plan was written. Most of its 18 conflicts are areas proposing
+different wording for the same string, and the sections above already pick one. Two
+points remain open:
+
+- **Default target weights still size things for a newcomer (critic V1, V4).**
+  - PR 1 makes the code default floor 0. The default weights stay 8000/1500/500 until the
+    targets become optional.
+  - A newcomer's "liquid dry powder" and LP target therefore still come from a 5% cash
+    weight and a 15% LP weight that they never set.
+  - With no floor, LP rebuild funding can draw on their whole NOCK stack, sized from that
+    default 15%.
+  - **Rule to implement:** rebuild suggestions need an LP target the user set, and dry
+    powder subtracts only a cash target the user set. Until targets are optional, the
+    newcomer tests should assert the weights the test itself sets, not the defaults.
+- **The $0.020 line (critic V2).** It is the original operator's legacy constant, applied
+  to everyone. While it remains a trigger, DIP ZONE's text calls it "the fixed $0.020
+  line", never a market fact. Moving it into config with no default is the v0.6.0
+  "externalise legacy constants" item.
+
 ## Out of scope for both patches
 
 - **Directive renames** such as dropping "Dual Growth Engine" (ADV-14): v0.6.0.
