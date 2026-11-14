@@ -144,7 +144,10 @@ pub struct AccumulationPlanConfig {
 }
 
 fn default_plan_venue() -> String {
-    "Aerodrome".to_string()
+    // Aerodrome and Velodrome merged into Aero (aero.xyz) on 2026-10-21; see
+    // ONCHAIN_INTEGRATION.md §6. The label is informational: receipt verification
+    // is contract-agnostic.
+    "Aero".to_string()
 }
 
 fn default_true() -> bool {
@@ -227,7 +230,8 @@ struct MarketDataConfig {
     geckoterminal_base_url: String,
     #[serde(default = "default_dexscreener_base_url")]
     dexscreener_base_url: String,
-    /// Tracked Aerodrome pool used for third-party OHLCV lookups
+    /// Pool used for third-party OHLCV lookups (RSI history). May be a legacy Aerodrome
+    /// pool: see ONCHAIN_INTEGRATION.md §6 for the dependency this creates.
     #[serde(default = "default_tracked_pool")]
     pool_address: String,
     /// Newest stored price point older than this triggers an hourly backfill
@@ -1763,7 +1767,7 @@ async fn mcp_http_handler(
                     },
                     {
                         "name": "simulate_claim_fees",
-                        "description": "Simulates gas expenditure vs uncollected yield across Aerodrome and Uniswap V4 positions.",
+                        "description": "Simulates gas expenditure vs uncollected yield across the tracked Uniswap v3/v4 positions.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {},
@@ -3272,7 +3276,7 @@ struct RecordAccumulationRequest {
 
 /// POST /v1/execute/record-accumulation — attach a confirmed USDC→NOCK purchase to
 /// the configured accumulation plan (issue #79). The swap may have been made anywhere
-/// (the Aerodrome UI, a wallet's swap screen): acceptance depends only on the on-chain
+/// (aero.xyz, a wallet's swap screen): acceptance depends only on the on-chain
 /// receipt showing USDC leaving, and NOCK entering, the tracked wallet. Amounts come
 /// from the Transfer logs. Idempotent on tx_hash.
 async fn record_accumulation_handler(
@@ -5763,7 +5767,7 @@ database_url: "postgresql://localhost/test"
             tranches: 5,
             interval_hours: 24.0,
             starts_at: None,
-            venue: "Aerodrome".to_string(),
+            venue: "Aero".to_string(),
             max_price_usd: None,
             pause_when_overextended: true,
             respect_cash_target: true,
@@ -5986,7 +5990,7 @@ database_url: "postgresql://localhost/test"
         )
         .unwrap();
         let plan = cfg.accumulation_plan.expect("plan parsed");
-        assert_eq!(plan.venue, "Aerodrome");
+        assert_eq!(plan.venue, "Aero");
         assert!(plan.pause_when_overextended && plan.respect_cash_target);
         assert!(plan.starts_at.is_none() && plan.max_price_usd.is_none());
         // Absent section keeps the feature off.
@@ -6030,7 +6034,7 @@ database_url: "postgresql://localhost/test"
         let ctx = PlanContext { cfg: Some(plan_cfg()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-15T12:00:00Z") };
         let m = metrics_with_plan(&raw, &ctx, &MarketRegime::default());
         assert_eq!(m.global_status.shot_advice_action, "DCA TRANCHE DUE (1 of 5)");
-        assert!(m.global_status.shot_advice_details.contains("Buy $100.00 of NOCK on Aerodrome"));
+        assert!(m.global_status.shot_advice_details.contains("Buy $100.00 of NOCK on Aero (spot"));
         assert!(!m.global_status.shot_advice_details.contains("Deploy $"));
         let ps = m.accumulation_plan.expect("plan status emitted");
         assert_eq!(ps.status, "tranche_due");
