@@ -7,19 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Deferred to Future Releases
+- [ ] **Koinly On-Chain Transaction Classifier (Issue #56, v0.4.0)**: reconcile on-chain fee-claim harvests directly with Koinly's Base wallet sync as ordinary income — explicitly NOT manual CSV download buttons/tooling (duplicate transactions and burns the annual 1,000-transaction budget on the $99 tier; Koinly misclassifying claims as "Liquidity Removals" corrupts LP cost basis).
+- [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).
+- [ ] **Multi-Pool Dynamic Ingestion**: Discovering and tracking secondary AMM pools on Base.
+- [ ] **Coinbase Staked-ETH Connector**: CDP API integration to monitor staked ETH balances.
+- [ ] **Urbit Native (%nocknock Desk)**: Hoon data structures and Gall agent.
+- [ ] **Phone install, notifications and TLS (Epic #89)** for the internal deployment.
+- [ ] **Accumulation plan Phase 2**: redesign for Aero's router, or keep operator-executed swaps and measure execution cost per fill against spot.
+- [ ] **Unsigned add-liquidity transactions** for LP rebuild suggestions (encoding to be verified by simulation).
+- [ ] **Aero concentrated (CL) positions (Issue #91)**, starting with WETH/NOCK CL200.
+- [ ] **AERO reward accounting (Issue #93)**: read, value and ledger rewards from staked Aero positions.
+- [ ] **Count ETH** in portfolio totals; externalise the legacy advice constants.
+
+## [0.5.0] - 2026-11-14
+
 ### Added — Aerodrome Full-Range Tranche (Issue #88)
 - **`protocol: aerodrome` positions.** A volatile x*y=k pool is tracked as a full-range
   position: the wallet's LP-token share of the reserves, with fees from `claimFees()`
   simulated from the wallet. It counts in totals, the deviation matrix, charts, fee
   reporting, the claim payload and LP rebuild suggestions. It is always in range and has
   no sell-out multiple (it sells NOCK gradually as price rises and never empties).
-  v0.4.0 had removed Aerodrome support, so such a position was invisible.
-- **Price source.** The example config makes the legacy Aerodrome NOCK/USDC vAMM the
-  NOCK/USD price source (spot = reserve ratio). On 2026-11-14 it carried about $110k/day
-  of NOCK volume against about $3.5k/day for the Uniswap v4 3% pool, and the RSI history
-  already came from it.
+  v0.4.0 had removed Aerodrome support, so such a position was invisible. A pool whose
+  `claimFees()` reverts (the new Aero pools) reads as having no LP-claimable fees
+  instead of failing the cycle. `gauge_address` adds LP tokens staked in the pool's
+  gauge to the wallet's balance.
+- **Shipped config.** Tracks the Aero Basic Volatile NOCK/USDC pool listed on
+  app.aero.xyz (`0x770fE8Fc…9e0A`) with its gauge. The legacy Aerodrome NOCK/USDC pool
+  is still the deepest market but the Aero app does not list it, so it is not tracked as
+  a position. The two empty Uniswap v4 positions (#3163431 on a dead pool, #3163432 out
+  of range) are retired from the shipped position list. A volatile pool can serve as the NOCK/USD price source (spot = reserve
+  ratio); the shipped config keeps the Uniswap v4 3% pool as the source.
+- **Deposit links** go to the Aero app (`https://app.aero.xyz/deposit/<chain>-<pool>`),
+  never to the retired aerodrome.finance. Display names say "Aero"; the `aerodrome`
+  protocol key is kept for ledger continuity.
 - Positions and brackets carry `full_range`; the dashboard shows FULL RANGE, draws no
   bracket for it, and no longer assumes the price source is the first position.
+- Suggestion buttons name their real destination ("Open position in Uniswap web app",
+  "Open deposit on aero.xyz"); the label was hardcoded to "Open in Uniswap"
+  for every venue. A suggestion capped by the aggregate LP gap reports the share being
+  filled, not "$128 of $162 wanted".
 
 ### Added — Operations
 - **Nightly database backup** for the Podman deployment (`nocknock-backup.timer`,
@@ -39,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Honest `/health` (Issue #87).** `degraded` when the last ingestion cycle failed or
   the data is older than the sync window plus grace, with `last_error`. It used to
   report `ok` whenever any snapshot existed.
+- The dashboard's positions summary is computed from the positions. It used to hardcode
+  "0% realized losses", call every position a "concentrated Uniswap position" and count
+  a dead pool as in range.
 - The claim-fees payload says "Nothing to collect" for an empty position instead of
   "RPC unavailable", and the plan's MCP text no longer says "$0.00 due now" while waiting.
 
@@ -115,12 +145,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer advises spending liquid USDC below `target_weights_bps.cash`, and is skipped
   when nothing is spendable. Previously the 5% cash target was displayed but never applied.
 
-### Deferred to Future Releases
-- [ ] **Koinly On-Chain Transaction Classifier (Issue #56, v0.4.0)**: reconcile on-chain fee-claim harvests directly with Koinly's Base wallet sync as ordinary income — explicitly NOT manual CSV download buttons/tooling (duplicate transactions and burns the annual 1,000-transaction budget on the $99 tier; Koinly misclassifying claims as "Liquidity Removals" corrupts LP cost basis).
-- [ ] **Native Android App (APK)**: Standalone native Android client (currently served via responsive mobile web cockpit).
-- [ ] **Multi-Pool Dynamic Ingestion**: Discovering and tracking secondary AMM pools on Base.
-- [ ] **Coinbase Staked-ETH Connector**: CDP API integration to monitor staked ETH balances.
-- [ ] **Urbit Native (%nocknock Desk)**: Hoon data structures and Gall agent.
+### Known Limitations in 0.5.0
+- **Aero concentrated (CL) pools are not tracked (Issue #91).** The operator holds a
+  WETH/NOCK CL200 position (about $180 at deposit, NFT #2914490); it is invisible to
+  NockNock, so portfolio and LP totals understate by that amount and the LP weight reads
+  lower than it is.
+- **AERO rewards are not read, valued or ledgered (Issue #93).** Aero positions are
+  staked by the Aero app and earn AERO.
+- Aero volatile positions are read only through a configured `gauge_address` (plus any
+  LP held directly in the wallet). The first live read matched the deposit exactly.
+- ETH is not counted in portfolio totals, so ETH moved into a position leaves the
+  tracked total without appearing anywhere.
+- Suggested LP deposits are sized, not built: the operator makes them in the venue's app.
+- A rebuild suggestion smaller than $5 is not shown; the position is listed as not
+  fundable, and the rebuild note then annotates the directive instead of leading it.
+- Notification delivery for `DCA TRANCHE DUE` has not been exercised on the on-prem
+  deployment (Epic #89).
+- 17 frontend dependency advisories remain with no upstream fix (unchanged from 0.4.0).
 
 ## [0.4.0] - 2026-11-13
 

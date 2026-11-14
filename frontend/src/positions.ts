@@ -12,16 +12,43 @@ export const POSITION_COLORS = ['#38bdf8', '#a855f7', '#f59e0b', '#ec4899', '#14
 export function positionLabel(p: any): string {
   if (!p) return 'Position';
   const proto =
-    p.protocol === 'uniswap-v4' ? 'v4' : p.protocol === 'uniswap-v3' ? 'v3' : p.protocol === 'aerodrome' ? 'Aerodrome' : p.protocol;
+    // The `aerodrome` protocol key is kept for ledger continuity; the venue is Aero now.
+    p.protocol === 'uniswap-v4' ? 'v4' : p.protocol === 'uniswap-v3' ? 'v3' : p.protocol === 'aerodrome' ? 'Aero' : p.protocol;
   const fee = (p.fee_tier_bps / 100).toFixed(2).replace(/\.?0+$/, '');
   return `${p.token0.symbol}/${p.token1.symbol} ${proto} · ${fee}%`;
+}
+
+/**
+ * One-line summary of the tracked LP positions, computed from the positions themselves.
+ * Replaces a line that hardcoded "0% realized losses" and called every position a
+ * "concentrated Uniswap position", counting a dead pool as in range.
+ */
+export function positionsSummary(
+  positions: Array<{ in_range: boolean; full_range?: boolean; pool_active?: boolean | null }>,
+): string {
+  const n = positions.length;
+  if (n === 0) return 'No LP positions tracked.';
+  const full = positions.filter((p) => p.full_range).length;
+  const stale = positions.filter((p) => !p.full_range && p.pool_active === false).length;
+  const ranged = positions.filter((p) => !p.full_range);
+  const inRange = ranged.filter((p) => p.in_range && p.pool_active !== false).length;
+  const out = ranged.length - inRange - stale;
+  const parts: string[] = [];
+  if (ranged.length > 0) {
+    const detail = [`${inRange} in range`];
+    if (out > 0) detail.push(`${out} out of range`);
+    if (stale > 0) detail.push(`${stale} on a stale pool`);
+    parts.push(`${ranged.length} ranged (${detail.join(', ')})`);
+  }
+  if (full > 0) parts.push(`${full} full range`);
+  return `${n} LP position${n === 1 ? '' : 's'} tracked live: ${parts.join(', ')}.`;
 }
 
 /** Protocol pill text for a position card. */
 export function protocolBadge(protocol: string): string {
   if (protocol === 'uniswap-v4') return 'UNISWAP V4';
   if (protocol === 'uniswap-v3') return 'UNISWAP V3';
-  if (protocol === 'aerodrome') return 'AERODROME';
+  if (protocol === 'aerodrome') return 'AERO';
   return String(protocol ?? '').toUpperCase();
 }
 

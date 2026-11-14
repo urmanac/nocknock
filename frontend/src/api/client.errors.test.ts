@@ -198,8 +198,8 @@ describe('Aerodrome full-range position display', () => {
   };
 
   it('labels the protocol and never prints a fake range', () => {
-    expect(positionLabel(aero)).toBe('USDC/NOCK Aerodrome · 0.3%');
-    expect(protocolBadge('aerodrome')).toBe('AERODROME');
+    expect(positionLabel(aero)).toBe('USDC/NOCK Aero · 0.3%');
+    expect(protocolBadge('aerodrome')).toBe('AERO');
     expect(protocolBadge('uniswap-v4')).toBe('UNISWAP V4');
     expect(positionRangeText(aero)).toBe('Full range (cannot go out of range)');
     expect(rangeStatus(aero)).toEqual({ label: '● FULL RANGE', tone: 'good' });
@@ -207,5 +207,58 @@ describe('Aerodrome full-range position display', () => {
 
   it('still flags a dead pool ahead of everything else', () => {
     expect(rangeStatus({ ...aero, pool_active: false }).tone).toBe('stale');
+  });
+});
+
+// ---------------- Suggestion link labels say where the link goes ----------------
+import { suggestionLinkLabel } from '../accumulation';
+
+describe('suggestion link labels', () => {
+  it('names the real destination, never "Uniswap" for an Aerodrome pool', () => {
+    expect(suggestionLinkLabel('https://app.uniswap.org/positions/v4/base/3163450')).toBe(
+      'OPEN POSITION IN UNISWAP WEB APP ↗',
+    );
+    // Aero tranches live at app.aero.xyz; the retired aerodrome.finance app is never linked.
+    const aeroLabel = suggestionLinkLabel('https://app.aero.xyz/deposit/8453-0x770fE8Fc9248c6382950A86E39a9391B41D59e0A');
+    expect(aeroLabel).toBe('OPEN DEPOSIT ON AERO.XYZ ↗');
+    expect(aeroLabel).not.toContain('UNISWAP');
+    expect(suggestionLinkLabel('https://basescan.org/address/0x85f1aa3a70fedd1c52705c15baed143e675cd626')).toBe(
+      'VIEW POOL ON BASESCAN ↗',
+    );
+  });
+
+  it('falls back to the host, and to a neutral label for a bad URL', () => {
+    expect(suggestionLinkLabel('https://example.org/deposit')).toBe('OPEN EXAMPLE.ORG ↗');
+    expect(suggestionLinkLabel('not a url')).toBe('OPEN LINK ↗');
+  });
+});
+
+// ---------------- Positions summary line ----------------
+import { positionsSummary } from '../positions';
+
+describe('positions summary', () => {
+  it('describes what is tracked without static claims', () => {
+    // The 2026-11-14 book: two Uniswap ranges in range, one staked Aero full-range pool.
+    const book = [
+      { in_range: true, pool_active: true },
+      { in_range: true, pool_active: true },
+      { in_range: true, pool_active: true, full_range: true },
+    ];
+    expect(positionsSummary(book)).toBe('3 LP positions tracked live: 2 ranged (2 in range), 1 full range.');
+    expect(positionsSummary(book)).not.toContain('0%');
+    expect(positionsSummary(book)).not.toContain('Uniswap');
+  });
+
+  it('does not count a dead pool as in range, and reports out-of-range positions', () => {
+    const old = [
+      { in_range: true, pool_active: false }, // frozen tick still reads "in range"
+      { in_range: false, pool_active: true },
+      { in_range: true, pool_active: true },
+    ];
+    expect(positionsSummary(old)).toBe(
+      '3 LP positions tracked live: 3 ranged (1 in range, 1 out of range, 1 on a stale pool).',
+    );
+    expect(positionsSummary([])).toBe('No LP positions tracked.');
+    expect(positionsSummary([{ in_range: true, full_range: true }])).toBe('1 LP position tracked live: 1 full range.');
   });
 });

@@ -30,7 +30,7 @@ const SOURCE_LABELS: Record<string, string> = {
   aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
-import { POSITION_COLORS, positionLabel, positionRangeText, protocolBadge, rangeStatus, walletNockUnits } from './positions.ts';
+import { POSITION_COLORS, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, walletNockUnits } from './positions.ts';
 
 function Dashboard() {
   const { snapshot, loading, error, freshness, refetch, ageDisplay } = useFreshness<
@@ -423,7 +423,7 @@ function Dashboard() {
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>Goal 1 (NOCK Accretion):</span>
             <span style={styles.shotPillText}>
-              {totalNockVal} NOCK total across the Sovereign Treasury wallet and {positionsList.length} tracked Uniswap LP position{positionsList.length === 1 ? '' : 's'}. Floor lock active if total &lt; {floorTargetFormatted}.
+              {totalNockVal} NOCK total across the Sovereign Treasury wallet and {positionsList.length} tracked LP position{positionsList.length === 1 ? '' : 's'}. Floor lock active if total &lt; {floorTargetFormatted}.
             </span>
           </div>
           <div style={styles.shotPill}>
@@ -433,9 +433,9 @@ function Dashboard() {
             </span>
           </div>
           <div style={styles.shotPill}>
-            <span style={styles.shotPillLabel}>Impermanent Loss / Risk:</span>
+            <span style={styles.shotPillLabel}>LP Positions / Range Risk:</span>
             <span style={styles.shotPillText}>
-              0% realized losses. {positionsList.length} concentrated Uniswap position{positionsList.length === 1 ? '' : 's'} tracked live ({positionsList.filter((p: any) => p.in_range).length} in range). Unclaimed fees live-tracked on-chain.
+              {positionsSummary(positionsList)} Unclaimed fees live-tracked on-chain.
             </span>
           </div>
         </div>

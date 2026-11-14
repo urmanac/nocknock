@@ -116,6 +116,7 @@
    - Split the LP target equally across eligible tracked positions unless config sets weights.
    - "We should not generally aim to fill positions that are out of range." Out-of-range positions are skipped unless config makes an explicit exception.
    - Never suggest a deposit into a pool with no in-range liquidity.
+   - Aero tranches live at app.aero.xyz ("We shouldn't refer folks to aerodrome.finance anymore"). Link there, never to the retired Aerodrome app. Staking is left at the Aero app's default; AERO rewards are unplanned income, so stay conservative and do not assume the operator wants to accumulate AERO.
    - LP may hold slightly more NOCK than sits above the hard floor. Operator, 2026-11-14: "Because the LP sells a fraction every time the price moves, by putting in just a little bit more than what we have allowed as a trading limit we will actually be quite unlikely to sell it all unless there is a super rally, in which case we'll still have most of the hundred thousand... We need to trade more." The overage is bounded by `operator_profile.lp_floor_tolerance_bps`, and the engine must state the worst case rather than hide it. Do not re-impose a hard cap at the floor.
 9. **Agents May Improve the Strategy (2026-11-14)**:
    - "I am counting on you to make the strategy good — the strategy that we wrote may not be good. You are allowed to suggest adjustments, and even build them into the code."
@@ -171,7 +172,7 @@
 Before pushing any PR or proposing a release tag, always execute the full verification battery:
 ```bash
 make test-brain       # 3 tests passing (WASM invariants & hashing)
-make test-worker      # 8 tests passing (hex decoding, spot math, advice, V4 scaling, config)
-make test-frontend    # 15 tests passing (staleness, contracts, math, dynamic domain)
+make test-worker      # 91 tests as of v0.5.0
+make test-frontend    # 45 tests as of v0.5.0
 make dist             # Verifies packaging of dist/ binaries and tarballs
 ```

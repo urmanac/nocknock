@@ -29,33 +29,16 @@ token_addresses:
 # whose pool is live and which are in range. Optional per-position controls:
 #     rebuild_weight_bps: 7000          # this position's share of the LP target (0 = never)
 #     rebuild_when_out_of_range: true   # exception to "do not fill out-of-range positions"
+#     deposit_url: "https://..."        # override where the suggestion's button goes
 positions:
-  # Position B — NOCK/USDC, Uniswap v4, 0.75% fee. No longer the price source: after the
-  # 2026-11 liquidation this pool has zero in-range liquidity, so its price is frozen.
-  - id: "uniswap-v4-nock-usdc"
-    protocol: "uniswap-v4"
-    network: "base"
-    nft_id: 3163431
-    pool_id: "0x91a9ef0a8dd231b99fa53a2a145a9e8bca7897e0d85852107abb997916f9f99c"
-    currency0: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"   # USDC
-    currency1: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"   # NOCK
-    tick_lower: 267825
-    tick_upper: 271050
-    is_price_source: false
+  # Retired 2026-11-14 (both NFTs still exist in the wallet, empty; re-add to track again):
+  #   #3163431  Uniswap v4 USDC/NOCK 0.75%, pool 0x91a9ef0a…f99c, ticks 267825..271050.
+  #             Its pool has had no in-range liquidity since the 2026-11 liquidation.
+  #   #3163432  Uniswap v4 ETH/NOCK 2%, pool 0xd3161520…71a8, ticks 65200..71200.
+  #             Out of range; the operator does not fill out-of-range positions.
 
-  # Position A — ETH/NOCK, Uniswap v4, 2% fee (currency0 = native ETH)
-  - id: "uniswap-v4-nock-eth"
-    protocol: "uniswap-v4"
-    network: "base"
-    nft_id: 3163432
-    pool_id: "0xd316152008e12105594c32686b9d0401fd2c60ca4805c84f280069d218b771a8"
-    currency0: "0x0000000000000000000000000000000000000000"   # native ETH
-    currency1: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"   # NOCK
-    tick_lower: 65200
-    tick_upper: 71200
-    is_price_source: false
-
-  # Position D — USDC/NOCK, Uniswap v4, 3.00% fee — wide raft. (RPC-verified via the
+  # Position D — USDC/NOCK, Uniswap v4, 3.00% fee — wide raft and the NOCK/USD price
+  # source (pool has active third-party liquidity). (RPC-verified via the
   # mint's ModifyLiquidity event: poolId, ticks 262200/282300, liquidity 48295502692597)
   - id: "uniswap-v4-nock-usdc-wide"
     protocol: "uniswap-v4"
@@ -66,7 +49,7 @@ positions:
     currency1: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"   # NOCK
     tick_lower: 262200
     tick_upper: 282300
-    is_price_source: false
+    is_price_source: true
 
   # Position C — WETH/NOCK, Uniswap v3, 1% fee (Base canonical NPM; pool resolved
   # via the v3 factory getPool(WETH, NOCK, 10000))
@@ -78,15 +61,21 @@ positions:
     pool_address: "0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a"
     is_price_source: false
 
-  # Aerodrome (now Aero) NOCK/USDC volatile pool — full range, x*y=k (v0.5.0, issue #88).
-  # The position is an LP-token balance in the pool, read as a share of reserves. It can
-  # never go out of range. On 2026-11-14 this pool carried ~$110k/day of NOCK volume,
-  # about 30x the next venue, so it is also the NOCK/USD price source.
-  - id: "aerodrome-vamm-nock-usdc"
+  # Aero "Basic Volatile" NOCK/USDC pool (app.aero.xyz) — full range, x*y=k (v0.5.0,
+  # issue #88). The position is an LP-token share of the pool's reserves and can never
+  # go out of range. The aero.xyz app stakes LP on deposit, so the balance is read
+  # through gauge_address. This pool's claimFees() reverts: no LP-claimable fees are
+  # reported, and rewards earned by staked LP are not read.
+  # (The legacy Aerodrome NOCK/USDC pool 0x85f1aa3a…d626 is still the deepest market,
+  # but app.aero.xyz does not list it, so it is not tracked as a position.)
+  - id: "aero-basic-nock-usdc"
     protocol: "aerodrome"
     network: "base"
-    pool_address: "0x85f1aa3a70fedd1c52705c15baed143e675cd626"
-    is_price_source: true
+    pool_address: "0x770fE8Fc9248c6382950A86E39a9391B41D59e0A"
+    # Gauge for this pool (verified 2026-11-14: stakingToken() is the pool). The
+    # aero.xyz app stakes LP on deposit, so the staked balance is what the wallet owns.
+    gauge_address: "0xc82782ee66d82c4d19db0429652091a085083526"
+    is_price_source: false
 
 # Canonical Uniswap v3 WETH/USDC 0.05% pool (Base) for the live ETH/USD spot (slot0).
 # Resolved via the verified v3 factory getPool and price-checked at discovery.

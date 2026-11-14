@@ -7,7 +7,7 @@
  * position is read on-chain, so nothing needs recording here.
  */
 import type { LpRebuild } from '../types/snapshot';
-import { suggestionLegs } from '../accumulation';
+import { suggestionLegs, suggestionLinkLabel } from '../accumulation';
 
 export function LpRebuildSteps({ lp }: { lp: LpRebuild }) {
   const suggestions = lp.suggestions ?? [];
@@ -65,14 +65,16 @@ export function LpRebuildSteps({ lp }: { lp: LpRebuild }) {
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  OPEN IN UNISWAP ↗
+                  {suggestionLinkLabel(sg.url)}
                 </a>
               </div>
             );
           })}
           <div style={{ fontSize: '0.72rem', color: '#8b949e' }}>
-            Amounts are what each range takes at its pool's current price and drift as price moves; the Uniswap app
-            shows the exact figures when you add liquidity. Nothing needs recording afterwards: the worker reads the
+            Amounts are what each position takes at its pool's current price and drift as price moves; the app you
+            deposit through shows the exact figures. Uniswap links open that position in the Uniswap web app, where
+            you connect your wallet. Aero links open the pool's deposit page at app.aero.xyz, which stakes the LP for
+            you; NockNock reads the staked balance. Nothing needs recording afterwards: the worker reads each
             position on-chain.
             {lp.worst_case_nock && (
               <>

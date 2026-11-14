@@ -236,7 +236,9 @@ swaps was not tested.
 
 The operator intends to hold a full-range NOCK/USDC position again as the long-term
 core (it cannot go out of range, so it never forces a re-range). The worker tracks it
-with `protocol: aerodrome` (issue #88).
+with `protocol: aerodrome` (issue #88). The measurements below were taken on the legacy
+pool, which is what the adapter was first written against; the pool actually tracked
+is the Aero app's (see "Which pool is tracked" and "First live deposits").
 
 ### Pool state, read 2026-11-14 (block 57409285)
 
@@ -264,13 +266,36 @@ For comparison, the new Aero volatile NOCK/USDC pool `0x770fe8fc…` held about 
 
 ### Not verified
 
-- **How to deposit.** No supported app was confirmed for adding liquidity to this legacy
-  pool after the Aero merger; aero.xyz routed a swap around it (§6). The rebuild
-  suggestion therefore links to the pool on the explorer, not to a deposit screen.
-- **What an unstaked LP earns now.** Swaps still emit fee events, but reward emissions
-  stopped at the merger and current fee distribution was not confirmed from Aero docs.
-- **Staked LP.** A balance staked in a gauge is not read; only LP tokens held in the
-  wallet count. Staking would make the position look empty.
-- The live read has only been exercised with a zero balance. The share-of-reserves and
-  fee paths are covered by unit tests against the reserves above.
+- **Which pool is tracked (settled 2026-11-14).** `app.aero.xyz` does not know the
+  legacy pool: `https://app.aero.xyz/deposit/8453-0x85f1aa3a…d626` answers "Pool not
+  found". Its pool list offers a Basic Volatile NOCK/USDC pool
+  `0x770fE8Fc9248c6382950A86E39a9391B41D59e0A` and the CL200 WETH/NOCK pool. The operator
+  uses the Aero app, so the shipped config tracks `0x770fE8Fc…` and the legacy pool is
+  no longer a tracked position (it remains the OHLCV history source). Deposit links are
+  `https://app.aero.xyz/deposit/8453-<pool>`. The retired aerodrome.finance app still
+  resolves but must not be linked.
+- **New-pool differences.** On `0x770fE8Fc…`, `claimFees()` and `stable()` revert;
+  `token0`, `token1`, `getReserves`, `totalSupply` and `balanceOf` behave as on the
+  legacy pool. The reader treats the `claimFees()` revert as "no LP-claimable fees".
+- **What an unstaked LP earns now.** Swaps on the legacy pool still emit fee events,
+  but reward emissions stopped at the merger and current fee distribution was not
+  confirmed. (aero.xyz states that new-Aero pool revenue goes to AERO stakers; its pool
+  page lists separate AERO and fee reward rates for depositors.)
+- Rewards earned by staked LP (AERO emissions) are not read or valued (issue #93).
+
+### First live deposits (2026-11-14, operator, via app.aero.xyz)
+
+| | USDC/NOCK Basic Volatile | WETH/NOCK CL200 |
+|---|---|---|
+| Tx | `0x127c4f4f…f185f0` (block 57425187) | `0x80277e2b…c93ddb` (block 57425824) |
+| In | 31.986644 USDC + 2,755 NOCK | 0.081995 ETH + 2,755 NOCK |
+| Pool | `0x770fE8Fc9248c6382950A86E39a9391B41D59e0A` | `0x957256c98d61A714081DE2EE70ae3A96c9b40874` |
+| Receipt | 29684955447174 LP tokens | NFT #2914490 on `0x4857db576ee0e45f10525ec59527bfd10beec60b` |
+| Staked in | gauge `0xc82782ee66d82c4d19db0429652091a085083526` | gauge `0x3bf70c880adc8370917994ab0df68e763b7a60fd` |
+| NockNock | tracked (`gauge_address`) | **not tracked** (issue #91) |
+
+Both went through the Aero router `0x0fef9e88…ee98` (`execute`, §6), which staked the
+receipt automatically. For the volatile pool `gauge.balanceOf(wallet)` returned the
+minted amount exactly and `gauge.stakingToken()` is the pool; the wallet's share was
+3.38% of reserves, equal to what was deposited.
 
