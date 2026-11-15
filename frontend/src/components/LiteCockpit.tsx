@@ -13,6 +13,7 @@
 import React from 'react';
 import { floorDeltaText } from '../floor';
 import { api, describeApiError, ClaimFeeAction, ClaimFeesPayload, LedgerSummary } from '../api/client';
+import { ledgerLiteText } from '../ledger';
 import {
   connectWallet,
   connectedAccount,
@@ -288,9 +289,7 @@ export function LiteCockpit() {
                 </div>
               ))}
             <div style={lite.sub}>
-              {ledger
-                ? `ledger: ${ledger.harvest_count} verified harvests · 40% tax reserve $${ledger.tax_reserve_usd} · 60% dry powder $${ledger.growth_dry_powder_usd}`
-                : 'ledger: loading…'}
+              {ledger ? ledgerLiteText(ledger) : 'ledger: loading…'}
             </div>
           </>
         )}
@@ -337,7 +336,7 @@ export function LiteCockpit() {
                 </div>
               )}
               {st.kind === 'recorded' && (
-                <div style={lite.recordedText}>Verified receipt recorded in the 60/40 ledger.</div>
+                <div style={lite.recordedText}>Verified receipt recorded in the harvest ledger.</div>
               )}
               {st.kind === 'failed' && <div style={lite.errorText}>{st.detail}</div>}
             </div>

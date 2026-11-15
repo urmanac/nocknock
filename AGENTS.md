@@ -146,8 +146,8 @@ This guide captures the operational rules, environment quirks, toolchain configu
 Before pushing any PR or tag:
 ```bash
 make test-brain       # 3 tests (WASM invariants)
-make test-worker      # 140 tests as of v0.5.2: 132 worker + 8 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces)
-make test-frontend    # 100 tests as of v0.5.2 (staleness, contract, display helpers, charts, surfaces)
+make test-worker      # 144 tests as of v0.5.3: 136 worker + 8 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger)
+make test-frontend    # 107 tests as of v0.5.3 (staleness, contract, display helpers, charts, surfaces, ledger)
 make dist             # Verifies packaging of dist/ binaries and tarballs
 NOCKNOCK_API_URL=http://chudmax:8081 make test-mcp   # both MCP transports against the deployment
 ```

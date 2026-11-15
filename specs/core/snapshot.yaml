@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: NockNock Snapshot Data Model
-  version: 2.3.0
+  version: 2.4.0
   description: Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
   license:
     name: ISC
@@ -440,20 +440,24 @@ components:
     SovereignLedger:
       type: object
       description: |
-        Virtual 60/40 sub-ledger over receipt-verified fee harvests. Purely internal
-        accounting inside the single sovereign wallet — no on-chain address change.
+        Virtual sub-ledger over receipt-verified fee harvests: bookkeeping inside the
+        single wallet. Nothing is moved, locked or set aside on-chain.
         tax_reserve_usd = cumulative_harvested_usd * operator_profile.tax_reserve_ratio
-        (default 0.40); growth_dry_powder_usd is the remainder (default 0.60).
+        (default 0, no reserve); growth_dry_powder_usd is the remainder. Each harvest row
+        (USDC, NOCK, WETH, or ETH unwrapped by a Uniswap position manager) is valued at
+        its claim's block (2.4.0): NOCK at the stored price nearest the block time (within
+        60 minutes), ETH/WETH at the ETH price pool's slot0 at that block. A row with no
+        price found has no USD value and is left out of cumulative_harvested_usd.
       properties:
         cumulative_harvested_usd:
           type: string
-          description: Sum of USD values of receipt-verified harvest events
+          description: Sum of the USD values of receipt-verified harvest rows that have one
         tax_reserve_usd:
           type: string
-          description: Virtual tax escrow buffer (protected; never deployable)
+          description: The configured ratio's share of the total (virtual; not protected or locked)
         growth_dry_powder_usd:
           type: string
-          description: Liquid dry powder available for tactical dip accumulation
+          description: The rest of the total, not booked to the reserve (virtual; not a spendable balance)
         harvest_count:
           type: integer
           description: Number of distinct verified harvest transactions
@@ -461,6 +465,12 @@ components:
           type: string
           format: date-time
           nullable: true
+        tax_reserve_ratio:
+          type: string
+          description: The configured operator_profile.tax_reserve_ratio the split uses, e.g. "0.40"; "0.00" when none is configured (2.4.0)
+        unpriced_count:
+          type: integer
+          description: Harvest rows with no USD value (no price found at their block), left out of the total (2.4.0)
 
     AccumulationPlanStatus:
       type: object
