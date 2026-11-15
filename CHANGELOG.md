@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-11-15
+
 ### Fixed — harvest ledger (#102, #111; snapshot spec 2.4.0)
 - **WETH fees are booked (#111).** The harvest ledger read only USDC and NOCK Transfers, so
   most of the v3 WETH/NOCK range's fees were never recorded. It now books WETH paid to the
