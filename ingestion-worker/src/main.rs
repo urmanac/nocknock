@@ -1484,7 +1484,8 @@ fn apply_lp_rebuild_bias(action: String, details: String, lp: &LpRebuild) -> (St
     }
 }
 
-/// Virtual 60/40 sub-ledger over receipt-verified harvests (no on-chain address change).
+/// Virtual harvest sub-ledger over receipt-verified harvests (no on-chain address change).
+/// The split follows `operator_profile.tax_reserve_ratio`; 0 (the default) books no reserve.
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 struct SovereignLedger {
     cumulative_harvested_usd: String,
@@ -1492,6 +1493,13 @@ struct SovereignLedger {
     growth_dry_powder_usd: String,
     harvest_count: i64,
     last_harvest_at: Option<String>,
+    /// The configured ratio the split uses, e.g. "0.40"; "0.00" when none is configured (2.4.0).
+    #[serde(default)]
+    tax_reserve_ratio: String,
+    /// Harvest rows with no USD value (no price found at their block), left out of the
+    /// total rather than valued at a substitute price (2.4.0).
+    #[serde(default)]
+    unpriced_count: i64,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -1499,6 +1507,7 @@ struct LedgerAggregate {
     total_usd: f64,
     harvest_count: i64,
     last_at: Option<DateTime<Utc>>,
+    unpriced_count: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
@@ -1550,7 +1559,7 @@ struct GlobalStatus {
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
-const SNAPSHOT_SPEC_VERSION: &str = "2.3.0";
+const SNAPSHOT_SPEC_VERSION: &str = "2.4.0";
 
 /// The gas (wallet ETH + WETH) and ETH pillar figures, each None when it cannot be
 /// measured: unread wallet balances or an unpriced ETH. Never a zero stand-in.
@@ -2753,7 +2762,8 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     let ledger_agg = match sqlx::query(
         "SELECT COALESCE(SUM(usd_value::numeric)::float8, 0) AS total_usd, \
                 COUNT(DISTINCT tx_hash) AS harvests, \
-                MAX(recorded_at) AS last_at \
+                MAX(recorded_at) AS last_at, \
+                COUNT(*) FILTER (WHERE usd_value IS NULL) AS unpriced \
          FROM harvest_events",
     )
     .fetch_one(&state.db)
@@ -2763,6 +2773,7 @@ async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
             total_usd: r.try_get::<f64, _>("total_usd").unwrap_or(0.0),
             harvest_count: r.try_get::<i64, _>("harvests").unwrap_or(0),
             last_at: r.try_get::<Option<DateTime<Utc>>, _>("last_at").ok().flatten(),
+            unpriced_count: r.try_get::<i64, _>("unpriced").unwrap_or(0),
         },
         Err(e) => {
             tracing::warn!("Harvest ledger aggregate query failed: {e}");
@@ -3449,14 +3460,20 @@ fn build_v4_collect_unlock_data_decrease_only(token_id: u64) -> String {
 /// price-verified at Phase-1 discovery). token0 = WETH (18 dec), token1 = USDC (6 dec).
 /// Zero-mock: returns None when the RPC query fails — callers must degrade honestly
 /// instead of valuing gas at a fabricated price.
-async fn fetch_eth_price_usd(http_client: &Client, alchemy_url: &str) -> Option<f64> {
+async fn fetch_eth_price_usd(http_client: &Client, alchemy_url: &str, pool: &str) -> Option<f64> {
+    fetch_eth_price_usd_at(http_client, alchemy_url, pool, "latest").await
+}
+
+/// ETH/USD from the price pool's slot0 at a given block tag ("latest" or a hex block
+/// number; historical blocks need an archive RPC, which Alchemy provides). None on failure.
+async fn fetch_eth_price_usd_at(http_client: &Client, alchemy_url: &str, pool: &str, block_tag: &str) -> Option<f64> {
     let payload = json!({
         "jsonrpc": "2.0",
         "method": "eth_call",
         "params": [{
-            "to": DEFAULT_ETH_PRICE_POOL,
+            "to": pool,
             "data": V3_SLOT0
-        }, "latest"],
+        }, block_tag],
         "id": 99
     });
     if let Some(res_json) = post_rpc_with_retry(http_client, alchemy_url, &payload, 2).await {
@@ -3481,6 +3498,15 @@ const NOCK_BASE: &str = "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722";
 /// keccak256("Transfer(address,address,uint256)") — verified against the repo keccak tooling.
 const TRANSFER_EVENT_TOPIC: &str =
     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
+/// WETH9 `Withdrawal(address indexed src, uint256 wad)` — checked against live Base WETH
+/// logs on 2026-11-15 (one indexed topic, amount in data).
+const WETH_WITHDRAWAL_TOPIC: &str =
+    "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65";
+/// Uniswap v3 NonfungiblePositionManager on Base.
+const UNISWAP_V3_NPM: &str = "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1";
+/// Ledger token address for fees paid out as native ETH (unwrapped WETH). Native ETH has no
+/// contract, so this conventional sentinel keeps (tx_hash, token_address) unique per token.
+const NATIVE_ETH_LEDGER_ADDRESS: &str = "0xEeeeeEeeeEeEeEeEeEeEEEeeeeEeeeeeeeEEeE";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 struct ParsedHarvestTransfer {
@@ -4052,9 +4078,13 @@ fn directive_transition_notification<'a>(
     Some(text)
 }
 
-/// Extract ERC-20 Transfer logs that paid the sovereign wallet in a transaction
-/// receipt. Logs for tokens we do not track (anything other than USDC/NOCK on
-/// Base) are ignored with a warning rather than guessed at.
+/// Extract what a fee claim paid the sovereign wallet from a transaction receipt:
+/// - ERC-20 Transfer logs of USDC, NOCK or WETH to the wallet;
+/// - WETH unwrapped by a Uniswap position manager (a WETH `Withdrawal` whose `src` is the
+///   v3 NonfungiblePositionManager or the v4 PositionManager) in a transaction the wallet
+///   sent. The Uniswap app collects WETH fees this way and forwards native ETH, which
+///   leaves no Transfer log; it is booked as "ETH".
+/// Logs for tokens we do not track are ignored with a warning rather than guessed at.
 fn parse_harvest_transfers(receipt: &serde_json::Value, wallet: &str) -> Vec<ParsedHarvestTransfer> {
     let mut out = Vec::new();
     let wallet_padded = format!(
@@ -4064,10 +4094,46 @@ fn parse_harvest_transfers(receipt: &serde_json::Value, wallet: &str) -> Vec<Par
     let Some(logs) = receipt.get("logs").and_then(|l| l.as_array()) else {
         return out;
     };
+    let sent_by_wallet = receipt
+        .get("from")
+        .and_then(|f| f.as_str())
+        .is_some_and(|f| f.eq_ignore_ascii_case(wallet));
     for log in logs {
         let Some(topics) = log.get("topics").and_then(|t| t.as_array()) else {
             continue;
         };
+        // Native ETH paid out by a position manager unwrapping WETH.
+        if sent_by_wallet && topics.len() == 2 {
+            let is_weth = log
+                .get("address")
+                .and_then(|a| a.as_str())
+                .is_some_and(|a| a.eq_ignore_ascii_case(WETH_BASE));
+            let is_withdrawal = topics[0]
+                .as_str()
+                .is_some_and(|t| t.eq_ignore_ascii_case(WETH_WITHDRAWAL_TOPIC));
+            if is_weth && is_withdrawal {
+                let src = topics[1].as_str().unwrap_or("").trim_start_matches("0x");
+                let src_addr = if src.len() == 64 { format!("0x{}", src[24..].to_lowercase()) } else { String::new() };
+                let by_position_manager = src_addr.eq_ignore_ascii_case(UNISWAP_V3_NPM)
+                    || src_addr.eq_ignore_ascii_case(UNISWAP_V4_POSM_BASE);
+                let amount = log
+                    .get("data")
+                    .and_then(|d| d.as_str())
+                    .and_then(|d| u128::from_str_radix(d.trim_start_matches("0x"), 16).ok());
+                if let (true, Some(amount)) = (by_position_manager, amount) {
+                    out.push(ParsedHarvestTransfer {
+                        token_address: NATIVE_ETH_LEDGER_ADDRESS.to_string(),
+                        token_symbol: "ETH".to_string(),
+                        from_address: src_addr,
+                        recipient: wallet.to_string(),
+                        amount_raw: amount.to_string(),
+                        amount_human: format_units(amount, 18),
+                        decimals: 18,
+                    });
+                }
+                continue;
+            }
+        }
         if topics.len() < 3 {
             continue;
         }
@@ -4094,6 +4160,8 @@ fn parse_harvest_transfers(receipt: &serde_json::Value, wallet: &str) -> Vec<Par
             ("USDC", 6)
         } else if token_addr.eq_ignore_ascii_case(NOCK_BASE) {
             ("NOCK", 16)
+        } else if token_addr.eq_ignore_ascii_case(WETH_BASE) {
+            ("WETH", 18)
         } else {
             tracing::warn!("Harvest receipt contains a Transfer of an untracked token {}; skipping", token_addr);
             continue;
@@ -4620,7 +4688,8 @@ async fn get_claim_fees_payload_handler(Extension(state): Extension<Arc<AppState
     }
 
     // Live prices for token-aware USD valuation (degrade to None, never fabricate).
-    let eth_price = fetch_eth_price_usd(&state.http_client, &alchemy_url).await;
+    let eth_price_pool = state.config.eth_price_pool.clone().unwrap_or_else(|| DEFAULT_ETH_PRICE_POOL.to_string());
+    let eth_price = fetch_eth_price_usd(&state.http_client, &alchemy_url, &eth_price_pool).await;
     let nock_spot = nock_spot_from_snapshot(&snapshot.data);
 
     for (idx, pos) in v4_configs.iter().enumerate() {
@@ -4774,6 +4843,55 @@ struct RecordHarvestRequest {
     tx_hash: String,
 }
 
+/// How far from a claim's block time a stored NOCK price may be and still value it. Live
+/// cycles store one about every 5 minutes; backfilled candles are coarser.
+const HARVEST_NOCK_PRICE_WINDOW_MINUTES: i64 = 60;
+
+/// Unit price for a harvested token: USDC is $1 by definition of the ledger, NOCK and
+/// ETH/WETH use the prices found for the claim's block. Pure.
+fn harvest_unit_price<'a>(
+    symbol: &str,
+    nock: Option<&'a (f64, String)>,
+    eth: Option<&'a (f64, String)>,
+) -> Option<(f64, &'a str)> {
+    match symbol {
+        "USDC" => Some((1.0, "USDC at $1")),
+        "NOCK" => nock.map(|(p, s)| (*p, s.as_str())),
+        "ETH" | "WETH" => eth.map(|(p, s)| (*p, s.as_str())),
+        _ => None,
+    }
+}
+
+/// USD value of a harvested amount at a unit price; None when the price is unknown or
+/// the amount does not parse. Pure.
+fn harvest_usd_value(amount_human: &str, unit_price: Option<f64>) -> Option<String> {
+    let amount = amount_human.parse::<f64>().ok()?;
+    let price = unit_price.filter(|p| p.is_finite() && *p > 0.0)?;
+    Some(format!("{:.4}", amount * price))
+}
+
+/// The stored NOCK/USD price nearest `at`, within HARVEST_NOCK_PRICE_WINDOW_MINUTES, with
+/// its provenance. None when no stored price is close enough or the query fails.
+async fn nock_price_near(db: &PgPool, at: DateTime<Utc>) -> Option<(f64, String)> {
+    let window = chrono::Duration::minutes(HARVEST_NOCK_PRICE_WINDOW_MINUTES);
+    let row = sqlx::query(
+        "SELECT timestamp, price_usd, source FROM market_price_history \
+         WHERE timestamp BETWEEN $2 AND $3 \
+         ORDER BY ABS(EXTRACT(EPOCH FROM (timestamp - $1))) ASC LIMIT 1",
+    )
+    .bind(at)
+    .bind(at - window)
+    .bind(at + window)
+    .fetch_optional(db)
+    .await
+    .map_err(|e| tracing::warn!("NOCK price lookup for a harvest failed: {e}"))
+    .ok()??;
+    let ts: DateTime<Utc> = row.try_get("timestamp").ok()?;
+    let price: f64 = row.try_get("price_usd").ok()?;
+    let source: String = row.try_get("source").unwrap_or_default();
+    (price.is_finite() && price > 0.0).then(|| (price, format!("market_price_history {source} at {}", ts.to_rfc3339())))
+}
+
 /// POST /v1/execute/record-harvest — receipt-verified harvest ledger entry.
 /// Clients call this after a claim transaction is confirmed by the wallet.
 /// "Receipt not found" also covers the Uniswap-app pending-broadcast quirk
@@ -4858,18 +4976,11 @@ async fn record_harvest_handler(
     if transfers.is_empty() {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": "NO_TRACKED_TRANSFERS", "detail": "Receipt contains no Transfer of tracked tokens (USDC/NOCK) to the sovereign wallet" })),
+            Json(json!({ "error": "NO_TRACKED_TRANSFERS", "detail": "Receipt pays the sovereign wallet no tracked token (USDC, NOCK, WETH, or ETH unwrapped by a Uniswap position manager)" })),
         )
             .into_response();
     }
 
-    // USD valuation from the latest snapshot spot; explicit null when unavailable.
-    let spot = state
-        .latest_snapshot
-        .lock()
-        .await
-        .clone()
-        .and_then(|s| nock_spot_from_snapshot(&s.data));
     let block_number: i64 = receipt
         .get("blockNumber")
         .and_then(|b| b.as_str())
@@ -4900,16 +5011,34 @@ async fn record_harvest_handler(
         Utc::now()
     };
 
+    // USD valuation at the claim's block, never at recording time: NOCK from the stored
+    // price nearest the block time, ETH/WETH from the ETH price pool read at that block.
+    // A price we cannot find is an explicit null, never a substitute.
+    let needs_nock = transfers.iter().any(|t| t.token_symbol == "NOCK");
+    let needs_eth = transfers.iter().any(|t| matches!(t.token_symbol.as_str(), "ETH" | "WETH"));
+    let nock_price: Option<(f64, String)> = if needs_nock {
+        nock_price_near(&state.db, confirmed_at).await
+    } else {
+        None
+    };
+    let eth_price: Option<(f64, String)> = if needs_eth && block_number > 0 {
+        let pool = state.config.eth_price_pool.clone().unwrap_or_else(|| DEFAULT_ETH_PRICE_POOL.to_string());
+        fetch_eth_price_usd_at(&state.http_client, &alchemy_url, &pool, &format!("0x{block_number:x}"))
+            .await
+            .map(|p| (p, format!("eth_price_pool {pool} slot0 at block {block_number}")))
+    } else {
+        None
+    };
+
     let mut recorded = Vec::new();
     let mut skipped = 0usize;
     for t in &transfers {
-        let usd_value: Option<String> = match t.token_symbol.as_str() {
-            "USDC" => Some(t.amount_human.clone()),
-            "NOCK" => spot.map(|s| format!("{:.4}", t.amount_human.parse::<f64>().unwrap_or(0.0) * s)),
-            _ => None,
-        };
+        let price = harvest_unit_price(&t.token_symbol, nock_price.as_ref(), eth_price.as_ref());
+        let usd_value = harvest_usd_value(&t.amount_human, price.map(|(p, _)| p));
+        let price_usd = price.map(|(p, _)| format!("{p}"));
+        let price_source = price.map(|(_, s)| s.to_string());
         let res = sqlx::query(
-            "INSERT INTO harvest_events (platform, tx_hash, token_address, token_symbol, from_address, recipient, amount_raw, amount_human, decimals, usd_value, block_number, confirmed_at)              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)              ON CONFLICT (tx_hash, token_address) DO NOTHING",
+            "INSERT INTO harvest_events (platform, tx_hash, token_address, token_symbol, from_address, recipient, amount_raw, amount_human, decimals, usd_value, block_number, confirmed_at, price_usd, price_source)              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)              ON CONFLICT (tx_hash, token_address) DO NOTHING",
         )
         .bind(&req.platform)
         .bind(&req.tx_hash)
@@ -4923,6 +5052,8 @@ async fn record_harvest_handler(
         .bind(&usd_value)
         .bind(block_number)
         .bind(confirmed_at)
+        .bind(&price_usd)
+        .bind(&price_source)
         .execute(&state.db)
         .await;
         match res {
@@ -4933,7 +5064,10 @@ async fn record_harvest_handler(
                     "token_symbol": t.token_symbol,
                     "amount_human": t.amount_human,
                     "usd_value": usd_value,
+                    "price_usd": price_usd,
+                    "price_source": price_source,
                     "block_number": block_number,
+                    "confirmed_at": confirmed_at.to_rfc3339(),
                 }));
             }
             Ok(_) => skipped += 1,
@@ -6645,7 +6779,7 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
             )
         });
     // BATCH HARVEST: the split comes from the configured ratio, and the text says what the
-    // harvest ledger actually books (USDC and NOCK; WETH fees are not booked yet).
+    // harvest ledger actually books (USDC, NOCK and WETH/ETH, each valued at the claim's block).
     let harvest: Option<(String, String)> = (total_fees_usd >= 5.00).then(|| {
         let gas_efficiency = if gas_cost > 0.0 {
             format!("{:.0}x", total_fees_usd / gas_cost)
@@ -6655,17 +6789,17 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
         let r = profile.tax_reserve_ratio * 100.0;
         let booking = if tax_ratio_set {
             format!(
-                "NockNock books {:.0}% of the USDC and NOCK received to the virtual tax reserve and {:.0}% to growth",
+                "NockNock books {:.0}% of the USDC, NOCK and WETH/ETH received to the virtual tax reserve and {:.0}% to growth",
                 r,
                 100.0 - r
             )
         } else {
-            "NockNock records the USDC and NOCK received; no tax_reserve_ratio is configured, so none of it is booked to a virtual tax reserve".to_string()
+            "NockNock records the USDC, NOCK and WETH/ETH received; no tax_reserve_ratio is configured, so none of it is booked to a virtual tax reserve".to_string()
         };
         (
             "BATCH HARVEST SHOT (Execute Claim)".to_string(),
             format!(
-                "Uncollected LP fees (${:.2}) have reached the fixed $5.00 harvest threshold ({} gas efficiency). After harvesting, record the transaction: {}. WETH fees are not booked yet. Bookkeeping only; nothing moves on-chain.",
+                "Uncollected LP fees (${:.2}) have reached the fixed $5.00 harvest threshold ({} gas efficiency). After harvesting, record the transaction: {}, each valued at the claim's block. Bookkeeping only; nothing moves on-chain.",
                 total_fees_usd,
                 gas_efficiency,
                 booking
@@ -6992,6 +7126,8 @@ fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profil
             growth_dry_powder_usd: format!("{:.2}", ledger.total_usd * (1.0 - profile.tax_reserve_ratio)),
             harvest_count: ledger.harvest_count,
             last_harvest_at: ledger.last_at.map(|dt| dt.to_rfc3339()),
+            tax_reserve_ratio: format!("{:.2}", profile.tax_reserve_ratio),
+            unpriced_count: ledger.unpriced_count,
         },
         accumulation_plan: plan_status,
         lp_rebuild,
@@ -7386,6 +7522,7 @@ database_url: "postgresql://localhost/test"
             total_usd: 100.0,
             harvest_count: 2,
             last_at: Some(Utc::now()),
+            unpriced_count: 0,
         };
         let metrics = compute_derived_metrics(
             &raw, 0.0, &profile,
@@ -7481,7 +7618,7 @@ database_url: "postgresql://localhost/test"
         raw.spot_price_nock_usd = 0.015; // dip zone (< 0.020)
         raw.wallet_balances[1].amount = "10.0".to_string();
         let profile = operator_profile_no_floor(); // ratio 0.40
-        let ledger = LedgerAggregate { total_usd: 500.0, harvest_count: 3, last_at: None };
+        let ledger = LedgerAggregate { total_usd: 500.0, harvest_count: 3, last_at: None, unpriced_count: 0 };
         let metrics = compute_derived_metrics(
             &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &ledger, &MarketRegime::default(),
         );
@@ -7494,7 +7631,7 @@ database_url: "postgresql://localhost/test"
         assert!(!d.contains("SWEEP") && !d.contains("sweep"), "{d}");
 
         // A $16 reserve still exceeds the $10 wallet: LP USDC no longer covers it.
-        let small = LedgerAggregate { total_usd: 40.0, harvest_count: 1, last_at: None };
+        let small = LedgerAggregate { total_usd: 40.0, harvest_count: 1, last_at: None, unpriced_count: 0 };
         let metrics = compute_derived_metrics(
             &raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &small, &MarketRegime::default(),
         );
@@ -9119,6 +9256,92 @@ database_url: "postgresql://localhost/test"
         assert_eq!(transfers[1].decimals, 16);
     }
 
+    fn word(addr: &str) -> String {
+        format!("0x000000000000000000000000{}", addr.trim_start_matches("0x").to_lowercase())
+    }
+
+    #[test]
+    fn test_parse_harvest_transfers_books_weth_fees() {
+        // #111: a v3 WETH/NOCK collect straight to the wallet pays WETH by Transfer.
+        let wallet = "0xeE114cC97eC5adeB34bA5645e315B497D8487a45";
+        let pool = "0x1111111111111111111111111111111111111111";
+        let receipt = json!({
+            "status": "0x1", "from": wallet,
+            "logs": [
+                { "address": WETH_BASE, "topics": [TRANSFER_EVENT_TOPIC, word(pool), word(wallet)],
+                  "data": "0x00000000000000000000000000000000000000000000000000038d7ea4c68000" },
+                { "address": NOCK_BASE, "topics": [TRANSFER_EVENT_TOPIC, word(pool), word(wallet)],
+                  "data": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000" }
+            ]
+        });
+        let t = parse_harvest_transfers(&receipt, wallet);
+        assert_eq!(t.len(), 2);
+        assert_eq!((t[0].token_symbol.as_str(), t[0].decimals, t[0].amount_human.as_str()), ("WETH", 18, "0.001"));
+        assert_eq!(t[1].token_symbol, "NOCK");
+    }
+
+    #[test]
+    fn test_parse_harvest_transfers_books_eth_unwrapped_by_a_position_manager() {
+        // #111: the Uniswap app collects to the NPM and unwraps; the wallet gets native ETH,
+        // which leaves only a WETH Withdrawal by the NPM.
+        let wallet = "0xeE114cC97eC5adeB34bA5645e315B497D8487a45";
+        let pool = "0x1111111111111111111111111111111111111111";
+        let withdrawal = |src: &str| json!({ "address": WETH_BASE, "topics": [WETH_WITHDRAWAL_TOPIC, word(src)],
+            "data": "0x00000000000000000000000000000000000000000000000000071afd498d0000" });
+        let weth_to_npm = json!({ "address": WETH_BASE, "topics": [TRANSFER_EVENT_TOPIC, word(pool), word(UNISWAP_V3_NPM)],
+            "data": "0x00000000000000000000000000000000000000000000000000071afd498d0000" });
+        let receipt = json!({ "status": "0x1", "from": wallet, "logs": [weth_to_npm.clone(), withdrawal(UNISWAP_V3_NPM)] });
+        let t = parse_harvest_transfers(&receipt, wallet);
+        assert_eq!(t.len(), 1, "the WETH Transfer to the NPM is not the wallet's; only the unwrap is booked");
+        assert_eq!(t[0].token_symbol, "ETH");
+        assert_eq!(t[0].token_address, NATIVE_ETH_LEDGER_ADDRESS);
+        assert_eq!(t[0].amount_human, "0.002");
+        assert_eq!(t[0].from_address, UNISWAP_V3_NPM.to_lowercase());
+        // The v4 PositionManager counts too.
+        let r4 = json!({ "status": "0x1", "from": wallet, "logs": [withdrawal(UNISWAP_V4_POSM_BASE)] });
+        assert_eq!(parse_harvest_transfers(&r4, wallet).len(), 1);
+        // A router or anyone else unwrapping is not a fee payout.
+        let other = json!({ "status": "0x1", "from": wallet, "logs": [withdrawal(pool)] });
+        assert!(parse_harvest_transfers(&other, wallet).is_empty());
+        // A transaction someone else sent never books an unwrap to this wallet.
+        let not_ours = json!({ "status": "0x1", "from": pool, "logs": [withdrawal(UNISWAP_V3_NPM)] });
+        assert!(parse_harvest_transfers(&not_ours, wallet).is_empty());
+    }
+
+    #[test]
+    fn test_sovereign_ledger_reports_its_ratio_and_unpriced_rows() {
+        // #102: the panel's labels come from the data, so the ledger carries the ratio.
+        let raw = four_position_fixture();
+        let agg = LedgerAggregate { total_usd: 10.0, harvest_count: 2, last_at: None, unpriced_count: 1 };
+        let m = compute_derived_metrics(&raw, 0.0, &OperatorProfile::default(), StructuralChannels { channels: vec![] }, &[], &agg, &MarketRegime::default());
+        let l = &m.sovereign_ledger;
+        assert_eq!((l.tax_reserve_ratio.as_str(), l.tax_reserve_usd.as_str(), l.growth_dry_powder_usd.as_str()), ("0.00", "0.00", "10.00"));
+        assert_eq!(l.unpriced_count, 1);
+        let mut profile = OperatorProfile::default();
+        profile.tax_reserve_ratio = 0.25;
+        let m = compute_derived_metrics(&raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &agg, &MarketRegime::default());
+        let l = &m.sovereign_ledger;
+        assert_eq!((l.tax_reserve_ratio.as_str(), l.tax_reserve_usd.as_str(), l.growth_dry_powder_usd.as_str()), ("0.25", "2.50", "7.50"));
+    }
+
+    #[test]
+    fn test_harvest_valuation_uses_the_block_prices_or_nothing() {
+        let nock = (0.0125, "market_price_history aerodrome_rpc at T".to_string());
+        let eth = (1790.0, "eth_price_pool slot0 at block 1".to_string());
+        assert_eq!(harvest_unit_price("USDC", None, None), Some((1.0, "USDC at $1")));
+        assert_eq!(harvest_unit_price("NOCK", Some(&nock), Some(&eth)).map(|p| p.0), Some(0.0125));
+        assert_eq!(harvest_unit_price("WETH", Some(&nock), Some(&eth)).map(|p| p.0), Some(1790.0));
+        assert_eq!(harvest_unit_price("ETH", None, Some(&eth)).map(|p| p.1), Some("eth_price_pool slot0 at block 1"));
+        // No price found: no value, never a substitute.
+        assert_eq!(harvest_unit_price("NOCK", None, Some(&eth)), None);
+        assert_eq!(harvest_unit_price("AERO", Some(&nock), Some(&eth)), None);
+        assert_eq!(harvest_usd_value("0.002", Some(1790.0)).as_deref(), Some("3.5800"));
+        assert_eq!(harvest_usd_value("1000", Some(0.0125)).as_deref(), Some("12.5000"));
+        assert_eq!(harvest_usd_value("1000", None), None);
+        assert_eq!(harvest_usd_value("1000", Some(0.0)), None);
+        assert_eq!(harvest_usd_value("abc", Some(1.0)), None);
+    }
+
     #[test]
     fn test_concentrated_amounts_match_discovery_magnitudes() {
         // Golden anchors from Phase-1 discovery (live chain reads on 2026-10-24).
@@ -10064,12 +10287,12 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
         let mut profile = operator_profile_no_floor();
         let m = compute_derived_metrics(&raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
         let d = &m.global_status.shot_advice_details;
-        assert!(d.contains("books 40% of the USDC and NOCK received to the virtual tax reserve and 60% to growth"), "{d}");
-        assert!(d.contains("WETH fees are not booked yet"));
+        assert!(d.contains("books 40% of the USDC, NOCK and WETH/ETH received to the virtual tax reserve and 60% to growth"), "{d}");
+        assert!(d.contains("valued at the claim's block") && !d.contains("not booked"), "{d}");
         profile.tax_reserve_ratio = 0.25;
         let m = compute_derived_metrics(&raw, 0.0, &profile, StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
         let d = &m.global_status.shot_advice_details;
-        assert!(d.contains("books 25% of the USDC and NOCK received to the virtual tax reserve and 75% to growth"), "{d}");
+        assert!(d.contains("books 25% of the USDC, NOCK and WETH/ETH received to the virtual tax reserve and 75% to growth"), "{d}");
         assert!(!d.contains("60/40") && !d.contains("40%") && !d.contains("Tax Escrow"), "{d}");
     }
 

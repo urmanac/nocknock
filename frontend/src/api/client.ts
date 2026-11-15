@@ -99,6 +99,10 @@ export interface LedgerSummary {
   growth_dry_powder_usd: string;
   harvest_count: number;
   last_harvest_at?: string | null;
+  /** Configured ratio the split uses, e.g. "0.40"; "0.00" = none (2.4.0; absent before). */
+  tax_reserve_ratio?: string;
+  /** Harvest rows with no USD price at their block, left out of the total (2.4.0). */
+  unpriced_count?: number;
 }
 
 export interface HistoricalResponse {

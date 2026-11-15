@@ -75,7 +75,7 @@ describe('Freshness Contract', () => {
     expect(latestSnapshot!.meta.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(latestSnapshot!.meta.snapshot_id).toMatch(/^([0-9A-Z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/);
     expect(latestSnapshot!.data).toBeDefined();
-    // v0.2.0 Golden Path: virtual 60/40 sovereign ledger rides on derived_metrics
+    // Harvest ledger rides on derived_metrics; its split follows the configured ratio (2.4.0)
     const ledger = (latestSnapshot!.data as any)?.derived_metrics?.sovereign_ledger;
     expect(ledger).toBeDefined();
     expect(typeof ledger.cumulative_harvested_usd).toBe('string');
@@ -191,7 +191,7 @@ describe('Freshness Contract', () => {
     expect(ag.positions_nock.length).toBe(data.positions.length);
     expect(ag.tranche_1_nock).toBeUndefined();
     // Meta version: the current snapshot spec (specs/core/snapshot.yaml info.version).
-    expect(latestSnapshot!.meta.version).toBe('2.3.0');
+    expect(latestSnapshot!.meta.version).toBe('2.4.0');
   });
 
   it('2.3.0 pillars partition the total and the wallet reports its gas', () => {

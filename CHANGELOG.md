@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — harvest ledger (#102, #111; snapshot spec 2.4.0)
+- **WETH fees are booked (#111).** The harvest ledger read only USDC and NOCK Transfers, so
+  most of the v3 WETH/NOCK range's fees were never recorded. It now books WETH paid to the
+  wallet, and the native ETH the Uniswap app pays out when it collects to the position
+  manager and unwraps: a WETH `Withdrawal` by the v3 NonfungiblePositionManager or the v4
+  PositionManager, in a transaction the wallet sent, is booked as "ETH". Unwraps by anyone
+  else (a router, say) are not fee payouts and are ignored.
+- **Each harvest is valued at its claim's block, not when it was recorded (#111).** NOCK
+  uses the stored price nearest the block time (within 60 minutes); ETH and WETH use the
+  `eth_price_pool` read at that block. A late recording no longer changes the value. When
+  no price is found the row has no USD value and is left out of the total, never valued at
+  a substitute. New `harvest_events` columns `price_usd` and `price_source` record the
+  price used and where it came from (migration `20261115000007`, additive).
+- **The tax-ledger panel's labels come from the data (#102).** The hardcoded "40% TAX
+  RESERVE (PROTECTED)", "60% GROWTH DRY POWDER (DEPLOYABLE)" and the always-on "✓ TAX
+  RESERVE PROTECTED" are gone. The panel is "Harvest Ledger (Virtual Tax Reserve)"; its
+  dials name the configured ratio (or say none is configured), and with no harvests they
+  read "no harvests yet" instead of drawing a full bar. It says plainly that the split is
+  bookkeeping: nothing is set aside on-chain. The Lite cockpit line follows the same rules.
+- **`sovereign_ledger`** gains `tax_reserve_ratio` and `unpriced_count`; the spec text no
+  longer calls the reserve "protected" or the rest "available dry powder".
+- **BATCH HARVEST text** says the ledger books USDC, NOCK and WETH/ETH, each valued at the
+  claim's block, instead of "WETH fees are not booked yet".
+- **The claim payload's ETH price** reads the configured `eth_price_pool` instead of always
+  the default pool.
+
 ## [0.5.2] - 2026-11-14
 
 ### Fixed — wallet ETH is the gas pillar (#94; snapshot spec 2.3.0)
