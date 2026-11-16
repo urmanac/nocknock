@@ -147,6 +147,8 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
     };
     let n = |k: &str| plan.and_then(|p| p.get(k)).and_then(|x| x.as_u64()).unwrap_or(0);
     let fills = plan.and_then(|p| p.get("fills")).and_then(|x| x.as_i64()).unwrap_or(0);
+    // Detected swaps and whether the check ran (issue #118); empty for older snapshots.
+    let detection = plan.map(fill_detection_lines).unwrap_or_default();
     format!(
         "🪜 Accumulation Plan \"{}\" ({})\n====================\n\
          • Status: {}\n\
@@ -157,7 +159,7 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
          • Lump-sum counterfactual (whole budget at first fill price): {} NOCK\n\
          • Constraint: {}\n\
          • Protected cash reserve: ${}\n\
-         {lp_line}",
+         {detection}{lp_line}",
         s(plan, "plan_id"), s(plan, "venue"), s(plan, "status"),
         if s(plan, "status") == "complete" {
             "none (plan complete)".to_string()

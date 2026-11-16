@@ -137,6 +137,14 @@ pub(crate) fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profi
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_history: &[(DateTime<Utc>, f64, f64)], ledger: &LedgerAggregate, regime: &MarketRegime, plan: &PlanContext) -> DerivedMetrics {
+    compute_derived_metrics_with_fills(raw, prev_hwm, profile, structural_channels, counterfactual_history, ledger, regime, plan, None)
+}
+
+/// As above, with this cycle's fill-detection result (issue #118). The result is
+/// attached to the plan status, and the plan's advice text reads it from there; the
+/// function stays pure, since detection's I/O happened before the call.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_history: &[(DateTime<Utc>, f64, f64)], ledger: &LedgerAggregate, regime: &MarketRegime, plan: &PlanContext, fill_detection: Option<&FillDetection>) -> DerivedMetrics {
     // 1. Spot price: live NOCK/USD from the designated price-source position pool
     //    (zero-mock: the cycle fails upstream when the read fails).
     let spot_price = raw.spot_price_nock_usd;
@@ -287,7 +295,9 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
             cash_target_usd,
         };
         let directive = plan_directive(cfg, &plan.fills, &guards, plan.ledger_unavailable, plan.now);
-        build_plan_status(cfg, &plan.fills, &directive)
+        let mut status = build_plan_status(cfg, &plan.fills, &directive);
+        status.fill_detection = fill_detection.cloned();
+        status
     });
     // While a plan exists it owns the buy decision: the lump-sum dip arms are retired
     // (a completed plan must not be followed by "deploy everything that is left").

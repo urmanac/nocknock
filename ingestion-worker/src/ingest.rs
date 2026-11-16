@@ -208,8 +208,11 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     };
 
     let plan_ctx = load_plan_context(state).await;
-    let mut derived_metrics = compute_derived_metrics_with_plan(&raw_data, prev_hwm, &profile, structural_channels,
-        &counterfactual_history, &ledger_agg, &regime, &plan_ctx);
+    // Fill detection (issue #118): look for plan buys on-chain and offer them. It never
+    // fails the cycle; when it cannot run, the plan status says so.
+    let fill_detection = detect_fills(state, &plan_ctx).await;
+    let mut derived_metrics = compute_derived_metrics_with_fills(&raw_data, prev_hwm, &profile, structural_channels,
+        &counterfactual_history, &ledger_agg, &regime, &plan_ctx, fill_detection.as_ref());
     {
         let gs = &mut derived_metrics.global_status;
         let current_total: f64 = gs.total_portfolio_usd.parse().unwrap_or(f64::INFINITY);
@@ -311,7 +314,9 @@ pub(crate) fn canonical_state_json(data: &SnapshotData) -> serde_json::Value {
 }
 
 pub(crate) fn strip_volatile_time_fields(value: &mut serde_json::Value) {
-    const VOLATILE_KEYS: [&str; 7] = [
+    const VOLATILE_KEYS: [&str; 8] = [
+        // Fill detection's check time (issue #118): fresh every cycle, no state.
+        "last_checked_at",
         "updated_at",
         "high_water_mark_date",
         "time_points",

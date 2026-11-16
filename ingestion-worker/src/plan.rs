@@ -3,6 +3,15 @@ use crate::*;
 /// Below this a tranche is not worth advising (and rounding dust never keeps a plan open).
 pub(crate) const PLAN_DUST_USDC: f64 = 1.0;
 
+/// When the open tranche comes due by cadence alone: the last verified fill plus the
+/// plan interval. None before the first fill (the first tranche is due from the start).
+/// Pure; shared by the directive and by fill detection's early/on-schedule label.
+pub(crate) fn next_tranche_due_at(cfg: &AccumulationPlanConfig, fills: &PlanFills) -> Option<DateTime<Utc>> {
+    fills
+        .last_at
+        .map(|last| last + chrono::Duration::seconds((cfg.interval_hours * 3600.0).round() as i64))
+}
+
 /// Pure plan decision: is a tranche due right now, and for how much? The clock is an
 /// argument so this is deterministic and unit-testable.
 ///
@@ -41,8 +50,7 @@ pub(crate) fn plan_directive(
             return PlanDirective::Pending { starts_at };
         }
     }
-    if let Some(last) = fills.last_at {
-        let next_due_at = last + chrono::Duration::seconds((cfg.interval_hours * 3600.0).round() as i64);
+    if let Some(next_due_at) = next_tranche_due_at(cfg, fills) {
         if now < next_due_at {
             return PlanDirective::Waiting { next_due_at };
         }
@@ -161,6 +169,8 @@ pub(crate) fn build_plan_status(
             .map(|p| format!("{:.4}", cfg.budget_usdc / p)),
         binding_constraint,
         cash_reserve_usdc: cfg.cash_reserve_usdc.map(|r| format!("{:.2}", r)),
+        // Attached by the caller that ran fill detection for this cycle (issue #118).
+        fill_detection: None,
     }
 }
 
@@ -182,11 +192,11 @@ pub(crate) fn plan_advice(ps: &AccumulationPlanStatus, spot_price: f64) -> (Stri
         None => progress,
     };
     let n = format!("{} of {}", ps.tranche_index, ps.tranches_total);
-    match ps.status.as_str() {
+    let (action, details) = match ps.status.as_str() {
         "tranche_due" => (
             format!("DCA TRANCHE DUE ({n})"),
             format!(
-                "Buy ${} of NOCK on {} (spot ${:.5}).{} {} After buying, record the transaction hash so the plan advances.",
+                "Buy ${} of NOCK on {} (spot ${:.5}).{} {} {}",
                 ps.tranche_usdc,
                 ps.venue,
                 spot_price,
@@ -194,7 +204,8 @@ pub(crate) fn plan_advice(ps: &AccumulationPlanStatus, spot_price: f64) -> (Stri
                     .as_ref()
                     .map(|c| format!(" Sized below the nominal ${} tranche: {}.", ps.nominal_tranche_usdc, c))
                     .unwrap_or_default(),
-                progress
+                progress,
+                after_buying_sentence(ps)
             ),
         ),
         "waiting" => (
@@ -237,6 +248,12 @@ pub(crate) fn plan_advice(ps: &AccumulationPlanStatus, spot_price: f64) -> (Stri
                 ps.binding_constraint.clone().unwrap_or_default()
             ),
         ),
+    };
+    // A detected swap that is not counted yet leads the text (issue #118). Only the
+    // details change: the notifier compares action titles, so no notification fires.
+    match open_offer_notice(ps) {
+        Some(notice) => (action, format!("{notice} {details}")),
+        None => (action, details),
     }
 }
 

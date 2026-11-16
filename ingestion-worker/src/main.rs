@@ -52,6 +52,12 @@ mod claims;
 use claims::*;
 mod mcp_http;
 use mcp_http::*;
+mod fill_verify;
+use fill_verify::*;
+mod fill_detection;
+use fill_detection::*;
+mod fill_text;
+use fill_text::*;
 
 // ============================================================
 // Configuration
@@ -217,6 +223,23 @@ pub struct AccumulationPlanConfig {
     pub cash_reserve_usdc: Option<f64>,
 }
 
+/// Fill detection for the accumulation plan (issue #118). It only reads the wallet's
+/// NOCK transfer history and offers what it finds; it never records a buy. There are
+/// no thresholds here: nothing is filtered by size or price.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct FillDetectionConfig {
+    /// On by default while an accumulation_plan is configured. Set false to stop the
+    /// worker reading the transfer history; recording by transaction hash still works.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for FillDetectionConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 fn default_plan_venue() -> String {
     // Aerodrome and Velodrome merged into Aero (aero.xyz) on 2026-10-21; see
     // ONCHAIN_INTEGRATION.md §6. The label is informational: receipt verification
@@ -268,6 +291,9 @@ struct AppConfig {
     /// Optional dollar-cost-averaging plan (issue #79).
     #[serde(default)]
     accumulation_plan: Option<AccumulationPlanConfig>,
+    /// Fill detection for the plan (issue #118); on unless switched off.
+    #[serde(default)]
+    fill_detection: FillDetectionConfig,
     #[serde(default)]
     notifications: NotificationConfig,
     #[serde(default)]
@@ -628,6 +654,61 @@ struct AccumulationPlanStatus {
     /// Protected cash reserve the plan never draws below; null when none is set.
     #[serde(default)]
     cash_reserve_usdc: Option<String>,
+    /// Swaps found on-chain that look like plan buys, offered for confirmation, and
+    /// whether the check ran (v0.6.0, issue #118). Offers are not progress: `fills`,
+    /// `spent_usdc` and the cadence count ledger rows only. Null in snapshots from
+    /// before v0.6.0.
+    #[serde(default)]
+    fill_detection: Option<FillDetection>,
+}
+
+/// One cycle's fill-detection result (v0.6.0, issue #118).
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct FillDetection {
+    /// ok | partial | unavailable | not_run. `unavailable` means "could not check",
+    /// which is not "checked, nothing found" (`ok` with no offers).
+    status: String,
+    /// Plain-words reason for partial, unavailable and not_run.
+    #[serde(default)]
+    detail: Option<String>,
+    /// How far back the transfer history was read: the plan anchor after a complete
+    /// check, a later time when the check was cut short. Null when it did not run.
+    #[serde(default)]
+    checked_back_to: Option<String>,
+    /// Time of the last successful check. A wall-clock field: it is left out of the
+    /// state hash, so it never forces a new snapshot row.
+    #[serde(default)]
+    last_checked_at: Option<String>,
+    /// Detected swaps waiting for the operator: confirm, or mark as not part of the plan.
+    #[serde(default)]
+    offers: Vec<FillOffer>,
+    /// Detected swaps the operator marked "not part of the plan". Kept and restorable.
+    #[serde(default)]
+    dismissed: Vec<FillOffer>,
+}
+
+/// A detected USDC→NOCK swap. Every figure comes from the transaction's receipt and
+/// block header, checked with the rules of the record endpoint.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct FillOffer {
+    tx_hash: String,
+    /// Block time of the swap.
+    confirmed_at: String,
+    block_number: i64,
+    usdc_spent: String,
+    nock_received: String,
+    effective_price_usd: String,
+    /// early | on_schedule: whether the swap landed before the open tranche came due
+    /// (last recorded fill plus the plan interval).
+    timing: String,
+    /// Stored NOCK/USD price nearest the swap's block time; null when none was near.
+    #[serde(default)]
+    reference_spot_usd: Option<String>,
+    #[serde(default)]
+    reference_spot_source: Option<String>,
+    /// (effective price / reference spot − 1) × 10,000; null without a reference.
+    #[serde(default)]
+    execution_cost_bps: Option<i32>,
 }
 
 /// Standing bias toward re-establishing LP ranges. Moving NOCK and USDC the wallet
@@ -1139,6 +1220,18 @@ async fn main() -> Result<()> {
             axum::routing::get(accumulation_events_handler),
         )
         .route(
+            "/v1/accumulation/candidates",
+            axum::routing::get(accumulation_candidates_handler),
+        )
+        .route(
+            "/v1/accumulation/candidates/dismiss",
+            axum::routing::post(dismiss_candidate_handler),
+        )
+        .route(
+            "/v1/accumulation/candidates/restore",
+            axum::routing::post(restore_candidate_handler),
+        )
+        .route(
             "/v1/tax/export",
             axum::routing::get(tax_export_handler),
         )
@@ -1320,3 +1413,5 @@ struct V3PositionDecoded {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_fills;

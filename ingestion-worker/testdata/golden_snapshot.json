@@ -725,6 +725,7 @@
           "binding_constraint": null,
           "budget_usdc": "500.00",
           "cash_reserve_usdc": null,
+          "fill_detection": null,
           "fills": 0,
           "last_fill_at": null,
           "lump_sum_nock": null,
@@ -1396,6 +1397,6 @@
         }
       ]
     },
-    "state_hash": "435905077fa0be75c79a72816dfcd3234e50c9eb0bb6481674b86353e4604a59"
+    "state_hash": "a2e08f89b24b5a5940535c1449f0cf3e61240dbad18234ba27181545e15bf7e8"
   }
 }
