@@ -10850,4 +10850,112 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
         assert!(text.contains("Gas held (wallet ETH+WETH): not reported (snapshot predates 2.3.0)"), "{text}");
         assert!(!text.contains("$0.00"));
     }
+
+    // ---------------- Golden snapshot (issue #97) ----------------
+    // Pins the whole pure path from one cycle's reads to the stored payload, the state
+    // hash and the MCP text, byte for byte. Added before the module split; a move-only
+    // refactor must leave ingestion-worker/testdata/golden_snapshot.json untouched.
+    // Regenerate only for an intended behaviour change:
+    //   NOCKNOCK_BLESS_GOLDEN=1 cargo test test_golden_snapshot
+
+    /// The steps fetch_raw_data (its tail) and run_ingestion_cycle apply after the reads.
+    #[allow(clippy::too_many_arguments)]
+    fn golden_snapshot(
+        mut raw: RawOnChainData,
+        prev_hwm: f64,
+        profile: &OperatorProfile,
+        history: &[(DateTime<Utc>, f64)],
+        counterfactual: &[(DateTime<Utc>, f64, f64)],
+        ledger: &LedgerAggregate,
+        regime: &MarketRegime,
+        plan: &PlanContext,
+    ) -> SnapshotData {
+        let (spot, eth) = (raw.spot_price_nock_usd, raw.live_eth_price_usd);
+        let mut positions = build_position_snapshots(&raw.positions, spot, eth);
+        apply_pool_activity(&mut positions, &raw.pool_liquidity);
+        raw.pool_mechanics = build_pool_mechanics(&raw.positions, spot, eth);
+        raw.contract_fees = build_contract_fees(&positions, raw.live_gas_cost_usd, &raw.fees_not_lp_claimable);
+        let derived_metrics = compute_derived_metrics_with_plan(
+            &raw, prev_hwm, profile, compute_structural_channels_sync(history), counterfactual, ledger, regime, plan,
+        );
+        SnapshotData {
+            wallet_balances: raw.wallet_balances,
+            positions,
+            pool_mechanics: raw.pool_mechanics,
+            concentrated_liquidity: raw.concentrated_liquidity,
+            contract_fees: raw.contract_fees,
+            derived_metrics,
+        }
+    }
+
+    fn golden_case(data: &SnapshotData) -> serde_json::Value {
+        let full = serde_json::to_value(data).unwrap();
+        json!({
+            "state_hash": compute_state_hash(data),
+            "snapshot": canonical_state_json(data),
+            "mcp_text": {
+                "get_portfolio_state": format_portfolio_state_text(&full),
+                "get_shot_advice": format_shot_advice_text(&full),
+                "simulate_claim_fees": format_claim_simulation_text(&full),
+                "get_accumulation_plan": format_accumulation_plan_text(&full),
+            },
+        })
+    }
+
+    #[test]
+    fn test_golden_snapshot_is_byte_identical() {
+        let no_plan = PlanContext { cfg: None, fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-15T12:00:00Z") };
+
+        // 1. The fixed fixture named by #97, exactly as the screenshot test uses it.
+        let four = golden_snapshot(
+            four_position_fixture(), 2500.0, &OperatorProfile::default(), &[], &[],
+            &LedgerAggregate::default(), &MarketRegime::default(), &no_plan,
+        );
+
+        // 2. Every adapter and engine input at once: four Uniswap positions, the Aero
+        //    volatile pool with a reverting claimFees(), gas read, pool activity, a
+        //    harvest ledger, both RSI reads, history, and a plan with a tranche due.
+        let mut raw = rebuild_fixture();
+        let mut aero = aero_position(false);
+        // 0.01% of the pool instead of the fixture's 1%, so LP stays under its target.
+        aero.liquidity /= 100;
+        aero.amount0 /= 100.0;
+        aero.amount1 /= 100.0;
+        raw.pool_liquidity.insert(aero.position_id.clone(), "342542824101829799".to_string());
+        raw.fees_not_lp_claimable = vec![aero.position_id.clone()];
+        raw.positions.push(aero);
+        let history: Vec<(DateTime<Utc>, f64)> = (0..22)
+            .map(|i| (t("2026-11-14T00:00:00Z") + chrono::Duration::minutes(5 * i), 2400.0 + (i as f64) * 1.25))
+            .collect();
+        let counterfactual = [
+            (t("2026-11-14T00:00:00Z"), 2400.0, 1400.0),
+            (t("2026-11-14T00:05:00Z"), 2401.25, 1400.5),
+        ];
+        let ledger = LedgerAggregate { total_usd: 12.5, harvest_count: 2, last_at: Some(t("2026-11-13T09:30:00Z")), unpriced_count: 1 };
+        let regime = MarketRegime { rsi_5m: Some(48.2), rsi_1d: Some(55.4), overextended: false };
+        let plan = PlanContext { cfg: Some(plan_cfg()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-15T12:00:00Z") };
+        let whole = golden_snapshot(raw, 2600.0, &operator_profile_2026_11(), &history, &counterfactual, &ledger, &regime, &plan);
+
+        // 3. A wallet starting from zero: USDC only, no positions, no plan, no rules.
+        let zero = golden_snapshot(
+            from_zero_raw(500.0, 0.0), 0.0, &OperatorProfile::default(), &[], &[],
+            &LedgerAggregate::default(), &MarketRegime::default(), &no_plan,
+        );
+
+        let doc = json!({
+            "four_position_fixture": golden_case(&four),
+            "whole_book_plan_due": golden_case(&whole),
+            "from_zero": golden_case(&zero),
+        });
+        let actual = format!("{}\n", serde_json::to_string_pretty(&doc).unwrap());
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/golden_snapshot.json");
+        if std::env::var("NOCKNOCK_BLESS_GOLDEN").is_ok() {
+            std::fs::write(path, &actual).unwrap();
+        }
+        let expected = std::fs::read_to_string(path).expect("testdata/golden_snapshot.json is checked in");
+        assert!(
+            actual == expected,
+            "snapshot bytes changed; compare {path} with a fresh NOCKNOCK_BLESS_GOLDEN=1 run and `git diff` it"
+        );
+    }
 }
