@@ -8,16 +8,19 @@ import { api } from './api/client';
 import type { AccumulationEvent } from './api/client';
 import type { FillDetection, FillOffer } from './types/snapshot';
 import {
+  COST_OVER_SPOT_CAVEAT,
   blockTime,
   confirmOffer,
   costOverSpot,
   detectionSummary,
   dismissOffer,
   fillsForPlan,
+  referenceNote,
   restoreOffer,
   shortHash,
   swapLine,
   timingLabel,
+  trancheDueHint,
   txUrl,
   type FillOfferClient,
 } from './fillOffers';
@@ -108,6 +111,45 @@ describe('detection state', () => {
   });
 });
 
+describe('tranche-due hint', () => {
+  const PROMISE = 'NockNock then looks for the swap on-chain and offers it here to confirm; you can also record its transaction hash below.';
+  const LEGACY = 'Then record the transaction hash below.';
+
+  it('promises detection only when detection is working', () => {
+    expect(trancheDueHint(detection({}))).toEqual({ offerFirst: null, afterBuying: PROMISE });
+    expect(trancheDueHint(detection({ status: 'partial', detail: '1 transaction(s) could not be read' })).afterBuying).toBe(PROMISE);
+  });
+
+  it('says so when detection could not check, and falls back to the hash', () => {
+    const h = trancheDueHint(detection({ status: 'unavailable', detail: 'no Alchemy RPC key is configured' }));
+    expect(h.afterBuying).toBe('Swap detection could not check this cycle; after buying, record the transaction hash below.');
+    expect(h.afterBuying).not.toContain('looks for the swap');
+    expect(h.offerFirst).toBeNull();
+  });
+
+  it('gives the pre-v0.6.0 instruction when detection is off, not reported or unknown', () => {
+    const off = detection({ status: 'not_run', detail: 'swap detection is turned off (fill_detection.enabled is false)' });
+    for (const d of [off, undefined, null, detection({ status: 'surprise' as FillDetection['status'] })]) {
+      const h = trancheDueHint(d);
+      expect(h).toEqual({ offerFirst: null, afterBuying: LEGACY });
+      expect(h.afterBuying).not.toContain('looks for the swap');
+    }
+  });
+
+  it('leads with the open offer in every state, so a tranche is not bought twice', () => {
+    const one = 'A detected swap below is not counted yet: confirm it or mark it as not part of the plan before buying again.';
+    expect(trancheDueHint(detection({ offers: [offer] })).offerFirst).toBe(one);
+    // Offers found by an earlier check stay listed when this cycle could not check.
+    expect(trancheDueHint(detection({ status: 'unavailable', detail: 'no answer', offers: [offer] })).offerFirst).toBe(one);
+    expect(trancheDueHint(detection({ status: 'not_run', detail: 'off', offers: [offer] })).offerFirst).toBe(one);
+    expect(trancheDueHint(detection({ offers: [offer, { ...offer, tx_hash: '0xabc' }] })).offerFirst).toBe(
+      '2 detected swaps below are not counted yet: confirm each or mark it as not part of the plan before buying again.',
+    );
+    // A dismissed swap has had its answer.
+    expect(trancheDueHint(detection({ dismissed: [offer] })).offerFirst).toBeNull();
+  });
+});
+
 describe('swap figures', () => {
   it('formats the amounts and price from the receipt figures', () => {
     expect(swapLine(offer)).toBe('$20.00 USDC → 1,780.36 NOCK at $0.011234 per NOCK');
@@ -123,8 +165,8 @@ describe('swap figures', () => {
     expect(blockTime('whenever')).toBe('whenever');
   });
 
-  it('labels a swap that landed before its tranche was due', () => {
-    expect(timingLabel('early')).toBe('early: before the open tranche came due');
+  it('labels a swap that landed less than one interval after the buy before it', () => {
+    expect(timingLabel('early')).toBe('early: less than one plan interval after the buy before it');
     expect(timingLabel('on_schedule')).toBe('on schedule');
     expect(timingLabel(undefined)).toBe('');
   });
@@ -140,8 +182,40 @@ describe('execution cost over spot', () => {
     expect(c.known).toBe(true);
     expect(c.text).toBe('+160 bps (1.60%) over spot $0.012500');
     expect(c.source).toContain('uniswap_rpc');
+    // Without the swap's time the reference still names its own.
+    expect(c.reference).toBe('stored price from 2026-11-15 02:55 UTC');
     expect(costOverSpot({ execution_cost_bps: -80, reference_spot_usd: '0.0125' }).text).toBe('−80 bps (0.80%) under spot $0.012500');
     expect(costOverSpot({ execution_cost_bps: 0, reference_spot_usd: '0.0125' }).text).toBe('at spot ($0.012500)');
+  });
+
+  it('names the reference time and its distance from the swap on the page itself', () => {
+    // The third plan buy: swap at 03:08:37, nearest stored price at 03:05:00.
+    const c = costOverSpot({
+      ...offer,
+      execution_cost_bps: 30,
+      reference_spot_usd: '0.01120000',
+      reference_spot_source: 'market_price_history uniswap_rpc at 2026-11-16T03:05:00+00:00',
+    });
+    expect(c.text).toBe('+30 bps (0.30%) over spot $0.011200');
+    expect(c.reference).toBe('stored price from 2026-11-16 03:05 UTC, 4 min before the swap');
+    // A reference from after the swap (a later cycle, or an hourly candle) says so.
+    expect(referenceNote('market_price_history geckoterminal at 2026-11-16T04:00:00+00:00', offer.confirmed_at)).toBe(
+      'stored price from 2026-11-16 04:00 UTC, 51 min after the swap',
+    );
+    expect(referenceNote('market_price_history uniswap_rpc at 2026-11-16T03:08:50+00:00', offer.confirmed_at)).toBe(
+      'stored price from 2026-11-16 03:08 UTC, under a minute from the swap',
+    );
+    // A source in another shape is shown as given; a missing one is said to be missing.
+    expect(referenceNote('some other source', offer.confirmed_at)).toBe('reference: some other source');
+    expect(referenceNote('price at noon-ish', offer.confirmed_at)).toBe('reference: price at noon-ish');
+    expect(referenceNote(null, offer.confirmed_at)).toBe('reference time not recorded');
+    expect(referenceNote('', offer.confirmed_at)).toBe('reference time not recorded');
+    // No figure, no reference line.
+    expect(costOverSpot(offer).reference).toBe('');
+    // The caveat says what the figure is compared with and what it is not.
+    expect(COST_OVER_SPOT_CAVEAT).toContain('within 60 minutes');
+    expect(COST_OVER_SPOT_CAVEAT).toContain('not with a quote');
+    expect(COST_OVER_SPOT_CAVEAT).not.toContain('hover');
   });
 
   it('is unavailable without a reference, never zero', () => {

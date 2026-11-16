@@ -12,6 +12,7 @@
 import { useState } from 'react';
 import type { FillDetection, FillOffer } from '../types/snapshot';
 import {
+  COST_OVER_SPOT_CAVEAT,
   blockTime,
   confirmOffer,
   costOverSpot,
@@ -59,6 +60,7 @@ function SwapFacts({ offer }: { offer: FillOffer }) {
       </div>
       <div style={{ ...small, color: cost.known ? '#c9d1d9' : '#8b949e' }} title={cost.source || undefined}>
         Execution cost: {cost.text}
+        {cost.reference && <span style={{ color: '#8b949e' }}> · {cost.reference}</span>}
       </div>
       <div style={mono}>
         <a href={txUrl(offer.tx_hash)} target="_blank" rel="noreferrer" style={{ color: '#58a6ff' }}>
@@ -82,6 +84,7 @@ export function FillOffers({
   const summary = detectionSummary(detection);
   const offers = detection?.offers ?? [];
   const dismissed = detection?.dismissed ?? [];
+  const anyCost = [...offers, ...dismissed].some((o) => costOverSpot(o).known);
 
   const run = async (offer: FillOffer, action: (o: FillOffer) => Promise<OfferActionResult>) => {
     setBusy(offer.tx_hash);
@@ -136,6 +139,11 @@ export function FillOffers({
         </div>
       ))}
 
+      {anyCost && (
+        <div data-testid="cost-caveat" style={{ ...small, fontSize: '0.65rem', color: '#484f58' }}>
+          {COST_OVER_SPOT_CAVEAT}
+        </div>
+      )}
       <div role="status" style={{ ...small, color: TONE_COLOR[summary.tone] }}>
         <strong style={{ letterSpacing: 1 }}>{summary.heading}</strong> · {summary.text}
       </div>

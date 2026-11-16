@@ -100,7 +100,7 @@ export interface FillOffer {
   usdc_spent: string;
   nock_received: string;
   effective_price_usd: string;
-  /** Whether the swap landed before the open tranche came due */
+  /** early: less than one plan interval after the buy before it (a recorded fill or an older open offer) */
   timing: 'early' | 'on_schedule';
   /** Stored NOCK/USD price nearest the swap's block time; null when none was near */
   reference_spot_usd?: string | null;

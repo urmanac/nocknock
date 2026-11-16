@@ -3,7 +3,8 @@
  *
  * Shows the dollar-cost-averaging plan the worker is pacing, the standing LP-rebuild
  * bias, the swaps the worker found on-chain and offers for confirmation (v0.6.0,
- * issue #118), and a field to record a buy by transaction hash, which always works.
+ * issue #118), and a field to record a buy by transaction hash, which does not depend
+ * on swap detection (it still needs a plan, an RPC key and a readable receipt).
  * The worker verifies the receipt on-chain before anything counts; this panel never
  * marks a tranche done on its own.
  */
@@ -13,6 +14,7 @@ import type { AccumulationPlanStatus, LpRebuild } from '../types/snapshot';
 import { LpRebuildSteps } from './LpRebuildSteps';
 import { FillOffers } from './FillOffers';
 import { PlanFills } from './PlanFills';
+import { trancheDueHint } from '../fillOffers';
 import {
   PLAN_STATUS_COLOR,
   PLAN_STATUS_LABEL,
@@ -107,6 +109,8 @@ export function AccumulationPlanPanel({
   const vsLump = dcaVsLumpSumNock(plan);
   const acquired = parseFloat(plan.acquired_nock);
   const canRecord = plan.status !== 'invalid';
+  // What to say around "Buy $X" follows the detection state (v0.6.0, issue #118).
+  const dueHint = trancheDueHint(plan.fill_detection);
 
   return (
     <div>
@@ -120,9 +124,15 @@ export function AccumulationPlanPanel({
           <div style={small}>
             {plan.status === 'tranche_due' && (
               <>
+                {dueHint.offerFirst && (
+                  <>
+                    <strong data-testid="offer-first" style={{ color: '#38bdf8' }}>
+                      {dueHint.offerFirst}
+                    </strong>{' '}
+                  </>
+                )}
                 Buy <strong style={{ color: '#f0f6fc' }}>${plan.tranche_usdc}</strong> of NOCK (tranche {plan.tranche_index} of{' '}
-                {plan.tranches_total}). NockNock then looks for the swap on-chain and offers it here to confirm; you can
-                also record its transaction hash below.
+                {plan.tranches_total}). {dueHint.afterBuying}
               </>
             )}
             {plan.status === 'waiting' && (
@@ -197,7 +207,7 @@ export function AccumulationPlanPanel({
       {canRecord && <FillOffers detection={plan.fill_detection} onChanged={onRecorded} />}
 
       {canRecord && (
-        <div style={{ ...label, marginBottom: 4 }}>RECORD A BUY BY TRANSACTION HASH · ALWAYS AVAILABLE</div>
+        <div style={{ ...label, marginBottom: 4 }}>RECORD A BUY BY TRANSACTION HASH · WORKS WITHOUT SWAP DETECTION</div>
       )}
       {canRecord && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>

@@ -106,11 +106,48 @@ export interface CostLabel {
   /** False when there is no reference price, so no figure. */
   known: boolean;
   text: string;
-  /** Where the reference came from, for a tooltip; empty when unknown. */
+  /** Where the reference came from, as the worker stored it; empty when unknown. */
   source: string;
+  /**
+   * The reference's own time, and how far it is from the swap, in words for the page
+   * itself: "stored price from 2026-11-16 03:05 UTC, 4 min before the swap". Empty
+   * when there is no figure.
+   */
+  reference: string;
 }
 
-type CostFigures = Pick<FillOffer, 'reference_spot_usd' | 'reference_spot_source' | 'execution_cost_bps'>;
+type CostFigures = Pick<FillOffer, 'reference_spot_usd' | 'reference_spot_source' | 'execution_cost_bps'> & {
+  /** Block time of the swap, to say how far the reference is from it. */
+  confirmed_at?: string | null;
+};
+
+/**
+ * The one caveat every cost-over-spot figure needs, shown on the page (not in a hover,
+ * which a touch screen cannot reach).
+ */
+export const COST_OVER_SPOT_CAVEAT =
+  'Cost over spot compares the swap\'s price with the NOCK/USD price NockNock stored nearest its block time (within 60 minutes), not with a quote. A price move between that stored price and the swap reads as cost, so each figure names its reference time.';
+
+/**
+ * When the reference price was stored, and how far that is from the swap. The worker
+ * writes the source as "... at <time>"; a source in another shape is shown as given,
+ * and a missing one is said to be missing. Nothing is estimated.
+ */
+export function referenceNote(source: string | null | undefined, swapAt?: string | null): string {
+  if (!source || source.trim() === '') return 'reference time not recorded';
+  const m = / at (\S+)$/.exec(source.trim());
+  const refMs = m ? Date.parse(m[1]) : NaN;
+  const when = m ? clock(m[1]) : null;
+  if (!m || Number.isNaN(refMs) || !when) return `reference: ${source.trim()}`;
+  const swapMs = swapAt ? Date.parse(swapAt) : NaN;
+  if (Number.isNaN(swapMs)) return `stored price from ${when}`;
+  const minutes = Math.round(Math.abs(swapMs - refMs) / 60000);
+  const gap =
+    minutes === 0
+      ? 'under a minute from the swap'
+      : `${minutes} min ${refMs < swapMs ? 'before' : 'after'} the swap`;
+  return `stored price from ${when}, ${gap}`;
+}
 
 /**
  * Execution cost over the reference spot. Positive means the swap paid more than the
@@ -120,7 +157,7 @@ export function costOverSpot(f: CostFigures): CostLabel {
   const bps = f.execution_cost_bps;
   const spot = f.reference_spot_usd;
   if (typeof bps !== 'number' || !Number.isFinite(bps) || !spot) {
-    return { known: false, text: 'cost over spot unavailable (no stored price near this block)', source: '' };
+    return { known: false, text: 'cost over spot unavailable (no stored price near this block)', source: '', reference: '' };
   }
   const pct = (Math.abs(bps) / 100).toFixed(2);
   const spotText = Number.isFinite(Number(spot)) ? Number(spot).toFixed(6) : spot;
@@ -128,13 +165,65 @@ export function costOverSpot(f: CostFigures): CostLabel {
     bps === 0
       ? `at spot ($${spotText})`
       : `${bps > 0 ? '+' : '−'}${Math.abs(bps)} bps (${pct}%) ${bps > 0 ? 'over' : 'under'} spot $${spotText}`;
-  return { known: true, text, source: f.reference_spot_source ?? '' };
+  return {
+    known: true,
+    text,
+    source: f.reference_spot_source ?? '',
+    reference: referenceNote(f.reference_spot_source, f.confirmed_at),
+  };
 }
 
+/**
+ * The worker judges each swap against the buy before it in time (a recorded fill, or an
+ * older swap still on offer), so the label does not depend on the order of confirming.
+ */
 export function timingLabel(timing: FillOffer['timing'] | string | undefined): string {
-  if (timing === 'early') return 'early: before the open tranche came due';
+  if (timing === 'early') return 'early: less than one plan interval after the buy before it';
   if (timing === 'on_schedule') return 'on schedule';
   return '';
+}
+
+export interface TrancheDueHint {
+  /**
+   * Said before "Buy $X": a detected swap is waiting for an answer, and buying again
+   * first would double a tranche that may already be bought. Null when none is open.
+   */
+  offerFirst: string | null;
+  /** What happens after buying, given whether detection is working this cycle. */
+  afterBuying: string;
+}
+
+/**
+ * The words around "Buy $X of NOCK" when a tranche is due. They follow the detection
+ * state, like the worker's own advice text: the panel must not promise that a swap will
+ * be found when detection is off, could not check, or is not reported at all.
+ */
+export function trancheDueHint(detection: FillDetection | null | undefined): TrancheDueHint {
+  const open = detection?.offers?.length ?? 0;
+  const offerFirst =
+    open === 0
+      ? null
+      : open === 1
+        ? 'A detected swap below is not counted yet: confirm it or mark it as not part of the plan before buying again.'
+        : `${open} detected swaps below are not counted yet: confirm each or mark it as not part of the plan before buying again.`;
+  switch (detection?.status) {
+    case 'ok':
+    case 'partial':
+      return {
+        offerFirst,
+        afterBuying:
+          'NockNock then looks for the swap on-chain and offers it here to confirm; you can also record its transaction hash below.',
+      };
+    case 'unavailable':
+      return {
+        offerFirst,
+        afterBuying: 'Swap detection could not check this cycle; after buying, record the transaction hash below.',
+      };
+    default:
+      // Not run, not reported (a worker older than v0.6.0), or a state this page does
+      // not know: the pre-v0.6.0 instruction, which is always true.
+      return { offerFirst, afterBuying: 'Then record the transaction hash below.' };
+  }
 }
 
 /** The API calls the offer actions need; `api` satisfies it. */

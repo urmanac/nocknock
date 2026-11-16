@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import type { AccumulationEvent } from '../api/client';
-import { blockTime, costOverSpot, fillsForPlan, shortHash, txUrl } from '../fillOffers';
+import { COST_OVER_SPOT_CAVEAT, blockTime, costOverSpot, fillsForPlan, shortHash, txUrl } from '../fillOffers';
 
 const cell = { padding: '4px 10px 4px 0', fontSize: '0.75rem', color: '#c9d1d9', whiteSpace: 'nowrap' } as const;
 const head = { ...cell, fontSize: '0.65rem', letterSpacing: 1, color: '#8b949e', textAlign: 'left' } as const;
@@ -68,6 +68,7 @@ export function PlanFillsTable({
                 <td style={cell}>{Number.isFinite(price) ? `$${price.toFixed(6)}` : f.effective_price_usd}</td>
                 <td style={{ ...cell, color: cost.known ? '#c9d1d9' : '#8b949e' }} title={cost.source || undefined}>
                   {cost.known ? cost.text : 'unavailable'}
+                  {cost.reference && <div style={{ fontSize: '0.65rem', color: '#8b949e' }}>{cost.reference}</div>}
                 </td>
                 <td style={{ ...cell, fontFamily: 'monospace' }}>
                   <a href={txUrl(f.tx_hash)} target="_blank" rel="noreferrer" style={{ color: '#58a6ff' }} title={f.tx_hash}>
@@ -80,8 +81,7 @@ export function PlanFillsTable({
         </tbody>
       </table>
       <div style={{ fontSize: '0.65rem', color: '#484f58', marginTop: 4, lineHeight: 1.6 }}>
-        Cost over spot compares each fill's price with the NOCK/USD price NockNock stored nearest its block time (within
-        60 minutes; hover a figure for the source). It is a measurement, not a quote.
+        {COST_OVER_SPOT_CAVEAT}
       </div>
     </div>
   );

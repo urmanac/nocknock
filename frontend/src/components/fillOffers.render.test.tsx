@@ -86,9 +86,15 @@ describe('offer card', () => {
     expect(html).toContain('2026-11-16 03:08 UTC · block 58040708');
     expect(html).toContain('Execution cost: +30 bps (0.30%) over spot $0.011200');
     expect(html).toContain('market_price_history uniswap_rpc at 2026-11-16T03:05:00+00:00');
+    // The reference's time is in the card's text, not only in a hover title.
+    expect(html.replace(/<[^>]+>/g, '')).toContain(
+      'Execution cost: +30 bps (0.30%) over spot $0.011200 · stored price from 2026-11-16 03:05 UTC, 4 min before the swap',
+    );
+    expect(count(html, 'data-testid="cost-caveat"')).toBe(1);
+    expect(html).toContain('A price move between that stored price and the swap reads as cost');
     // The second offer has no reference price: unavailable, never a zero.
     expect(html).toContain('Execution cost: cost over spot unavailable');
-    expect(html).toContain('early: before the open tranche came due');
+    expect(html).toContain('early: less than one plan interval after the buy before it');
     expect(count(html, '>CONFIRM<')).toBe(2);
     expect(count(html, '>NOT PART OF THE PLAN<')).toBe(2);
     expect(html).toContain('2 swaps found, not counted yet');
@@ -103,6 +109,13 @@ describe('offer card', () => {
     expect(html).toContain(BUY_2);
     expect(count(html, '>RESTORE<')).toBe(1);
     expect(count(html, '>CONFIRM<')).toBe(1);
+  });
+
+  it('shows the cost caveat only when a cost figure is shown', () => {
+    const none = renderToStaticMarkup(<FillOffers detection={detection({ offers: [offer2] })} />);
+    expect(none).not.toContain('data-testid="cost-caveat"');
+    const dismissedOnly = renderToStaticMarkup(<FillOffers detection={detection({ dismissed: [offer3] })} />);
+    expect(count(dismissedOnly, 'data-testid="cost-caveat"')).toBe(1);
   });
 
   it('says "could not check" for unavailable, and never "none found"', () => {
@@ -145,7 +158,9 @@ describe('accumulation plan panel', () => {
       );
       expect(html, status).toContain(HASH_FIELD);
       expect(html, status).toContain('RECORD BUY');
-      expect(html, status).toContain('RECORD A BUY BY TRANSACTION HASH · ALWAYS AVAILABLE');
+      expect(html, status).toContain('RECORD A BUY BY TRANSACTION HASH · WORKS WITHOUT SWAP DETECTION');
+      // "Always" would be untrue: recording still needs a plan, an RPC key and a receipt.
+      expect(html.toUpperCase(), status).not.toContain('ALWAYS AVAILABLE');
       expect(html, status).toContain(BUY_3);
       expect(html.indexOf('data-testid="fill-offer"'), status).toBeLessThan(html.indexOf(HASH_FIELD));
     }
@@ -168,6 +183,45 @@ describe('accumulation plan panel', () => {
     const old = renderToStaticMarkup(<AccumulationPlanPanel plan={plan({ fill_detection: undefined })} />);
     expect(old).toContain('SWAP DETECTION NOT REPORTED');
     expect(old).toContain(HASH_FIELD);
+  });
+
+  // Review finding on #118: the hint promised "NockNock then looks for the swap" in
+  // every state, and never said to answer an open offer before buying again.
+  it('words the tranche-due hint by the detection state', () => {
+    const text = (p: AccumulationPlanStatus) => renderToStaticMarkup(<AccumulationPlanPanel plan={p} />).replace(/<[^>]+>/g, '');
+    const BUY = 'Buy $20.00 of NOCK (tranche 3 of 5). ';
+    const PROMISE = 'NockNock then looks for the swap on-chain and offers it here to confirm';
+
+    expect(text(plan())).toContain(`${BUY}${PROMISE}; you can also record its transaction hash below.`);
+
+    const down = text(plan({ fill_detection: detection({ status: 'unavailable', detail: 'no Alchemy RPC key is configured' }) }));
+    expect(down).toContain(`${BUY}Swap detection could not check this cycle; after buying, record the transaction hash below.`);
+    expect(down).not.toContain(PROMISE);
+
+    const off = text(plan({ fill_detection: detection({ status: 'not_run', detail: 'swap detection is turned off' }) }));
+    expect(off).toContain(`${BUY}Then record the transaction hash below.`);
+    expect(off).not.toContain(PROMISE);
+
+    const old = text(plan({ fill_detection: undefined }));
+    expect(old).toContain(`${BUY}Then record the transaction hash below.`);
+    expect(old).not.toContain(PROMISE);
+
+    // An open offer comes first: answer it before buying the same tranche again.
+    const html = renderToStaticMarkup(
+      <AccumulationPlanPanel plan={plan({ fill_detection: detection({ offers: [offer3] }) })} />,
+    );
+    const open = html.replace(/<[^>]+>/g, '');
+    expect(count(html, 'data-testid="offer-first"')).toBe(1);
+    expect(open).toContain(
+      `A detected swap below is not counted yet: confirm it or mark it as not part of the plan before buying again. ${BUY}`,
+    );
+    expect(renderToStaticMarkup(<AccumulationPlanPanel plan={plan()} />)).not.toContain('data-testid="offer-first"');
+    // Only a due tranche carries the buy hint; a waiting plan does not tell anyone to buy.
+    const waiting = renderToStaticMarkup(
+      <AccumulationPlanPanel plan={plan({ status: 'waiting', fill_detection: detection({ offers: [offer3] }) })} />,
+    );
+    expect(waiting).not.toContain('data-testid="offer-first"');
+    expect(waiting).not.toContain('before buying again');
   });
 
   it('does not count an open offer as progress', () => {
@@ -217,6 +271,10 @@ describe('per-fill table', () => {
     expect(html).toContain('2026-11-14 06:02 UTC');
     expect(html).toContain('$0.012516');
     expect(html).toContain('+184 bps (1.84%) over spot $0.012290');
+    // Each figure names its reference time in the cell; the footnote needs no hover.
+    expect(html).toContain('stored price from 2026-11-14 06:00 UTC, 2 min before the swap');
+    expect(html).toContain('A price move between that stored price and the swap reads as cost');
+    expect(html).not.toContain('hover');
     expect(html).toContain('>unavailable<');
     expect(html).toContain('0x5d0c02d9…2a3f0e');
     expect(html).not.toContain('0xfeed');
