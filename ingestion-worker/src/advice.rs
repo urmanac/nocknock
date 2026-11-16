@@ -774,6 +774,9 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         },
         accumulation_plan: plan_status,
         lp_rebuild,
+        // Filled in by the ingestion cycle from the accumulation ledger (cost_basis.rs);
+        // this function reads no ledger rows.
+        cost_basis: None,
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: fee_entries
                 .iter()

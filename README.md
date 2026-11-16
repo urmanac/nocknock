@@ -67,6 +67,10 @@ Everything comes from `ingestion-worker/config.yaml`:
   asks Aero's and Uniswap's quoter contracts what that exact amount returns in NOCK and
   shows both. Read-only, a comparison and not a recommendation; set it to `false` to
   stop the quoter calls.
+- `cost_basis.opening`: optional, and yours alone to fill in: what the NOCK you already
+  held cost you, as of an instant you name, with a note on where the figures came from.
+  Without it NockNock reports the average cost of your plan's verified buys and nothing
+  more (see "Cost basis" below).
 
 The shipped `config.yaml.example` is loaded as the base layer and still carries the
 original operator's wallet, positions and limits. Set or clear every one of those in your
@@ -86,11 +90,64 @@ Each ingestion cycle produces one directive. The first rule that applies wins:
 | 4 | **RANGE EXIT / BATCH HARVEST** | The price-source range has been exited, or uncollected LP fees reach the fixed $5.00 threshold | Facts about the exited range, or that fees are worth collecting. Harvest is advised only when no tranche is due. |
 | 5 | **Waiting plan** (DCA ON SCHEDULE, pending, paused, blocked) | A plan exists but nothing is due | When the next tranche is due and its size. |
 | 6 | **Planless arms** (nothing to track yet, build from zero, tax reserve short, dip zone) | No plan is configured | Facts only: what the wallet holds and where the price is. No buy is sized; the numbers are yours to set. |
-| 7 | **HOLD & ACCRETE** | Nothing above applies | What the LP positions are doing. No profit or loss is claimed (NockNock does not track cost basis). |
+| 7 | **HOLD & ACCRETE** | Nothing above applies | What the LP positions are doing. No profit or loss is claimed: cost basis is reported separately, as a measurement (below), and never drives a directive. |
 
 Alongside the directive, the **LP rebuild bias** stands: while LP holds less than your
 LP target, NockNock suggests deposits into the positions you track. Rebuilding ranges is
 a reposition, with no net cash change. With no LP target configured it suggests nothing.
+
+### Cost basis: what NockNock knows, and what only you know
+
+NockNock reports what NOCK cost in two layers, and keeps them apart.
+
+**Plan buys (always on).** Every buy the accumulation plan paced and verified on-chain is
+in the accumulation ledger with the USDC that left the wallet and the NOCK that entered
+it. Their running average cost is exact. The dashboard panel **Average cost vs spot**
+charts it against the stored NOCK price, marks each buy, lists what each buy did to the
+average, and states what that NOCK is worth at the current spot against what it cost.
+That difference is a measurement: a valuation of the NOCK those buys acquired. It does
+not say the NOCK is still held, because NockNock does not track whether it was later
+sold or moved into LP. NockNock sizes no buy from it and never suggests averaging down
+([why](docs/lore/2026-11-14-four-pillars-no-hurry.md)).
+
+**Whole stack (only if you supply it).** NockNock cannot work out what the rest of your
+NOCK cost. The chain does not say what you paid before the plan, what you sold, or what
+moved through LP ranges. If you want a whole-stack average, enter your own opening
+figures in `config.yaml`:
+
+```yaml
+cost_basis:
+  opening:
+    nock_amount: <NOCK you held at as_of, as a number>
+    cost_usd: <what that NOCK cost you in total, in USD, as a number>
+    as_of: <the instant you read those figures, written like "YYYY-MM-DDTHH:MM:SSZ">
+    source: <where the figures came from, in your own words>
+```
+
+- Blended average = (`cost_usd` + USDC of verified buys confirmed after `as_of`) /
+  (`nock_amount` + NOCK received in those buys). It is shown with your `source` note and
+  the instant, as your figure. NockNock neither reads nor checks the opening numbers.
+- Buys confirmed at or before `as_of` are taken to be inside your figures and are not
+  added again. That is why `as_of` must be a full timestamp: a date alone does not say
+  whether a buy made that day is already counted.
+- **Not tracked after `as_of`:** sells, NOCK that LP ranges sell or buy back, fees earned
+  in NOCK, transfers in or out, buys you did not record, realized gains and losses, and
+  gas. The panel and the MCP text show the NOCK NockNock reads now (to the nearest
+  whole NOCK) beside the NOCK the basis covers, so the difference is visible.
+- Unset, the whole-stack basis reads "not configured". A half-filled block, a zero or
+  negative amount, or an `as_of` in the future is a configuration error, shown on the
+  dashboard, in the snapshot and in MCP. It is never completed with a default, and it
+  does not stop the worker.
+
+Where the numbers are: `derived_metrics.cost_basis` in the snapshot, the series behind
+the chart at `GET /v1/cost-basis/series` (fills with their running averages, and stored
+spot; gaps in the price history stay gaps), and two lines in the `get_portfolio_state`
+MCP text. After a database loss the plan buys come back when you record their
+transaction hashes again; the opening basis lives in `config.yaml`; the stored price
+history restarts from backfilled candles, so older stretches of the spot line are coarser.
+A backfilled candle is drawn at its open time with its open price (the price at that
+instant), and a buy is matched to the worker's own stored read when one lies within 60
+minutes of it, otherwise to the nearest backfilled point in that window.
 
 ---
 
@@ -271,7 +328,7 @@ To connect NockNock to Claude Desktop, Gemini Antigravity, Cursor, or Mecris, ad
 ```
 
 **Exposed MCP Tools:**
-- `get_portfolio_state`: Balances, the four pillars (NOCK, USDC, ETH, AERO), gas held, AERO held and unclaimed, the NOCK floor buffer (if you set a floor), and the directive.
+- `get_portfolio_state`: Balances, the four pillars (NOCK, USDC, ETH, AERO), gas held, AERO held and unclaimed, the NOCK floor buffer (if you set a floor), the average cost of your plan's verified buys against spot (and the whole-stack average if you configured an opening basis), and the directive.
 - `get_shot_advice`: The current directive, its details, and the harvest rule.
 - `simulate_claim_fees`: Gas versus uncollected LP fees across the tracked LP positions. A position whose fees are not LP-claimable says why, followed by its unclaimed AERO (an amount, not a suggestion to claim).
 - `get_accumulation_plan`: Your DCA plan's status, next tranche, verified buys, swaps found on-chain that await your confirmation (listed only: MCP has no write tool), the LP rebuild bias and, while a tranche is due, read-only route quotes for that amount on Aero and Uniswap (a comparison, not a recommendation).

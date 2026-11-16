@@ -2,7 +2,7 @@
   "aero_held_block_58077673": {
     "mcp_text": {
       "get_accumulation_plan": "🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n• LP rebuild bias: under_target (holds $242.72 of a $332.63 target, $89.91 short). Rebuilding ranges is a reposition: no net cash change.\n   ✗ Aero CL WETH/NOCK 0.97% #2914490: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions\n   ✗ Aero USDC/NOCK 0.30% (full range): cannot be funded: only 0 NOCK sits above the hard floor (a range can sell its NOCK as price rises, so floor NOCK is never placed in LP)",
-      "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $2217.50 USD\n• Pillars: NOCK $1167.42 · USDC $922.80 · ETH $126.71 · AERO $0.57\n• Sovereign NOCK Stack: 103433 NOCK (+3433 above the 100000 NOCK floor)\n• Stable Stack: 922.80 USDC\n• Gas held (wallet ETH+WETH): 0.013347 ETH ($24.18), counted in the total; not cash, not deployable\n• AERO held (wallet): 1.359979 AERO ($0.57), counted in the total; not cash, not deployable, no target\n• Unclaimed AERO: 12.043104 AERO ($5.03) in tracked gauges, not counted in the total\n   - Aero USDC/NOCK: 0.121026 AERO ($0.05)\n   - Aero CL WETH/NOCK #2914490: 11.922078 AERO ($4.98)\n• AERO/USD: $0.417608\n• High-Water Mark: $2217.50 USD\n• Tactical Directive: DIP ZONE (No Buy Plan Configured)",
+      "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $2217.50 USD\n• Pillars: NOCK $1167.42 · USDC $922.80 · ETH $126.71 · AERO $0.57\n• Sovereign NOCK Stack: 103433 NOCK (+3433 above the 100000 NOCK floor)\n• Stable Stack: 922.80 USDC\n• Gas held (wallet ETH+WETH): 0.013347 ETH ($24.18), counted in the total; not cash, not deployable\n• AERO held (wallet): 1.359979 AERO ($0.57), counted in the total; not cash, not deployable, no target\n• Unclaimed AERO: 12.043104 AERO ($5.03) in tracked gauges, not counted in the total\n   - Aero USDC/NOCK: 0.121026 AERO ($0.05)\n   - Aero CL WETH/NOCK #2914490: 11.922078 AERO ($4.98)\n• AERO/USD: $0.417608\n• High-Water Mark: $2217.50 USD\n• Cost basis: not reported by this snapshot\n• Tactical Directive: DIP ZONE (No Buy Plan Configured)",
       "get_shot_advice": "🎯 Tactical Shot Advice Engine\n===============================\n• Recommended Action: DIP ZONE (No Buy Plan Configured)\n• Decision Matrix Details: Spot $0.01129 is below the $0.020 accumulation line and the wallet holds $891.38 of liquid USDC. Liquid dry powder: $780.51 (wallet USDC $891.38 less the larger of the $110.88 cash target and the $0.00 virtual tax reserve). The $31.42 of USDC inside LP is working capital, not dry powder: it stays in its ranges. NockNock does not size buys outside a plan: add an accumulation_plan with your own budget_usdc, tranches and interval_hours and it will pace them. Standing bias: LP holds $242.72 against a $332.63 target (15% of portfolio), $89.91 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. No tracked position is eligible for a deposit right now.\n• Uncollected Claimable Fees: $0.00 USD\n• Net of two claims' gas: -$0.01 USD\n• Harvest rule: BATCH HARVEST is advised once uncollected LP fees reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).",
       "simulate_claim_fees": "⚡ Fee Claim Simulation\n=======================\n• Total Gross Claimable: $0.0000 USD\n• Estimated Gas: n/a (nothing LP-claimable)\n• Net Accretion if Harvested: n/a (nothing LP-claimable)\nPool Breakdown:\n  - USDC+NOCK (Aerodrome): not LP-claimable (claimFees() reverts); unclaimed AERO 0.121026 ($0.05)\n  - WETH+NOCK (Aero CL #2914490): not LP-claimable (staked: swap fees on staked liquidity go to the gauge); unclaimed AERO 11.922078 ($4.98)\n"
     },
@@ -55,6 +55,7 @@
             "93796.4586"
           ]
         },
+        "cost_basis": null,
         "global_status": {
           "aero_note": null,
           "aero_price_usd": "0.417608",
@@ -388,12 +389,12 @@
         }
       ]
     },
-    "state_hash": "0d1b17c3608a26caf5fab5bdc03d5174f62bf2f782a27ba26672a9bd788ba525"
+    "state_hash": "6fa09760f0d3ef159369b8e7820df9a80b1bf19e79e1e42179c3b508536b72f3"
   },
   "aero_unclaimed_block_58077673": {
     "mcp_text": {
       "get_accumulation_plan": "🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n• LP rebuild bias: under_target (holds $242.72 of a $332.54 target, $89.82 short). Rebuilding ranges is a reposition: no net cash change.\n   ✗ Aero CL WETH/NOCK 0.97% #2914490: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions\n   ✗ Aero USDC/NOCK 0.30% (full range): cannot be funded: only 0 NOCK sits above the hard floor (a range can sell its NOCK as price rises, so floor NOCK is never placed in LP)",
-      "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $2216.93 USD\n• Pillars: NOCK $1167.42 · USDC $922.80 · ETH $126.71 · AERO $0.00\n• Sovereign NOCK Stack: 103433 NOCK (+3433 above the 100000 NOCK floor)\n• Stable Stack: 922.80 USDC\n• Gas held (wallet ETH+WETH): 0.013347 ETH ($24.18), counted in the total; not cash, not deployable\n• AERO held (wallet): 0.000000 AERO ($0.00), counted in the total; not cash, not deployable, no target\n• Unclaimed AERO: 12.043104 AERO ($5.03) in tracked gauges, not counted in the total\n   - Aero USDC/NOCK: 0.121026 AERO ($0.05)\n   - Aero CL WETH/NOCK #2914490: 11.922078 AERO ($4.98)\n• AERO/USD: $0.417608\n• High-Water Mark: $2216.93 USD\n• Tactical Directive: DIP ZONE (No Buy Plan Configured)",
+      "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $2216.93 USD\n• Pillars: NOCK $1167.42 · USDC $922.80 · ETH $126.71 · AERO $0.00\n• Sovereign NOCK Stack: 103433 NOCK (+3433 above the 100000 NOCK floor)\n• Stable Stack: 922.80 USDC\n• Gas held (wallet ETH+WETH): 0.013347 ETH ($24.18), counted in the total; not cash, not deployable\n• AERO held (wallet): 0.000000 AERO ($0.00), counted in the total; not cash, not deployable, no target\n• Unclaimed AERO: 12.043104 AERO ($5.03) in tracked gauges, not counted in the total\n   - Aero USDC/NOCK: 0.121026 AERO ($0.05)\n   - Aero CL WETH/NOCK #2914490: 11.922078 AERO ($4.98)\n• AERO/USD: $0.417608\n• High-Water Mark: $2216.93 USD\n• Cost basis: not reported by this snapshot\n• Tactical Directive: DIP ZONE (No Buy Plan Configured)",
       "get_shot_advice": "🎯 Tactical Shot Advice Engine\n===============================\n• Recommended Action: DIP ZONE (No Buy Plan Configured)\n• Decision Matrix Details: Spot $0.01129 is below the $0.020 accumulation line and the wallet holds $891.38 of liquid USDC. Liquid dry powder: $780.54 (wallet USDC $891.38 less the larger of the $110.85 cash target and the $0.00 virtual tax reserve). The $31.42 of USDC inside LP is working capital, not dry powder: it stays in its ranges. NockNock does not size buys outside a plan: add an accumulation_plan with your own budget_usdc, tranches and interval_hours and it will pace them. Standing bias: LP holds $242.72 against a $332.54 target (15% of portfolio), $89.82 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. No tracked position is eligible for a deposit right now.\n• Uncollected Claimable Fees: $0.00 USD\n• Net of two claims' gas: -$0.01 USD\n• Harvest rule: BATCH HARVEST is advised once uncollected LP fees reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).",
       "simulate_claim_fees": "⚡ Fee Claim Simulation\n=======================\n• Total Gross Claimable: $0.0000 USD\n• Estimated Gas: n/a (nothing LP-claimable)\n• Net Accretion if Harvested: n/a (nothing LP-claimable)\nPool Breakdown:\n  - USDC+NOCK (Aerodrome): not LP-claimable (claimFees() reverts); unclaimed AERO 0.121026 ($0.05)\n  - WETH+NOCK (Aero CL #2914490): not LP-claimable (staked: swap fees on staked liquidity go to the gauge); unclaimed AERO 11.922078 ($4.98)\n"
     },
@@ -446,6 +447,7 @@
             "93796.4586"
           ]
         },
+        "cost_basis": null,
         "global_status": {
           "aero_note": null,
           "aero_price_usd": "0.417608",
@@ -779,6 +781,6 @@
         }
       ]
     },
-    "state_hash": "7669d416d80114c6e94fe7d843d963ff800e6d3f53a2e953d567f23b10c74fc6"
+    "state_hash": "f67794b2d0b4091f50d5832e95da1f1af36fe234e2eaeabadaade971b4c2698a"
   }
 }

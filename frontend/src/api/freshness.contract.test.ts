@@ -192,7 +192,7 @@ describe('Freshness Contract', () => {
     expect(ag.positions_nock.length).toBe(data.positions.length);
     expect(ag.tranche_1_nock).toBeUndefined();
     // Meta version: the current snapshot spec (specs/core/snapshot.yaml info.version).
-    expect(latestSnapshot!.meta.version).toBe('2.5.0');
+    expect(latestSnapshot!.meta.version).toBe('2.6.0');
   });
 
   it('2.3.0 pillars partition the total and the wallet reports its gas', () => {

@@ -57,7 +57,7 @@ pub(crate) async fn mcp_http_handler(
                 "tools": [
                     {
                         "name": "get_portfolio_state",
-                        "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, native token balance, and active tranche allocations.",
+                        "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, native token balance, active tranche allocations, and the average cost of the plan's verified NOCK buys against spot (plus the whole-stack average when an opening basis is configured).",
                         "inputSchema": {
                             "type": "object",
                             "properties": {},

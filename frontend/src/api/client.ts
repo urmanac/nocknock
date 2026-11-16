@@ -295,4 +295,7 @@ export const api = {
   // quotes are not part of it, so a revalidated snapshot can carry older ones.
   latestRouteQuotes: () =>
     request<LatestRouteQuotesResponse>('/accumulation/quotes/latest', { cache: 'no-store' }),
+  // Average cost vs spot (v0.6.0, #98): verified fills with running averages, and stored spot.
+  costBasisSeries: (days?: number) =>
+    request<import('../costBasis').CostBasisSeries>(`/cost-basis/series${days ? `?days=${days}` : ''}`),
 };

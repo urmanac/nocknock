@@ -12,6 +12,10 @@ use fill_text::fill_detection_lines;
 #[path = "../quote_text.rs"]
 mod quote_text;
 use quote_text::route_quote_lines;
+/// Shared with the worker (src/cost_basis_text.rs) so both transports print the same
+/// cost-basis lines. This binary cannot import from main.rs, so it compiles the file.
+#[path = "../cost_basis_text.rs"]
+mod cost_basis_text;
 
 /// Worker base URL when NOCKNOCK_API_URL is unset. Point the variable at a remote
 /// deployment (e.g. `http://chudmax:8081`) to read it instead of a local worker.
@@ -92,7 +96,7 @@ async fn main() -> Result<()> {
                         "tools": [
                             {
                                 "name": "get_portfolio_state",
-                                "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, native token balance, and tracked LP position totals.",
+                                "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, native token balance, tracked LP position totals, and the average cost of the plan's verified NOCK buys against spot (plus the whole-stack average when an opening basis is configured).",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {},
@@ -341,6 +345,8 @@ fn format_portfolio_state(data: &Value) -> String {
         (Some(eth), None) => format!("{eth} ETH (USD value not reported), counted in the total; not cash, not deployable"),
         _ => not_reported.to_string(),
     };
+    // Cost basis (issue #98): the worker's own lines, compiled from the same source file.
+    let cost_basis = cost_basis_text::cost_basis_lines(data);
 
     format!(
         "📈 NockNock Sovereign Portfolio State\n\
@@ -352,6 +358,7 @@ fn format_portfolio_state(data: &Value) -> String {
          • Gas held (wallet ETH+WETH): {gas}\n\
          {aero}\n\
          • High-Water Mark: {hwm}\n\
+         {cost_basis}\n\
          • Tactical Directive: {advice}"
     )
 }
@@ -636,6 +643,32 @@ mod tests {
         assert!(zero_db_fallback_text("get_shot_advice", "x").contains("Tactical Shot Advice Engine"));
         assert!(zero_db_fallback_text("simulate_claim_fees", "x").contains("Fee Claim Simulation"));
         assert_eq!(zero_db_fallback_text("nope", "x"), "Unknown tool: nope");
+    }
+
+    #[test]
+    fn test_fallback_state_prints_the_cost_basis_lines_the_worker_prints() {
+        // The block as the worker emits it (issue #98); figures from tests_cost_basis.rs.
+        let mut data = from_zero_snapshot();
+        data["derived_metrics"]["cost_basis"] = json!({
+            "spot_price_usd": "0.011530",
+            "plan_buys": {
+                "status": "ok", "reason": null, "fills": 3, "spent_usdc": "60.00", "acquired_nock": "5098.5115",
+                "avg_cost_usd": "0.011768", "value_at_spot_usd": "58.79", "unrealized_usd": "-1.21", "unrealized_pct": "-2.02"
+            },
+            "whole_stack": { "status": "not_configured", "reason": "cost_basis.opening is not set in config." }
+        });
+        let text = format_portfolio_state(&data);
+        // Same source file as the worker's HTTP transport, so the lines are identical.
+        assert!(text.contains(&cost_basis_text::cost_basis_lines(&data)), "{text}");
+        assert!(
+            text.contains("• Plan buys average cost: $0.011768 per NOCK over 3 verified buy(s) ($60.00 for 5098.5115 NOCK). At spot $0.011530 that NOCK is worth $58.79: $1.21 below cost (-2.02%)."),
+            "{text}"
+        );
+        assert!(text.contains("• Whole-stack average cost: not configured"), "{text}");
+        // A snapshot from a worker without the field says so; it prints no $0 basis.
+        let old = format_portfolio_state(&from_zero_snapshot());
+        assert!(old.contains("• Cost basis: not reported by this snapshot"), "{old}");
+        assert!(!old.contains("average cost: $0"), "{old}");
     }
 }
 

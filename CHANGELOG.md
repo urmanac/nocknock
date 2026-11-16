@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — snapshot spec 2.6.0 (guided buys: #115, #98)
+- `SNAPSHOT_SPEC_VERSION`, `specs/core/snapshot.yaml` and the frontend contract test move
+  from 2.5.0 to 2.6.0. `accumulation_plan.route_quotes` (#115) and
+  `derived_metrics.cost_basis` (#98) are optional or nullable, so an older reader still
+  parses a 2.6.0 snapshot.
+- The three golden snapshots were regenerated at this point: each case gains
+  `cost_basis: null`, the line "Cost basis: not reported by this snapshot" in the
+  `get_portfolio_state` text (the fixtures carry no accumulation ledger), and a new state
+  hash. Nothing else differs.
+
+### Added — cost basis and the average-cost chart (#98)
+- **Plan buys: average cost against spot.** The snapshot gains `derived_metrics.cost_basis`.
+  Its `plan_buys` layer is the running average cost of every receipt-verified buy in the
+  accumulation ledger (per plan and across plans), what that NOCK is worth at the current
+  spot, and the signed difference. It needs no operator input and reads
+  `accumulation_events` only; fill recording, receipt verification and plan pacing are
+  untouched.
+- **Whole stack: only from an operator-entered opening basis.** New optional config
+  `cost_basis.opening` (`nock_amount`, `cost_usd`, `as_of`, `source`). NockNock cannot
+  derive the stack's history from the chain and never fills these in. Unset, the
+  `whole_stack` layer is `not_configured` and carries no number. Set, the blended average
+  is (opening cost + verified buys after `as_of`) / (opening NOCK + NOCK bought since),
+  labelled with the source note and the instant, with statements of exactly what is and
+  is not counted: sells, LP rebalancing, fees, transfers and unrecorded buys after
+  `as_of` are not tracked.
+- **Config errors are stated, not defaulted.** A half-filled block, a zero or negative
+  amount or cost, a non-numeric value, a missing source, an `as_of` in the future, or an
+  `as_of` that is a date without a time and offset makes `whole_stack.status` `invalid`
+  with a reason naming every problem. The worker keeps running and plan buys still
+  report; the error is also logged once at startup.
+- **`GET /v1/cost-basis/series`**: every verified fill with the running averages after it
+  (its plan's, the ledger's, and the blended one when configured), the stored spot
+  that stands for it (within 60 minutes, else null), and the stored spot history over
+  the range, thinned to at most one stored observation per bucket. Nothing is
+  interpolated: a bucket with no observation has no point. `?days=` sets the range
+  (1 to 365).
+- **Every spot point is the price at its own time.** The price history stores a
+  third-party candle at its open time with its close as the price, which is the price an
+  hour (or a day) later. The series uses the candle's open instead, so a backfilled
+  point is never a later price shown early; a candle without a usable open yields no
+  point. A buy is matched to the worker's own read when one lies within the 60 minutes,
+  and to a backfilled point only when there is none.
+- **Dashboard panel "Average cost vs spot"** (`AverageCostPanel`, helper `costBasis.ts`):
+  the average-cost step line, the spot line with its gaps shaded and never bridged, a
+  marker on each buy, a table of what each buy did to the average, and the difference at
+  spot stated as a fact. No advice: nothing suggests buying, selling or averaging down.
+  The difference is described as a valuation of the NOCK the buys acquired; the panel
+  does not claim that NOCK is still held, because sells and LP activity are not tracked.
+- **MCP**: `get_portfolio_state` gains two cost-basis lines. Both transports compile them
+  from one file (`src/cost_basis_text.rs`), so they cannot drift, and both say so in the
+  tool's `tools/list` description. The whole-stack line values "the NOCK this basis
+  covers" and puts the NOCK read now beside it.
+- **A failed ledger read is `unavailable`, never "no buys".** It does not fail the cycle,
+  `plan_buys.fills` is null (not 0) in that state, and both plan-buys tiles on the
+  dashboard say "unavailable" with the reason.
+- `whole_stack.held_nock` is a whole number of NOCK, the precision the snapshot's own
+  total has.
+- `/v1/snapshot/historical` rows keep the cost-basis figures and drop the repeated
+  `includes`/`excludes` prose, so the history payload stays bounded.
+- New modules `cost_basis` and `cost_basis_text`; tests in `tests_cost_basis.rs`, built
+  from the operator's three real plan buys re-read from Base (ONCHAIN_INTEGRATION.md §12).
+  No migration. The golden snapshot gains `"cost_basis": null` and one portfolio-text
+  line per fixture (its pure path does not read the ledger); no other byte moved.
+- Specs: `CostBasis`, `PlanBuysBasis`, `WholeStackBasis` in `snapshot.yaml`; the series
+  endpoint and `CostBasisSpotPoint` in `api.yaml`. The spec version is not bumped here.
+
 ### Added — route quotes for a due tranche (#115)
 - **Both venues, quoted for the exact tranche.** When the plan's status is `tranche_due`
   the worker asks each venue's own quoter contract what that tranche amount returns in

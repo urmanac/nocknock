@@ -265,6 +265,14 @@ pub(crate) fn slim_historical_payload(data: &mut SnapshotData) {
     // Channels are recomputed by the worker each cycle from history; historical rows
     // never need to carry them
     dm.structural_channels.channels.clear();
+    // The cost-basis statements (#98) are fixed prose repeated in every row; history
+    // keeps the figures and drops the prose. `/snapshot/latest` still carries it.
+    if let Some(cb) = dm.cost_basis.as_mut() {
+        cb.plan_buys.includes.clear();
+        cb.plan_buys.excludes.clear();
+        cb.whole_stack.includes.clear();
+        cb.whole_stack.excludes.clear();
+    }
 }
 
 pub(crate) async fn get_snapshot_metadata_handler(

@@ -1076,3 +1076,61 @@ The retired v4 USDC/NOCK 0.75% pool (`0x91a9ef0a…f99c`, zero in-range liquidit
   estimate; it is not shown). Gas is ETH, a different pillar.
 - **The legacy Aerodrome vAMM** `0x85f1aa3a…d626` (plan buy 3 went through it, §10) is
   deep, but `app.aero.xyz` does not list it. It is not quoted.
+## 12. Accumulation Fills Behind the Cost-Basis Fixtures (#98) — Read 2026-11-16
+
+The cost basis (issue #98) adds **no contract address, function selector or event topic**.
+It reads the `accumulation_events` table, whose rows the record handler already wrote
+from receipt logs (`parse_accumulation_swap` in `ledger.rs`). Its unit-test fixtures
+(`ingestion-worker/src/tests_cost_basis.rs`, `frontend/src/costBasis.test.ts`) are the
+operator's three real plan buys, re-read from Base here so the expected averages rest on
+chain data rather than on the ledger's own copy.
+
+RPC: `https://base-rpc.publicnode.com`, read-only. Chain head at the time:
+`eth_blockNumber` → `0x375f6e7` (58062567).
+
+### Scaling assumptions, re-read
+
+| Call | To | Data | Raw result | Meaning |
+|---|---|---|---|---|
+| `decimals()` `0x313ce567` | NOCK `0x9B5E262cF9bb04869ab40b19AF91D2dc85761722` | `0x313ce567` | `0x…0010` | 16 |
+| `decimals()` `0x313ce567` | USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` | `0x313ce567` | `0x…0006` | 6 |
+
+Both at `latest` (head 58062567). `keccak256("Transfer(address,address,uint256)")` was
+recomputed as `0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef`, the
+topic `ledger.rs` already matches.
+
+### The three receipts (`eth_getTransactionReceipt`, then `eth_getBlockByNumber`)
+
+Each receipt has `status 0x1`, `from` = the wallet
+`0xeE114cC97eC5adeB34bA5645e315B497D8487a45`, exactly one USDC `Transfer` out of the
+wallet and exactly one NOCK `Transfer` into it.
+
+| Tx | Block | Block `timestamp` | USDC out of wallet (raw `data`) | NOCK into wallet (raw `data`) | `to` |
+|---|---|---|---|---|---|
+| `0x5d0c02d9929f49f71526e0c8d91d1bd99ec19f116befc285d67f6bf9412a3f0e` | 57228848 (`0x3693e30`) | `0x6af7f971` = 2026-11-14T06:02:25Z | `0x…01312d00` = 20000000 | `0x…ddc205801b5ceaca` = 15979340475636968138 | `0x0fef9e88…ee98` (Aero router, §6) |
+| `0x4644edd99bb2770f369862357eb5647a68a7157ca9e91ecccfce79e6964c61e8` | 57605753 (`0x36efe79`) | `0x6af91fe6` = 2026-11-15T02:58:46Z | `0x…01312d00` = 20000000 | `0x…eeba6ce707ab3fb6` = 17202181466216939446 | `0x0fef9e88…ee98` (Aero router, §6) |
+| `0x78376f3cc9e80f2eb124a945a452df40556649e3d9983be526b2bd97586e31b9` | 58040708 (`0x375a184`) | `0x6afa73b5` = 2026-11-16T03:08:37Z | `0x…01312d00` = 20000000 | `0x…f713117c2d57cfbb` = 17803592976960049083 | `0xcaf22ce3…7c67` (not identified; acceptance is contract-agnostic) |
+
+### What follows from them
+
+| After buy | USDC spent | NOCK received | Price paid | Running average cost |
+|---|---|---|---|---|
+| 1 | 20 | 1,597.9340475636968138 | $0.01251616 | $0.01251616 |
+| 2 | 20 | 1,720.2181466216939446 | $0.01162643 | $0.01205490 |
+| 3 | 20 | 1,780.3592976960049083 | $0.01123369 | $0.01176814 |
+
+Total: $60 for 5,098.5114918813956667 NOCK. These are the figures the tests assert, and
+they match what the deployment's `GET /v1/accumulation/events` returned on the same day
+(plan `2026-11-reentry`).
+
+### Not verified
+
+- **The price at each buy's block.** The series pairs each buy with the nearest *stored*
+  spot within 60 minutes (`market_price_history`), not with a pool read at the block. No
+  historical pool read was added.
+- **The third buy's router** (`0xcaf22ce31298cf2bf1d152862f80216478ad7c67`). Its code
+  and name were not looked up. The record handler accepts a buy on the wallet's own
+  USDC and NOCK Transfer logs, whatever contract routed it.
+- **The SQL.** The two new queries (the ledger read and the price-history read) are
+  plain named-column SELECTs. They were not run against a PostgreSQL instance in this
+  session: no local server was available and the deployment's database was not touched.

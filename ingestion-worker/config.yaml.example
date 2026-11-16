@@ -205,6 +205,35 @@ operator_profile:
 #   enabled: true
 
 # ============================================================
+# Cost Basis — optional opening basis for the whole stack (v0.6.0)
+# ============================================================
+# NockNock always reports the average cost of the buys its accumulation plan verified,
+# and charts it against the price. That needs nothing here.
+#
+# It cannot work out what the REST of your NOCK cost: the chain does not say what you
+# paid before, what you sold, or what moved through LP. If you want a whole-stack
+# average, enter your own opening figures below, read from wherever you keep them (a
+# wallet app's performance panel, a tax tool, a spreadsheet). NockNock never fills these
+# in. Leave the block commented out and the whole-stack basis reads "not configured".
+#
+# All four keys are required together. A half-filled block, a zero or negative amount, a
+# date without a time, or an as_of in the future is reported as a configuration error
+# (dashboard, snapshot, MCP); it is never completed with a default.
+#
+#   Blended average = (cost_usd + USDC of verified buys confirmed after as_of)
+#                   / (nock_amount + NOCK received in those buys)
+#
+# Buys confirmed at or before as_of are taken to be inside your figures already.
+# Not tracked after as_of: sells, LP ranges selling or buying NOCK, fees earned,
+# transfers in or out, and buys you did not record.
+# cost_basis:
+#   opening:
+#     nock_amount: <NOCK you held at as_of, as a number>
+#     cost_usd: <what that NOCK cost you in total, in USD, as a number>
+#     as_of: <the instant you read those figures, written like "YYYY-MM-DDTHH:MM:SSZ">
+#     source: <where the figures came from, in your own words>
+
+# ============================================================
 # Market Price Backfill Engine (v0.3.0)
 # ============================================================
 # Heals gaps in market_price_history from free public OHLCV feeds and extends

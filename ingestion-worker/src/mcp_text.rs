@@ -64,6 +64,8 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
         (Some(eth), None) => format!("{eth} ETH (USD value not reported), counted in the total; not cash, not deployable"),
         _ => not_reported.to_string(),
     };
+    // Cost basis (issue #98): the same lines in both MCP transports (cost_basis_text.rs).
+    let cost_basis = cost_basis_lines(data);
 
     format!(
         "📈 NockNock Sovereign Portfolio State\n\
@@ -75,6 +77,7 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
          • Gas held (wallet ETH+WETH): {gas}\n\
          {aero}\n\
          • High-Water Mark: {hwm}\n\
+         {cost_basis}\n\
          • Tactical Directive: {advice}"
     )
 }
