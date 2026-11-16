@@ -21,13 +21,38 @@ The last part ran overnight without the operator, by their instruction.*
 - chudmax runs **v0.5.3** at the end of this session. Nothing from the stack below was
   deployed.
 
+## Afterwards, on 2026-11-16: merged and deployed
+
+The sections below were written overnight, before the operator was back. This is what
+happened next, at the operator's instruction ("Yes, merge in order", and a standing
+authorization to deploy to chudmax whenever it is appropriate):
+
+- **Merged.** #120 to #126 went into `main` one at a time, in order, each after a green CI
+  run against `main`. Retargeting a pull request does not start CI, so each was closed and
+  reopened to trigger it. `main` at `1f659c2` is byte-identical to the stack tip that was
+  reviewed and tested, and CI on `main` is green.
+- **Deployed.** `main` at `1f659c2` was deployed to chudmax with the operator's config
+  unchanged (three positions; the Aero CL block has not been added). Checked there:
+  `/health` ok with `last_error: null`; snapshot spec 2.6.0; migrations 10, 11 and 12
+  applied; the plan still reads $60 of $100 over 3 buys at $0.011768; fill detection `ok`
+  back to the plan anchor with nothing uncounted; AERO read (0.16 unclaimed in the basic
+  gauge); the harvest ledger and the tax export unchanged; the MCP playtest passed on both
+  transports; the dashboard rendered with no console errors.
+- **Each buy's reference spot** was written by the corrected lookup (#129) from the
+  worker's own reads within a minute of the swap, and equals the cost-basis panel's figure
+  for the same buy.
+- **Not done:** no tag. `Cargo.toml` still says 0.5.0 and CHANGELOG has no version section
+  for this work.
+- **Found on chudmax:** the average-cost chart labels every hourly backfilled candle as a
+  gap (#137, cosmetic).
+
 ## What was filed
 
 - Milestones v0.6.0 (#97, #91, #93, #118), v0.7.0 (#115, #98), v0.8.0 (#89).
 - New issues: #118 (fill detection), #119 (from-zero ingestion, unscheduled). #115 was
   rewritten to cover route quotes only.
 
-## The stack (nothing merged, nothing tagged, nothing deployed)
+## The stack (as it stood overnight: nothing merged, tagged or deployed)
 
 Seven pull requests, each based on the one before it:
 
