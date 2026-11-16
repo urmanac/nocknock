@@ -1,0 +1,27 @@
+[Unit]
+Description=NockNock opt-in TLS proxy (Caddy, private CA) in front of the dashboard
+# Ordered after the dashboard, but neither needs the other: the plain-HTTP dashboard on
+# :3000 works the same with or without this unit.
+After=nocknock-frontend.service
+Wants=nocknock-frontend.service
+
+[Container]
+ContainerName=nocknock-tls
+Image=docker.io/library/caddy:2
+Network=nocknock.network
+# An unprivileged port: rootless Podman cannot publish below 1024, so not 443. Host
+# port 8080 belongs to Strata on chudmax and is refused by render.sh.
+PublishPort=@PORT@:@PORT@
+Volume=%h/nocknock/tls/Caddyfile:/etc/caddy/Caddyfile:ro
+# The private CA (its root key included) and the certificates it issues. Deleting this
+# volume makes Caddy create a new root, and every phone must install that one instead.
+Volume=nocknock-tls-data.volume:/data
+
+[Service]
+Restart=always
+RestartSec=5
+# The first start pulls the image.
+TimeoutStartSec=300
+
+[Install]
+WantedBy=default.target

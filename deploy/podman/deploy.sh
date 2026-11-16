@@ -13,6 +13,17 @@
 # gitignored files included (#128).
 #
 # Host prerequisites (one-time):  sudo apt install podman
+#
+# Opt-in HTTPS for phones (issue #89; off unless asked for):
+#   NOCKNOCK_TLS=1 deploy/podman/deploy.sh [host]
+#       also installs and starts the Caddy proxy in deploy/podman/tls/ on an
+#       unprivileged port. NOCKNOCK_TLS_PORT (default 3443) picks the port and
+#       NOCKNOCK_TLS_NAMES (default: the host argument) lists every name or IPv4 address
+#       the phone will type, separated by spaces.
+#   NOCKNOCK_TLS=remove deploy/podman/deploy.sh [host]
+#       stops the proxy and removes its quadlet; its CA volume is kept.
+# With NOCKNOCK_TLS unset this script does not install, start, restart or remove it.
+# See docs/kb/how-to-phone-install-notifications-tls.md before turning it on.
 set -euo pipefail
 
 HOST="${1:-chudmax}"
@@ -21,6 +32,22 @@ CONFIG="${NOCKNOCK_CONFIG:-$ROOT/ingestion-worker/config.yaml}"
 cd "$ROOT"
 
 [ -f "$CONFIG" ] || { echo "missing $CONFIG (copy config.yaml.example and add your Alchemy key)" >&2; exit 1; }
+
+# Opt-in TLS proxy (#89). Checked and rendered here, before anything is shipped, so a
+# bad port or name stops the deploy instead of half-finishing it.
+TLS="${NOCKNOCK_TLS:-}"
+case "$TLS" in
+  ""|remove) ;;
+  1)
+    TLS_PORT="${NOCKNOCK_TLS_PORT:-3443}"
+    read -r -a TLS_NAMES <<< "${NOCKNOCK_TLS_NAMES:-$HOST}"
+    [ "${#TLS_NAMES[@]}" -gt 0 ] || { echo "NOCKNOCK_TLS_NAMES is blank: list at least one name or address" >&2; exit 1; }
+    TLS_DIR="$(mktemp -d)"
+    trap 'rm -rf "$TLS_DIR"' EXIT
+    deploy/podman/tls/render.sh "$TLS_DIR" "$TLS_PORT" "${TLS_NAMES[@]}"
+    ;;
+  *) echo "NOCKNOCK_TLS must be unset, 1 or remove (got '$TLS')" >&2; exit 1 ;;
+esac
 
 # Public client id baked into the bundle at build time; optional (pairing UI degrades without it).
 WC_ID="${VITE_WALLETCONNECT_PROJECT_ID:-$(sed -n 's/^VITE_WALLETCONNECT_PROJECT_ID=//p' frontend/.env.local 2>/dev/null || true)}"
@@ -52,4 +79,26 @@ ssh "$HOST" 'set -e
   for i in $(seq 1 30); do curl -fsS -m 3 http://localhost:3000/health && break; sleep 2; done; echo
   systemctl --user --no-pager --lines=0 status nocknock-db nocknock-worker nocknock-frontend | grep -E "●|Active:"'
 
+if [ "$TLS" = "1" ]; then
+  echo "==> installing the opt-in TLS proxy on port $TLS_PORT for: ${TLS_NAMES[*]}"
+  ssh "$HOST" 'mkdir -p ~/nocknock/tls && cat > ~/nocknock/tls/Caddyfile' < "$TLS_DIR/Caddyfile"
+  ssh "$HOST" 'cat > ~/.config/containers/systemd/nocknock-tls.container' < "$TLS_DIR/nocknock-tls.container"
+  ssh "$HOST" "set -e
+    cp ~/nocknock/src/deploy/podman/tls/nocknock-tls-data.volume ~/.config/containers/systemd/
+    systemctl --user daemon-reload
+    systemctl --user restart nocknock-tls.service
+    for i in \$(seq 1 30); do curl -fsSk -m 3 --connect-to '${TLS_NAMES[0]}:$TLS_PORT:127.0.0.1:$TLS_PORT' 'https://${TLS_NAMES[0]}:$TLS_PORT/health' && break; sleep 2; done; echo
+    systemctl --user --no-pager --lines=0 status nocknock-tls | grep -E '●|Active:'
+    echo 'root CA SHA-256 fingerprint (compare it on the phone before you trust the certificate):'
+    podman exec nocknock-tls cat /data/caddy/pki/authorities/local/root.crt | openssl x509 -noout -fingerprint -sha256 || echo '  not read; run deploy/podman/tls/export-root-ca.sh'"
+elif [ "$TLS" = "remove" ]; then
+  echo "==> removing the TLS proxy (the nocknock-tls-data volume, which holds its CA, is kept)"
+  ssh "$HOST" 'systemctl --user stop nocknock-tls.service 2>/dev/null || true
+    rm -f ~/.config/containers/systemd/nocknock-tls.container ~/.config/containers/systemd/nocknock-tls-data.volume
+    systemctl --user daemon-reload'
+fi
+
 echo "==> dashboard: http://$HOST:3000   API/MCP: http://$HOST:8081"
+if [ "$TLS" = "1" ]; then
+  echo "==> HTTPS dashboard: https://${TLS_NAMES[0]}:$TLS_PORT   (trusted only after the root CA is installed on the device)"
+fi

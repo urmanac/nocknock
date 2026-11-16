@@ -154,8 +154,8 @@ This guide captures the operational rules, environment quirks, toolchain configu
 Before pushing any PR or tag:
 ```bash
 make test-brain       # 3 tests (WASM invariants)
-make test-worker      # 309 tests as of #98: 290 worker + 19 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger)
-make test-frontend    # 222 tests as of #98 (staleness, contract, display helpers, charts, surfaces, ledger)
+make test-worker      # 342 tests as of #89: 323 worker + 19 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger)
+make test-frontend    # 256 tests as of #89 (staleness, contract, display helpers, charts, surfaces, ledger)
 make dist             # Verifies packaging of dist/ binaries and tarballs
 NOCKNOCK_API_URL=http://chudmax:8081 make test-mcp   # both MCP transports against the deployment
 ```
@@ -247,5 +247,10 @@ charts restart. See
   plainly, remove their ledger rows afterwards, and restore the operator's config.
 - **Do not** leave it running an unmerged branch at the end of a session without saying
   so in the session log.
+- **Opt-in TLS proxy (#89)**: `NOCKNOCK_TLS=1 deploy/podman/deploy.sh chudmax` adds the
+  `nocknock-tls` quadlet (Caddy, private CA, `https://chudmax:3443`). A deploy without
+  that variable never installs, restarts or removes it. Its `nocknock-tls-data` volume
+  holds the CA's root key: do not delete it casually (every phone would need the new
+  root) and never copy the key off the host. See `DEPLOYMENT.md` §7.
 - Other hosts (`netmoom`, `metnoom`) reject the workstation's SSH key; nothing runs there.
 

@@ -135,6 +135,23 @@ pub(crate) fn compute_derived_metrics(raw: &RawOnChainData, prev_hwm: f64, profi
     compute_derived_metrics_with_plan(raw, prev_hwm, profile, structural_channels, counterfactual_history, ledger, regime, &PlanContext::none())
 }
 
+/// Where spot stands against the top of the price-source range: the position, the top
+/// in display units (USD per NOCK) and whether spot is at or above it. One definition
+/// for the RANGE EXIT directive and for the range-exit push (#89), so they cannot
+/// disagree. None when there is no ranged price-source position, when that range holds
+/// no liquidity (an emptied range has nothing to exit: it earns nothing in or out of
+/// range), or when spot or the top is not a positive number.
+pub(crate) fn price_source_range_top(raw: &RawOnChainData) -> Option<(&RawPosition, f64, bool)> {
+    let spot = raw.spot_price_nock_usd;
+    raw.positions
+        .iter()
+        .find(|p| p.is_price_source && !is_full_range(p.tick_lower, p.tick_upper))
+        .filter(|p| p.liquidity > 0)
+        .map(|p| (p, tick_to_display_price_dec(p.tick_lower, p.token0.decimals, p.token1.decimals)))
+        .filter(|(_, top)| spot > 0.0 && *top > 0.0)
+        .map(|(p, top)| (p, top, spot >= top))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: f64, profile: &OperatorProfile, structural_channels: StructuralChannels, counterfactual_history: &[(DateTime<Utc>, f64, f64)], ledger: &LedgerAggregate, regime: &MarketRegime, plan: &PlanContext) -> DerivedMetrics {
     compute_derived_metrics_with_fills(raw, prev_hwm, profile, structural_channels, counterfactual_history, ledger, regime, plan, None)
@@ -248,12 +265,6 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     let nock_floor_delta = total_nock - floor;
     let current_hwm = prev_hwm.max(total_portfolio_usd);
 
-    // Range top of the price-source position (display units) — feeds the RANGE EXIT
-    // branch; replaces the retired hardcoded V4 tick constants.
-    let range_top_price = raw.positions.iter().find(|p| p.is_price_source && !is_full_range(p.tick_lower, p.tick_upper)).map(|p| {
-        tick_to_display_price_dec(p.tick_lower, p.token0.decimals, p.token1.decimals)
-    });
-
     // Liquid dry powder (issue #63): only wallet USDC is spendable. USDC inside LP is
     // working capital (a USDC/NOCK range converts it to NOCK as the price falls), so it
     // neither covers the virtual tax reserve nor counts as dry powder: the same rule
@@ -365,15 +376,9 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     // NockNock never sizes a buy outside the operator's own accumulation plan.
     let (lp_summary, engine_active) = lp_positions_summary(raw);
     // RANGE EXIT reports the price-source range's own value, never the whole LP book.
-    let range_exit: Option<(String, String)> = raw
-        .positions
-        .iter()
-        .find(|p| p.is_price_source && !is_full_range(p.tick_lower, p.tick_upper))
-        .zip(range_top_price)
-        // An emptied range holds nothing to exit: it earns nothing in or out of range.
-        .filter(|(p, _)| p.liquidity > 0)
-        .filter(|(_, top)| spot_price > 0.0 && *top > 0.0 && spot_price >= *top)
-        .map(|(p, top)| {
+    let range_exit: Option<(String, String)> = price_source_range_top(raw)
+        .filter(|(_, _, above)| *above)
+        .map(|(p, top, _)| {
             let p0 = leg_usd_price(&p.token0, spot_price, raw.live_eth_price_usd);
             let p1 = leg_usd_price(&p.token1, spot_price, raw.live_eth_price_usd);
             let pos_usd = p.amount0 * p0 + p.amount1 * p1;

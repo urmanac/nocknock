@@ -280,6 +280,27 @@ curl -X POST http://localhost:8080/v1/ingest
 
 For deploying to production servers, VPS (DigitalOcean / Hetzner), Fly.io, or AWS, refer to the complete **[Deployment Guide](DEPLOYMENT.md)**.
 
+### On your phone (opt-in)
+
+Three separate parts, each off until you turn it on. Steps, config blocks and the phone
+checklist are in [DEPLOYMENT.md section 7](DEPLOYMENT.md#7-on-your-phone-install-notifications-https-opt-in);
+the trade-offs are in [`docs/kb/how-to-phone-install-notifications-tls.md`](docs/kb/how-to-phone-install-notifications-tls.md).
+
+* **Install**: open `http://<host>:3000/?view=lite` on the phone and use "Add to Home
+  Screen". It opens the Lite cockpit, which shows the directive, the plan and whether
+  the page is live. There is no service worker: nothing is cached, so an old snapshot is
+  never shown as live.
+* **Notifications**: add a `notifications:` block (Telegram, Pushover or a webhook) to
+  `config.yaml`. The worker pushes when the directive changes, when a plan completes
+  and when spot reaches the top of the price-source range.
+  `POST /v1/notifications/test`, or SEND TEST NOTIFICATION on the dashboard, sends one
+  message labelled TEST and reports each channel.
+* **HTTPS on the LAN**: `NOCKNOCK_TLS=1 deploy/podman/deploy.sh <host>` adds a Caddy
+  proxy on `https://<host>:3443` with a private CA. Each phone must install that CA's
+  root certificate, which is a real trade-off: read the guide first.
+
+None of the three has been tried on a real phone yet.
+
 ---
 
 ## 7. Spec Contracts

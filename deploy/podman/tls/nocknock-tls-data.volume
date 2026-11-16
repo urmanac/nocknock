@@ -1,0 +1,5 @@
+[Unit]
+Description=NockNock TLS proxy data (private CA and certificates)
+
+[Volume]
+VolumeName=nocknock-tls-data

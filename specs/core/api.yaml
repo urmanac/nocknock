@@ -26,6 +26,8 @@ tags:
     description: Liveness and ingestion status
   - name: Execution
     description: Golden Path claim-fees payload engine (zero-custody; clients dispatch unsigned txs to the paired wallet for signing)
+  - name: Notifications
+    description: Channel readiness and a labelled test send (v0.6.0)
 
 paths:
   /health:
@@ -680,6 +682,45 @@ paths:
         '422':
           description: Unsupported format requested
 
+  /notifications/status:
+    get:
+      tags: [Notifications]
+      summary: Which notification channels are configured (v0.6.0)
+      operationId: getNotificationStatus
+      description: |
+        States which of Telegram, Pushover and the webhook are configured, and when the
+        worker notifies. Reads config only: nothing is sent. The response never carries a
+        token, a user key or the webhook URL.
+      responses:
+        '200':
+          description: Channel readiness
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationStatus'
+
+  /notifications/test:
+    post:
+      tags: [Notifications]
+      summary: Send one TEST notification through the configured channels (v0.6.0)
+      operationId: sendTestNotification
+      description: |
+        Sends one message, labelled TEST in its first line, through every configured
+        channel and reports each channel's outcome. `delivered` means the provider
+        accepted the message, not that a phone displayed it. With no channel configured
+        it answers 200 with `sent: false` and sends nothing. No request body. There is
+        no authentication beyond reaching the worker on the LAN; test sends are limited
+        to one per `test_cooldown_seconds`.
+      responses:
+        '200':
+          description: Per-channel outcome (also when nothing is configured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationTestResult'
+        '429':
+          description: A test was sent less than the cooldown ago (error RATE_LIMITED, with retry_after_seconds)
+
 components:
   parameters:
     IfNoneMatch:
@@ -952,6 +993,73 @@ components:
         simulation_detail:
           type: string
           nullable: true
+
+    NotificationChannelReport:
+      type: object
+      required: [channel, status, detail]
+      description: One notification channel's state (v0.6.0). Never carries a credential.
+      properties:
+        channel:
+          type: string
+          enum: [telegram, pushover, webhook]
+        status:
+          type: string
+          enum: [configured, incomplete, not_configured, delivered, failed]
+          description: |
+            configured / incomplete / not_configured describe the config. incomplete
+            means half of a channel's pair is set, so nothing is sent to it. delivered /
+            failed appear only after a send.
+        detail:
+          type: string
+          description: 'Which config keys are set, missing or ignored, or what the provider answered (for example "HTTP 401: Unauthorized").'
+
+    NotificationStatus:
+      type: object
+      required: [any_configured, channels, fires_on, test_cooldown_seconds]
+      properties:
+        any_configured:
+          type: boolean
+        channels:
+          type: array
+          description: Always all three channels, in a fixed order.
+          items:
+            $ref: '#/components/schemas/NotificationChannelReport'
+        cockpit_url:
+          type: string
+          nullable: true
+          description: The link appended to each message, or null when none is configured.
+        cockpit_url_note:
+          type: string
+          nullable: true
+          description: A known mistake in cockpit_url, in words (for example a /lite path), or null.
+        fires_on:
+          type: string
+          description: When the worker notifies, in words.
+        test_cooldown_seconds:
+          type: integer
+
+    NotificationTestResult:
+      type: object
+      required: [sent, any_configured, message, channels]
+      properties:
+        sent:
+          type: boolean
+          description: False when no channel is configured; nothing was sent.
+        any_configured:
+          type: boolean
+        message:
+          type: string
+        sent_at:
+          type: string
+          format: date-time
+          description: Present only when sent is true.
+        text:
+          type: string
+          description: The exact message sent. Present only when sent is true.
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationChannelReport'
 
   securitySchemes:
     ApiKeyAuth:

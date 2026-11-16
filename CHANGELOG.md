@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — phone install, notification test, opt-in TLS (#89)
+- **Install on a phone.** The dashboard ships a web app manifest (start URL
+  `/?view=lite`, standalone), icons, and the iOS and Android home-screen tags. The icons
+  are a crop of the roundel in `assets/image_6cc4c3c4.jpg` (the repo has no logo);
+  `frontend/scripts/make-icons.sh` regenerates them. **No service worker ships**: nothing
+  is cached, so an installed copy can never show an old snapshot as live. The cost is
+  that it does not open away from the LAN.
+- **The Lite cockpit shows the directive and its own freshness.** A DIRECTIVE card (action,
+  details, and `LIVE ON-CHAIN · read 42s ago` or `NOT LIVE · last read 12m ago`) and, when
+  a plan is configured, the accumulation plan panel with RECORD BUY. Before this the Lite
+  view showed neither, so a "DCA TRANCHE DUE" push landed on a page without the tranche
+  and with no sign of how old its numbers were. The card reads `NOT LIVE · Worker
+  unreachable: … · last read 50s ago` from the first poll that fails, however recent the
+  last read (a phone that left the LAN with the app open), and reads the worker again
+  when the app returns to the foreground.
+- **Notification status and test routes.** `GET /v1/notifications/status` states which of
+  Telegram, Pushover and the webhook are configured. `POST /v1/notifications/test` sends
+  one message labelled TEST through every configured channel and reports each channel:
+  `delivered`, `failed` with the provider's reason, `incomplete` or `not_configured`. With
+  no channel configured it says so and sends nothing. Test sends are limited to one per
+  30 s. The dashboard and the Lite cockpit have a SEND TEST NOTIFICATION control.
+- **A plan completing notifies.** When the last buy was recorded while LP was under target,
+  the action read `REBUILD LP TRANCHES` before and after, so nothing was pushed. The
+  completion now carries its own sentence, with the plan's own figures, placed before
+  the directive's details so Pushover's 1024-character cut keeps it. A cycle that could
+  not read the accumulation ledger no longer makes the next cycle announce an already
+  completed plan again.
+- **A range exit notifies whatever the directive reads.** A floor lock and a due tranche
+  outrank `RANGE EXIT FLASHPOINT`, so under either the action did not change when spot
+  reached the top of the price-source range and nothing was pushed. The exit now carries
+  its own sentence (`Range exit: spot $… is at or above the top of the price-source
+  range ($…)`), from the same rule the directive uses. The return into the range is
+  pushed only when it changes the directive, and the last reading is held in memory, so
+  an exit across a worker restart is pushed only if the directive changes with it.
+- **Opt-in TLS proxy for the Podman deployment.** `NOCKNOCK_TLS=1 deploy/podman/deploy.sh
+  <host>` adds the `nocknock-tls` quadlet: Caddy with a private CA on an unprivileged port
+  (default 3443; 8080, 3000 and 8081 are refused, and so is a leading zero such as
+  `08080`), no `sudo`.
+  `NOCKNOCK_TLS=remove` takes it out. With the variable unset
+  the deploy script's remote commands are identical to before. Each phone must install
+  the CA's root certificate; `docs/kb/how-to-phone-install-notifications-tls.md` states
+  what that costs and describes the two alternatives that were not built (a tailnet; a
+  real domain with DNS-01).
+- **Docs**: `DEPLOYMENT.md` §7, a README section, and the guide above with a phone
+  checklist and a list of what was and was not tested. Nothing here has run on a real
+  phone, against a real provider, or on the host.
+
+### Fixed — notifier (#89)
+- **No token in the logs.** A failed Telegram request logged reqwest's error, which
+  includes the request URL, and Telegram's URL contains the bot token. Errors now drop
+  the URL and every detail is redacted before it is logged or returned.
+- **`pushover_user_key` is accepted.** The example config documented that name while the
+  worker read only `pushover_user`, so a copied example left Pushover off without a word.
+  Both spellings work; the example now uses `pushover_user`. A config that carries both
+  loads: `pushover_user` is used and the status route says `pushover_user_key` is ignored.
+- **Half a channel is reported.** A Telegram token without a chat id (or a Pushover token
+  without a user key) was skipped silently. It is now `incomplete`, with the missing key
+  named, in the status route and in the log.
+- **The example `cockpit_url` opens the Lite view.** It ended in `/lite`, which nginx
+  serves as the full dashboard; the Lite view is `/?view=lite`. The status route warns
+  when it sees the old form.
+- **The push follows the store.** It went out before the snapshot was stored, so a failed
+  store repeated it every cycle. It is now sent once the snapshot is on record.
+- **Provider requests time out after 10 s.** The worker's HTTP client has no timeout, and
+  a hung provider held the ingestion cycle open.
+- **Long messages fit the provider.** A directive whose details list LP rebuild steps can
+  pass Pushover's 1024-character limit. Messages are now cut to each provider's limit with
+  a "…", keeping the cockpit link.
 ### Changed — snapshot spec 2.6.0 (guided buys: #115, #98)
 - `SNAPSHOT_SPEC_VERSION`, `specs/core/snapshot.yaml` and the frontend contract test move
   from 2.5.0 to 2.6.0. `accumulation_plan.route_quotes` (#115) and

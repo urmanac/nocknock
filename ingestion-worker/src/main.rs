@@ -1647,6 +1647,14 @@ async fn main() -> Result<()> {
             axum::routing::get(tax_export_handler),
         )
         .route(
+            "/v1/notifications/status",
+            axum::routing::get(notification_status_handler),
+        )
+        .route(
+            "/v1/notifications/test",
+            axum::routing::post(notification_test_handler),
+        )
+        .route(
             "/v1/cost-basis/series",
             axum::routing::get(cost_basis_series_handler),
         )
@@ -1753,9 +1761,57 @@ struct NotificationConfig {
     telegram_bot_token: Option<String>,
     telegram_chat_id: Option<String>,
     pushover_token: Option<String>,
+    /// The Pushover *user key*.
     pushover_user: Option<String>,
+    /// The same key under the name the example config documented until v0.5.3, while the
+    /// worker read only `pushover_user`: a copied example left Pushover silently off
+    /// (#89). Its own field, not a serde alias: an alias makes a config that carries both
+    /// names fail to load ("duplicate field"), which stops the worker at startup. Read
+    /// only through `notify::pushover_user_key`, where `pushover_user` wins.
+    pushover_user_key: Option<String>,
     webhook_url: Option<String>,
     cockpit_url: Option<String>,
+}
+
+/// One notification channel's state (#89): what `GET /v1/notifications/status` and
+/// `POST /v1/notifications/test` report per channel. `status` is `configured`,
+/// `incomplete` or `not_configured` before a send, and `delivered` or `failed` after one.
+/// `detail` never carries a token, a user key or a webhook URL.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+struct ChannelReport {
+    channel: String,
+    status: String,
+    detail: String,
+}
+
+/// Where each provider is reached. Production uses the defaults; tests point these at a
+/// local server so delivery is exercised without touching the providers.
+#[derive(Debug, Clone)]
+struct NotifyEndpoints {
+    telegram_base: String,
+    pushover_url: String,
+}
+
+/// One cycle's reading of the price-source range against spot (#89). Kept in memory
+/// from one cycle to the next so a range exit can be pushed when the directive's action
+/// does not change with it. Never stored and never part of a snapshot.
+#[derive(Debug, Clone, PartialEq)]
+struct RangeTopReading {
+    position_id: String,
+    label: String,
+    spot: f64,
+    top: f64,
+    /// Spot is at or above the top of the range: the RANGE EXIT condition.
+    above: bool,
+}
+
+impl Default for NotifyEndpoints {
+    fn default() -> Self {
+        Self {
+            telegram_base: "https://api.telegram.org".to_string(),
+            pushover_url: "https://api.pushover.net/1/messages.json".to_string(),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -1838,3 +1894,5 @@ mod tests_fills;
 mod tests_quotes;
 #[cfg(test)]
 mod tests_cost_basis;
+#[cfg(test)]
+mod tests_notify;
