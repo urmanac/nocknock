@@ -227,6 +227,14 @@ paths:
                   reference_spot_usd: { type: string, nullable: true, description: "Stored NOCK/USD price nearest the fill's block time, within 60 minutes (v0.6.0); null when none was near. A fill confirmed from a detected swap keeps the reference its offer showed, so the two figures cannot differ." }
                   reference_spot_source: { type: string, nullable: true }
                   execution_cost_bps: { type: integer, nullable: true, description: "(effective price / reference spot - 1) x 10,000 (v0.6.0); null without a reference" }
+                  quote_venue: { type: string, nullable: true, description: "Venue of the best quote that was current for this fill's tranche (v0.7.0): the latest stored quote read before the fill's block and not before the plan's previous fill. All eight quote fields are null together when there is none (\"no quote on record\"); a later quote is never used." }
+                  quote_route: { type: string, nullable: true }
+                  quote_usdc: { type: string, nullable: true, description: "The tranche amount that quote was for" }
+                  quote_nock_out: { type: string, nullable: true }
+                  quote_effective_price_usd: { type: string, nullable: true }
+                  quote_block_number: { type: integer, nullable: true, description: "Block the quote was read at. Shown beside the cost figure." }
+                  quoted_at: { type: string, format: date-time, nullable: true }
+                  quote_cost_bps: { type: integer, nullable: true, description: "(fill effective price / quote effective price - 1) x 10,000 (v0.7.0). The market can move between the quote's block and the fill, so this is not execution cost alone." }
         '404':
           description: Receipt not found on-chain yet (retry once the transaction lands)
         '409':
@@ -265,6 +273,45 @@ paths:
                         reference_spot_usd: { type: string, nullable: true, description: "Stored NOCK/USD price nearest the fill's block time (v0.6.0); null when none was near" }
                         reference_spot_source: { type: string, nullable: true }
                         execution_cost_bps: { type: integer, nullable: true, description: "Cost over the reference spot in basis points (v0.6.0); null without a reference" }
+                        quote_venue: { type: string, nullable: true, description: "Venue of the best quote that was current for this fill's tranche (v0.7.0); the eight quote fields are null together when no quote was on record" }
+                        quote_route: { type: string, nullable: true }
+                        quote_usdc: { type: string, nullable: true }
+                        quote_nock_out: { type: string, nullable: true }
+                        quote_effective_price_usd: { type: string, nullable: true }
+                        quote_block_number: { type: integer, nullable: true }
+                        quoted_at: { type: string, format: date-time, nullable: true }
+                        quote_cost_bps: { type: integer, nullable: true, description: "Cost over that quote in basis points (v0.7.0); not execution cost alone, since the market can move between the quote's block and the fill" }
+
+  /accumulation/quotes/refresh:
+    post:
+      tags: [Execution]
+      summary: Quote the due tranche again at the latest block
+      operationId: refreshRouteQuotes
+      description: |
+        Route quotes for a due tranche (v0.7.0, issue #115). Takes no body and no
+        parameters: the worker quotes the tranche amount of the latest snapshot's
+        `accumulation_plan`, and only while its status is `tranche_due`. It makes
+        read-only quoter calls (`eth_call`), stores the result so a later fill can be
+        measured against it, and attaches it to the snapshot being served. It never
+        signs, builds or sends a transaction, and never quotes another amount.
+        Unauthenticated, like the other endpoints of this LAN-only API; each call
+        makes about a dozen RPC reads.
+      responses:
+        '200':
+          description: The quotes. A venue that could not be quoted is `unavailable` with its reason; that is still a 200.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan_id: { type: string }
+                  tranche_index: { type: integer }
+                  route_quotes:
+                    $ref: './snapshot.yaml#/components/schemas/RouteQuotes'
+        '409':
+          description: NO_PLAN (no accumulation_plan is configured), QUOTES_DISABLED (route_quotes.enabled is false) or NO_TRANCHE_DUE (nothing is due, so nothing is quoted)
+        '503':
+          description: NO_SNAPSHOT. No snapshot yet, so it is not known whether a tranche is due.
 
   /accumulation/candidates:
     get:

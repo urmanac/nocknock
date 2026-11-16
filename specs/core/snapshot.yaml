@@ -545,6 +545,141 @@ components:
             `avg_price_usd` and the cadence count ledger rows only. Null in snapshots
             from before v0.6.0.
 
+        route_quotes:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/RouteQuotes'
+          nullable: true
+          description: |
+            Read-only quotes for this exact tranche on Aero and on Uniswap (v0.7.0).
+            Present only while `status` is `tranche_due` and quoting is on
+            (`route_quotes.enabled`); null otherwise and in snapshots from before
+            v0.7.0. The whole object is excluded from `state_hash`: a quote is a
+            contract read at a stated block and says nothing about the wallet's state.
+
+    RouteQuotes:
+      type: object
+      description: |
+        Quotes for one due tranche (v0.7.0, issue #115). The worker asks each venue's
+        own quoter contract, with `eth_call` only, what the plan's tranche amount
+        returns in NOCK along each route of a built-in, verified table, all at one
+        block, and reports each venue's best route. Nothing is signed, built or sent;
+        no amount other than the tranche the plan produced is ever quoted; a quote that
+        fails or reverts is `unavailable` with its reason and is never replaced by an
+        estimate or an older quote. This compares execution routes for a buy the plan
+        already sized. It is not a recommendation to buy, and the wallet app's own
+        router may pick a different route.
+      required: [status, amount_usdc, venues, comparison]
+      properties:
+        status:
+          type: string
+          enum: [ok, partial, unavailable]
+          description: ok when both venues were quoted, partial when one was, unavailable when none was. `detail` says what is missing.
+        detail:
+          type: string
+          nullable: true
+        amount_usdc:
+          type: string
+          description: The plan's own tranche amount that was quoted (equal to `tranche_usdc`)
+        block_number:
+          type: integer
+          nullable: true
+          description: The block every quote in this object was read at; null when no block was read
+        quoted_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: That block's time
+        reference_spot_usd:
+          type: string
+          nullable: true
+          description: The snapshot's NOCK/USD reference spot the costs are measured against (the price-source pool's price for this cycle)
+        venues:
+          type: array
+          description: One entry per venue, Aero first, then Uniswap
+          items:
+            $ref: '#/components/schemas/VenueQuote'
+        more_nock_venue:
+          type: string
+          nullable: true
+          description: The venue that returns more NOCK at that block. Null unless both venues were quoted and their amounts differ. A fact about two reads, not advice.
+        more_nock_by_pct:
+          type: string
+          nullable: true
+          description: How much more, in percent of the other venue's amount, two decimals ("0.00" when the difference is below 0.005%)
+        comparison:
+          type: string
+          description: The comparison as one sentence, e.g. "Aero returns more NOCK by 0.05% for $20.00 USDC at block 58081910 ..."; with one quote or none it says there is nothing to compare
+
+    VenueQuote:
+      type: object
+      description: One venue's best verified route for the tranche, or why it could not be quoted (v0.7.0)
+      required: [venue, status, swap_url]
+      properties:
+        venue:
+          type: string
+          enum: [Aero, Uniswap]
+        status:
+          type: string
+          enum: [quoted, unavailable]
+        reason:
+          type: string
+          nullable: true
+          description: Why, when unavailable. Every numeric field is then null.
+        swap_url:
+          type: string
+          description: The venue's own swap page (https://app.aero.xyz/swap or https://app.uniswap.org/swap). No token or amount is prefilled.
+        nock_out:
+          type: string
+          nullable: true
+          description: NOCK the quoter returned for `amount_usdc` along `route`, exact (16 decimals)
+        effective_price_usd:
+          type: string
+          nullable: true
+          description: amount_usdc / nock_out, eight decimals
+        cost_over_spot_pct:
+          type: string
+          nullable: true
+          description: (effective_price_usd / reference_spot_usd - 1) x 100, two decimals. Negative when the route beats the reference pool's mid price. Null without a reference spot.
+        route:
+          type: string
+          nullable: true
+          description: The best route's tokens, e.g. "USDC → WETH → NOCK"
+        hops:
+          type: array
+          items:
+            $ref: '#/components/schemas/RouteHop'
+        routes_tried:
+          type: array
+          description: Every candidate route of this venue with its own result
+          items:
+            type: object
+            required: [route_id, route]
+            properties:
+              route_id: { type: string }
+              route: { type: string }
+              nock_out: { type: string, nullable: true }
+              reason: { type: string, nullable: true, description: "Why this route gave no quote" }
+
+    RouteHop:
+      type: object
+      required: [pool, pool_kind, token_in, token_out]
+      properties:
+        pool:
+          type: string
+          description: Pool address, or the 32-byte pool id for a Uniswap v4 pool
+        pool_kind:
+          type: string
+          enum: [Aero basic volatile, Aero concentrated, Uniswap v3, Uniswap v4]
+        token_in:
+          type: string
+        token_out:
+          type: string
+        fee_pct:
+          type: string
+          nullable: true
+          description: Swap fee in percent. Aero fees are read at the quote block (they can change); Uniswap fees are fixed by the pool. Null when the fee read failed; the quote itself stands.
+
     FillDetection:
       type: object
       description: |

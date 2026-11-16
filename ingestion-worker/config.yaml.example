@@ -153,6 +153,21 @@ operator_profile:
 #   enabled: true
 
 # ============================================================
+# Route quotes for a due tranche (v0.7.0, issue #115)
+# ============================================================
+# On by default while an accumulation_plan is configured: nothing to set. When the plan
+# says a tranche is due, the worker asks Aero's and Uniswap's own quoter contracts what
+# that exact tranche amount returns in NOCK (read-only eth_call, about a dozen RPC reads
+# per cycle while a tranche is due), shows both venues and states which returns more
+# NOCK. It quotes only the amount your plan produced, never another size, and it never
+# signs or sends anything: you swap in the venue's own app. The routes are a built-in
+# table verified on-chain (ONCHAIN_INTEGRATION.md section 9); there is nothing else to
+# configure. Set enabled: false to stop the quoter calls; the due tranche is advised
+# exactly as before.
+# route_quotes:
+#   enabled: true
+
+# ============================================================
 # Market Price Backfill Engine (v0.3.0)
 # ============================================================
 # Heals gaps in market_price_history from free public OHLCV feeds and extends
