@@ -265,7 +265,15 @@ paths:
       description: |
         Called by clients after the paired wallet confirms a claim transaction.
         The worker fetches the Base transaction receipt, verifies success, and
-        extracts the ERC-20 Transfer logs (USDC/NOCK) paid to the sovereign wallet.
+        extracts the ERC-20 Transfer logs (USDC, NOCK, WETH, and since v0.6.0 AERO)
+        paid to the sovereign wallet, plus ETH unwrapped by a Uniswap position manager.
+        AERO (#93) is what an Aero gauge pays on a claim: a Transfer of
+        0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee to the wallet, minted from the zero
+        address. It is valued from the AERO price pool read at the claim's block; when
+        that read fails or the pool had no in-range liquidity at that block the row has
+        no usd_value, never a substitute. Record an AERO claim with the platform of the
+        position it came from (aerodrome or aerodrome-cl). NockNock builds no AERO claim
+        transaction and gives no advice to claim.
         Nothing is recorded without on-chain verification. A 404 RECEIPT_NOT_FOUND
         also covers the Uniswap-app pending-broadcast quirk (approved but not yet
         broadcast): surface "approved, awaiting wallet broadcast" and retry.
@@ -322,7 +330,9 @@ paths:
       description: |
         Exports the receipt-verified harvest ledger. Fee claims are tagged
         `income` and carry their Base tx hash; every row ties out to on-chain
-        receipts. Rebalances/liquidity transfers are not yet ledgered (future
+        receipts. An AERO row (v0.6.0, #93) is described as "NockNock AERO reward
+        claim (<platform>)" instead of "NockNock fee harvest (<platform>)"; its label
+        stays `income`. Rebalances/liquidity transfers are not yet ledgered (future
         work — they will export with a non-taxable `transfer` label).
       parameters:
         - name: format
@@ -570,7 +580,10 @@ components:
             Clients MUST only dispatch "success". not_claimable: the Aero pool's
             claimFees() reverts (no LP-claimable fees), or (v0.6.0) an aerodrome-cl
             position is staked in its gauge, where swap fees go to the gauge;
-            simulation_detail carries the reason. The action is excluded from
+            simulation_detail carries the reason. The payload never contains an
+            action that claims AERO from a gauge (#93): unclaimed AERO is stated in
+            the snapshot, and claiming it is the operator's own act in the Aero
+            app. The action is excluded from
             estimated_gas_usd and net_after_gas_usd. unavailable: not simulated or
             the simulation got no answer; (v0.6.0) also an aerodrome-cl position
             that is not in the latest snapshot yet, or whose snapshot row carries
