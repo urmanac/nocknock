@@ -231,14 +231,12 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     let next_directive_action = derived_metrics.global_status.shot_advice_action.clone();
     let next_directive_details = derived_metrics.global_status.shot_advice_details.clone();
 
-    // Build snapshot data
+    // Build snapshot data. The positions carry every stamp the cycle's fee rows were
+    // built from (pool activity and, since #91, staking and the fees note).
+    let positions = snapshot_positions(&raw_data);
     let snapshot_data = SnapshotData {
         wallet_balances: raw_data.wallet_balances,
-        positions: {
-            let mut positions = build_position_snapshots(&raw_data.positions, raw_data.spot_price_nock_usd, raw_data.live_eth_price_usd);
-            apply_pool_activity(&mut positions, &raw_data.pool_liquidity);
-            positions
-        },
+        positions,
         pool_mechanics: raw_data.pool_mechanics,
         concentrated_liquidity: raw_data.concentrated_liquidity,
         contract_fees: raw_data.contract_fees,

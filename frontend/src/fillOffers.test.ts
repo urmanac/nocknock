@@ -1,7 +1,7 @@
 /**
  * Fill detection display helpers and offer actions (v0.6.0, issue #118).
  * The offers below are the operator's real plan buys on Base (see
- * ingestion-worker/testdata/fills and ONCHAIN_INTEGRATION.md §8).
+ * ingestion-worker/testdata/fills and ONCHAIN_INTEGRATION.md §10).
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { api } from './api/client';

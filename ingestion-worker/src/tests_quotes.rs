@@ -1,7 +1,7 @@
 //! Route quotes for a due tranche (issue #115).
 //!
 //! The fixtures under testdata/quotes are real `eth_call` requests and their verbatim
-//! answers from Base mainnet, read on 2026-11-16 (ONCHAIN_INTEGRATION.md §9 records how
+//! answers from Base mainnet, read on 2026-11-16 (ONCHAIN_INTEGRATION.md §11 records how
 //! each was obtained). `quotes_block_58081910.json` holds every route of the table, the
 //! failing calls and the fee reads, all at one block, for 20 USDC in.
 

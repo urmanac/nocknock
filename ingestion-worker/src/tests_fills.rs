@@ -1,7 +1,7 @@
 //! Fill detection for the accumulation plan (issue #118).
 //!
 //! The fixtures under testdata/fills are real responses from Base mainnet, read on
-//! 2026-11-15/16 for the wallet named in ONCHAIN_INTEGRATION.md (§8 records how each was
+//! 2026-11-15/16 for the wallet named in ONCHAIN_INTEGRATION.md (§10 records how each was
 //! obtained). Three are plan buys, four are Uniswap fee claims, two are Aero liquidity
 //! deposits that returned a NOCK refund, and one is a purchase from before the plan.
 
@@ -14,7 +14,7 @@ const WALLET: &str = "0xeE114cC97eC5adeB34bA5645e315B497D8487a45";
 const BUY_1: &str = "0x5d0c02d9929f49f71526e0c8d91d1bd99ec19f116befc285d67f6bf9412a3f0e";
 const BUY_2: &str = "0x4644edd99bb2770f369862357eb5647a68a7157ca9e91ecccfce79e6964c61e8";
 const BUY_3: &str = "0x78376f3cc9e80f2eb124a945a452df40556649e3d9983be526b2bd97586e31b9";
-/// Block times of the three buys (ONCHAIN_INTEGRATION.md §8).
+/// Block times of the three buys (ONCHAIN_INTEGRATION.md §10).
 const BUY_1_AT: &str = "2026-11-14T06:02:25Z";
 const BUY_2_AT: &str = "2026-11-15T02:58:46Z";
 const BUY_3_AT: &str = "2026-11-16T03:08:37Z";
@@ -417,7 +417,7 @@ fn test_real_history_offers_exactly_the_plan_buys() {
     let (offers, dismissed) = build_fill_offers(&rows, &HashSet::new(), anchor(), &[], 24.0);
     assert!(dismissed.is_empty());
     assert_eq!(offers.iter().map(|o| o.tx_hash.as_str()).collect::<Vec<_>>(), vec![BUY_1, BUY_2, BUY_3]);
-    // The labels are already the ones ONCHAIN_INTEGRATION.md §8 gives: the second buy
+    // The labels are already the ones ONCHAIN_INTEGRATION.md §10 gives: the second buy
     // came 20 h 56 min after the first (early on a 24 h plan), the third 24 h 10 min
     // after the second. They do not wait for the first buy to be confirmed.
     assert_eq!(
@@ -708,7 +708,7 @@ fn test_rpc_error_reason_names_the_error_and_nothing_else() {
     assert_eq!(rpc_error_reason(&bad).as_deref(), Some("the RPC answered with error -32602: invalid params"));
     let missing = json!({ "jsonrpc": "2.0", "id": 44, "error": { "code": -32601, "message": "the method alchemy_getAssetTransfers does not exist/is not available" } });
     assert!(rpc_error_reason(&missing).unwrap().contains("-32601: the method alchemy_getAssetTransfers does not exist"));
-    // The public RPC's real answer to a 200,000-block eth_getLogs (ONCHAIN_INTEGRATION.md §8).
+    // The public RPC's real answer to a 200,000-block eth_getLogs (ONCHAIN_INTEGRATION.md §10).
     let range = json!({ "jsonrpc": "2.0", "error": { "code": -32701, "message": "exceed maximum block range: 50000" }, "id": 1 });
     assert_eq!(rpc_error_reason(&range).as_deref(), Some("the RPC answered with error -32701: exceed maximum block range: 50000"));
     // A long message is cut, an odd error still reads as an error, an answer is not one.

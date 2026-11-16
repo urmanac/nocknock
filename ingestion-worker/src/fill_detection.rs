@@ -17,7 +17,7 @@ use std::collections::HashSet;
 //   - classify a receipt it could not read. That hash is left out and tried again.
 //   - filter by size or price. It has no thresholds: it shows what the chain shows.
 //
-// Verified against live Base on 2026-11-15/16 (ONCHAIN_INTEGRATION.md §8).
+// Verified against live Base on 2026-11-15/16 (ONCHAIN_INTEGRATION.md §10).
 
 /// Transfers asked for per `alchemy_getAssetTransfers` page.
 pub(crate) const FILL_SCAN_PAGE_SIZE: u32 = 100;

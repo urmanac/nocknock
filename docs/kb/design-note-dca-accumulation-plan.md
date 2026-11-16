@@ -435,7 +435,7 @@ Question 4 has a working default, taken while the operator was away and theirs t
 change: a USDC→NOCK swap the worker notices on-chain is **offered**, not attached. The
 operator confirms it with one click (the existing `record-accumulation` call with the
 offered hash, which verifies the receipt again) or marks it "not part of the plan". The
-reason is in ONCHAIN_INTEGRATION.md §8: the recording rules only net transfers, so a
+reason is in ONCHAIN_INTEGRATION.md §10: the recording rules only net transfers, so a
 transaction that pays USDC and receives NOCK for another reason would count if it were
 attached without anyone looking.
 
@@ -446,7 +446,7 @@ quote, and quoting a due tranche on two venues, stay with #115.
 ### 8.8 Route quotes for a due tranche (Issue #115, v0.7.0)
 
 8.5 asked for three things before anything could be quoted. Two now exist
-(ONCHAIN_INTEGRATION.md §9): Aero publishes a contract list, and its Metaquoter is a
+(ONCHAIN_INTEGRATION.md §11): Aero publishes a contract list, and its Metaquoter is a
 quoting source that matches Aero's routing: replayed at the block before the plan's
 first buy, along that buy's route, it returns the NOCK the buy received, to the wei.
 The third, the command encoding for `execute`, is still not needed, because the model
@@ -468,7 +468,7 @@ Defaults taken while the operator was away, theirs to change:
 - The comparison is NOCK out only. Gas is not shown beside it.
 - Swap links prefill nothing.
 - The legacy vAMM (the last open point of 8.5) is not quoted: `app.aero.xyz` cannot
-  trade it. The plan's third buy did go through it by another app (§8 of the on-chain
+  trade it. The plan's third buy did go through it by another app (§10 of the on-chain
   record), so it remains the operator's call.
 - The plan's `venue` label still appears in the due-tranche sentence and is still
   stored as each fill's venue.

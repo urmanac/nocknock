@@ -21,7 +21,7 @@ use crate::*;
 //     buy the plan already sized. The wallet app's own router may route differently.
 //
 // Every address and selector below was verified by live read-only calls on Base on
-// 2026-11-16 (ONCHAIN_INTEGRATION.md §9); the fixtures under testdata/quotes are those
+// 2026-11-16 (ONCHAIN_INTEGRATION.md §11); the fixtures under testdata/quotes are those
 // calls and their answers.
 
 // ---------------- Verified contracts (Base mainnet) ----------------
@@ -50,7 +50,7 @@ pub(crate) const AERO_CL1_USDC_USDT: &str = "0xd448990883e3bf9cdd8ebca368a3ecf9d
 pub(crate) const AERO_CL100_WETH_USDT: &str = "0x2dbe0e264c7c246e05c6614794899937f264cf7b";
 // Uniswap pools. v3 pools resolve from the v3 factory; v4 pools are named by the hash of
 // their pool key; each id below was recomputed from the key the route table sends and
-// then read through StateView (ONCHAIN_INTEGRATION.md §9).
+// then read through StateView (ONCHAIN_INTEGRATION.md §11).
 pub(crate) const UNISWAP_V3_WETH_NOCK_1PCT: &str = "0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a";
 pub(crate) const UNISWAP_V4_USDC_NOCK_3PCT_ID: &str =
     "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13";
@@ -170,7 +170,7 @@ const KIND_UNI_V4: &str = "Uniswap v4";
 
 /// Every route NockNock quotes, USDC in and NOCK out. The table is explicit and built
 /// in: a route is here only because each of its pools and its quoter answered a live
-/// call with a sane quote (ONCHAIN_INTEGRATION.md §9). Nothing is discovered at runtime.
+/// call with a sane quote (ONCHAIN_INTEGRATION.md §11). Nothing is discovered at runtime.
 ///
 /// Aero: the basic pool directly; through WETH by either Aero USDC/WETH concentrated
 /// pool; and the three-hop route through USDT that the Aero app itself used for the

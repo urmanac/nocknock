@@ -50,12 +50,15 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
     // Pillars and gas (snapshot 2.3.0, issue #94). Absent fields say so, never $0.00.
     let not_reported = "not reported (snapshot predates 2.3.0)";
     let pillar = |k: &str| get(k).map(|v| format!("${v}")).unwrap_or_else(|| not_reported.to_string());
+    // AERO is the fourth pillar (issue #93): wallet AERO, so the four add up to the total.
     let pillars = format!(
-        "NOCK {} · USDC {} · ETH {}",
+        "NOCK {} · USDC {} · ETH {} · AERO {}",
         pillar("total_native_usd"),
         pillar("total_stable_usd"),
-        pillar("total_eth_usd")
+        pillar("total_eth_usd"),
+        aero_pillar_text(data)
     );
+    let aero = aero_lines(data);
     let gas = match (get("wallet_gas_eth"), get("wallet_gas_usd")) {
         (Some(eth), Some(usd)) => format!("{eth} ETH (${usd}), counted in the total; not cash, not deployable"),
         (Some(eth), None) => format!("{eth} ETH (USD value not reported), counted in the total; not cash, not deployable"),
@@ -70,6 +73,7 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
          • Sovereign NOCK Stack: {total_nock} ({floor})\n\
          • Stable Stack: {total_usdc}\n\
          • Gas held (wallet ETH+WETH): {gas}\n\
+         {aero}\n\
          • High-Water Mark: {hwm}\n\
          • Tactical Directive: {advice}"
     )
@@ -192,6 +196,7 @@ pub fn format_claim_simulation_text(data: &serde_json::Value) -> String {
     let mut details = String::new();
     let mut total_claimable_usd = 0.0f64;
     let mut gas_usd: Option<f64> = None;
+    let (mut claimable_rows, mut not_claimable_rows) = (0usize, 0usize);
 
     if let Some(list) = fees {
         for fee in list {
@@ -200,10 +205,14 @@ pub fn format_claim_simulation_text(data: &serde_json::Value) -> String {
             let amount_usd = fee.get("amount_usd").and_then(|a| a.as_str()).unwrap_or("0.00");
             let gas_str = fee.get("gas_break_even_usd").and_then(|g| g.as_str()).unwrap_or_default();
             if amount.starts_with("not LP-claimable") {
-                // An Aero pool whose claimFees() reverts: nothing to claim, no gas to count.
+                // No fee figure to print: an Aero pool whose claimFees() reverts, or an
+                // Aero CL position staked in its gauge. The worker's own reason is
+                // shown; nothing to claim, no gas to count.
                 details.push_str(&format!("  - {symbol}: {amount}\n"));
+                not_claimable_rows += 1;
                 continue;
             }
+            claimable_rows += 1;
             match gas_str.parse::<f64>() {
                 Ok(g) => {
                     // Per-contract break-evens come from the live gas query; take the max
@@ -228,6 +237,12 @@ pub fn format_claim_simulation_text(data: &serde_json::Value) -> String {
         Some(g) => (
             format!("~${:.4} USD", g),
             format!("${:.4} USD", (total_claimable_usd - g).max(0.0)),
+        ),
+        // Every row is one the LP cannot claim: there is no claim to cost, which is
+        // not the same as a gas estimate that could not be read.
+        None if claimable_rows == 0 && not_claimable_rows > 0 => (
+            "n/a (nothing LP-claimable)".to_string(),
+            "n/a (nothing LP-claimable)".to_string(),
         ),
         None => (
             "unavailable".to_string(),

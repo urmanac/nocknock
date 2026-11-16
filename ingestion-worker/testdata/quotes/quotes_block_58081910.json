@@ -267,5 +267,5 @@
    }
   }
  },
- "_about": "Read-only eth_call requests and their verbatim responses, all at one block of Base mainnet, via https://base-rpc.publicnode.com on 2026-11-16 (issue #115). 20 USDC in. See ONCHAIN_INTEGRATION.md section 9."
+ "_about": "Read-only eth_call requests and their verbatim responses, all at one block of Base mainnet, via https://base-rpc.publicnode.com on 2026-11-16 (issue #115). 20 USDC in. See ONCHAIN_INTEGRATION.md section 11."
 }

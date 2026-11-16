@@ -103,6 +103,7 @@
 4. **Traded Assets & CPA Tie-Out**:
    - The treasury only actively trades NOCK and sometimes ETH/WETH on Base.
    - All transactions tie out to CPA records via Koinly tax reporting.
+   - AERO claimed from a gauge is booked by the harvest ledger when the claim's transaction is recorded (v0.6.0, #93): valued at the claim's block from the AERO price pool, or with no USD value when that price cannot be read. The export describes it as an AERO reward claim and keeps the `income` label; a different label is the operator's and their CPA's call. With a `tax_reserve_ratio` set, a priced AERO row counts toward the virtual tax reserve like any other harvest row.
 5. **LP Rebuild Bias (standing order, 2026-11-14)**:
    - "Rebuilding the tranches has basically no net cash position change so we should always act with a bias towards doing that."
    - When LP is under its target weight, advice must surface `REBUILD LP TRANCHES`: as the primary directive whenever the engine would otherwise be idle, and appended to every other directive. It must never displace a due DCA tranche or a safety directive.
@@ -118,7 +119,8 @@
    - Split the LP target equally across eligible tracked positions unless config sets weights.
    - "We should not generally aim to fill positions that are out of range." Out-of-range positions are skipped unless config makes an explicit exception.
    - Never suggest a deposit into a pool with no in-range liquidity.
-   - Aero tranches live at app.aero.xyz ("We shouldn't refer folks to aerodrome.finance anymore"). Link there, never to the retired Aerodrome app. Staking is left at the Aero app's default. AERO is the fourth pillar (7.11): neither minimized nor maximized. NockNock does not read AERO rewards yet (#93), so it must say "not read" rather than show them as zero, and it must not advise accumulating or selling AERO until a policy is decided there.
+   - Aero tranches live at app.aero.xyz ("We shouldn't refer folks to aerodrome.finance anymore"). Link there, never to the retired Aerodrome app. Staking is left at the Aero app's default. AERO is the fourth pillar (7.11): neither minimized nor maximized. Since v0.6.0 NockNock reads it (#93): the wallet's AERO, and the AERO each staked position has earned in its gauge and not claimed. A value it cannot read is "not read" or "not reported" with the reason, never zero. It states amounts and must not advise claiming, selling, holding or accumulating AERO; what to do with claimed AERO is the operator's decision and no policy for it is built in.
+   - Aero concentrated (CL) positions are tracked since v0.6.0 with `protocol: aerodrome-cl` (#91), once listed under `positions:`; the WETH/NOCK CL200 position (NFT #2914490) was invisible before that. A CL position is ranged: it can go out of range. Staked in its gauge, it earns no swap fees for the LP (they go to the gauge), so NockNock shows "not LP-claimable" and never $0 earned. Its WETH is gas-pillar ETH, so it is never offered a rebuild deposit; no Aero CL position is, whatever its pair, because the Aero app's deposit link starts a new position (another NFT, which NockNock would not track) and adding to an existing NFT is not verified. A position the wallet neither holds nor staked fails the cycle; it is never counted on someone else's behalf. So does a `pool_address` that is not the NFT's own pool, and an unstaked position whose fees cannot be read (its `collect` simulation reverts): an unread fee is never published as 0.
    - LP may hold slightly more NOCK than sits above the hard floor. Operator, 2026-11-14: "Because the LP sells a fraction every time the price moves, by putting in just a little bit more than what we have allowed as a trading limit we will actually be quite unlikely to sell it all unless there is a super rally, in which case we'll still have most of the hundred thousand... We need to trade more." The overage is bounded by `operator_profile.lp_floor_tolerance_bps`, and the engine must state the worst case rather than hide it. Do not re-impose a hard cap at the floor.
 9. **Agents May Improve the Strategy (2026-11-14)**:
    - "I am counting on you to make the strategy good — the strategy that we wrote may not be good. You are allowed to suggest adjustments, and even build them into the code."
@@ -127,6 +129,7 @@
    - Never hallucinate fake Urbit `@p` (e.g. `~urmanac` is invalid Hoon syntax). Stick strictly to verifiable protocol and mathematical facts.
 11. **Four Pillars (standing order, 2026-11-14)**:
    - The wallet holds four things: NOCK, cash (USDC), gas (ETH) and AERO. "We neither minimize nor maximize the importance of the pillars. They just are. If they grow, that's good."
+   - The four add up to the total: NOCK (wallet plus LP), USDC (wallet plus LP), ETH (wallet gas plus LP WETH) and wallet AERO (since v0.6.0, #93). AERO has no target and no deviation label other than `no_target`. AERO still unclaimed in a gauge is not in the total, exactly as uncollected LP fees are not; it is shown beside them and counts once it is claimed. AERO here is the token the Aero gauges pay, `0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee`; the older "Aerodrome" token that shares the symbol is not read ([`ONCHAIN_INTEGRATION.md`](ONCHAIN_INTEGRATION.md) §9).
    - No pillar is the point of the others, and NockNock puts no rebalancing pressure on any of them. LP positions are where the pillars work together, not a fifth pillar. Reasons: [`docs/lore/2026-11-14-four-pillars-no-hurry.md`](docs/lore/2026-11-14-four-pillars-no-hurry.md).
    - The deviation matrix's under/over-funded labels measure against the operator's own targets. They are not instructions.
 12. **Gas Is Not Cash (standing order, 2026-11-14)**:
@@ -190,7 +193,7 @@
 Before pushing any PR or proposing a release tag, always execute the full verification battery:
 ```bash
 make test-brain       # 3 tests passing (WASM invariants & hashing)
-make test-worker      # 145 tests as of #97 (137 worker + 8 MCP)
-make test-frontend    # 107 tests as of v0.5.3
+make test-worker      # 275 tests as of #115 (257 worker + 18 MCP)
+make test-frontend    # 201 tests as of #115
 make dist             # Verifies packaging of dist/ binaries and tarballs
 ```
