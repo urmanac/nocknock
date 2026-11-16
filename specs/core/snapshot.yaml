@@ -622,7 +622,11 @@ components:
         timing:
           type: string
           enum: [early, on_schedule]
-          description: early when the swap landed before the open tranche came due (last recorded fill plus the plan interval)
+          description: >-
+            early when the swap landed less than one plan interval after the buy before it,
+            otherwise on_schedule. "The buy before it" is the latest of this plan's recorded
+            fills at or before the swap's block time and the older swaps still on offer; a
+            dismissed swap is nobody's previous buy. The plan's first buy is never early.
         reference_spot_usd:
           type: string
           nullable: true
@@ -630,7 +634,9 @@ components:
         reference_spot_source:
           type: string
           nullable: true
-          description: Where the reference came from, with its own timestamp
+          description: >-
+            Where the reference came from, with its own timestamp. Clients show it next to
+            the cost figure: a price move between that time and the swap reads as cost.
         execution_cost_bps:
           type: integer
           nullable: true

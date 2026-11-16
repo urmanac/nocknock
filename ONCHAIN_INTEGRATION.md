@@ -386,7 +386,8 @@ four fee claims after the anchor, the two deposits and the pre-plan purchase.
   7,370.2 NOCK). The scan stops at the plan anchor, so it is never fetched or offered. Set
   `accumulation_plan.starts_at` earlier to reach it.
 - **Plan buy 2 came 20 h 56 min after buy 1.** Against a 24-hour interval that is before
-  its tranche was due, so the offer is labelled `early`. Buy 3 came 24 h 10 min after buy 2.
+  its tranche was due, so the offer is labelled `early` (judged against the buy before it,
+  whether that buy is recorded or still on offer). Buy 3 came 24 h 10 min after buy 2.
 - **Plan buy 3 did not go through the Aero router of §6.** Its receipt's `to` is
   `0xcaf22ce31298cf2bf1d152862f80216478ad7c67`, and both the USDC and the NOCK moved
   directly between the wallet and the legacy vAMM `0x85f1aa3a…d626`. Which app sent it was

@@ -45,7 +45,7 @@ Everything comes from `ingestion-worker/config.yaml`:
   make yourself. After a buy, NockNock finds the swap in the wallet's on-chain history and
   offers it on the dashboard: CONFIRM counts it (its receipt is verified again first),
   NOT PART OF THE PLAN leaves it out. A detected swap is never counted on its own, and
-  recording a buy by its transaction hash always works.
+  recording a buy by its transaction hash works whether or not detection ran.
 
 The shipped `config.yaml.example` is loaded as the base layer and still carries the
 original operator's wallet, positions and limits. Set or clear every one of those in your

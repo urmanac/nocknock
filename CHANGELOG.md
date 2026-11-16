@@ -18,8 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /v1/execute/record-accumulation` with the offered hash, so the receipt is fetched
   and verified again: there is no second write path. NOT PART OF THE PLAN leaves it
   uncounted; it stays listed and can be restored. The manual hash field is unchanged and
-  always available. Open offers change no plan number: fills, spend, average cost and
-  cadence still count ledger rows only.
+  does not depend on detection. Open offers change no plan number: fills, spend, average
+  cost and cadence still count ledger rows only. When a tranche is due the panel's hint
+  follows the detection state (it promises to find the swap only when detection is
+  working) and, with a swap on offer, says to answer it before buying again.
 - **One set of rules.** The record handler's checks are now one pure function
   (`fill_verify.rs`: receipt, wallet, block time, plan anchor) that the handler and the
   detector both call. The handler's order of checks, status codes, error codes and
@@ -32,21 +34,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the state hash.
 - **Bounds.** The scan goes back to the plan anchor and no further; swaps from before it
   are not offered. A transaction already in the ledger (any plan id) is never offered. A
-  swap made before its tranche was due is offered with an `early` label.
+  swap made less than one plan interval after the buy before it (a recorded fill, or an
+  older swap still on offer) is offered with an `early` label; the label does not depend
+  on the order in which offers are confirmed. A stalled transfer-history call fails with
+  its own reason in about 20 seconds (two 10-second attempts), inside the 60-second cap
+  on the whole check.
 - **Execution cost per fill.** Each recorded fill and each offer carries
   `execution_cost_bps` over the reference spot at its block time: the stored NOCK/USD
   price nearest the block, within 60 minutes (the v0.5.3 lookup the harvest ledger uses),
   kept with its source. No stored price near the block means no figure, never a
-  substitute. Fills recorded before this release get theirs on the next cycle when a
+  substitute. Every surface prints the reference's own time next to the figure (the
+  dashboard also says how many minutes it is from the swap), because a price move between
+  the two reads as cost. A fill confirmed from an offer keeps the figure the offer
+  showed. Fills recorded before this release get theirs on the next cycle when a
   stored price exists. `GET /v1/accumulation/events` returns the three new fields and the
   panel lists the plan's fills with them.
-- **Advice and MCP.** While a swap is on offer, the plan's advice text leads with it; the
-  action title does not change, so no extra notification fires. `get_accumulation_plan`
+- **Advice and MCP.** While a swap is on offer, the advice text leads with it in every
+  directive (also when an overextension, a range exit or a harvest outranks the plan, and
+  after the plan is complete); the action title does not change, so no extra notification
+  fires. `get_accumulation_plan`
   lists offers and the detection state on both transports, from one shared source file.
   MCP gains no write tool.
 - **New REST endpoints**, unauthenticated like the existing routes, touching only the
   candidates table: `GET /v1/accumulation/candidates`,
-  `POST /v1/accumulation/candidates/dismiss`, `POST /v1/accumulation/candidates/restore`.
+  `POST /v1/accumulation/candidates/dismiss`, `POST /v1/accumulation/candidates/restore`
+  (503 `NO_TRACKED_WALLET` when no wallet is configured).
 - **Storage.** New table `accumulation_candidates` (migration `20261116000010`, with a
   `fills_checked_at` column on `accumulation_plans`) so a transaction is classified once;
   new nullable columns `reference_spot_usd`, `reference_spot_source`, `execution_cost_bps`
