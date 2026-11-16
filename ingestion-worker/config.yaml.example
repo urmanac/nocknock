@@ -122,9 +122,10 @@ operator_profile:
 # ============================================================
 # Optional. While this section exists the advice engine paces buys in tranches
 # ("DCA TRANCHE DUE (3 of 10)") instead of advising one lump-sum deployment. The plan
-# only PACES: you make each swap yourself (e.g. on Aero, aero.xyz) and record its
-# transaction hash (dashboard, or POST /v1/execute/record-accumulation). Progress is
-# counted from receipt-verified buys only; missed windows never stack.
+# only PACES: you make each swap yourself (e.g. on Aero, aero.xyz). NockNock then finds
+# the swap on-chain and offers it on the dashboard for you to confirm (v0.6.0), or you
+# record its transaction hash (dashboard, or POST /v1/execute/record-accumulation).
+# Progress is counted from receipt-verified buys you confirmed; missed windows never stack.
 # Budget, tranche count and cadence are your allocation decision — there is no default.
 # accumulation_plan:
 #   id: "2026-11-reentry"          # label; keys the accumulation ledger
@@ -138,6 +139,18 @@ operator_profile:
 #   respect_cash_target: true      # never spend liquid USDC below target_weights_bps.cash
 #   cash_reserve_usdc: 950         # protected reserve: never advise a buy that takes liquid
 #                                  # USDC below this, at any price (keep dry powder for a dip)
+
+# ============================================================
+# Fill detection for the accumulation plan (v0.6.0, issue #118)
+# ============================================================
+# On by default while an accumulation_plan is configured: nothing to set. Each cycle the
+# worker reads the tracked wallet's incoming NOCK transfers back to the plan anchor
+# (starts_at, else the moment the plan id was first seen; one alchemy_getAssetTransfers
+# call) and offers each swap that passes the recording rules. It never records a buy and
+# has no thresholds. Set enabled: false to stop the check; recording a buy by its
+# transaction hash keeps working either way.
+# fill_detection:
+#   enabled: true
 
 # ============================================================
 # Market Price Backfill Engine (v0.3.0)

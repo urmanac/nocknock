@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — fill detection for the accumulation plan (#118)
+- **The worker finds the plan's buys on-chain.** Each ingestion cycle, while a plan is
+  active, it lists the NOCK transfers into the tracked wallet back to the plan anchor
+  (`alchemy_getAssetTransfers`), and checks every transaction it has not seen before
+  against its receipt and block header. Cost: one transfer-history call per cycle, plus
+  one receipt (and one block header for a purchase) per new transaction.
+- **A detected swap is offered, never recorded.** The Accumulation Plan panel shows each
+  one with its full hash, amounts, price and block time. CONFIRM calls the existing
+  `POST /v1/execute/record-accumulation` with the offered hash, so the receipt is fetched
+  and verified again: there is no second write path. NOT PART OF THE PLAN leaves it
+  uncounted; it stays listed and can be restored. The manual hash field is unchanged and
+  always available. Open offers change no plan number: fills, spend, average cost and
+  cadence still count ledger rows only.
+- **One set of rules.** The record handler's checks are now one pure function
+  (`fill_verify.rs`: receipt, wallet, block time, plan anchor) that the handler and the
+  detector both call. The handler's order of checks, status codes, error codes and
+  messages are unchanged.
+- **Honest failure.** Detection never fails a cycle. `accumulation_plan.fill_detection`
+  (snapshot, v0.6.0) carries `status`: `ok`, `partial` (read, but incompletely, with what
+  is missing), `unavailable` (could not check, with the reason) or `not_run` (with the
+  reason). "Could not check" is never shown as "none found". A receipt that could not be
+  read is not classified; it is tried again next cycle. `last_checked_at` is left out of
+  the state hash.
+- **Bounds.** The scan goes back to the plan anchor and no further; swaps from before it
+  are not offered. A transaction already in the ledger (any plan id) is never offered. A
+  swap made before its tranche was due is offered with an `early` label.
+- **Execution cost per fill.** Each recorded fill and each offer carries
+  `execution_cost_bps` over the reference spot at its block time: the stored NOCK/USD
+  price nearest the block, within 60 minutes (the v0.5.3 lookup the harvest ledger uses),
+  kept with its source. No stored price near the block means no figure, never a
+  substitute. Fills recorded before this release get theirs on the next cycle when a
+  stored price exists. `GET /v1/accumulation/events` returns the three new fields and the
+  panel lists the plan's fills with them.
+- **Advice and MCP.** While a swap is on offer, the plan's advice text leads with it; the
+  action title does not change, so no extra notification fires. `get_accumulation_plan`
+  lists offers and the detection state on both transports, from one shared source file.
+  MCP gains no write tool.
+- **New REST endpoints**, unauthenticated like the existing routes, touching only the
+  candidates table: `GET /v1/accumulation/candidates`,
+  `POST /v1/accumulation/candidates/dismiss`, `POST /v1/accumulation/candidates/restore`.
+- **Storage.** New table `accumulation_candidates` (migration `20261116000010`, with a
+  `fills_checked_at` column on `accumulation_plans`) so a transaction is classified once;
+  new nullable columns `reference_spot_usd`, `reference_spot_source`, `execution_cost_bps`
+  on `accumulation_events` (migration `20261116000011`). Both additive. The table is
+  disposable like the rest of the database: after a loss the next cycle rebuilds it and
+  offers every buy since the anchor again.
+- **Config.** `fill_detection.enabled` (default `true`) turns the check off. There are no
+  thresholds: detection filters nothing by size or price.
+- **Verified on Base** (ONCHAIN_INTEGRATION.md §8): tests run on real receipts. The
+  plan's three buys qualify; four Uniswap fee claims and two Aero deposits that returned
+  a NOCK refund do not.
+
 ### Changed — worker split into modules (#97)
 - **Move-only refactor.** `ingestion-worker/src/main.rs` (10,853 lines) is now 1,322 lines
   plus 22 modules: `evm`, `calldata`, `contracts`, `rpc`, `adapters/{uniswap_v3,uniswap_v4,
