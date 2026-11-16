@@ -3,6 +3,8 @@ mod uniswap_v4;
 pub(crate) use uniswap_v4::*;
 mod uniswap_v3;
 pub(crate) use uniswap_v3::*;
+mod aero_basic;
+pub(crate) use aero_basic::*;
 
 /// Stable identifier shared by config rules and RawPosition.position_id.
 pub(crate) fn position_key(c: &PositionConfig) -> String {
