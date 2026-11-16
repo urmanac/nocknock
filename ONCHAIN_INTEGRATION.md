@@ -219,6 +219,9 @@ If `fee()` is in hundredths of a basis point (the Uniswap-v3 convention these po
 otherwise follow), the hops charge 0.0008%, 0.0435% and 0.97%: the WETH/NOCK hop
 accounts for most of the 1.8% paid over spot.
 
+*Confirmed 2026-11-16 for the WETH/NOCK pool (§8, "Swap fee units"): `fee()` is in
+millionths, so 9700 is 0.97%. The other two hops were not re-measured.*
+
 ### Legacy Aerodrome pool
 
 The NOCK/USDC vAMM `0x85f1aa3a70fedd1c52705c15baed143e675cd626` (factory
@@ -305,10 +308,191 @@ For comparison, the new Aero volatile NOCK/USDC pool `0x770fe8fc…` held about 
 | Pool | `0x770fE8Fc9248c6382950A86E39a9391B41D59e0A` | `0x957256c98d61A714081DE2EE70ae3A96c9b40874` |
 | Receipt | 29684955447174 LP tokens | NFT #2914490 on `0x4857db576ee0e45f10525ec59527bfd10beec60b` |
 | Staked in | gauge `0xc82782ee66d82c4d19db0429652091a085083526` | gauge `0x3bf70c880adc8370917994ab0df68e763b7a60fd` |
-| NockNock | tracked (`gauge_address`) | **not tracked** (issue #91) |
+| NockNock | tracked (`gauge_address`) | tracked since v0.6.0 with `protocol: aerodrome-cl` (issue #91, §8); not tracked before |
 
 Both went through the Aero router `0x0fef9e88…ee98` (`execute`, §6), which staked the
 receipt automatically. For the volatile pool `gauge.balanceOf(wallet)` returned the
 minted amount exactly and `gauge.stakingToken()` is the pool; the wallet's share was
 3.38% of reserves, equal to what was deposited.
+
+---
+
+## 8. Aero Concentrated-Liquidity (Slipstream) Positions (v0.6.0, issue #91) — Verified Record
+
+The worker tracks an Aero CL position with `protocol: aerodrome-cl`
+(`ingestion-worker/src/adapters/aero_cl.rs`). Everything below was read with `eth_call`
+through `https://base-rpc.publicnode.com` on 2026-11-16 (workstation date 2026-11-15),
+pinned to **block 58061668** (`0x375f364`, 2026-11-16T04:18:29Z, hash `0xb3cb8ebf…4a92f9`)
+unless another block is named. Selectors were computed from the signatures shown and each
+was checked against the response it produces. The raw responses are the fixtures in
+`ingestion-worker/src/tests_aero_cl.rs`.
+
+### Contracts
+
+| Role | Address | How it was tied to the others |
+|---|---|---|
+| Position manager (NFT "Slipstream V3 Deposit") | `0x4857db576ee0e45f10525ec59527bfd10beec60b` | `pool.nft()` and `gauge.nft()` both return it |
+| Pool, WETH/NOCK CL200 | `0x957256c98d61A714081DE2EE70ae3A96c9b40874` | `factory.getPool(WETH, NOCK, 200)` and `gauge.pool()` return it |
+| Pool factory | `0x9cb220581b91b0c83223012fe69688b92ad07a76` | `pool.factory()` and position manager `factory()`; the factory of §6's route |
+| Gauge of that pool | `0x3bf70c880adc8370917994ab0df68e763b7a60fd` | `pool.gauge()` returns it |
+| Gauge implementation | `0x89e91a960154b1ed6c093039a8f0725ab67d14e0` | the gauge's code is a 45-byte EIP-1167 proxy to it |
+| Gauge factory / voter | `0xf437f62053acb121665b8fdbfea8f214fb8e589d` / `0x382409fad8503fbcdbb27a4211551fa03e884078` | `gauge.gaugeFactory()` / `gauge.voter()` |
+
+### Selectors used by the adapter
+
+| Call | Selector | On | Used for |
+|---|---|---|---|
+| `positions(uint256)` | `0x99fbab88` | position manager | tokens, tick spacing, ticks, liquidity |
+| `ownerOf(uint256)` | `0x6352211e` | position manager | who holds the NFT |
+| `collect((uint256,address,uint128,uint128))` | `0xfc6f7865` | position manager | fees of an UNSTAKED position (simulated from the wallet) |
+| `slot0()` | `0x3850c7bd` | pool | sqrt price and tick |
+| `liquidity()` | `0x1a686502` | pool | in-range liquidity (pool liveness) |
+| `token0()` / `token1()` | `0x0dfe1681` / `0xd21220a7` | pool | the configured pool is the NFT's pool |
+| `tickSpacing()` | `0xd0c93a7c` | pool | same check |
+| `fee()` | `0xddca3f43` | pool | current swap fee (dynamic) |
+| `gauge()` | `0xa6f19c84` | pool | the only contract the NFT may be staked in |
+| `stakedContains(address,uint256)` | `0xc69deec5` | gauge | proof that the wallet staked the NFT |
+
+### Layouts (they differ from Uniswap v3)
+
+`positions(2914490)` returns 12 words. Word 4 is the pool's **tick spacing**, where
+Uniswap v3 has the fee tier:
+
+| Word | Field | Value |
+|---:|---|---|
+| 0, 1 | nonce, operator | 0, zero address |
+| 2 | token0 | `0x4200…0006` (WETH) |
+| 3 | token1 | `0x9b5e…1722` (NOCK) |
+| 4 | tickSpacing | 200 |
+| 5 | tickLower | 73400 |
+| 6 | tickUpper | 74800 |
+| 7 | liquidity | 57859113596792372851 (`0x322f4dd43fbc87e73`) |
+| 8, 9 | feeGrowthInside0/1LastX128 | `0x574a55555810582e165fb0bd53ef`, `0x212d3d750e1bdf94505a584b88be1f5` |
+| 10, 11 | tokensOwed0, tokensOwed1 | 0, 0 |
+
+Pool `slot0()` returns **6 words** (Uniswap v3 returns 7; there is no `feeProtocol`):
+sqrtPriceX96 `0x2871f7214287269e35ad48582c`, tick 74002, observationIndex 207,
+observationCardinality 900, observationCardinalityNext 900, unlocked 1.
+
+Pool `ticks(int24)` (`0xf30dba93`) returns **10 words**: liquidityGross, liquidityNet,
+stakedLiquidityNet, feeGrowthOutside0X128, feeGrowthOutside1X128, rewardGrowthOutsideX128,
+tickCumulativeOutside, secondsPerLiquidityOutsideX128, secondsOutside, initialized. Fee
+growth is at words 3 and 4, not 2 and 3 as in Uniswap v3, so the v3 fee-growth maths must
+not be pointed at this pool. The adapter does not read `ticks()` at all.
+
+Negative ticks arrive sign-extended over the whole word (`ff…fe98` is -360; seen on NFT
+#3117536 below and on the ETH/USD price pool's own `slot0`, tick -201250 at this block).
+`parse_hex_word_i32` used to reject such a word; it and the calldata encoder
+(`int24_calldata_word`) were corrected in the same change.
+
+### Amounts at block 58061668
+
+From liquidity, ticks 73400..74800 and the pool's sqrt price, with the maths shared with
+the Uniswap v3 adapter (`evm::concentrated_amounts_raw`):
+
+- **0.055908 WETH + 6,945.83 NOCK**, in range (tick 74002).
+- Valued at the snapshot's own prices at that block (ETH/USD $1,820.91 from the
+  `eth_price_pool` slot0, NOCK/USD $0.0112868 from the v4 3% pool): **$180.20**.
+- The deposit (block 57425824, 2026-11-14T16:59:00Z; `gauge.depositBlock(2914490)` returns
+  that block) was 0.081995 ETH + 2,755 NOCK. The liquidity read today reproduces both
+  deposit amounts at a pool tick of 73641 (0.0819946 WETH and 2,755 NOCK), so the
+  liquidity is unchanged since the deposit; NOCK has since fallen against ETH, so the
+  range holds more NOCK and less WETH.
+- The position is 20.1% of the pool's in-range liquidity (`liquidity()` =
+  287515221646699784807).
+
+### Ownership: the NFT is staked, and how the wallet is proved to be the staker
+
+- `ownerOf(2914490)` = the gauge `0x3bf70c88…60fd`, not the wallet.
+  `positionManager.balanceOf(wallet)` = 0.
+- `gauge.stakedContains(wallet, 2914490)` = **true**. `stakedLength(wallet)` (`0xae775c32`)
+  = 1, `stakedByIndex(wallet, 0)` (`0x38463937`) = 2914490, `stakedValues(wallet)`
+  (`0x4b937763`) = `[2914490]`.
+- The same question about an account that did not stake it
+  (`stakedContains(0x4857db57…, 2914490)`) and about another id
+  (`stakedContains(wallet, 2914491)`) = false.
+- `gauge.withdraw(2914490)` (`0x2e1a7d4d`) simulated **from the wallet** succeeds; simulated
+  from another account it reverts with `NA`. So the per-depositor stake set is what gives
+  the right to take the NFT back, and `stakedContains` is the read that proves it.
+
+The adapter counts the position only when `ownerOf` is the wallet, or `ownerOf` is
+`pool.gauge()` **and** `stakedContains(wallet, tokenId)` is true. Otherwise the cycle fails
+and says who holds the NFT. A `gauge_address` in config is optional and must equal
+`pool.gauge()`.
+
+This gauge is not the older Slipstream `CLGauge`: `earned(address,uint256)`
+(`0x3e491d47`), `rewards(uint256)` and `rewardToken()` revert on it. Its selectors, read
+from the implementation's bytecode, include `earned(address,uint256[])` `0xd942be03`,
+`claimEmissions(address,address,uint256[])` `0x09902477`, `deferredEmissions(address)`
+`0xba135be9`, `depositBlock(uint256)` `0x32590654`, `pendingFees()` `0x224438d1`,
+`collectFees()` `0xc8796572`, `depositFor(uint256,address)` `0x36efd16f` and
+`withdrawFrom(uint256,address)` `0xb1cbf888` (names resolved through the public signature
+database; only the ones called above were exercised).
+
+### Fees: what a staked LP can and cannot claim
+
+Measured, not assumed:
+
+- **Swap fees on staked liquidity go to the gauge.** At this block `pool.stakedLiquidity()`
+  (`0x3ab04b20`) equals `pool.liquidity()`: all in-range liquidity is staked. Across the
+  swap in block 58060732 (tx `0xd42d28d1…518137`, 9765162112164125 wei WETH in),
+  `pool.gaugeFees()` (`0x293833ba`) token0 rose from `0xdf2a2eb83ab2` to `0x135506233e2eb`:
+  94722072487993 wei, which is exactly `ceil(amountIn × 9700 / 1e6)`. The whole fee went to
+  the gauge's account. `gauge.pendingFees()` reports the same balance.
+- **Nothing is collectable for the position.** `collect` for NFT #2914490 simulated from
+  the wallet reverts (the gauge holds the NFT); simulated from the gauge, its owner, it
+  returns (0, 0). `positions().tokensOwed0/1` are 0. Five other contract-held NFTs on the
+  same position manager (#3116708, #2890904, #3089776, #3096968, #3110680; three of the
+  holders are 45-byte proxies like this gauge, none was confirmed to be a gauge) also
+  returned (0, 0) when `collect` was simulated from the holder.
+- **The staker earns AERO instead.** `gauge.earned(wallet, [2914490])` returned
+  `0xa08e3e2faa16f716` (11.569 at 18 decimals) at this block. NockNock does **not** read
+  this value: AERO rewards are issue #93.
+
+So a staked position reports no fee figure. Its fee fields say
+"not LP-claimable (staked: swap fees on staked liquidity go to the gauge); AERO rewards
+not read (#93)" in `positions[].fees_note`, `contract_fees[].amount`, the velocity row's
+`note`, the claim payload (`not_claimable`) and the MCP text. It is never shown as $0
+earned, and it adds nothing to the claimable total.
+
+**An unstaked position** (the wallet holds the NFT) can collect. Verified on NFT #3117536
+at **block 58063800** (`0x375fbb8`), then held by the EOA `0xe3c74593…a88a` (USDC / an
+unregistered token, tick spacing 10, ticks -360..-270; burned a few hundred blocks later):
+`positions()` showed tokensOwed 0/0, while `collect` simulated from the owner returned
+(129192, 599) raw, and from another account reverted. The adapter therefore takes an
+unstaked position's fees from the `collect` simulation, not from `tokensOwed`. One other
+EOA-held NFT (#86038) reverted on the same simulation for a reason not investigated; in
+that case the adapter reports "fees unavailable (collect() simulation from the wallet
+reverted); not counted" rather than zero.
+
+### Swap fee units
+
+`pool.fee()` = 9700 and the measurement above gives fee = amountIn × 9700 / 1,000,000, so
+the unit is millionths (the Uniswap v3 "pips"): 9700 is **0.97%**, reported as
+`fee_tier_bps` 97. The fee is dynamic on these pools; the worker reads it every cycle.
+`pool.unstakedFee()` (`0xb64cc67b`) = 50000; its meaning was not measured and it is not
+used.
+
+### What NockNock does with the position
+
+- Its NOCK counts toward the NOCK total and the floor; its WETH toward the ETH pillar
+  (never cash, never investable).
+- It is a ranged position: in/out of range comes from the pool tick against its ticks
+  (upper bound exclusive), and it appears in the tick bracket panel like the Uniswap ones.
+- It is never offered an LP rebuild deposit: its WETH leg would have to come from gas
+  (issue #94). Were a link ever needed, it is `https://app.aero.xyz/deposit/8453-<pool>`.
+
+### Not verified
+
+- **The deposit link for a CL pool.** `https://app.aero.xyz/deposit/8453-0x957256c9…0874`
+  follows the form settled for the basic pool (§7). The app is a client-rendered page, so
+  whether that URL opens the CL200 pool, and whether it adds to the existing NFT or mints
+  a new one, was not confirmed. No suggestion uses it today.
+- **AERO**: token address, value and claim path (`claimEmissions`) are not read (#93).
+- **Other CL pools.** Only the WETH/NOCK CL200 pool and its gauge were exercised. The
+  adapter reads the gauge from the pool, so another pool works only if its gauge answers
+  `stakedContains(address,uint256)`; one that does not fails the cycle rather than being
+  counted.
+- **`unstakedFee()`** and how fees are split when only part of the in-range liquidity is
+  staked.
 

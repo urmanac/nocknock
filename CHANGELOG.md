@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Aero concentrated positions (#91)
+- **New position protocol `aerodrome-cl`.** An Aero concentrated-liquidity ("CL",
+  Slipstream) position is read from its NFT: tokens, tick spacing, ticks and liquidity from
+  the position manager, price, tick and the current swap fee from the pool. Amounts use the
+  same maths as Uniswap v3. Its NOCK counts toward the NOCK total and the floor, its WETH
+  toward the ETH pillar, and its range shows in the tick bracket panel, now with which side
+  an out-of-range position left on. Nothing is tracked until the position is added to
+  `positions:`; `config.yaml.example` carries a commented entry.
+- **Ownership is checked every cycle.** The Aero app stakes the NFT in the pool's gauge, so
+  `ownerOf` is the gauge. The position is counted only if the wallet holds the NFT or the
+  gauge lists it among the wallet's stakes (`stakedContains`); otherwise the cycle fails and
+  names the holder. A staked position says so (`positions[].staked_in_gauge`).
+- **Fees are stated truthfully.** Swap fees on staked liquidity go to the gauge, measured
+  on-chain (ONCHAIN_INTEGRATION.md §8), so a staked position shows "not LP-claimable
+  (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)" on
+  the card, in `contract_fees`, the velocity panel, the claim payload and the MCP text,
+  never $0 earned. An unstaked position's fees are what `collect` simulated from the wallet
+  returns; if that simulation reverts they are "fees unavailable", not zero.
+- **An unknown `protocol` is a configuration error.** It is reported before any chain read
+  ("Configuration error: position '…' has unknown protocol '…'") and by the claim payload.
+  Labels, deposit links, the fee contract, the pool liveness read and the claim payload used
+  to treat any protocol that was not `uniswap-v3` or `aerodrome` as Uniswap v4.
+- **Negative ticks decode.** Tick words are read as sign-extended `int24` and encoded the
+  same way in calldata; a negative tick used to fail the read (latent for the tracked
+  pairs, whose ticks are positive).
+- Snapshot (spec version unchanged until the v0.6.0 branches are stacked): optional
+  `positions[].tick_spacing`, `staked_in_gauge`, `fees_note` and velocity `contracts[].note`,
+  present only for positions that have them. `record-harvest` and the claim payload accept
+  platform `aerodrome-cl`. `testdata/golden_snapshot.json` is unchanged; the new protocol
+  has its own `testdata/golden_snapshot_aero_cl.json`, built from reads at Base block
+  58061668.
+
 ### Changed — worker split into modules (#97)
 - **Move-only refactor.** `ingestion-worker/src/main.rs` (10,853 lines) is now 1,322 lines
   plus 22 modules: `evm`, `calldata`, `contracts`, `rpc`, `adapters/{uniswap_v3,uniswap_v4,

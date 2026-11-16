@@ -328,7 +328,7 @@ pub(crate) async fn get_claim_fees_payload_handler(Extension(state): Extension<A
     // --- Aero CL positions (issue #91) ---
     // An unstaked NFT's fees are collected from the Aero CL position manager with the
     // same collect((uint256,address,uint128,uint128)) call as Uniswap v3 (verified on
-    // that contract, ONCHAIN_INTEGRATION.md §7). A STAKED NFT has nothing to collect:
+    // that contract, ONCHAIN_INTEGRATION.md §8). A STAKED NFT has nothing to collect:
     // swap fees on staked liquidity go to the gauge, and collect() from the wallet
     // reverts because the gauge holds the NFT. The snapshot says which it is.
     for (idx, pos) in aero_cl_configs.iter().enumerate() {

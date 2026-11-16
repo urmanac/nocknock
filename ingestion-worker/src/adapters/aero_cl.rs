@@ -4,7 +4,7 @@ use crate::*;
 // Aero concentrated-liquidity ("CL", Slipstream) positions — issue #91
 // ============================================================
 // Every address, selector and layout here was verified by live read-only calls on Base
-// on 2026-11-16 (blocks 58061668 and 58063800; ONCHAIN_INTEGRATION.md §7). The unit
+// on 2026-11-16 (blocks 58061668 and 58063800; ONCHAIN_INTEGRATION.md §8). The unit
 // tests in tests_aero_cl.rs decode the raw responses captured at those blocks.
 //
 // A CL position is an NFT in Aero's Slipstream position manager. The layouts follow

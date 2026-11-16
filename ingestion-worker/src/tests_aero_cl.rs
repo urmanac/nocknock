@@ -2,7 +2,7 @@
 //!
 //! Every `REAL_*` constant below is a raw `eth_call` result captured from Base mainnet
 //! through https://base-rpc.publicnode.com on 2026-11-16, at a pinned block, and is
-//! recorded with its call in ONCHAIN_INTEGRATION.md §7. Nothing here is hand-made
+//! recorded with its call in ONCHAIN_INTEGRATION.md §8. Nothing here is hand-made
 //! except where a test says "synthetic".
 
 use super::*;

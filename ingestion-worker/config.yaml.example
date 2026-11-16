@@ -91,7 +91,7 @@ positions:
   # ETH pillar and its NOCK toward your NOCK total and floor. It is never offered an LP
   # rebuild deposit, because its WETH leg would have to come from gas.
   # Values below are the WETH/NOCK CL200 pool, verified on Base 2026-11-16
-  # (ONCHAIN_INTEGRATION.md §7):
+  # (ONCHAIN_INTEGRATION.md §8):
   # - id: "aero-cl200-weth-nock"
   #   protocol: "aerodrome-cl"
   #   network: "base"
