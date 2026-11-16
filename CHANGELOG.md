@@ -157,6 +157,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   differences are `accumulation_plan.fill_detection: null` in the plan case and that
   case's state hash.
 
+### Fixed — found by the review of the whole stack (#127, #128, #129)
+- **The RPC URL can no longer reach an error message (#127).** reqwest appends the request
+  URL to a network error, and the RPC URL holds the Alchemy key. That text was returned to
+  callers that publish it: `/health` `last_error` already in v0.5.3, and with this release
+  the Aero CL adapter and the AERO notes stored in the snapshot. All three sites in
+  `rpc.rs` strip the URL; a test calls the real function against a refused port and fails
+  if the URL or key appears.
+- **A stored candle counts as its open, never its close (#129).** A backfilled candle is
+  stored at its open time with its close in `price_usd`. The lookup behind harvest values
+  and each fill's cost over spot returned that close labelled with the open time: a price
+  from an hour (or a day) later. It now reads a candle as its open, prefers the worker's
+  own read inside the 60-minute window, and gives no price for a candle with no positive
+  open. This is the rule the cost-basis series uses, so one buy shows one spot figure.
+  Rows already written are not rewritten.
+- **`deploy.sh` does not ship nested git worktrees (#128).** git lists a nested worktree as
+  one directory and tar archived it recursively: about 16 GB from a checkout holding
+  agent worktrees. tar is now told not to recurse, and `.claude/` is ignored.
+- **`specs/core/snapshot.yaml` parses as YAML again.** A description added with #91 held a
+  `: ` in a plain scalar. A test now loads both spec files.
+- **Deploys are forward-only**, now stated in AGENTS.md section 13 and DEPLOYMENT.md: a
+  build older than the newest applied migration does not start.
+
 ### Added — fill detection for the accumulation plan (#118)
 - **The worker finds the plan's buys on-chain.** Each ingestion cycle, while a plan is
   active, it lists the NOCK transfers into the tracked wallet back to the plan anchor
