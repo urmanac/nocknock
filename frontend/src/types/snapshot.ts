@@ -220,8 +220,11 @@ export interface FeeCollectionIndex {
   claimable_usd: string;
   gas_break_even_usd: string;
   efficiency_ratio: number;
-  /** What the worker emits; 'not_claimable' is an Aero pool whose claimFees() reverts. */
+  /** What the worker emits; 'not_claimable' is an Aero pool whose claimFees() reverts,
+   *  or (v0.6.0) an Aero CL position with no readable LP claim (see note). */
   recommended_action: 'claim_now' | 'claim_recommended' | 'accumulate' | 'not_claimable';
+  /** With 'not_claimable': the position's own reason, when it has one (v0.6.0). */
+  note?: string;
 }
 
 // ============================================================
@@ -293,7 +296,8 @@ export interface Position {
   position_id: string;
   network: string;
   wallet: string;
-  protocol: 'uniswap-v4' | 'uniswap-v3' | 'aerodrome';
+  /** 'aerodrome-cl' (v0.6.0): an Aero concentrated-liquidity NFT, staked in its gauge or not. */
+  protocol: 'uniswap-v4' | 'uniswap-v3' | 'aerodrome' | 'aerodrome-cl';
   nft_id: number;
   pool_id: string;
   npm_address?: string | null;
@@ -317,6 +321,13 @@ export interface Position {
   pool_active?: boolean | null;
   /** True for a position spanning every price (Aerodrome volatile pool); bounds are not meaningful (2.2.0) */
   full_range?: boolean;
+  /** aerodrome-cl only: the pool's tick spacing, 200 for a CL200 pool (v0.6.0) */
+  tick_spacing?: number;
+  /** aerodrome-cl only: the gauge holding the NFT, when this wallet staked it there (v0.6.0) */
+  staked_in_gauge?: string;
+  /** Present when tokens_owed_* and fees_usd are not a read of LP-claimable fees: the
+   *  reason to show in their place, never "$0 earned" (v0.6.0) */
+  fees_note?: string;
 }
 
 export interface RawSnapshotData {
