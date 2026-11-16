@@ -41,6 +41,8 @@ export interface DerivedMetrics {
   accumulation_plan?: AccumulationPlanStatus | null;
   /** Standing LP-rebuild bias (2.1.0) */
   lp_rebuild?: LpRebuild;
+  /** NOCK cost basis (v0.6.0, #98); null/absent from a worker that predates it */
+  cost_basis?: import('../costBasis').CostBasis | null;
 }
 
 /** Plan progress, derived from config + receipt-verified buys only (2.1.0) */

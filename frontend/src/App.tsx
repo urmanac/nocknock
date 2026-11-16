@@ -1,6 +1,7 @@
 import React from 'react';
 import { LiteCockpit, WalletConnectBadge } from './components/LiteCockpit';
 import { AccumulationPlanPanel } from './components/AccumulationPlanPanel';
+import { AverageCostPanel, COST_PANEL_TITLE } from './components/AverageCostPanel';
 import { createRoot } from 'react-dom/client';
 import {
   AreaChart,
@@ -764,6 +765,13 @@ function Dashboard() {
             </div>
           </CanvasPanel>
         )}
+
+        {/* 8. Average cost of the verified buys against spot (#98); a full row for the time axis */}
+        <div style={{ gridColumn: '1 / -1' }}>
+          <CanvasPanel title={COST_PANEL_TITLE}>
+            <AverageCostPanel costBasis={metrics?.cost_basis} refreshKey={snapshot?.meta?.snapshot_id} />
+          </CanvasPanel>
+        </div>
       </main>
 
       {/* Stale Banner — non-obtrusive */}

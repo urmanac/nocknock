@@ -203,4 +203,8 @@ export const api = {
 
   // Ask the worker to ingest now (used after recording a buy so the plan advances).
   ingestNow: () => request<unknown>('/ingest', { method: 'POST' }),
+
+  // Average cost vs spot (v0.6.0, #98): verified fills with running averages, and stored spot.
+  costBasisSeries: (days?: number) =>
+    request<import('../costBasis').CostBasisSeries>(`/cost-basis/series${days ? `?days=${days}` : ''}`),
 };
