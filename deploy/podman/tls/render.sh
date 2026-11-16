@@ -23,6 +23,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 
 case "$PORT" in
   ''|*[!0-9]*) echo "render.sh: port '$PORT' is not a number" >&2; exit 1 ;;
+  # 08080 is 8080 to Podman but not to the string comparisons below, so it would get past
+  # the reserved-port check. More than five digits can only be out of range.
+  0*|??????*) echo "render.sh: write the port as a plain number from 1024 to 65535 (got '$PORT')" >&2; exit 1 ;;
 esac
 if [ "$PORT" -lt 1024 ] || [ "$PORT" -gt 65535 ]; then
   echo "render.sh: port $PORT is outside 1024-65535 (rootless Podman cannot publish a privileged port)" >&2
