@@ -551,9 +551,13 @@ block 58086356 (Aero 1,779.3262 NOCK, Uniswap 1,778.5967, Aero ahead by 0.04%).
 | The same, v4 | V4Quoter, USDC/NOCK 3% | error 3 `execution reverted`, data wrapping `0x7a5ed734` and the pool id |
 | The same, Aero | Metaquoter, USDC → WETH (50) → NOCK | a result: 131,005.94 NOCK, post-swap price far down but not at the bound (the pool holds full-range liquidity, so it fills any size at a collapsing price) |
 
-The fourth row matters: QuoterV2 and the Metaquoter do not signal a partial fill. The
-worker therefore reads the post-swap prices in their answers and treats one pinned at
-the range's end as "unavailable", never as a quote.
+The fourth row matters: QuoterV2 does not signal a partial fill. It was observed to
+return a partial amount with the post-swap price pinned at the range's bound, and no
+error. The worker therefore reads the post-swap prices in the answer and treats one
+pinned at the range's end as "unavailable", never as a quote. The Aero pools on these
+routes hold full-range liquidity and fill any size at a collapsing price (last row), so
+the Metaquoter was never seen to answer for a pool with no liquidity left; its answer
+has the same shape and the same price-bound check is applied to it.
 
 The retired v4 USDC/NOCK 0.75% pool (`0x91a9ef0a…f99c`, zero in-range liquidity) answers
 1,035.83 NOCK for 20 USDC by crossing empty ticks to reach some liquidity: a real quote
@@ -572,12 +576,20 @@ The retired v4 USDC/NOCK 0.75% pool (`0x91a9ef0a…f99c`, zero in-range liquidit
 
 ### Not verified
 
+- **The Aero Metaquoter on a concentrated pool with no liquidity left.** No such pool
+  exists on these routes to test against: the CLFactory resolves one USDC/NOCK or
+  WETH/NOCK concentrated pool (`0x9572…0874`), and it and the hop pools fill any size.
+  Whether the Metaquoter then reverts or returns a partial amount with the price at the
+  bound was not observed. The worker handles both: a revert reads "unavailable", and so
+  does a post-swap price at the bound.
 - **The worker's calls through Alchemy.** This branch had no key. The whole read path
   ran against the public RPC only. Each quote is pinned to the latest block number; if
   a node behind Alchemy's balancer has not seen that block yet the call is an RPC error
   (not a revert) and is retried twice before the route reads "unavailable".
 - **Compute-unit cost** on the operator's plan: one block header, seven quoter calls and
-  up to three fee reads per cycle while a tranche is due, and per refresh.
+  up to three fee reads per cycle while a tranche is due, and per refresh. The fee
+  reads run together, once each, inside two seconds; one that does not answer in time
+  leaves that hop's fee "not read" and the quotes stand.
 - **Wallet-specific fees on Aero.** The Metaquoter is called without a `from`. Its
   interface speaks of a pool's "total contextual fee" and Aero deploys a
   DiscountRegistry; if the operator's wallet has a discount the real swap returns

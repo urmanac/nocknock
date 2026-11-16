@@ -27,9 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or sent: every call is an `eth_call`, and there is no swap calldata, approval, slippage
   or minimum-out value in the code.
 - **Unavailable is never a number.** A quote that reverts, gets no answer, or comes from
-  a pool that ran dry part-way (Uniswap QuoterV2 and the Aero Metaquoter answer that case
-  with a partial amount; the worker detects it from the post-swap price) reads
-  "unavailable" with its reason, for that route and venue only. Nothing is derived from
+  a pool that ran dry part-way reads "unavailable" with its reason, for that route and
+  venue only. Uniswap QuoterV2 was observed to answer a dry pool with a partial amount
+  and the post-swap price pinned at the range's bound, and no error; the worker detects
+  that from the price. The Aero pools on these routes hold full-range liquidity and
+  fill any size at a collapsing price, so what the Aero Metaquoter answers for a dry
+  concentrated pool was not observed: the same price-bound check is applied to it. Nothing is derived from
   the spot price and an older quote is never shown as current. A failed quote never
   fails the cycle or hides the due tranche.
 - **Snapshot.** `accumulation_plan.route_quotes` (v0.7.0): `status` (`ok`, `partial`,
@@ -38,24 +41,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `more_nock_by_pct`, `comparison`. Null unless a tranche is due. The whole object is
   left out of the state hash, so quotes never force a new snapshot row; the golden
   snapshot file is unchanged for that reason, and the payload's shape is pinned by its
-  own fixture instead.
+  own fixture instead. While a tranche is due with quoting on, the advice details end
+  with one fixed sentence pointing to the quotes; it does not depend on what the
+  quoters answered. A snapshot read back from the database at start-up carries no
+  quotes until the first cycle reads new ones.
 - **Dashboard.** The Accumulation Plan panel shows the two venues side by side while a
   tranche is due, marks the one the worker named, and links each venue's own swap page
   (`app.aero.xyz/swap`, `app.uniswap.org/swap`) labelled as a swap page. Nothing is
   prefilled: neither app documents a link format that also fixes the chain. The panel
   says that quotes are estimates as of their block and that the wallet app's own router
-  may pick a different route. REFRESH QUOTES reads again at the latest block.
+  may pick a different route. REFRESH QUOTES reads again at the latest block. The panel
+  reads the quotes from `GET /v1/accumulation/quotes/latest` every 30 seconds, because
+  the snapshot's ETag is the state hash and the quotes are not part of it. NOCK amounts
+  are cut to four decimals, not rounded, as in the comparison sentence and the MCP
+  text. Two candidate routes with the same tokens are told apart by their route id.
 - **Cost over the quote, per fill.** When a buy is recorded or confirmed, the worker
   attaches the best stored quote read for its tranche before the buy's block (and not
   before the plan's previous buy) and stores `quote_cost_bps` = fill price / quote price
-  − 1, beside the cost over spot from #118. The recorded-buys table shows it with the
-  quote's block; without a stored quote it reads "no quote on record", never a later
-  quote. The gap between quote and fill includes price movement, and the table says so.
+  − 1, beside the cost over spot from #118. The quote must have been read for that
+  tranche (the plan keeps quoting a tranche after its buy lands, until the buy is
+  recorded; those quotes never serve the next buy) and within 60 minutes before the
+  buy. The recorded-buys table shows it with the quote's block; without such a quote it
+  reads "no quote on record", never a later quote, another tranche's or an old one. The gap between quote and fill includes price movement, and the table says so.
 - **MCP.** `get_accumulation_plan` prints the quotes, the comparison and the caveat on
   both transports from one shared source file (`quote_text.rs`). MCP gains no tool.
-- **New REST endpoint**, unauthenticated like the existing routes:
+- **New REST endpoints**, unauthenticated like the existing routes:
   `POST /v1/accumulation/quotes/refresh` (no body; 409 `NO_TRANCHE_DUE`, `NO_PLAN` or
-  `QUOTES_DISABLED`; 503 `NO_SNAPSHOT`). `GET /v1/accumulation/events` and the record
+  `QUOTES_DISABLED`; 503 `NO_SNAPSHOT`) and `GET /v1/accumulation/quotes/latest` (the
+  quotes the worker holds in memory; it makes no call and is never cached). A refresh
+  measures cost against the cycle's own full-precision spot; without one it shows no
+  cost over spot. `GET /v1/accumulation/events` and the record
   response gain the eight `quote_*` fields.
 - **Storage.** New table `accumulation_quotes` and eight nullable `quote_*` columns on
   `accumulation_events` (migration `20261116000012`, additive). One quote row is kept

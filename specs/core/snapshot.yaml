@@ -556,6 +556,10 @@ components:
             (`route_quotes.enabled`); null otherwise and in snapshots from before
             v0.7.0. The whole object is excluded from `state_hash`: a quote is a
             contract read at a stated block and says nothing about the wallet's state.
+            The snapshot's ETag is that hash, so a conditional GET can keep an older
+            copy of this object: `GET /v1/accumulation/quotes/latest` always answers
+            with the one the worker holds. A snapshot the worker read back from its
+            database at start-up carries null here until the first cycle.
 
     RouteQuotes:
       type: object
@@ -593,7 +597,7 @@ components:
         reference_spot_usd:
           type: string
           nullable: true
-          description: The snapshot's NOCK/USD reference spot the costs are measured against (the price-source pool's price for this cycle)
+          description: The snapshot's NOCK/USD reference spot the costs are measured against (the price-source pool's price for this cycle, eight decimals). Present even when no venue could be quoted, so a refresh measures against the same figure. Null when the cycle had none; costs are then null too.
         venues:
           type: array
           description: One entry per venue, Aero first, then Uniswap

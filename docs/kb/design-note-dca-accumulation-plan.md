@@ -472,3 +472,8 @@ Defaults taken while the operator was away, theirs to change:
   record), so it remains the operator's call.
 - The plan's `venue` label still appears in the due-tranche sentence and is still
   stored as each fill's venue.
+- A recorded buy is measured only against a quote read for its own tranche and within
+  60 minutes before it (`FILL_QUOTE_MAX_AGE_MINUTES`, the window #118 uses for the
+  reference spot). Anything else reads "no quote on record".
+- Quotes keep being read while a detected swap awaits confirmation: the swap may not be
+  the plan's buy, and until it is confirmed the tranche is still shown as due.
