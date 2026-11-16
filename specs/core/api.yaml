@@ -632,7 +632,7 @@ components:
             failed appear only after a send.
         detail:
           type: string
-          description: 'Which config keys are set or missing, or what the provider answered (for example "HTTP 401: Unauthorized").'
+          description: 'Which config keys are set, missing or ignored, or what the provider answered (for example "HTTP 401: Unauthorized").'
 
     NotificationStatus:
       type: object

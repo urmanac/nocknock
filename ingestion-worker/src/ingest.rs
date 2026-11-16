@@ -219,6 +219,7 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     let next_directive_action = derived_metrics.global_status.shot_advice_action.clone();
     let next_directive_details = derived_metrics.global_status.shot_advice_details.clone();
     let next_plan_status = derived_metrics.accumulation_plan.clone();
+    let next_range_top = range_top_reading(&raw_data);
 
     // Build snapshot data
     let snapshot_data = SnapshotData {
@@ -240,8 +241,9 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // Build envelope
     let now = Utc::now();
     // Notifications (issues #28, #89): decided here against the previous snapshot, sent
-    // only after this one is stored. A directive change notifies, and so does a plan
-    // completing. A first cycle with no previous snapshot stays silent.
+    // only after this one is stored. A directive change notifies, and so do a plan
+    // completing and the price-source range being exited. A first cycle with no previous
+    // snapshot stays silent.
     let (prev_directive, prev_plan_status) = match state.latest_snapshot.lock().await.as_ref() {
         Some(s) => (
             Some(s.data.derived_metrics.global_status.shot_advice_action.clone()),
@@ -249,12 +251,14 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
         ),
         None => (None, None),
     };
+    let range_exit = range_exit_note(last_range_top_reading().as_ref(), next_range_top.as_ref());
     let notification = cycle_notification(
         prev_directive.as_deref(),
         &next_directive_action,
         &next_directive_details,
         prev_plan_status.as_ref(),
         next_plan_status.as_ref(),
+        range_exit.as_deref(),
         state.config.notifications.cockpit_url.as_deref(),
     );
 
@@ -277,6 +281,7 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
 
     // Update in-memory cache
     *state.latest_snapshot.lock().await = Some(envelope);
+    remember_range_top_reading(next_range_top);
 
     // Sent after the store: a cycle whose store fails leaves the previous snapshot in
     // place, so the same transition is decided again next cycle and is pushed once, when

@@ -165,9 +165,10 @@ market_data:
 # Notifications (issues #28, #89): optional, off until you set a channel
 # ============================================================
 # The worker pushes a message when the directive CHANGES between two sync cycles (for
-# example DCA ON SCHEDULE -> DCA TRANCHE DUE, or HOLD & ACCRETE -> DEFENSIVE LOCK) and
-# when an accumulation plan completes. Never on a repeat. Delivery failures are logged,
-# never fatal. Every channel is optional; with none set nothing is sent.
+# example DCA ON SCHEDULE -> DCA TRANCHE DUE, or HOLD & ACCRETE -> DEFENSIVE LOCK), when
+# an accumulation plan completes, and when spot reaches the top of the price-source range
+# (a range exit). Never on a repeat. Delivery failures are logged, never fatal. Every
+# channel is optional; with none set nothing is sent.
 #
 # Check a channel without waiting for a change ("SEND TEST NOTIFICATION" on the
 # dashboard does the same):
@@ -178,7 +179,8 @@ market_data:
 #   message, then open https://api.telegram.org/bot<token>/getUpdates in a browser:
 #   result[0].message.chat.id is telegram_chat_id.
 # Pushover: at pushover.net, "Your User Key" is pushover_user; "Create an
-#   Application/API Token" gives pushover_token.
+#   Application/API Token" gives pushover_token. (pushover_user_key, this file's name
+#   for the user key until v0.5.3, is read when pushover_user is not set.)
 # Full steps: DEPLOYMENT.md section 7.
 #
 # Keep this block commented here. This file is the base layer of the worker's config, so

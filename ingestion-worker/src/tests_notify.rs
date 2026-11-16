@@ -135,8 +135,8 @@ fn metrics(raw: &RawOnChainData, profile: &OperatorProfile, ctx: &PlanContext) -
     )
 }
 
-/// What the cycle would push going from `prev` to `next`, exactly as `run_ingestion_cycle`
-/// decides it.
+/// What the cycle would push going from `prev` to `next`, for wallets whose price-source
+/// range does not move across its top (most of these tests hold no range at all).
 fn pushed(prev: &DerivedMetrics, next: &DerivedMetrics) -> Option<String> {
     cycle_notification(
         Some(&prev.global_status.shot_advice_action),
@@ -144,8 +144,47 @@ fn pushed(prev: &DerivedMetrics, next: &DerivedMetrics) -> Option<String> {
         &next.global_status.shot_advice_details,
         prev.accumulation_plan.as_ref(),
         next.accumulation_plan.as_ref(),
+        None,
         Some("http://host:3000/?view=lite"),
     )
+}
+
+/// One cycle as the worker holds it: the reads, and what was derived from them.
+struct Cycle {
+    raw: RawOnChainData,
+    m: DerivedMetrics,
+}
+
+fn cycle(raw: RawOnChainData, profile: &OperatorProfile, ctx: &PlanContext) -> Cycle {
+    let m = metrics(&raw, profile, ctx);
+    Cycle { raw, m }
+}
+
+/// What the cycle would push going from `prev` to `next`, exactly as `run_ingestion_cycle`
+/// decides it: the directive, the plan, and the price-source range read from each
+/// cycle's own reads.
+fn pushed_cycle(prev: &Cycle, next: &Cycle) -> Option<String> {
+    let range_exit = range_exit_note(range_top_reading(&prev.raw).as_ref(), range_top_reading(&next.raw).as_ref());
+    cycle_notification(
+        Some(&prev.m.global_status.shot_advice_action),
+        &next.m.global_status.shot_advice_action,
+        &next.m.global_status.shot_advice_details,
+        prev.m.accumulation_plan.as_ref(),
+        next.m.accumulation_plan.as_ref(),
+        range_exit.as_deref(),
+        Some("http://host:3000/?view=lite"),
+    )
+}
+
+/// The wallet holding the price-source range after spot moved 1% above the range's top.
+/// USDC is token0, so the NOCK price is highest at the lower tick.
+fn wallet_with_exited_range(usdc: f64, nock: f64) -> RawOnChainData {
+    let mut raw = wallet_with_range(usdc, nock);
+    let src = raw.positions[0].clone();
+    let top = tick_to_display_price_dec(src.tick_lower, src.token0.decimals, src.token1.decimals);
+    raw.spot_price_nock_usd = top * 1.01;
+    raw.positions[0].in_range = false;
+    raw
 }
 
 // ---------------- Transitions the operator cares about ----------------
@@ -257,6 +296,61 @@ fn test_plan_completion_note_only_on_the_cycle_it_completes() {
 }
 
 #[test]
+fn test_a_ledger_read_failure_does_not_announce_an_old_completion_again() {
+    // A plan that completed long ago; then one cycle in which the accumulation ledger
+    // could not be read (status `blocked`, progress unknown); then a good cycle.
+    let p = profile(0.0);
+    let done_ctx = plan_after(5, "2026-11-20T12:00:00Z");
+    let done = metrics(&wallet_only(400.0, 8673.027), &p, &done_ctx);
+    let mut outage_ctx = plan_after(0, "2026-11-20T12:05:00Z");
+    outage_ctx.ledger_unavailable = true;
+    let outage = metrics(&wallet_only(400.0, 8673.027), &p, &outage_ctx);
+    let (done_plan, outage_plan) = (done.accumulation_plan.as_ref().unwrap(), outage.accumulation_plan.as_ref().unwrap());
+    assert_eq!(done_plan.status, "complete");
+    assert_eq!(outage_plan.status, "blocked");
+    assert_eq!(outage_plan.binding_constraint.as_deref(), Some(PLAN_LEDGER_UNREADABLE_REASON));
+    assert!(plan_completion_note(Some(outage_plan), Some(done_plan)).is_none());
+    // The directive does change back, and that is pushed, without the completion sentence.
+    let text = pushed(&outage, &done).expect("the directive changed");
+    assert!(text.contains("directive change: HOLD & ACCRETE"), "{text}");
+    assert!(!text.contains("is complete:"), "{text}");
+    // A plan blocked for any other reason that then completes is a real completion.
+    let mut blocked_other = outage_plan.clone();
+    blocked_other.binding_constraint = Some("nothing spendable: wallet USDC $0.40 less the $0.00 virtual tax reserve".to_string());
+    assert!(plan_completion_note(Some(&blocked_other), Some(done_plan)).is_some());
+}
+
+#[test]
+fn test_completion_sentence_survives_pushovers_cut() {
+    // The commonest completion: the last tranche is recorded while LP is under target,
+    // so the new directive is REBUILD LP TRANCHES with long details. The completion
+    // sentence goes before those details, where Pushover's 1024-character cut keeps it.
+    let p = profile(0.0);
+    let running = metrics(&wallet_only(420.0, 6938.0), &p, &plan_after(4, AT_DUE)).accumulation_plan.unwrap();
+    let done = metrics(&wallet_only(400.0, 8673.0), &p, &plan_after(5, AT_DUE)).accumulation_plan.unwrap();
+    let details = "Suggested: add 156.01 USDC + 4532 NOCK ($211.70) to v4 USDC/NOCK 3.00% #3163450. ".repeat(15);
+    let text = cycle_notification(
+        Some("DCA TRANCHE DUE (5 of 5)"),
+        "REBUILD LP TRANCHES (No Net Cash Change)",
+        &details,
+        Some(&running),
+        Some(&done),
+        None,
+        Some("http://chudmax:3000/?view=lite"),
+    )
+    .unwrap();
+    assert!(text.chars().count() > PUSHOVER_MESSAGE_LIMIT);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0], "🛡️ NockNock directive change: REBUILD LP TRANCHES (No Net Cash Change)");
+    assert!(lines[1].starts_with("Accumulation plan \"my-plan\" is complete: $100.00 of $100.00 deployed over 5 verified buy(s)"), "{text}");
+    assert!(lines[2].starts_with("Suggested: add 156.01 USDC"), "{text}");
+    let cut = fit_message(&text, PUSHOVER_MESSAGE_LIMIT);
+    assert_eq!(cut.chars().count(), PUSHOVER_MESSAGE_LIMIT);
+    assert!(cut.contains("NockNock paces no further buys until you extend its budget or configure a new plan."), "{cut}");
+    assert!(cut.ends_with("…\n→ http://chudmax:3000/?view=lite"), "{cut}");
+}
+
+#[test]
 fn test_floor_lock_starting_and_ending_notifies() {
     let p = profile(100_000.0);
     let none = PlanContext::none();
@@ -285,25 +379,102 @@ fn test_floor_lock_starting_and_ending_notifies() {
 fn test_range_exit_notifies() {
     let p = profile(0.0);
     let none = PlanContext::none();
-    let inside = wallet_with_range(50.0, 1000.0);
-    let before = metrics(&inside, &p, &none);
-    assert!(!before.global_status.shot_advice_action.contains("RANGE EXIT"), "{}", before.global_status.shot_advice_action);
+    let before = cycle(wallet_with_range(50.0, 1000.0), &p, &none);
+    assert!(!before.m.global_status.shot_advice_action.contains("RANGE EXIT"), "{}", before.m.global_status.shot_advice_action);
 
-    // Spot moves above the top of the price-source range. USDC is token0, so the NOCK
-    // price is highest at the lower tick.
-    let mut outside = wallet_with_range(50.0, 1000.0);
-    let src = outside.positions[0].clone();
-    let top = tick_to_display_price_dec(src.tick_lower, src.token0.decimals, src.token1.decimals);
-    outside.spot_price_nock_usd = top * 1.01;
-    outside.positions[0].in_range = false;
-    let after = metrics(&outside, &p, &none);
-    assert_eq!(after.global_status.shot_advice_action, "RANGE EXIT FLASHPOINT (Above Range)");
-    let text = pushed(&before, &after).expect("a range exit must notify");
+    let after = cycle(wallet_with_exited_range(50.0, 1000.0), &p, &none);
+    assert_eq!(after.m.global_status.shot_advice_action, "RANGE EXIT FLASHPOINT (Above Range)");
+    let text = pushed_cycle(&before, &after).expect("a range exit must notify");
     assert!(text.starts_with("🛡️ NockNock directive change: RANGE EXIT FLASHPOINT (Above Range)\n"), "{text}");
-    assert!(text.contains("is at or above the top of the price-source range"), "{text}");
-    assert!(pushed(&after, &after).is_none());
+    // The directive's own details say it; the range-exit sentence is not added on top.
+    assert_eq!(text.matches("at or above the top of the price-source range").count(), 1, "{text}");
+    assert!(!text.contains("Range exit:"), "{text}");
+    assert!(pushed_cycle(&after, &after).is_none());
     // Falling back into the range ends the flashpoint, and says so once.
-    assert!(pushed(&after, &before).is_some());
+    assert!(pushed_cycle(&after, &before).is_some());
+}
+
+#[test]
+fn test_range_exit_notifies_when_the_directive_does_not_change() {
+    // A floor lock and a due tranche both outrank RANGE EXIT in the directive, so the
+    // action reads the same before and after the exit. Before this was fixed the exit
+    // pushed nothing in these three states.
+    let none = PlanContext::none();
+    let cases: Vec<(&str, OperatorProfile, PlanContext, &str)> = vec![
+        ("floor lock, no plan", profile(100_000.0), none, "DEFENSIVE LOCK (Floor Recovery)"),
+        (
+            "floor lock, plan waiting",
+            profile(100_000.0),
+            plan_after(1, BEFORE_DUE),
+            "DEFENSIVE LOCK (Floor Recovery) · DCA ON SCHEDULE (2 of 5 next)",
+        ),
+        ("tranche due", profile(0.0), plan_after(1, AT_DUE), "DCA TRANCHE DUE (2 of 5)"),
+    ];
+    for (name, p, ctx, action) in &cases {
+        let before = cycle(wallet_with_range(480.0, 1734.6054), p, ctx);
+        let after = cycle(wallet_with_exited_range(480.0, 1734.6054), p, ctx);
+        assert_eq!(before.m.global_status.shot_advice_action, *action, "{name}");
+        assert_eq!(after.m.global_status.shot_advice_action, *action, "{name}");
+        let text = pushed_cycle(&before, &after).unwrap_or_else(|| panic!("{name}: a range exit must notify"));
+        assert!(
+            text.starts_with("🛡️ NockNock: Range exit: spot $0.0415 is at or above the top of the price-source range ($0.0411). That range (v4 USDC/NOCK 3.00% #3163450) earns no fees unless the price falls back into it."),
+            "{name}: {text}"
+        );
+        assert!(text.contains(&format!("\nDirective unchanged: {action}\n")), "{name}: {text}");
+        assert!(text.ends_with("\n→ http://host:3000/?view=lite"), "{name}: {text}");
+        assert!(!text.contains("directive change"), "{name}: {text}");
+        // It states the prices and leaves the choice with the operator.
+        assert!(text.contains("is your decision; NockNock does not choose range bounds."), "{name}: {text}");
+        // While spot stays above the top: silence. The way back in changes no directive
+        // here either, and is not pushed (a stated limit, see the guide's known gaps).
+        assert!(pushed_cycle(&after, &after).is_none(), "{name}");
+        assert!(pushed_cycle(&after, &before).is_none(), "{name}");
+        assert!(pushed_cycle(&before, &before).is_none(), "{name}");
+    }
+}
+
+#[test]
+fn test_range_exit_with_another_directive_change_is_said_before_the_details() {
+    // The tranche comes due on the same cycle spot leaves the range.
+    let p = profile(0.0);
+    let before = cycle(wallet_with_range(480.0, 1734.6054), &p, &plan_after(1, BEFORE_DUE));
+    let after = cycle(wallet_with_exited_range(480.0, 1734.6054), &p, &plan_after(1, AT_DUE));
+    assert_eq!(after.m.global_status.shot_advice_action, "DCA TRANCHE DUE (2 of 5)");
+    assert_ne!(before.m.global_status.shot_advice_action, after.m.global_status.shot_advice_action);
+    let text = pushed_cycle(&before, &after).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0], "🛡️ NockNock directive change: DCA TRANCHE DUE (2 of 5)");
+    assert!(lines[1].starts_with("Range exit: spot $0.0415 is at or above the top"), "{text}");
+    assert!(lines[2].starts_with("Buy $20.00 of NOCK on Aero"), "{text}");
+}
+
+#[test]
+fn test_range_exit_note_needs_the_same_range_seen_below_its_top_last_cycle() {
+    let below = range_top_reading(&wallet_with_range(50.0, 1000.0)).expect("a funded price-source range has a reading");
+    let above = range_top_reading(&wallet_with_exited_range(50.0, 1000.0)).unwrap();
+    assert!(!below.above && above.above);
+    assert_eq!(below.position_id, "uniswap-v4:base:3163450");
+    assert!(range_exit_note(Some(&below), Some(&above)).is_some());
+    // First cycle of a process (a restart): nothing to compare against.
+    assert!(range_exit_note(None, Some(&above)).is_none());
+    assert!(range_exit_note(Some(&above), Some(&above)).is_none());
+    assert!(range_exit_note(Some(&above), Some(&below)).is_none());
+    assert!(range_exit_note(Some(&below), Some(&below)).is_none());
+    assert!(range_exit_note(Some(&below), None).is_none());
+    // A different price-source position is not the range seen last cycle.
+    let mut other = above.clone();
+    other.position_id = "uniswap-v4:base:1".to_string();
+    assert!(range_exit_note(Some(&below), Some(&other)).is_none());
+    // Spot exactly at the top counts, as in the directive ("at or above").
+    let mut at_top = wallet_with_exited_range(50.0, 1000.0);
+    at_top.spot_price_nock_usd = above.top;
+    assert!(range_top_reading(&at_top).unwrap().above);
+    // No reading at all: an emptied range, a wallet with no range, no spot.
+    assert!(range_top_reading(&wallet_with_emptied_range(50.0, 1000.0)).is_none());
+    assert!(range_top_reading(&wallet_only(50.0, 1000.0)).is_none());
+    let mut no_spot = wallet_with_range(50.0, 1000.0);
+    no_spot.spot_price_nock_usd = 0.0;
+    assert!(range_top_reading(&no_spot).is_none());
 }
 
 #[test]
@@ -317,6 +488,7 @@ fn test_no_previous_snapshot_and_hold_variants_stay_silent() {
         &due.global_status.shot_advice_details,
         None,
         due.accumulation_plan.as_ref(),
+        None,
         Some("http://host:3000/?view=lite"),
     )
     .is_none());
@@ -327,10 +499,11 @@ fn test_no_previous_snapshot_and_hold_variants_stay_silent() {
         None,
         None,
         None,
+        None,
     )
     .is_none());
     // A blank cockpit_url adds no dangling arrow.
-    let text = cycle_notification(Some("A"), "B", "d", None, None, Some("  ")).unwrap();
+    let text = cycle_notification(Some("A"), "B", "d", None, None, None, Some("  ")).unwrap();
     assert_eq!(text, "🛡️ NockNock directive change: B\nd");
 }
 
@@ -342,6 +515,7 @@ fn cfg(telegram: Option<(&str, &str)>, pushover: Option<(&str, &str)>, webhook: 
         telegram_chat_id: telegram.map(|x| x.1.to_string()),
         pushover_token: pushover.map(|x| x.0.to_string()),
         pushover_user: pushover.map(|x| x.1.to_string()),
+        pushover_user_key: None,
         webhook_url: webhook.map(str::to_string),
         cockpit_url: None,
     }
@@ -396,10 +570,56 @@ fn test_pushover_user_key_spelling_is_accepted() {
         );
         let absent = path.with_file_name("absent.yaml.example");
         let loaded = load_app_config(absent.to_str().unwrap(), Some(path.to_str().unwrap()), false).unwrap();
-        assert_eq!(loaded.notifications.pushover_user.as_deref(), Some("user"), "{key}");
-        assert_eq!(status_of(&channel_readiness(&loaded.notifications), "pushover").status, "configured", "{key}");
+        assert_eq!(pushover_user_key(&loaded.notifications), Some((key, "user")), "{key}");
+        let pushover = channel_readiness(&loaded.notifications).into_iter().find(|r| r.channel == "pushover").unwrap();
+        assert_eq!(pushover.status, "configured", "{key}");
+        assert_eq!(pushover.detail, format!("notifications.pushover_token and notifications.{key} are set"), "{key}");
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
+}
+
+#[tokio::test]
+async fn test_a_config_with_both_pushover_spellings_loads_and_pushover_user_wins() {
+    // An operator who copied the old example and later added the key the worker reads,
+    // without deleting the old line. With a serde alias this config failed to load
+    // ("duplicate field `pushover_user`"), which stops the worker at startup.
+    let path = write_temp_config(
+        "config.yaml",
+        &format!(
+            "{MINIMAL_CONFIG}notifications:\n  pushover_token: \"good\"\n  pushover_user_key: \"old-KEY\"\n  pushover_user: \"real-KEY\"\n"
+        ),
+    );
+    let absent = path.with_file_name("absent.yaml.example");
+    let loaded = load_app_config(absent.to_str().unwrap(), Some(path.to_str().unwrap()), false)
+        .expect("a config carrying both spellings must load");
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    let n = &loaded.notifications;
+    assert_eq!(pushover_user_key(n), Some(("pushover_user", "real-KEY")));
+    let pushover = channel_readiness(n).into_iter().find(|r| r.channel == "pushover").unwrap();
+    assert_eq!(pushover.status, "configured");
+    assert_eq!(
+        pushover.detail,
+        "notifications.pushover_token and notifications.pushover_user are set; notifications.pushover_user_key is also set and is ignored"
+    );
+    // Neither value may reach a log line or a response, the ignored one included.
+    let secrets = notification_secrets(n);
+    assert!(secrets.contains(&"real-KEY".to_string()) && secrets.contains(&"old-KEY".to_string()), "{secrets:?}");
+    assert!(!notification_status_body(n).to_string().contains("KEY\""), "{}", notification_status_body(n));
+
+    // The send uses pushover_user.
+    let (base, seen) = provider_stand_in().await;
+    let reports = deliver_notifications(&Client::new(), n, &endpoints(&base), "hello").await;
+    assert_eq!(status_of(&reports, "pushover").status, "delivered", "{reports:?}");
+    assert_eq!(seen.lock().unwrap()[0].1["user"], json!("real-KEY"));
+
+    // A blank pushover_user does not hide a set pushover_user_key.
+    let mut blank = n.clone();
+    blank.pushover_user = Some("  ".to_string());
+    assert_eq!(pushover_user_key(&blank), Some(("pushover_user_key", "old-KEY")));
+    let (base, seen) = provider_stand_in().await;
+    let reports = deliver_notifications(&Client::new(), &blank, &endpoints(&base), "hello").await;
+    assert_eq!(status_of(&reports, "pushover").status, "delivered", "{reports:?}");
+    assert_eq!(seen.lock().unwrap()[0].1["user"], json!("old-KEY"));
 }
 
 fn example_config_text() -> String {
@@ -545,7 +765,7 @@ fn test_long_messages_are_cut_to_the_providers_limit_and_keep_the_link() {
 async fn test_a_long_directive_reaches_pushover_within_its_limit() {
     let (base, seen) = provider_stand_in().await;
     let details = "add 65.86 USDC + 5678 NOCK ($135.64) to Aero USDC/NOCK 0.30% (full range); ".repeat(30);
-    let text = cycle_notification(Some("A"), "DCA TRANCHE DUE (2 of 5)", &details, None, None, Some("http://chudmax:3000/?view=lite")).unwrap();
+    let text = cycle_notification(Some("A"), "DCA TRANCHE DUE (2 of 5)", &details, None, None, None, Some("http://chudmax:3000/?view=lite")).unwrap();
     assert!(text.chars().count() > PUSHOVER_MESSAGE_LIMIT);
     let c = cfg(Some(("good", "42")), Some(("good", "user-key")), None);
     let reports = deliver_notifications(&Client::new(), &c, &endpoints(&base), &text).await;

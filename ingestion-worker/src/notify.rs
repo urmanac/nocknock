@@ -42,6 +42,15 @@ fn configured(v: &Option<String>) -> Option<&str> {
     v.as_deref().map(str::trim).filter(|s| !s.is_empty())
 }
 
+/// The Pushover user key and the config key it was read from. `pushover_user` wins;
+/// `pushover_user_key` (the name the example used until v0.5.3) is read only when
+/// `pushover_user` is unset or blank. A config may carry both and still loads.
+pub(crate) fn pushover_user_key(cfg: &NotificationConfig) -> Option<(&'static str, &str)> {
+    configured(&cfg.pushover_user)
+        .map(|v| ("pushover_user", v))
+        .or_else(|| configured(&cfg.pushover_user_key).map(|v| ("pushover_user_key", v)))
+}
+
 /// Which channels the config enables. Pure. Always reports all three, in a fixed order,
 /// so "nothing is configured" is stated rather than shown as an empty list. A channel
 /// with only half of its pair set is `incomplete` and names the missing key: before #89
@@ -58,17 +67,23 @@ pub(crate) fn channel_readiness(cfg: &NotificationConfig) -> Vec<ChannelReport> 
         (true, false) => report(channel, "incomplete", format!("notifications.{} is set but notifications.{} is not, so nothing is sent", a.0, b.0)),
         (false, true) => report(channel, "incomplete", format!("notifications.{} is set but notifications.{} is not, so nothing is sent", b.0, a.0)),
     };
+    let pushover_user = pushover_user_key(cfg);
+    let mut pushover = pair(
+        "pushover",
+        ("pushover_token", configured(&cfg.pushover_token).is_some()),
+        (pushover_user.map_or("pushover_user", |(key, _)| key), pushover_user.is_some()),
+    );
+    // Both spellings of the user key are set: say which one is read.
+    if configured(&cfg.pushover_user).is_some() && configured(&cfg.pushover_user_key).is_some() {
+        pushover.detail.push_str("; notifications.pushover_user_key is also set and is ignored");
+    }
     vec![
         pair(
             "telegram",
             ("telegram_bot_token", configured(&cfg.telegram_bot_token).is_some()),
             ("telegram_chat_id", configured(&cfg.telegram_chat_id).is_some()),
         ),
-        pair(
-            "pushover",
-            ("pushover_token", configured(&cfg.pushover_token).is_some()),
-            ("pushover_user", configured(&cfg.pushover_user).is_some()),
-        ),
+        pushover,
         if configured(&cfg.webhook_url).is_some() {
             report("webhook", "configured", "notifications.webhook_url is set".to_string())
         } else {
@@ -79,11 +94,17 @@ pub(crate) fn channel_readiness(cfg: &NotificationConfig) -> Vec<ChannelReport> 
 
 /// Every configured value that must never reach a log line or an API response.
 pub(crate) fn notification_secrets(cfg: &NotificationConfig) -> Vec<String> {
-    [&cfg.telegram_bot_token, &cfg.pushover_token, &cfg.pushover_user, &cfg.webhook_url]
-        .into_iter()
-        .filter_map(configured)
-        .map(str::to_string)
-        .collect()
+    [
+        &cfg.telegram_bot_token,
+        &cfg.pushover_token,
+        &cfg.pushover_user,
+        &cfg.pushover_user_key,
+        &cfg.webhook_url,
+    ]
+    .into_iter()
+    .filter_map(configured)
+    .map(str::to_string)
+    .collect()
 }
 
 /// Replace every secret in `text`. Pure. Provider answers and transport errors are
@@ -178,7 +199,7 @@ pub(crate) async fn deliver_notifications(
             }
             "pushover" => {
                 let token = configured(&cfg.pushover_token).unwrap_or_default();
-                let user = configured(&cfg.pushover_user).unwrap_or_default();
+                let user = pushover_user_key(cfg).map(|(_, v)| v).unwrap_or_default();
                 http.post(&endpoints.pushover_url)
                     .json(&json!({ "token": token, "user": user, "message": fit_message(text, PUSHOVER_MESSAGE_LIMIT) }))
             }
@@ -228,19 +249,26 @@ pub(crate) async fn dispatch_notifications(state: &Arc<AppState>, text: &str) {
     }
 }
 
+/// Did the directive change between two cycles? Pure. Never on first boot (no previous
+/// action), never on a repeat.
+pub(crate) fn directive_changed(prev: Option<&str>, next: &str) -> bool {
+    // HOLD's parenthetical follows each cycle's position reads (in range, pool read); a
+    // change between HOLD variants is not a directive change and must not push.
+    fn stem(a: &str) -> &str {
+        if a.starts_with("HOLD & ACCRETE") { "HOLD & ACCRETE" } else { a }
+    }
+    prev.is_some_and(|prev| stem(prev) != stem(next))
+}
+
 /// Pure transition decision: notify only when a directive CHANGES between cycles
 /// (never on first boot, never on repeats). Returns the message text.
-pub(crate) fn directive_transition_notification<'a>(
-    prev: Option<&'a str>,
-    next: &'a str,
+pub(crate) fn directive_transition_notification(
+    prev: Option<&str>,
+    next: &str,
     details: &str,
     cockpit_url: Option<&str>,
 ) -> Option<String> {
-    let prev = prev?;
-    // HOLD's parenthetical follows each cycle's position reads (in range, pool read); a
-    // change between HOLD variants is not a directive change and must not push.
-    let stem = |a: &'a str| -> &'a str { if a.starts_with("HOLD & ACCRETE") { "HOLD & ACCRETE" } else { a } };
-    if stem(prev) == stem(next) {
+    if !directive_changed(prev, next) {
         return None;
     }
     let mut text = format!("🛡️ NockNock directive change: {}\n{}", next, details);
@@ -254,13 +282,18 @@ pub(crate) fn directive_transition_notification<'a>(
 
 /// The sentence to push when a plan that was running last cycle is complete this cycle
 /// (#89). Pure; every figure is the plan's own. None on first sight of a plan, for a
-/// different plan id, or when it was already complete.
+/// different plan id, when it was already complete, or when last cycle could not read
+/// the ledger: that cycle's status is `blocked` with unknown progress, so a plan that
+/// completed long ago would otherwise be announced again on the next good read.
 pub(crate) fn plan_completion_note(
     prev: Option<&AccumulationPlanStatus>,
     next: Option<&AccumulationPlanStatus>,
 ) -> Option<String> {
     let (prev, next) = (prev?, next?);
     if prev.plan_id != next.plan_id || prev.status == "complete" || next.status != "complete" {
+        return None;
+    }
+    if prev.status == "blocked" && prev.binding_constraint.as_deref() == Some(PLAN_LEDGER_UNREADABLE_REASON) {
         return None;
     }
     Some(format!(
@@ -276,26 +309,86 @@ pub(crate) fn plan_completion_note(
     ))
 }
 
-/// Everything one cycle pushes (#89). Pure. A directive change notifies as before; a
-/// plan completing adds its own sentence, and notifies on its own when the directive did
-/// not change. That happens when the last buy is recorded while LP is under target: the
-/// action reads REBUILD LP TRANCHES before and after, and the completion used to pass
-/// in silence.
+/// This cycle's reading of the price-source range, from the same rule the RANGE EXIT
+/// directive uses (#89). None when there is no ranged price-source position holding
+/// liquidity, or no spot.
+pub(crate) fn range_top_reading(raw: &RawOnChainData) -> Option<RangeTopReading> {
+    price_source_range_top(raw).map(|(p, top, above)| RangeTopReading {
+        position_id: p.position_id.clone(),
+        label: position_label(p),
+        spot: raw.spot_price_nock_usd,
+        top,
+        above,
+    })
+}
+
+/// The sentence to push when spot was below the top of the price-source range last
+/// cycle and is at or above it this cycle (#89). Pure; it states the two prices and
+/// chooses nothing. None on first sight (no previous reading, as after a restart), for
+/// a different position, while spot stays above the top, and on the way back in.
+pub(crate) fn range_exit_note(prev: Option<&RangeTopReading>, next: Option<&RangeTopReading>) -> Option<String> {
+    let (prev, next) = (prev?, next?);
+    if prev.position_id != next.position_id || prev.above || !next.above {
+        return None;
+    }
+    Some(format!(
+        "Range exit: spot ${:.4} is at or above the top of the price-source range (${:.4}). That range ({}) earns no fees unless the price falls back into it. Whether to leave it, withdraw it or open a new range is your decision; NockNock does not choose range bounds.",
+        next.spot, next.top, next.label
+    ))
+}
+
+/// The previous cycle's range reading. In memory only: one worker process reads one
+/// wallet, and a restart starts from None, so the first cycle after it pushes no range
+/// exit of its own (a directive change still does).
+static LAST_RANGE_TOP: std::sync::Mutex<Option<RangeTopReading>> = std::sync::Mutex::new(None);
+
+pub(crate) fn last_range_top_reading() -> Option<RangeTopReading> {
+    LAST_RANGE_TOP.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+
+/// Called only after a cycle's snapshot is stored, like the snapshot cache: a cycle
+/// whose store fails decides the same transition again next time.
+pub(crate) fn remember_range_top_reading(reading: Option<RangeTopReading>) {
+    *LAST_RANGE_TOP.lock().unwrap_or_else(|p| p.into_inner()) = reading;
+}
+
+/// Everything one cycle pushes (#89). Pure. A directive change notifies as before. Two
+/// facts add a sentence of their own, and notify on their own when the directive did not
+/// change with them:
+/// - a plan completing. The last buy recorded while LP is under target reads REBUILD LP
+///   TRANCHES before and after, and the completion used to pass in silence.
+/// - the price-source range being exited (`range_exit`, from `range_exit_note`). Under a
+///   floor lock or a due tranche the action does not change, and the exit used to pass
+///   in silence. When the new directive is RANGE EXIT FLASHPOINT its details already
+///   say it, so the sentence is not repeated.
+/// These sentences go before the directive's details: Pushover cuts a message at 1024
+/// characters, and LP rebuild details alone can be longer than that.
 pub(crate) fn cycle_notification(
     prev_action: Option<&str>,
     next_action: &str,
     next_details: &str,
     prev_plan: Option<&AccumulationPlanStatus>,
     next_plan: Option<&AccumulationPlanStatus>,
+    range_exit: Option<&str>,
     cockpit_url: Option<&str>,
 ) -> Option<String> {
-    let directive = directive_transition_notification(prev_action, next_action, next_details, None);
-    let completion = plan_completion_note(prev_plan, next_plan);
-    let mut text = match (directive, completion) {
-        (Some(d), Some(c)) => format!("{}\n{}", d, c),
-        (Some(d), None) => d,
-        (None, Some(c)) => format!("🛡️ NockNock: {}\nDirective unchanged: {}", c, next_action),
-        (None, None) => return None,
+    let changed = directive_changed(prev_action, next_action);
+    let mut notes: Vec<String> = Vec::new();
+    notes.extend(plan_completion_note(prev_plan, next_plan));
+    if !next_action.starts_with("RANGE EXIT FLASHPOINT") {
+        notes.extend(range_exit.map(str::to_string));
+    }
+    let mut text = match (changed, notes.is_empty()) {
+        // The plain directive change: the same text as before #89.
+        (true, true) => directive_transition_notification(prev_action, next_action, next_details, None)?,
+        (true, false) => format!(
+            "🛡️ NockNock directive change: {}\n{}\n{}",
+            next_action,
+            notes.join("\n"),
+            next_details
+        ),
+        (false, false) => format!("🛡️ NockNock: {}\nDirective unchanged: {}", notes.join("\n"), next_action),
+        (false, true) => return None,
     };
     if let Some(url) = cockpit_url.map(str::trim).filter(|u| !u.is_empty()) {
         text.push_str(&format!("\n→ {}", url));
@@ -341,7 +434,7 @@ pub(crate) fn notification_status_body(cfg: &NotificationConfig) -> serde_json::
         "channels": channels,
         "cockpit_url": cockpit_url,
         "cockpit_url_note": cockpit_url_note(cockpit_url),
-        "fires_on": "A change of the directive between two cycles, and an accumulation plan completing. Never on a repeat, and never between HOLD variants.",
+        "fires_on": "A change of the directive between two cycles, an accumulation plan completing, and spot reaching the top of the price-source range (a range exit). Never on a repeat, and never between HOLD variants.",
         "test_cooldown_seconds": TEST_SEND_COOLDOWN_SECONDS,
     })
 }

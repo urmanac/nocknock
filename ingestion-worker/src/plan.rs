@@ -3,6 +3,12 @@ use crate::*;
 /// Below this a tranche is not worth advising (and rounding dust never keeps a plan open).
 pub(crate) const PLAN_DUST_USDC: f64 = 1.0;
 
+/// Why a plan is `blocked` in a cycle whose ledger read failed. A constant because the
+/// notifier compares against it: that cycle's fills and spend are unknown, not zero, so
+/// the next good cycle must not read as the plan having just completed (#89).
+pub(crate) const PLAN_LEDGER_UNREADABLE_REASON: &str =
+    "the accumulation ledger could not be read this cycle, so plan progress is unknown";
+
 /// Pure plan decision: is a tranche due right now, and for how much? The clock is an
 /// argument so this is deterministic and unit-testable.
 ///
@@ -29,7 +35,7 @@ pub(crate) fn plan_directive(
     }
     if ledger_unavailable {
         return PlanDirective::Blocked {
-            reason: "the accumulation ledger could not be read this cycle, so plan progress is unknown".to_string(),
+            reason: PLAN_LEDGER_UNREADABLE_REASON.to_string(),
         };
     }
     let remaining = cfg.budget_usdc - fills.spent_usdc;
