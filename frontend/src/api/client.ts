@@ -13,7 +13,7 @@ export interface SnapshotMeta {
   snapshot_id: string;
 }
 
-import type { DataProvenance } from '../types/snapshot';
+import type { DataProvenance, RouteQuotes } from '../types/snapshot';
 
 export interface SnapshotEnvelope<T = unknown> {
   meta: SnapshotMeta;
@@ -111,6 +111,25 @@ export interface AccumulationEvent {
   reference_spot_usd?: string | null;
   reference_spot_source?: string | null;
   execution_cost_bps?: number | null;
+  /**
+   * The best quote that was current for this fill's tranche, and the fill's cost over
+   * it (v0.7.0, issue #115). Null together when no quote was on record; absent before.
+   */
+  quote_venue?: string | null;
+  quote_route?: string | null;
+  quote_usdc?: string | null;
+  quote_nock_out?: string | null;
+  quote_effective_price_usd?: string | null;
+  quote_block_number?: number | null;
+  quoted_at?: string | null;
+  quote_cost_bps?: number | null;
+}
+
+/** POST /accumulation/quotes/refresh: the due tranche quoted again at the latest block. */
+export interface RefreshRouteQuotesResponse {
+  plan_id: string;
+  tranche_index: number;
+  route_quotes: RouteQuotes;
 }
 
 export interface AccumulationEventsResponse {
@@ -253,4 +272,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ tx_hash: txHash }),
     }),
+
+  // Route quotes (v0.7.0, issue #115): quote the due tranche again at the latest block.
+  // It takes no amount: the worker quotes only the tranche its own plan says is due.
+  refreshRouteQuotes: () =>
+    request<RefreshRouteQuotesResponse>('/accumulation/quotes/refresh', { method: 'POST' }),
 };

@@ -73,6 +73,70 @@ export interface AccumulationPlanStatus {
    * Null or absent in snapshots from before v0.6.0.
    */
   fill_detection?: FillDetection | null;
+  /**
+   * Read-only quotes for this exact tranche on Aero and on Uniswap (v0.7.0, issue #115).
+   * Present only while a tranche is due and quoting is on; null or absent otherwise and
+   * in older snapshots. Not part of state_hash.
+   */
+  route_quotes?: RouteQuotes | null;
+}
+
+/**
+ * Quotes for one due tranche, both venues read at the same block (v0.7.0, issue #115).
+ * A comparison of execution routes for a buy the plan already sized: not a
+ * recommendation, and never an estimate. A venue that could not be quoted is
+ * `unavailable` with its reason.
+ */
+export interface RouteQuotes {
+  /** ok (both venues quoted) | partial (one) | unavailable (none) */
+  status: 'ok' | 'partial' | 'unavailable';
+  detail?: string | null;
+  /** The plan's own tranche amount that was quoted, in USDC */
+  amount_usdc: string;
+  /** Block every quote was read at, and that block's time; null when nothing was read */
+  block_number?: number | null;
+  quoted_at?: string | null;
+  /** The snapshot's NOCK/USD reference spot the costs are measured against */
+  reference_spot_usd?: string | null;
+  venues: VenueQuote[];
+  /** Null unless both venues were quoted and their amounts differ */
+  more_nock_venue?: string | null;
+  more_nock_by_pct?: string | null;
+  /** The comparison as one sentence of fact, written by the worker */
+  comparison: string;
+}
+
+/** One venue's best verified route, or why it could not be quoted (v0.7.0) */
+export interface VenueQuote {
+  venue: string;
+  status: 'quoted' | 'unavailable';
+  reason?: string | null;
+  /** The venue's own swap page; nothing is prefilled */
+  swap_url: string;
+  nock_out?: string | null;
+  effective_price_usd?: string | null;
+  /** (effective price / reference spot − 1) × 100; null without a reference spot */
+  cost_over_spot_pct?: string | null;
+  route?: string | null;
+  hops?: RouteHop[];
+  routes_tried?: RouteAttempt[];
+}
+
+export interface RouteHop {
+  /** Pool address, or the pool id for a Uniswap v4 pool */
+  pool: string;
+  pool_kind: string;
+  token_in: string;
+  token_out: string;
+  /** Swap fee in percent; null when the fee read failed */
+  fee_pct?: string | null;
+}
+
+export interface RouteAttempt {
+  route_id: string;
+  route: string;
+  nock_out?: string | null;
+  reason?: string | null;
 }
 
 /** One cycle's fill-detection result (v0.6.0, issue #118) */

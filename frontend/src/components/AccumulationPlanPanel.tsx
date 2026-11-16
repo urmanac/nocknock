@@ -14,6 +14,7 @@ import type { AccumulationPlanStatus, LpRebuild } from '../types/snapshot';
 import { LpRebuildSteps } from './LpRebuildSteps';
 import { FillOffers } from './FillOffers';
 import { PlanFills } from './PlanFills';
+import { RouteQuotes } from './RouteQuotes';
 import { trancheDueHint } from '../fillOffers';
 import {
   PLAN_STATUS_COLOR,
@@ -202,6 +203,9 @@ export function AccumulationPlanPanel({
           </div>
         </div>
       </div>
+
+      {/* Read-only quotes for the due tranche on Aero and on Uniswap (v0.7.0, issue #115). */}
+      {plan.status === 'tranche_due' && <RouteQuotes quotes={plan.route_quotes} onChanged={onRecorded} />}
 
       {/* Detected swaps: offered, never counted until confirmed (v0.6.0, issue #118). */}
       {canRecord && <FillOffers detection={plan.fill_detection} onChanged={onRecorded} />}

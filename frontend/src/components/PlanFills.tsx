@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import type { AccumulationEvent } from '../api/client';
 import { COST_OVER_SPOT_CAVEAT, blockTime, costOverSpot, fillsForPlan, shortHash, txUrl } from '../fillOffers';
+import { COST_OVER_QUOTE_CAVEAT, costOverQuote } from '../routeQuotes';
 
 const cell = { padding: '4px 10px 4px 0', fontSize: '0.75rem', color: '#c9d1d9', whiteSpace: 'nowrap' } as const;
 const head = { ...cell, fontSize: '0.65rem', letterSpacing: 1, color: '#8b949e', textAlign: 'left' } as const;
@@ -52,12 +53,15 @@ export function PlanFillsTable({
             <th style={head}>NOCK RECEIVED</th>
             <th style={head}>PRICE</th>
             <th style={head}>COST OVER SPOT</th>
+            <th style={head}>COST OVER QUOTE</th>
             <th style={head}>TRANSACTION</th>
           </tr>
         </thead>
         <tbody>
           {fills.map((f, i) => {
             const cost = costOverSpot(f);
+            // Cost over the tranche's best quote (v0.7.0, issue #115); none on record is said so.
+            const quote = costOverQuote(f);
             const price = Number(f.effective_price_usd);
             return (
               <tr key={f.tx_hash} data-testid="plan-fill">
@@ -69,6 +73,10 @@ export function PlanFillsTable({
                 <td style={{ ...cell, color: cost.known ? '#c9d1d9' : '#8b949e' }} title={cost.source || undefined}>
                   {cost.known ? cost.text : 'unavailable'}
                   {cost.reference && <div style={{ fontSize: '0.65rem', color: '#8b949e' }}>{cost.reference}</div>}
+                </td>
+                <td style={{ ...cell, color: quote.known ? '#c9d1d9' : '#8b949e' }} data-testid="cost-over-quote">
+                  {quote.text}
+                  {quote.reference && <div style={{ fontSize: '0.65rem', color: '#8b949e' }}>{quote.reference}</div>}
                 </td>
                 <td style={{ ...cell, fontFamily: 'monospace' }}>
                   <a href={txUrl(f.tx_hash)} target="_blank" rel="noreferrer" style={{ color: '#58a6ff' }} title={f.tx_hash}>
@@ -82,6 +90,9 @@ export function PlanFillsTable({
       </table>
       <div style={{ fontSize: '0.65rem', color: '#484f58', marginTop: 4, lineHeight: 1.6 }}>
         {COST_OVER_SPOT_CAVEAT}
+      </div>
+      <div style={{ fontSize: '0.65rem', color: '#484f58', marginTop: 4, lineHeight: 1.6 }}>
+        {COST_OVER_QUOTE_CAVEAT}
       </div>
     </div>
   );
