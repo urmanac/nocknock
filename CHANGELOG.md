@@ -7,6 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — snapshot spec 2.5.0 (the whole wallet: #91, #93, #118)
+- `SNAPSHOT_SPEC_VERSION`, `specs/core/snapshot.yaml` and the frontend contract test move
+  from 2.4.0 to 2.5.0. Every field added by #91, #93 and #118 is optional or nullable, so a
+  2.4.0 reader still parses a 2.5.0 snapshot.
+- The golden snapshot was regenerated at this point: against the #93 golden the only
+  differences are `accumulation_plan.fill_detection: null` in the plan case and that
+  case's state hash.
+
+### Fixed — found by the review of the whole stack (#127, #128, #129)
+- **The RPC URL can no longer reach an error message (#127).** reqwest appends the request
+  URL to a network error, and the RPC URL holds the Alchemy key. That text was returned to
+  callers that publish it: `/health` `last_error` already in v0.5.3, and with this release
+  the Aero CL adapter and the AERO notes stored in the snapshot. All three sites in
+  `rpc.rs` strip the URL; a test calls the real function against a refused port and fails
+  if the URL or key appears.
+- **A stored candle counts as its open, never its close (#129).** A backfilled candle is
+  stored at its open time with its close in `price_usd`. The lookup behind harvest values
+  and each fill's cost over spot returned that close labelled with the open time: a price
+  from an hour (or a day) later. It now reads a candle as its open, prefers the worker's
+  own read inside the 60-minute window, and gives no price for a candle with no positive
+  open. This is the rule the cost-basis series uses, so one buy shows one spot figure.
+  Rows already written are not rewritten.
+- **`deploy.sh` does not ship nested git worktrees (#128).** git lists a nested worktree as
+  one directory and tar archived it recursively: about 16 GB from a checkout holding
+  agent worktrees. tar is now told not to recurse, and `.claude/` is ignored.
+- **`specs/core/snapshot.yaml` parses as YAML again.** A description added with #91 held a
+  `: ` in a plain scalar. A test now loads both spec files.
+- **Deploys are forward-only**, now stated in AGENTS.md section 13 and DEPLOYMENT.md: a
+  build older than the newest applied migration does not start.
+
+### Added — fill detection for the accumulation plan (#118)
+- **The worker finds the plan's buys on-chain.** Each ingestion cycle, while a plan is
+  active, it lists the NOCK transfers into the tracked wallet back to the plan anchor
+  (`alchemy_getAssetTransfers`), and checks every transaction it has not seen before
+  against its receipt and block header. Cost: one transfer-history call per cycle, plus
+  one receipt (and one block header for a purchase) per new transaction.
+- **A detected swap is offered, never recorded.** The Accumulation Plan panel shows each
+  one with its full hash, amounts, price and block time. CONFIRM calls the existing
+  `POST /v1/execute/record-accumulation` with the offered hash, so the receipt is fetched
+  and verified again: there is no second write path. NOT PART OF THE PLAN leaves it
+  uncounted; it stays listed and can be restored. The manual hash field is unchanged and
+  does not depend on detection. Open offers change no plan number: fills, spend, average
+  cost and cadence still count ledger rows only. When a tranche is due the panel's hint
+  follows the detection state (it promises to find the swap only when detection is
+  working) and, with a swap on offer, says to answer it before buying again.
+- **One set of rules.** The record handler's checks are now one pure function
+  (`fill_verify.rs`: receipt, wallet, block time, plan anchor) that the handler and the
+  detector both call. The handler's order of checks, status codes, error codes and
+  messages are unchanged.
+- **Honest failure.** Detection never fails a cycle. `accumulation_plan.fill_detection`
+  (snapshot, v0.6.0) carries `status`: `ok`, `partial` (read, but incompletely, with what
+  is missing), `unavailable` (could not check, with the reason) or `not_run` (with the
+  reason). "Could not check" is never shown as "none found". A receipt that could not be
+  read is not classified; it is tried again next cycle. `last_checked_at` is left out of
+  the state hash.
+- **Bounds.** The scan goes back to the plan anchor and no further; swaps from before it
+  are not offered. A transaction already in the ledger (any plan id) is never offered. A
+  swap made less than one plan interval after the buy before it (a recorded fill, or an
+  older swap still on offer) is offered with an `early` label; the label does not depend
+  on the order in which offers are confirmed. A stalled transfer-history call fails with
+  its own reason in about 20 seconds (two 10-second attempts), inside the 60-second cap
+  on the whole check.
+- **Execution cost per fill.** Each recorded fill and each offer carries
+  `execution_cost_bps` over the reference spot at its block time: the stored NOCK/USD
+  price nearest the block, within 60 minutes (the v0.5.3 lookup the harvest ledger uses),
+  kept with its source. No stored price near the block means no figure, never a
+  substitute. Every surface prints the reference's own time next to the figure (the
+  dashboard also says how many minutes it is from the swap), because a price move between
+  the two reads as cost. A fill confirmed from an offer keeps the figure the offer
+  showed. Fills recorded before this release get theirs on the next cycle when a
+  stored price exists. `GET /v1/accumulation/events` returns the three new fields and the
+  panel lists the plan's fills with them.
+- **Advice and MCP.** While a swap is on offer, the advice text leads with it in every
+  directive (also when an overextension, a range exit or a harvest outranks the plan, and
+  after the plan is complete); the action title does not change, so no extra notification
+  fires. `get_accumulation_plan`
+  lists offers and the detection state on both transports, from one shared source file.
+  MCP gains no write tool.
+- **New REST endpoints**, unauthenticated like the existing routes, touching only the
+  candidates table: `GET /v1/accumulation/candidates`,
+  `POST /v1/accumulation/candidates/dismiss`, `POST /v1/accumulation/candidates/restore`
+  (503 `NO_TRACKED_WALLET` when no wallet is configured).
+- **Storage.** New table `accumulation_candidates` (migration `20261116000010`, with a
+  `fills_checked_at` column on `accumulation_plans`) so a transaction is classified once;
+  new nullable columns `reference_spot_usd`, `reference_spot_source`, `execution_cost_bps`
+  on `accumulation_events` (migration `20261116000011`). Both additive. The table is
+  disposable like the rest of the database: after a loss the next cycle rebuilds it and
+  offers every buy since the anchor again.
+- **Config.** `fill_detection.enabled` (default `true`) turns the check off. There are no
+  thresholds: detection filters nothing by size or price.
+- **Verified on Base** (ONCHAIN_INTEGRATION.md §10): tests run on real receipts. The
+  plan's three buys qualify; four Uniswap fee claims and two Aero deposits that returned
+  a NOCK refund do not.
 ### Added — AERO rewards, the fourth pillar (#93)
 - **AERO is read every cycle.** The wallet's AERO balance, the AERO each staked Aero
   position has earned in its gauge and not claimed, and an AERO/USD price. NockNock

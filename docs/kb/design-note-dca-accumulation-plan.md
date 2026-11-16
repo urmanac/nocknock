@@ -429,3 +429,16 @@ is answered by 8.1 and 8.6. Questions
 ceiling), 4 (auto-attach hand-executed buys), 6 (count ETH) and 7 (multiple plans) are
 unchanged. Phases 2 and 3 are not started.
 
+### 8.7 Fill detection (Issue #118, v0.6.0)
+
+Question 4 has a working default, taken while the operator was away and theirs to
+change: a USDC→NOCK swap the worker notices on-chain is **offered**, not attached. The
+operator confirms it with one click (the existing `record-accumulation` call with the
+offered hash, which verifies the receipt again) or marks it "not part of the plan". The
+reason is in ONCHAIN_INTEGRATION.md §10: the recording rules only net transfers, so a
+transaction that pays USDC and receives NOCK for another reason would count if it were
+attached without anyone looking.
+
+Each fill now stores its execution cost over the reference spot at its block time (the
+measurement 8.5 asked for), using the stored price nearest the block. Cost against a
+quote, and quoting a due tranche on two venues, stay with #115.

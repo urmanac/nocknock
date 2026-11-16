@@ -59,7 +59,10 @@ Everything comes from `ingestion-worker/config.yaml`:
 - `operator_profile`: an optional NOCK floor, target weights, tax-reserve ratio and LP
   floor tolerance.
 - `accumulation_plan`: an optional dollar-cost-averaging plan that paces NOCK buys you
-  make yourself.
+  make yourself. After a buy, NockNock finds the swap in the wallet's on-chain history and
+  offers it on the dashboard: CONFIRM counts it (its receipt is verified again first),
+  NOT PART OF THE PLAN leaves it out. A detected swap is never counted on its own, and
+  recording a buy by its transaction hash works whether or not detection ran.
 
 The shipped `config.yaml.example` is loaded as the base layer and still carries the
 original operator's wallet, positions and limits. Set or clear every one of those in your
@@ -75,7 +78,7 @@ Each ingestion cycle produces one directive. The first rule that applies wins:
 |:--|:---|:---|:---|
 | 1 | **DEFENSIVE LOCK (Floor Recovery)** | You set `treasury_floor_nock` and total NOCK (wallet plus LP) is below it | How far below, and your plan's next step if you have one. Nothing is "locked"; NockNock does not size recovery buys. |
 | 2 | **OVEREXTENDED** | Daily RSI(14) is 70 or more (and the plan pauses when overextended) | No buy and no sale is advised while it stays there. A range exit or a due harvest still outranks it. |
-| 3 | **DCA TRANCHE DUE** | Your accumulation plan has a tranche due | Buy that tranche's size of NOCK yourself, then record the transaction; NockNock verifies it on-chain. |
+| 3 | **DCA TRANCHE DUE** | Your accumulation plan has a tranche due | Buy that tranche's size of NOCK yourself. NockNock then finds the swap on-chain and offers it for you to confirm (or record its transaction hash); either way the receipt is verified on-chain before it counts. |
 | 4 | **RANGE EXIT / BATCH HARVEST** | The price-source range has been exited, or uncollected LP fees reach the fixed $5.00 threshold | Facts about the exited range, or that fees are worth collecting. Harvest is advised only when no tranche is due. |
 | 5 | **Waiting plan** (DCA ON SCHEDULE, pending, paused, blocked) | A plan exists but nothing is due | When the next tranche is due and its size. |
 | 6 | **Planless arms** (nothing to track yet, build from zero, tax reserve short, dip zone) | No plan is configured | Facts only: what the wallet holds and where the price is. No buy is sized; the numbers are yours to set. |
@@ -267,7 +270,7 @@ To connect NockNock to Claude Desktop, Gemini Antigravity, Cursor, or Mecris, ad
 - `get_portfolio_state`: Balances, the four pillars (NOCK, USDC, ETH, AERO), gas held, AERO held and unclaimed, the NOCK floor buffer (if you set a floor), and the directive.
 - `get_shot_advice`: The current directive, its details, and the harvest rule.
 - `simulate_claim_fees`: Gas versus uncollected LP fees across the tracked LP positions. A position whose fees are not LP-claimable says why, followed by its unclaimed AERO (an amount, not a suggestion to claim).
-- `get_accumulation_plan`: Your DCA plan's status, next tranche, verified buys, and the LP rebuild bias.
+- `get_accumulation_plan`: Your DCA plan's status, next tranche, verified buys, swaps found on-chain that await your confirmation (listed only: MCP has no write tool), and the LP rebuild bias.
 
 Every answer ends with the snapshot's generation time and the worker's health.
 

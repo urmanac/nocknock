@@ -193,6 +193,9 @@ paths:
         success, and nets the USDC/NOCK Transfer logs touching the sovereign wallet;
         the transaction is accepted only if the wallet ended with less USDC and more
         NOCK. Amounts come from the logs, never from the request. Idempotent on tx_hash.
+        This is the only write path into the accumulation ledger: confirming a swap
+        that fill detection offered (v0.6.0) calls it with the offered hash, and the
+        receipt is verified again.
       requestBody:
         required: true
         content:
@@ -221,6 +224,9 @@ paths:
                   effective_price_usd: { type: string }
                   block_number: { type: integer }
                   confirmed_at: { type: string, format: date-time }
+                  reference_spot_usd: { type: string, nullable: true, description: "Stored NOCK/USD price that stands for the fill's block time, within 60 minutes (v0.6.0); the worker's own read is preferred and a backfilled candle counts as its open (#129); null when none was near. A fill confirmed from a detected swap keeps the reference its offer showed, so the two figures cannot differ." }
+                  reference_spot_source: { type: string, nullable: true }
+                  execution_cost_bps: { type: integer, nullable: true, description: "(effective price / reference spot - 1) x 10,000 (v0.6.0); null without a reference" }
         '404':
           description: Receipt not found on-chain yet (retry once the transaction lands)
         '409':
@@ -256,6 +262,114 @@ paths:
                         effective_price_usd: { type: string }
                         block_number: { type: integer }
                         confirmed_at: { type: string, format: date-time }
+                        reference_spot_usd: { type: string, nullable: true, description: "Stored NOCK/USD price that stands for the fill's block time (v0.6.0; own read preferred, a candle counts as its open, #129); null when none was near" }
+                        reference_spot_source: { type: string, nullable: true }
+                        execution_cost_bps: { type: integer, nullable: true, description: "Cost over the reference spot in basis points (v0.6.0); null without a reference" }
+
+  /accumulation/candidates:
+    get:
+      tags: [Execution]
+      summary: List every transaction fill detection has examined (v0.6.0)
+      operationId: listAccumulationCandidates
+      description: |
+        Transactions that sent NOCK to the tracked wallet and were checked against
+        their receipt, newest first, with the verdict. `offered` and `dismissed` are
+        USDC to NOCK purchases by the wallet; `not_a_purchase` is anything else (a fee
+        claim, a liquidity deposit, a sale). A candidate is never plan progress.
+      responses:
+        '200':
+          description: Candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        tx_hash: { type: string }
+                        state: { type: string, enum: [offered, dismissed, not_a_purchase] }
+                        reason: { type: string, nullable: true, description: "Rejection code for not_a_purchase" }
+                        recorded: { type: boolean, description: "True when the hash is in the accumulation ledger" }
+                        block_number: { type: integer, nullable: true }
+                        confirmed_at: { type: string, format: date-time, nullable: true }
+                        usdc_spent: { type: string, nullable: true }
+                        nock_received: { type: string, nullable: true }
+                        effective_price_usd: { type: string, nullable: true }
+                        reference_spot_usd: { type: string, nullable: true }
+                        reference_spot_source: { type: string, nullable: true }
+                        execution_cost_bps: { type: integer, nullable: true }
+                        first_seen_at: { type: string, format: date-time, nullable: true }
+        '500':
+          description: The candidates table could not be read
+
+  /accumulation/candidates/dismiss:
+    post:
+      tags: [Execution]
+      summary: Mark a detected swap "not part of the plan" (v0.6.0)
+      operationId: dismissAccumulationCandidate
+      description: |
+        Moves a detected swap from `offered` to `dismissed`. It is not written to the
+        ledger and does not advance the plan; it stays listed and can be restored.
+        Idempotent. Touches only the candidates table. Unauthenticated, like the other
+        routes. The snapshot's offer list updates on the next ingestion cycle.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CandidateActionRequest'
+      responses:
+        '200':
+          description: The swap is dismissed (changed is false when it already was)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateActionResponse'
+        '404':
+          description: CANDIDATE_NOT_FOUND. The transaction was never detected; nothing to dismiss.
+        '409':
+          description: ALREADY_RECORDED (the buy is in the ledger) or NOT_AN_OFFER (checked, and not a purchase)
+        '422':
+          description: INVALID_TX_HASH
+        '500':
+          description: The candidates table could not be read or updated; nothing changed
+        '503':
+          description: NO_TRACKED_WALLET. No tracked wallet is configured, so there are no candidates to act on; nothing changed.
+
+  /accumulation/candidates/restore:
+    post:
+      tags: [Execution]
+      summary: Put a dismissed swap back on offer (v0.6.0)
+      operationId: restoreAccumulationCandidate
+      description: |
+        Moves a swap from `dismissed` back to `offered`. It is still not counted until
+        the operator confirms it through /execute/record-accumulation. Idempotent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CandidateActionRequest'
+      responses:
+        '200':
+          description: The swap is on offer (changed is false when it already was)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateActionResponse'
+        '404':
+          description: CANDIDATE_NOT_FOUND
+        '409':
+          description: ALREADY_RECORDED or NOT_AN_OFFER
+        '422':
+          description: INVALID_TX_HASH
+        '500':
+          description: The candidates table could not be read or updated; nothing changed
+        '503':
+          description: NO_TRACKED_WALLET. No tracked wallet is configured; nothing changed.
 
   /execute/record-harvest:
     post:
@@ -527,6 +641,24 @@ components:
         details:
           type: object
           nullable: true
+
+    CandidateActionRequest:
+      type: object
+      description: Names a detected swap by its transaction hash (v0.6.0).
+      required: [tx_hash]
+      properties:
+        tx_hash:
+          type: string
+          description: 32-byte hex transaction hash (0x-prefixed or bare)
+
+    CandidateActionResponse:
+      type: object
+      description: Result of dismissing or restoring a detected swap (v0.6.0). The plan ledger is never touched.
+      properties:
+        tx_hash: { type: string }
+        state: { type: string, enum: [offered, dismissed] }
+        changed: { type: boolean, description: "False when the swap was already in that state" }
+        note: { type: string }
 
     ClaimFeesPayload:
       type: object

@@ -4,6 +4,11 @@ use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 use std::time::Duration;
 
+// Shared with the worker (src/fill_text.rs) so both MCP transports print the same text.
+#[path = "../fill_text.rs"]
+mod fill_text;
+use fill_text::fill_detection_lines;
+
 /// Worker base URL when NOCKNOCK_API_URL is unset. Point the variable at a remote
 /// deployment (e.g. `http://chudmax:8081`) to read it instead of a local worker.
 const DEFAULT_API_BASE: &str = "http://127.0.0.1:8080";
@@ -110,7 +115,7 @@ async fn main() -> Result<()> {
                             },
                             {
                                 "name": "get_accumulation_plan",
-                                "description": "Returns the dollar-cost-averaging plan: whether a NOCK tranche is due, its size, progress from receipt-verified buys, average cost, and the LP-rebuild bias.",
+                                "description": "Returns the dollar-cost-averaging plan: whether a NOCK tranche is due, its size, progress from receipt-verified buys, average cost, swaps found on-chain that await the operator's confirmation (listed only; this tool confirms nothing), and the LP-rebuild bias.",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {},
@@ -280,9 +285,10 @@ fn format_accumulation_plan(data: &Value) -> String {
                  • Next tranche: {}\n\
                  • Next due at: {}\n\
                  • Progress: ${} of ${} spent; average ${}\n\
-                 {lp_line}",
+                 {detection}{lp_line}",
                 s("plan_id"), s("status"), next,
                 s("next_due_at"), s("spent_usdc"), s("budget_usdc"), s("avg_price_usd"),
+                detection = fill_detection_lines(plan),
             )
         }
     }
@@ -627,3 +633,8 @@ mod tests {
         assert_eq!(zero_db_fallback_text("nope", "x"), "Unknown tool: nope");
     }
 }
+
+// Fill-detection text for the snapshot-API fallback (issue #118).
+#[cfg(test)]
+#[path = "../mcp_bin_tests_fills.rs"]
+mod tests_fills;

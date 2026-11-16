@@ -262,60 +262,18 @@ pub(crate) async fn record_accumulation_handler(
         Some(res) => res.get("result").cloned().unwrap_or(serde_json::Value::Null),
         None => return err(StatusCode::SERVICE_UNAVAILABLE, "RPC_UNAVAILABLE", "Could not query receipt; not recorded"),
     };
-    if receipt.is_null() {
-        return err(
-            StatusCode::NOT_FOUND,
-            "RECEIPT_NOT_FOUND",
-            "Transaction not found on-chain. If the wallet shows it approved, it may still be pending broadcast; retry once it lands.",
-        );
-    }
-    if receipt.get("status").and_then(|s| s.as_str()) != Some("0x1") {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "TX_REVERTED", "Receipt status is not success; nothing recorded");
-    }
-    let Some((usdc_raw, nock_raw)) = parse_accumulation_swap(&receipt, &wallet) else {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "NOT_A_NOCK_PURCHASE",
-            "Receipt does not show USDC leaving and NOCK entering the sovereign wallet",
-        );
+    // Every acceptance check lives in fill_verify.rs, shared with fill detection
+    // (issue #118). The receipt checks run first so a transaction that is not a
+    // purchase is rejected without a block read, exactly as before.
+    let reject = |r: &FillRejection| err(r.http_status(), r.code(), &r.detail(&plan.id));
+    let swap = match verify_fill_receipt(&receipt, &wallet) {
+        Ok(swap) => swap,
+        Err(r) => return reject(&r),
     };
-    let usdc_spent = format_units(usdc_raw, 6);
-    let nock_received = format_units(nock_raw, 16);
-    let (usdc_f, nock_f) = (
-        usdc_spent.parse::<f64>().unwrap_or(0.0),
-        nock_received.parse::<f64>().unwrap_or(0.0),
-    );
-    if !(usdc_f > 0.0 && nock_f > 0.0) {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "NOT_A_NOCK_PURCHASE", "Parsed amounts are not positive");
-    }
-    let effective_price = format!("{:.8}", usdc_f / nock_f);
-
-    let block_number: i64 = receipt
-        .get("blockNumber")
-        .and_then(|b| b.as_str())
-        .and_then(|s| i64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
-        .unwrap_or(0);
     // The fill time drives the plan's cadence, so it must be the block time. Unlike
     // the harvest ledger there is no wall-clock fallback: a wrong time would shift
     // when the next tranche comes due.
-    let block_payload = json!({
-        "jsonrpc": "2.0", "id": 43, "method": "eth_getBlockByNumber",
-        "params": [format!("0x{block_number:x}"), false]
-    });
-    let confirmed_at: Option<DateTime<Utc>> = if block_number > 0 {
-        post_rpc_with_retry(&state.http_client, &alchemy_url, &block_payload, 2)
-            .await
-            .and_then(|res| res.get("result").cloned())
-            .and_then(|blk| {
-                blk.get("timestamp")
-                    .and_then(|t| t.as_str())
-                    .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
-            })
-            .and_then(|ts| Utc.timestamp_opt(ts as i64, 0).single())
-    } else {
-        None
-    };
-    let Some(confirmed_at) = confirmed_at else {
+    let Some(confirmed_at) = fetch_block_time(&state.http_client, &alchemy_url, swap.block_number).await else {
         return err(StatusCode::SERVICE_UNAVAILABLE, "RPC_UNAVAILABLE", "Could not read the block timestamp; not recorded");
     };
 
@@ -329,23 +287,23 @@ pub(crate) async fn record_accumulation_handler(
         }
     };
     let anchor = plan_anchor(plan.starts_at, registered_at);
-    if confirmed_at < anchor {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "BEFORE_PLAN_START",
-            &format!(
-                "This purchase was confirmed at {}, before plan \"{}\" began ({}). To count earlier buys, set accumulation_plan.starts_at to an earlier time.",
-                confirmed_at.to_rfc3339(),
-                plan.id,
-                anchor.to_rfc3339()
-            ),
-        );
-    }
+    let fill = match verify_fill(&receipt, &wallet, confirmed_at, anchor) {
+        Ok(fill) => fill,
+        Err(r) => return reject(&r),
+    };
+    let (usdc_raw, nock_raw, block_number) = (fill.swap.usdc_raw, fill.swap.nock_raw, fill.swap.block_number);
+    let (usdc_spent, nock_received, effective_price) =
+        (fill.swap.usdc_spent.clone(), fill.swap.nock_received.clone(), fill.swap.effective_price_usd.clone());
+    // Execution cost over the reference spot at the fill's block time (issue #118). No
+    // stored price near that time means no cost figure: all three columns stay null.
+    // A swap confirmed from an offer keeps the figure the offer showed.
+    let reference = reference_for_recorded_fill(&state.db, &wallet, &tx_hash, &effective_price, confirmed_at).await;
 
     let res = sqlx::query(
         "INSERT INTO accumulation_events \
-            (plan_id, tx_hash, venue, usdc_spent_raw, nock_received_raw, usdc_spent, nock_received, effective_price_usd, block_number, confirmed_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
+            (plan_id, tx_hash, venue, usdc_spent_raw, nock_received_raw, usdc_spent, nock_received, effective_price_usd, block_number, confirmed_at, \
+             reference_spot_usd, reference_spot_source, execution_cost_bps) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) \
          ON CONFLICT (tx_hash) DO NOTHING",
     )
     .bind(&plan.id)
@@ -358,6 +316,9 @@ pub(crate) async fn record_accumulation_handler(
     .bind(&effective_price)
     .bind(block_number)
     .bind(confirmed_at)
+    .bind(&reference.spot_usd)
+    .bind(&reference.source)
+    .bind(reference.cost_bps)
     .execute(&state.db)
     .await;
     match res {
@@ -371,6 +332,9 @@ pub(crate) async fn record_accumulation_handler(
             "effective_price_usd": effective_price,
             "block_number": block_number,
             "confirmed_at": confirmed_at.to_rfc3339(),
+            "reference_spot_usd": reference.spot_usd,
+            "reference_spot_source": reference.source,
+            "execution_cost_bps": reference.cost_bps,
             "note": "Plan status updates on the next ingestion cycle (POST /v1/ingest to refresh now)."
         }))
         .into_response(),
@@ -384,7 +348,8 @@ pub(crate) async fn record_accumulation_handler(
 /// GET /v1/accumulation/events — receipt-verified fills, oldest first.
 pub(crate) async fn accumulation_events_handler(Extension(state): Extension<Arc<AppState>>) -> impl IntoResponse {
     let rows = sqlx::query(
-        "SELECT plan_id, tx_hash, venue, usdc_spent, nock_received, effective_price_usd, block_number, confirmed_at \
+        "SELECT plan_id, tx_hash, venue, usdc_spent, nock_received, effective_price_usd, block_number, confirmed_at, \
+                reference_spot_usd, reference_spot_source, execution_cost_bps \
          FROM accumulation_events ORDER BY confirmed_at ASC, id ASC",
     )
     .fetch_all(&state.db)
@@ -406,6 +371,10 @@ pub(crate) async fn accumulation_events_handler(Extension(state): Extension<Arc<
                             .try_get::<DateTime<Utc>, _>("confirmed_at")
                             .map(|t| t.to_rfc3339())
                             .unwrap_or_default(),
+                        // Null when no stored price was near the fill's block time (#118).
+                        "reference_spot_usd": r.try_get::<Option<String>, _>("reference_spot_usd").ok().flatten(),
+                        "reference_spot_source": r.try_get::<Option<String>, _>("reference_spot_source").ok().flatten(),
+                        "execution_cost_bps": r.try_get::<Option<i32>, _>("execution_cost_bps").ok().flatten(),
                     })
                 })
                 .collect();
@@ -454,15 +423,26 @@ pub(crate) fn harvest_usd_value(amount_human: &str, unit_price: Option<f64>) -> 
     Some(format!("{:.4}", amount * price))
 }
 
-/// The stored NOCK/USD price nearest `at`, within HARVEST_NOCK_PRICE_WINDOW_MINUTES, with
-/// its provenance. None when no stored price is close enough or the query fails.
+/// The statement behind `nock_price_near` (#129). The table holds two kinds of row. An
+/// observation (the worker's own read, or a seeded point) is stamped when it was taken
+/// and has no OHLC columns: its `price_usd` is the price at `timestamp`. A third-party
+/// candle is stored at its OPEN time with `price_usd` set to its CLOSE, which is the
+/// price one candle period later (an hour, or a day). So a candle counts as its open,
+/// never its close, and a candle with no positive open gives no price. Inside the window
+/// the worker's own read nearest `at` wins; a backfilled point is used only when there
+/// is none. This is the same rule the cost-basis series applies (`nearest_spot`).
+pub(crate) const NOCK_PRICE_NEAR_SQL: &str =
+    "SELECT timestamp, COALESCE(open_usd, price_usd) AS price_usd, source FROM market_price_history \
+     WHERE timestamp BETWEEN $2 AND $3 AND COALESCE(open_usd, price_usd) > 0 \
+     ORDER BY is_backfilled ASC, ABS(EXTRACT(EPOCH FROM (timestamp - $1))) ASC LIMIT 1";
+
+/// The stored NOCK/USD price that stands for `at`, within
+/// HARVEST_NOCK_PRICE_WINDOW_MINUTES, with its provenance: the price at the row's own
+/// timestamp (see NOCK_PRICE_NEAR_SQL). None when no stored price is close enough or the
+/// query fails.
 pub(crate) async fn nock_price_near(db: &PgPool, at: DateTime<Utc>) -> Option<(f64, String)> {
     let window = chrono::Duration::minutes(HARVEST_NOCK_PRICE_WINDOW_MINUTES);
-    let row = sqlx::query(
-        "SELECT timestamp, price_usd, source FROM market_price_history \
-         WHERE timestamp BETWEEN $2 AND $3 \
-         ORDER BY ABS(EXTRACT(EPOCH FROM (timestamp - $1))) ASC LIMIT 1",
-    )
+    let row = sqlx::query(NOCK_PRICE_NEAR_SQL)
     .bind(at)
     .bind(at - window)
     .bind(at + window)

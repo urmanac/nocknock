@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: NockNock Snapshot Data Model
-  version: 2.4.0
+  version: 2.5.0
   description: Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
   license:
     name: ISC
@@ -518,8 +518,9 @@ components:
         tax_reserve_usd = cumulative_harvested_usd * operator_profile.tax_reserve_ratio
         (default 0, no reserve); growth_dry_powder_usd is the remainder. Each harvest row
         (USDC, NOCK, WETH, or ETH unwrapped by a Uniswap position manager) is valued at
-        its claim's block (2.4.0): NOCK at the stored price nearest the block time (within
-        60 minutes), ETH/WETH at the ETH price pool's slot0 at that block. A row with no
+        its claim's block (2.4.0): NOCK at the stored price that stands for the block time
+        (within 60 minutes; the worker's own read first, a backfilled candle as its open,
+        #129), ETH/WETH at the ETH price pool's slot0 at that block. A row with no
         price found has no USD value and is left out of cumulative_harvested_usd.
       properties:
         cumulative_harvested_usd:
@@ -607,6 +608,113 @@ components:
           type: string
           nullable: true
           description: Protected cash reserve the plan never draws below; null when none is set
+        fill_detection:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/FillDetection'
+          nullable: true
+          description: |
+            Swaps found on-chain that look like plan buys, offered for confirmation, and
+            whether the check ran (v0.6.0). Offers are not progress: `fills`, `spent_usdc`,
+            `avg_price_usd` and the cadence count ledger rows only. Null in snapshots
+            from before v0.6.0.
+
+    FillDetection:
+      type: object
+      description: |
+        One cycle's fill detection for the accumulation plan (v0.6.0, issue #118). While a
+        plan is active the worker reads the tracked wallet's incoming NOCK transfers back
+        to the plan anchor and checks each transaction it has not seen before against
+        its receipt, with the rules of POST /execute/record-accumulation. A swap that
+        passes is offered; it is recorded only when the operator confirms it, through
+        that same endpoint, which verifies the receipt again. Detection never fails the
+        cycle and has no thresholds: nothing is filtered by size or price.
+      required: [status, offers, dismissed]
+      properties:
+        status:
+          type: string
+          enum: [ok, partial, unavailable, not_run]
+          description: |
+            ok: the transfer history was read back to the plan anchor and every new
+            transaction was examined (an empty `offers` then means "checked, none found").
+            partial: read, but incompletely; `detail` says what is missing (a receipt
+            that could not be read is retried, never classified).
+            unavailable: could not check this cycle; `detail` says why. This is not
+            "none found". Swaps found by an earlier check stay in `offers`.
+            not_run: not attempted; `detail` says why (the plan is invalid, has not
+            started or has spent its budget; the ledger could not be read; or
+            `fill_detection.enabled` is false).
+        detail:
+          type: string
+          nullable: true
+          description: Plain-words reason for partial, unavailable and not_run
+        checked_back_to:
+          type: string
+          format: date-time
+          nullable: true
+          description: How far back the transfer history was read. The plan anchor after a complete check; a later time when the check was cut short. Null when it did not run.
+        last_checked_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Time of the last successful check; null when none is on record. A wall-clock field, excluded from `state_hash` like `updated_at`.
+        offers:
+          type: array
+          description: Detected swaps waiting for the operator's answer (confirm, or mark as not part of the plan), oldest first. Never includes a transaction already in the ledger or one from before the plan anchor.
+          items:
+            $ref: '#/components/schemas/FillOffer'
+        dismissed:
+          type: array
+          description: Detected swaps the operator marked "not part of the plan". Not counted; kept and restorable.
+          items:
+            $ref: '#/components/schemas/FillOffer'
+
+    FillOffer:
+      type: object
+      description: |
+        A detected USDC to NOCK swap by the tracked wallet (v0.6.0). Every figure comes
+        from the transaction's receipt and block header. It is shown at its real size:
+        it is not matched to the tranche amount.
+      required: [tx_hash, confirmed_at, block_number, usdc_spent, nock_received, effective_price_usd, timing]
+      properties:
+        tx_hash:
+          type: string
+          description: Lowercase, 0x-prefixed. Confirming posts this hash to /execute/record-accumulation.
+        confirmed_at:
+          type: string
+          format: date-time
+          description: Block time of the swap
+        block_number:
+          type: integer
+        usdc_spent:
+          type: string
+        nock_received:
+          type: string
+        effective_price_usd:
+          type: string
+          description: USDC spent / NOCK received
+        timing:
+          type: string
+          enum: [early, on_schedule]
+          description: >-
+            early when the swap landed less than one plan interval after the buy before it,
+            otherwise on_schedule. "The buy before it" is the latest of this plan's recorded
+            fills at or before the swap's block time and the older swaps still on offer; a
+            dismissed swap is nobody's previous buy. The plan's first buy is never early.
+        reference_spot_usd:
+          type: string
+          nullable: true
+          description: The stored NOCK/USD price that stands for the swap's block time (within 60 minutes); the worker's own read nearest that time is preferred, and a backfilled candle counts as its open, never its close (#129); null when none was near
+        reference_spot_source:
+          type: string
+          nullable: true
+          description: >-
+            Where the reference came from, with its own timestamp. Clients show it next to
+            the cost figure: a price move between that time and the swap reads as cost.
+        execution_cost_bps:
+          type: integer
+          nullable: true
+          description: (effective_price_usd / reference_spot_usd - 1) x 10,000; positive means the swap paid more than the reference. Null without a reference, never a substitute.
 
     LpRebuild:
       type: object

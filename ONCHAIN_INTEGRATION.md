@@ -781,3 +781,114 @@ Zero liquidity is "Stale AERO/USD price: price pool … has zero in-range liquid
   public signature database; the topic hashes were recomputed from those signatures and
   match the logs. No verified source for these contracts was read.
 
+
+---
+
+## 10. Fill Detection for the Accumulation Plan (v0.6.0, issue #118) — Verified Record
+
+The worker looks for the plan's buys itself: each cycle it lists the NOCK transfers into
+the tracked wallet back to the plan anchor, fetches the receipt of every transaction it
+has not seen before, and applies the checks of `record-accumulation` (one shared function,
+`fill_verify.rs`). What passes is offered for confirmation; nothing is recorded until the
+operator confirms, and confirming verifies the receipt again.
+
+Detection adds **no contract address, no function selector and no event topic**. It
+reuses the NOCK and USDC token addresses (§1) and the ERC-20 `Transfer` topic already in
+`ledger.rs`. It adds one RPC method, `alchemy_getAssetTransfers`, and calls
+`eth_getTransactionReceipt` and `eth_getBlockByNumber`, which the worker already used.
+
+### What was read, and by whom
+
+Read on 2026-11-15/16 (the evening of 2026-11-15 in the operator's timezone), Base mainnet.
+
+| What | Call | Block | Raw result |
+|---|---|---|---|
+| `Transfer` topic | `keccak256("Transfer(address,address,uint256)")`, recomputed | n/a | `0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef`; it is `topics[0]` of every log below |
+| Transfer history (Alchemy, the operator's plan, read-only) | `alchemy_getAssetTransfers`: ERC-20, `toAddress` = wallet, `contractAddresses` = [NOCK], `withMetadata`, `order: desc`, `maxCount`, `pageKey` paging | newest 58043697, oldest 53006877 | 20 transfers and a `pageKey` (`e73927e8-c0bf-4c78-a0eb-5279ce640947`); saved verbatim as `ingestion-worker/testdata/fills/alchemy_getAssetTransfers_nock_in.json` |
+| The same transfers from logs (public RPC `base-rpc.publicnode.com`) | `eth_getLogs` address = NOCK, topics `[Transfer, null, 0x…ee114cc9…7a45]`, blocks `0x374eef8`..`0x375b248` (57,995,000..58,045,000) | head was 58062703 (`0x375f76f`) | 3 logs: tx `0x78376f3c…` block 58040708 logIndex 10 `data` `0xf713117c2d57cfbb` (1780.359297696005 NOCK); tx `0x929cb3e5…` block 58043556 logIndex 11 `data` `0x59970c4b41c2685` (40.34776317640147 NOCK); tx `0x3127a1f4…` block 58043697 logIndex 13 `data` `0xfd114621e11ee71` (113.97145923452884 NOCK). Same hashes, blocks, log indexes and amounts as the first three Alchemy entries. Saved as `eth_getLogs_nock_in_57995000_58045000.json` |
+| `eth_getLogs` range limits | same call over 200,000 blocks | n/a | publicnode: error `-32701 exceed maximum block range: 50000`. On the operator's Alchemy plan the 200,000-block span succeeded (read by the orchestrating session; not repeated here, no key) |
+| Receipts | `eth_getTransactionReceipt` for all 20 hashes (public RPC) | see table | For the six receipts also read through Alchemy, `status`, `blockNumber` and every log (`address`, `topics`, `data`, `logIndex`) are identical between the two providers |
+| Block times | `eth_getBlockByNumber(n, false)` (public RPC) | 58040708, 57605753, 57228848, 53725121, 57425187 | `timestamp` `0x6afa73b5`, `0x6af91fe6`, `0x6af7f971`, `0x6aed4827`, `0x6af892d5` = 2026-11-16T03:08:37Z, 2026-11-15T02:58:46Z, 2026-11-14T06:02:25Z, 2026-11-06T03:23:19Z, 2026-11-14T16:56:53Z: equal to Alchemy's `metadata.blockTimestamp` for the same transfers |
+
+### The 20 most recent NOCK transfers into the wallet, classified
+
+Net flows are the sum of the USDC and NOCK `Transfer` logs touching the wallet in each
+receipt (what `parse_accumulation_swap` computes). A purchase is net USDC out and net NOCK in.
+
+| Transaction | Block | Block time | Receipt `to` | Net USDC | Net NOCK | Verdict |
+|---|---:|---|---|---:|---:|---|
+| `0x3127a1f4…e49c9e` | 58043697 | 2026-11-16T03:18:35Z | `0x03a520b3…` (v3 NPM) | +0.000000 | +113.9715 | not a purchase (v3 fee claim; also +0.000678 WETH) |
+| `0x929cb3e5…cc4fd0` | 58043556 | 2026-11-16T03:18:06Z | `0x7c5f5a4b…` (v4 POSM) | +0.573656 | +40.3478 | not a purchase (v4 fee claim) |
+| `0x78376f3c…6e31b9` | 58040708 | 2026-11-16T03:08:37Z | `0xcaf22ce3…7c67` | −20.000000 | +1780.3593 | **purchase** (plan buy 3, $0.01123369) |
+| `0x4644edd9…4c61e8` | 57605753 | 2026-11-15T02:58:46Z | `0x0fef9e88…` (Aero router) | −20.000000 | +1720.2181 | **purchase** (plan buy 2, $0.01162643) |
+| `0x1d566001…a374b1` | 57504113 | 2026-11-14T21:19:58Z | `0x03a520b3…` | +0.000000 | +33.7768 | not a purchase (v3 fee claim) |
+| `0x8f0b3cbb…c78228` | 57503975 | 2026-11-14T21:19:30Z | `0x7c5f5a4b…` | +0.025169 | +18.8069 | not a purchase (v4 fee claim) |
+| `0x80277e2b…c93ddb` | 57425824 | 2026-11-14T16:59:00Z | `0x0fef9e88…` | +0.000000 | −2755.0000 | not a purchase (CL200 deposit, §7) |
+| `0x127c4f4f…f185f0` | 57425187 | 2026-11-14T16:56:53Z | `0x0fef9e88…` | −31.986644 | −2755.0000 | not a purchase (volatile-pool deposit, §7) |
+| `0x5d0c02d9…2a3f0e` | 57228848 | 2026-11-14T06:02:25Z | `0x0fef9e88…` | −20.000000 | +1597.9340 | **purchase** (plan buy 1, $0.01251616, §6) |
+| `0xa8cd4501…9ce4dc` | 53725121 | 2026-11-06T03:23:19Z | `0x0fef9e88…` | −105.471820 | +7370.1998 | **purchase**, before the plan ($0.01431058) |
+| `0x56efde30…4f893b` | 53223698 | 2026-10-29T01:19:03Z | `0x7c5f5a4b…` | +0.000000 | +33415.7370 | not a purchase |
+| `0x7f0daf07…c32124` | 53223681 | 2026-10-29T01:18:29Z | `0x7c5f5a4b…` | +0.328365 | +7693.1080 | not a purchase |
+| `0x5673582f…7b4cac` | 53223656 | 2026-10-29T01:17:39Z | `0x7c5f5a4b…` | +103.253128 | +5257.3122 | not a purchase |
+| `0xea9680ac…ea57ed` | 53223635 | 2026-10-29T01:16:57Z | `0x03a520b3…` | +0.000000 | +1444.3263 | not a purchase |
+| `0x889c865f…52191c` | 53008782 | 2026-10-24T01:55:11Z | `0x7c5f5a4b…` | +0.000000 | +191.1711 | not a purchase |
+| `0xfdbcebc2…d55c5b` | 53008778 | 2026-10-24T01:55:03Z | `0x7c5f5a4b…` | +5.376593 | +156.1783 | not a purchase |
+| `0x6fc8f541…0c91da` | 53006987 | 2026-10-24T00:55:21Z | `0xcf77a3ba…` | +78.788719 | +3822.4952 | not a purchase |
+| `0x8132c691…97f44d` | 53006951 | 2026-10-24T00:54:09Z | `0x7c5f5a4b…` | +60.372284 | +11600.9806 | not a purchase |
+| `0x2a7b564a…02eae1` | 53006900 | 2026-10-24T00:52:27Z | `0x7c5f5a4b…` | +0.013038 | +5.4668 | not a purchase |
+| `0xb27b6f44…5de3f9` | 53006877 | 2026-10-24T00:51:41Z | `0x85f1aa3a…` | +0.024665 | +1.4752 | not a purchase |
+
+With the plan anchored on 2026-11-14 the worker examines the first nine rows and offers
+exactly the three plan buys. Ten of these receipts are checked in under
+`ingestion-worker/testdata/fills/` and drive `src/tests_fills.rs`: the three plan buys, the
+four fee claims after the anchor, the two deposits and the pre-plan purchase.
+
+### What the real data showed
+
+- **The two Aero deposits appear in the transfer list.** The router `0x0fef9e88…` sent
+  the wallet a NOCK refund in each (0.0000459601 NOCK and 0.0000000000000152 NOCK). #118
+  named this as the possible false positive: a deposit that pays USDC and receives some
+  NOCK. Neither qualifies, because the wallet's net NOCK flow is outward (−2,755). A
+  deposit that paid USDC and returned more NOCK than it took would qualify; none has been
+  observed. This is the reason a detected swap is offered and not recorded.
+- **A purchase from before the plan exists** (`0xa8cd4501…`, 2026-11-06, $105.47182 for
+  7,370.2 NOCK). The scan stops at the plan anchor, so it is never fetched or offered. Set
+  `accumulation_plan.starts_at` earlier to reach it.
+- **Plan buy 2 came 20 h 56 min after buy 1.** Against a 24-hour interval that is before
+  its tranche was due, so the offer is labelled `early` (judged against the buy before it,
+  whether that buy is recorded or still on offer). Buy 3 came 24 h 10 min after buy 2.
+- **Plan buy 3 did not go through the Aero router of §6.** Its receipt's `to` is
+  `0xcaf22ce31298cf2bf1d152862f80216478ad7c67`, and both the USDC and the NOCK moved
+  directly between the wallet and the legacy vAMM `0x85f1aa3a…d626`. Which app sent it was
+  not established. Verification is contract-agnostic, so it qualifies like the others, and
+  NockNock stores nothing about the router.
+
+### Cost over the reference spot
+
+Each recorded fill and each offer carries `execution_cost_bps` =
+(effective price / reference spot − 1) × 10,000. The reference is the stored NOCK/USD price
+nearest the fill's block time, within 60 minutes (`nock_price_near`, the v0.5.3 lookup the
+harvest ledger uses), kept with its source and its own timestamp. Inside the window the
+worker's own read nearest the fill is used; a backfilled candle is used only when there is
+none, and it counts as its **open** (the table stores a candle at its open time with its
+close in `price_usd`, which is the price one candle period later; issue #129). While the worker is
+running that is a price-source pool read at most a few minutes from the fill; after
+downtime it may be a backfilled hourly candle, and the source says so. No stored price in
+the window means no reference and no figure. The reference is not the price in the fill's
+own block, and it is not a quote: cost against a quote belongs to #115.
+
+For scale, plan buy 1 at $0.01251616 against the engine spot noted at the time ($0.01229,
+§6) is +184 bps.
+
+### Not verified
+
+- **The worker's own `alchemy_getAssetTransfers` request.** This branch had no Alchemy
+  key. The method and its parameters were exercised on the operator's plan by the
+  orchestrating session and the response saved, but the request that produced it was not
+  saved. The worker sends `fromBlock: "0x0"`, `toBlock: "latest"`, `excludeZeroValue: true`
+  and `maxCount: "0x64"` with the parameters in the table above; the first deployed cycle
+  is the first time that exact request runs. If Alchemy rejects it, the plan status reads
+  `unavailable` with the reason and recording by hash is unaffected.
+- **Following a `pageKey`.** The saved response has one; the second page was not fetched.
+  The paging test splits the real response in two.
+- **Compute-unit cost** of one transfer-history call per cycle on the operator's plan.
