@@ -484,6 +484,10 @@ components:
           nullable: true
         fills:
           type: integer
+          nullable: true
+          description: |
+            Verified buys counted. Null when `status` is `unavailable`: the ledger was
+            not read, so the count is unknown, not 0. 0 only with `no_fills`.
         spent_usdc:
           type: string
           nullable: true
@@ -511,7 +515,11 @@ components:
         unrealized_usd:
           type: string
           nullable: true
-          description: value_at_spot_usd less spent_usdc, signed (negative = worth less than it cost)
+          description: |
+            value_at_spot_usd less spent_usdc, signed (negative = worth less than it
+            cost). A valuation of the NOCK these buys acquired, not a statement that it
+            is still held: NockNock does not track whether it was later sold or moved
+            into LP.
           example: "-1.21"
         unrealized_pct:
           type: string
@@ -620,8 +628,10 @@ components:
           type: string
           nullable: true
           description: |
-            NOCK read this cycle (wallet plus tracked LP), for comparison with basis_nock.
-            The two differ by everything the basis does not track.
+            NOCK read this cycle (wallet plus tracked LP), to the nearest whole NOCK (it
+            is `global_status.total_nock_amount`), for comparison with basis_nock. The
+            two differ by everything the basis does not track.
+          example: "118714"
         includes:
           type: array
           items: { type: string }

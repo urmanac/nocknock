@@ -40,16 +40,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report; the error is also logged once at startup.
 - **`GET /v1/cost-basis/series`**: every verified fill with the running averages after it
   (its plan's, the ledger's, and the blended one when configured), the stored spot
-  nearest it (within 60 minutes, else null), and the stored spot history over the range,
-  thinned to at most one stored observation per bucket. Nothing is interpolated: a
-  bucket with no observation has no point. `?days=` sets the range (1 to 365).
+  that stands for it (within 60 minutes, else null), and the stored spot history over
+  the range, thinned to at most one stored observation per bucket. Nothing is
+  interpolated: a bucket with no observation has no point. `?days=` sets the range
+  (1 to 365).
+- **Every spot point is the price at its own time.** The price history stores a
+  third-party candle at its open time with its close as the price, which is the price an
+  hour (or a day) later. The series uses the candle's open instead, so a backfilled
+  point is never a later price shown early; a candle without a usable open yields no
+  point. A buy is matched to the worker's own read when one lies within the 60 minutes,
+  and to a backfilled point only when there is none.
 - **Dashboard panel "Average cost vs spot"** (`AverageCostPanel`, helper `costBasis.ts`):
   the average-cost step line, the spot line with its gaps shaded and never bridged, a
   marker on each buy, a table of what each buy did to the average, and the difference at
   spot stated as a fact. No advice: nothing suggests buying, selling or averaging down.
+  The difference is described as a valuation of the NOCK the buys acquired; the panel
+  does not claim that NOCK is still held, because sells and LP activity are not tracked.
 - **MCP**: `get_portfolio_state` gains two cost-basis lines. Both transports compile them
-  from one file (`src/cost_basis_text.rs`), so they cannot drift.
-- **A failed ledger read is `unavailable`, never "no buys".** It does not fail the cycle.
+  from one file (`src/cost_basis_text.rs`), so they cannot drift, and both say so in the
+  tool's `tools/list` description. The whole-stack line values "the NOCK this basis
+  covers" and puts the NOCK read now beside it.
+- **A failed ledger read is `unavailable`, never "no buys".** It does not fail the cycle,
+  `plan_buys.fills` is null (not 0) in that state, and both plan-buys tiles on the
+  dashboard say "unavailable" with the reason.
+- `whole_stack.held_nock` is a whole number of NOCK, the precision the snapshot's own
+  total has.
 - `/v1/snapshot/historical` rows keep the cost-basis figures and drop the repeated
   `includes`/`excludes` prose, so the history payload stays bounded.
 - New modules `cost_basis` and `cost_basis_text`; tests in `tests_cost_basis.rs`, built

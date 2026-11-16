@@ -270,8 +270,11 @@ paths:
         Nothing is interpolated. `spot` holds stored observations only, thinned to at
         most one per `bucket_seconds` (the last stored row in each bucket, with its own
         timestamp and price); a bucket with no observation has no point, and clients
-        must draw that as a gap. `spot_at_fill` is the stored observation nearest the
-        fill's block time, or null when none lies within `spot_match_window_minutes`.
+        must draw that as a gap. `spot_at_fill` is the stored price that stands for the
+        fill's block time: among the stored points within `spot_match_window_minutes`
+        of it, the worker's own read nearest the fill, or, when there is none, the
+        nearest backfilled point; null when no point lies within the window. Every
+        point is the price at its own `at` (see `CostBasisSpotPoint`).
         The averages are exact between fills: an average cost changes only when a buy
         is recorded.
       parameters:
@@ -530,17 +533,25 @@ components:
 
     CostBasisSpotPoint:
       type: object
-      description: One stored NOCK/USD observation from the price history (v0.6.0). Never interpolated.
+      description: |
+        One stored NOCK/USD point from the price history (v0.6.0): the price at `at`.
+        Never interpolated. The worker's own read is stamped when it was taken. A
+        third-party candle is stored at its open time, so its point here is the candle's
+        OPEN (the price at that instant); the candle's close, which is the price one
+        candle period later, is never placed at the open time. A candle without a usable
+        open yields no point.
       required: [at, price_usd, source, is_backfilled]
       properties:
         at: { type: string, format: date-time }
-        price_usd: { type: string }
+        price_usd:
+          type: string
+          description: The price at `at` (a candle's open, or the observation itself)
         source:
           type: string
           description: Provenance of the row (the worker's own pool read, or a third-party feed)
         is_backfilled:
           type: boolean
-          description: True for a third-party candle filled in after the fact, false for the worker's own contemporaneous read
+          description: True for a third-party point filled in after the fact (a candle, shown at its open), false for the worker's own contemporaneous read
 
     HistoricalResponse:
       type: object

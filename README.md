@@ -81,8 +81,10 @@ in the accumulation ledger with the USDC that left the wallet and the NOCK that 
 it. Their running average cost is exact. The dashboard panel **Average cost vs spot**
 charts it against the stored NOCK price, marks each buy, lists what each buy did to the
 average, and states what that NOCK is worth at the current spot against what it cost.
-That difference is a measurement. NockNock sizes no buy from it and never suggests
-averaging down ([why](docs/lore/2026-11-14-four-pillars-no-hurry.md)).
+That difference is a measurement: a valuation of the NOCK those buys acquired. It does
+not say the NOCK is still held, because NockNock does not track whether it was later
+sold or moved into LP. NockNock sizes no buy from it and never suggests averaging down
+([why](docs/lore/2026-11-14-four-pillars-no-hurry.md)).
 
 **Whole stack (only if you supply it).** NockNock cannot work out what the rest of your
 NOCK cost. The chain does not say what you paid before the plan, what you sold, or what
@@ -106,8 +108,8 @@ cost_basis:
   whether a buy made that day is already counted.
 - **Not tracked after `as_of`:** sells, NOCK that LP ranges sell or buy back, fees earned
   in NOCK, transfers in or out, buys you did not record, realized gains and losses, and
-  gas. The panel shows the NOCK NockNock reads now beside the NOCK the basis covers, so
-  the difference is visible.
+  gas. The panel and the MCP text show the NOCK NockNock reads now (to the nearest
+  whole NOCK) beside the NOCK the basis covers, so the difference is visible.
 - Unset, the whole-stack basis reads "not configured". A half-filled block, a zero or
   negative amount, or an `as_of` in the future is a configuration error, shown on the
   dashboard, in the snapshot and in MCP. It is never completed with a default, and it
@@ -119,6 +121,9 @@ spot; gaps in the price history stay gaps), and two lines in the `get_portfolio_
 MCP text. After a database loss the plan buys come back when you record their
 transaction hashes again; the opening basis lives in `config.yaml`; the stored price
 history restarts from backfilled candles, so older stretches of the spot line are coarser.
+A backfilled candle is drawn at its open time with its open price (the price at that
+instant), and a buy is matched to the worker's own stored read when one lies within 60
+minutes of it, otherwise to the nearest backfilled point in that window.
 
 ---
 
