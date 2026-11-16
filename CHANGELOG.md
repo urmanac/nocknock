@@ -56,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   store repeated it every cycle. It is now sent once the snapshot is on record.
 - **Provider requests time out after 10 s.** The worker's HTTP client has no timeout, and
   a hung provider held the ingestion cycle open.
+- **Long messages fit the provider.** A directive whose details list LP rebuild steps can
+  pass Pushover's 1024-character limit. Messages are now cut to each provider's limit with
+  a "…", keeping the cockpit link.
 
 ### Changed — worker split into modules (#97)
 - **Move-only refactor.** `ingestion-worker/src/main.rs` (10,853 lines) is now 1,322 lines

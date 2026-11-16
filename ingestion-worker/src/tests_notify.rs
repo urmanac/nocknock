@@ -522,6 +522,44 @@ fn test_provider_error_detail_reads_each_providers_answer() {
 }
 
 #[test]
+fn test_long_messages_are_cut_to_the_providers_limit_and_keep_the_link() {
+    // Short text is untouched.
+    assert_eq!(fit_message("hello\n→ http://h/?view=lite", 1024), "hello\n→ http://h/?view=lite");
+    // A directive whose details list LP rebuild steps can pass Pushover's 1024 characters.
+    let details = "Suggested: add 156.01 USDC + 4532 NOCK ($211.70) to v4 USDC/NOCK 3.00% #3163450. ".repeat(20);
+    let text = format!("🛡️ NockNock directive change: DCA TRANCHE DUE (2 of 5)\n{}\n→ http://chudmax:3000/?view=lite", details);
+    assert!(text.chars().count() > 1024);
+    let cut = fit_message(&text, PUSHOVER_MESSAGE_LIMIT);
+    assert_eq!(cut.chars().count(), 1024);
+    assert!(cut.starts_with("🛡️ NockNock directive change: DCA TRANCHE DUE (2 of 5)\n"), "{cut}");
+    assert!(cut.ends_with("…\n→ http://chudmax:3000/?view=lite"), "{cut}");
+    // Without a link the cut is still marked, and multi-byte characters are never split.
+    let no_link = fit_message(&"é".repeat(2000), 1024);
+    assert_eq!(no_link.chars().count(), 1024);
+    assert!(no_link.ends_with('…'));
+    // A last line that only looks like a link but is the whole budget is not kept.
+    assert_eq!(fit_message(&format!("x\n→ {}", "y".repeat(50)), 10).chars().count(), 10);
+}
+
+#[tokio::test]
+async fn test_a_long_directive_reaches_pushover_within_its_limit() {
+    let (base, seen) = provider_stand_in().await;
+    let details = "add 65.86 USDC + 5678 NOCK ($135.64) to Aero USDC/NOCK 0.30% (full range); ".repeat(30);
+    let text = cycle_notification(Some("A"), "DCA TRANCHE DUE (2 of 5)", &details, None, None, Some("http://chudmax:3000/?view=lite")).unwrap();
+    assert!(text.chars().count() > PUSHOVER_MESSAGE_LIMIT);
+    let c = cfg(Some(("good", "42")), Some(("good", "user-key")), None);
+    let reports = deliver_notifications(&Client::new(), &c, &endpoints(&base), &text).await;
+    assert!(reports.iter().filter(|r| r.channel != "webhook").all(|r| r.status == "delivered"), "{reports:?}");
+    let seen = seen.lock().unwrap();
+    let got = |who: &str| seen.iter().find(|(w, _)| w == who).map(|(_, b)| b.clone()).unwrap();
+    let pushover = got("pushover")["message"].as_str().unwrap().to_string();
+    assert_eq!(pushover.chars().count(), PUSHOVER_MESSAGE_LIMIT);
+    assert!(pushover.ends_with("…\n→ http://chudmax:3000/?view=lite"));
+    // Telegram's limit is higher, so it carries the whole text.
+    assert_eq!(got("telegram")["text"].as_str().unwrap(), text);
+}
+
+#[test]
 fn test_test_send_cooldown() {
     use std::time::Duration;
     assert_eq!(test_send_retry_after(None, 30), None);

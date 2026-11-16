@@ -158,6 +158,10 @@ copied example left Pushover off without saying so.
 ### Notes on the block
 
 - You can set more than one channel. Each is sent independently.
+- A long message is cut to the provider's limit (Pushover: 1024 characters) with a
+  "…", and the link is kept. The full text is on the page the link opens. The test
+  message is short, so it passing says nothing about length; that is why every
+  message is cut the same way before it is sent.
 - `cockpit_url` is the link at the end of each message. The Lite cockpit is
   `/?view=lite`. A `/lite` path opens the full dashboard; the status route and the
   dashboard panel warn when they see one.

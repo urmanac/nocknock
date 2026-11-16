@@ -36,6 +36,7 @@ case "$TLS" in
   1)
     TLS_PORT="${NOCKNOCK_TLS_PORT:-3443}"
     read -r -a TLS_NAMES <<< "${NOCKNOCK_TLS_NAMES:-$HOST}"
+    [ "${#TLS_NAMES[@]}" -gt 0 ] || { echo "NOCKNOCK_TLS_NAMES is blank: list at least one name or address" >&2; exit 1; }
     TLS_DIR="$(mktemp -d)"
     trap 'rm -rf "$TLS_DIR"' EXIT
     deploy/podman/tls/render.sh "$TLS_DIR" "$TLS_PORT" "${TLS_NAMES[@]}"

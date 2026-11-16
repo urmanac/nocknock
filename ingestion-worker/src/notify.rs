@@ -8,6 +8,35 @@ pub(crate) const NOTIFY_TIMEOUT_SECONDS: u64 = 10;
 /// on the LAN, so this bounds how fast anything can make the phone buzz.
 pub(crate) const TEST_SEND_COOLDOWN_SECONDS: u64 = 30;
 
+/// Pushover's API limits a message to 1024 characters. A directive whose details list
+/// LP rebuild steps can be longer than that.
+pub(crate) const PUSHOVER_MESSAGE_LIMIT: usize = 1024;
+
+/// Telegram's limit is 4096 UTF-16 units; the margin covers characters that take two.
+pub(crate) const TELEGRAM_MESSAGE_LIMIT: usize = 4000;
+
+/// Shorten `text` to at most `limit` characters. Pure. The cut is marked with "…", and a
+/// last line that is the cockpit link ("→ …") is kept whole, since the full text is one
+/// tap away there. A short test message fitting a provider's limit says nothing about a
+/// long directive, so every message goes through this.
+pub(crate) fn fit_message(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_string();
+    }
+    let (body, link) = match text.rsplit_once('\n') {
+        Some((body, last)) if last.starts_with("→ ") && last.chars().count() + 2 < limit => (body, Some(last)),
+        _ => (text, None),
+    };
+    let room = limit - link.map_or(0, |l| l.chars().count() + 1) - 1;
+    let mut out: String = body.chars().take(room).collect();
+    out.push('…');
+    if let Some(link) = link {
+        out.push('\n');
+        out.push_str(link);
+    }
+    out
+}
+
 /// A config value that is present and not blank.
 fn configured(v: &Option<String>) -> Option<&str> {
     v.as_deref().map(str::trim).filter(|s| !s.is_empty())
@@ -145,13 +174,13 @@ pub(crate) async fn deliver_notifications(
                 let token = configured(&cfg.telegram_bot_token).unwrap_or_default();
                 let chat = configured(&cfg.telegram_chat_id).unwrap_or_default();
                 http.post(format!("{}/bot{}/sendMessage", endpoints.telegram_base, token))
-                    .json(&json!({ "chat_id": chat, "text": text }))
+                    .json(&json!({ "chat_id": chat, "text": fit_message(text, TELEGRAM_MESSAGE_LIMIT) }))
             }
             "pushover" => {
                 let token = configured(&cfg.pushover_token).unwrap_or_default();
                 let user = configured(&cfg.pushover_user).unwrap_or_default();
                 http.post(&endpoints.pushover_url)
-                    .json(&json!({ "token": token, "user": user, "message": text }))
+                    .json(&json!({ "token": token, "user": user, "message": fit_message(text, PUSHOVER_MESSAGE_LIMIT) }))
             }
             _ => http
                 .post(configured(&cfg.webhook_url).unwrap_or_default())
