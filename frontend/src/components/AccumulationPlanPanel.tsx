@@ -2,14 +2,17 @@
  * Accumulation Plan panel (v0.5.0, issue #79).
  *
  * Shows the dollar-cost-averaging plan the worker is pacing, the standing LP-rebuild
- * bias, and a field to record a buy by transaction hash. The worker verifies the
- * receipt on-chain before anything counts; this panel never marks a tranche done
- * on its own.
+ * bias, the swaps the worker found on-chain and offers for confirmation (v0.6.0,
+ * issue #118), and a field to record a buy by transaction hash, which always works.
+ * The worker verifies the receipt on-chain before anything counts; this panel never
+ * marks a tranche done on its own.
  */
 import { useState } from 'react';
 import { api } from '../api/client';
 import type { AccumulationPlanStatus, LpRebuild } from '../types/snapshot';
 import { LpRebuildSteps } from './LpRebuildSteps';
+import { FillOffers } from './FillOffers';
+import { PlanFills } from './PlanFills';
 import {
   PLAN_STATUS_COLOR,
   PLAN_STATUS_LABEL,
@@ -118,7 +121,8 @@ export function AccumulationPlanPanel({
             {plan.status === 'tranche_due' && (
               <>
                 Buy <strong style={{ color: '#f0f6fc' }}>${plan.tranche_usdc}</strong> of NOCK (tranche {plan.tranche_index} of{' '}
-                {plan.tranches_total}), then record the transaction below.
+                {plan.tranches_total}). NockNock then looks for the swap on-chain and offers it here to confirm; you can
+                also record its transaction hash below.
               </>
             )}
             {plan.status === 'waiting' && (
@@ -189,6 +193,12 @@ export function AccumulationPlanPanel({
         </div>
       </div>
 
+      {/* Detected swaps: offered, never counted until confirmed (v0.6.0, issue #118). */}
+      {canRecord && <FillOffers detection={plan.fill_detection} onChanged={onRecorded} />}
+
+      {canRecord && (
+        <div style={{ ...label, marginBottom: 4 }}>RECORD A BUY BY TRANSACTION HASH · ALWAYS AVAILABLE</div>
+      )}
       {canRecord && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <input
@@ -232,9 +242,11 @@ export function AccumulationPlanPanel({
           {message.text}
         </div>
       )}
+      {canRecord && <PlanFills planId={plan.plan_id} refreshKey={`${plan.fills}:${plan.last_fill_at ?? ''}`} />}
       <div style={{ ...small, color: '#484f58' }}>
         The plan paces buys; it never executes them. Progress counts only swaps the worker has verified on-chain as
-        USDC leaving and NOCK entering the sovereign wallet. Missed windows do not stack.
+        USDC leaving and NOCK entering the sovereign wallet. A swap NockNock finds on its own is offered, not counted:
+        it counts once you confirm it, and confirming verifies its receipt again. Missed windows do not stack.
       </div>
     </div>
   );

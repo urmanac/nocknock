@@ -67,6 +67,46 @@ export interface AccumulationPlanStatus {
   binding_constraint?: string | null;
   /** Protected cash reserve the plan never draws below */
   cash_reserve_usdc?: string | null;
+  /**
+   * Swaps found on-chain that look like plan buys, and whether the check ran (v0.6.0).
+   * Offers are not progress: fills, spend and cadence count recorded buys only.
+   * Null or absent in snapshots from before v0.6.0.
+   */
+  fill_detection?: FillDetection | null;
+}
+
+/** One cycle's fill-detection result (v0.6.0, issue #118) */
+export interface FillDetection {
+  /** `unavailable` is "could not check", not "checked, nothing found" (`ok`, no offers) */
+  status: 'ok' | 'partial' | 'unavailable' | 'not_run';
+  /** Plain-words reason for partial, unavailable and not_run */
+  detail?: string | null;
+  /** How far back the transfer history was read (the plan anchor after a complete check) */
+  checked_back_to?: string | null;
+  /** Time of the last successful check; not part of state_hash */
+  last_checked_at?: string | null;
+  /** Detected swaps waiting for an answer: confirm, or mark as not part of the plan */
+  offers: FillOffer[];
+  /** Detected swaps marked "not part of the plan"; kept and restorable */
+  dismissed: FillOffer[];
+}
+
+/** A detected USDC→NOCK swap, read from its receipt and block header */
+export interface FillOffer {
+  tx_hash: string;
+  /** Block time of the swap */
+  confirmed_at: string;
+  block_number: number;
+  usdc_spent: string;
+  nock_received: string;
+  effective_price_usd: string;
+  /** Whether the swap landed before the open tranche came due */
+  timing: 'early' | 'on_schedule';
+  /** Stored NOCK/USD price nearest the swap's block time; null when none was near */
+  reference_spot_usd?: string | null;
+  reference_spot_source?: string | null;
+  /** (effective price / reference spot − 1) × 10,000; null without a reference */
+  execution_cost_bps?: number | null;
 }
 
 /** LP weight vs target; rebuilding is a reposition with no net cash change (2.1.0) */

@@ -91,6 +91,38 @@ export interface RecordAccumulationResponse {
   effective_price_usd: string;
   block_number: number;
   confirmed_at: string;
+  /** Reference spot at the fill's block time and the cost over it (v0.6.0); null when unknown. */
+  reference_spot_usd?: string | null;
+  reference_spot_source?: string | null;
+  execution_cost_bps?: number | null;
+}
+
+/** A receipt-verified fill from GET /accumulation/events. */
+export interface AccumulationEvent {
+  plan_id: string;
+  tx_hash: string;
+  venue: string;
+  usdc_spent: string;
+  nock_received: string;
+  effective_price_usd: string;
+  block_number: number;
+  confirmed_at: string;
+  /** Null when no stored price was near the fill's block time (v0.6.0; absent before). */
+  reference_spot_usd?: string | null;
+  reference_spot_source?: string | null;
+  execution_cost_bps?: number | null;
+}
+
+export interface AccumulationEventsResponse {
+  events: AccumulationEvent[];
+}
+
+/** Result of marking a detected swap "not part of the plan", or restoring it (v0.6.0). */
+export interface FillCandidateActionResponse {
+  tx_hash: string;
+  state: 'offered' | 'dismissed';
+  /** False when the swap was already in that state. */
+  changed: boolean;
 }
 
 export interface LedgerSummary {
@@ -203,4 +235,22 @@ export const api = {
 
   // Ask the worker to ingest now (used after recording a buy so the plan advances).
   ingestNow: () => request<unknown>('/ingest', { method: 'POST' }),
+
+  // Receipt-verified fills, oldest first, with each fill's cost over spot (v0.6.0).
+  accumulationEvents: () => request<AccumulationEventsResponse>('/accumulation/events'),
+
+  // Fill detection (v0.6.0, issue #118). Neither call touches the plan ledger: they move
+  // a detected swap between "offered" and "not part of the plan". Confirming an offer is
+  // recordAccumulation with the offered hash; there is no second write path.
+  dismissFillOffer: (txHash: string) =>
+    request<FillCandidateActionResponse>('/accumulation/candidates/dismiss', {
+      method: 'POST',
+      body: JSON.stringify({ tx_hash: txHash }),
+    }),
+
+  restoreFillOffer: (txHash: string) =>
+    request<FillCandidateActionResponse>('/accumulation/candidates/restore', {
+      method: 'POST',
+      body: JSON.stringify({ tx_hash: txHash }),
+    }),
 };
