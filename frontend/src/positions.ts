@@ -126,9 +126,11 @@ export function walletNockUnits(
 }
 
 /** Velocity panel row for one fee contract. A pool whose claimFees() reverts is not
- *  "$0 earned": its fees are not LP-claimable and its AERO rewards are not read (#93).
- *  A row that carries the worker's own reason (`note`, v0.6.0: an Aero CL position
- *  staked in its gauge) prints that reason instead. */
+ *  "$0 earned": its fees are not LP-claimable. A row that carries the worker's own
+ *  `note` prints it: the reason (v0.6.0, #91) followed by the position's unclaimed AERO
+ *  or why that was not read (#93). A snapshot from before #93 has no note for an Aero
+ *  basic pool; its AERO is then "not reported", never shown as 0. A claimable row that
+ *  also earns AERO keeps its gas economics and appends the note. */
 export function velocityRowText(g: {
   name: string;
   claimable: number;
@@ -139,7 +141,8 @@ export function velocityRowText(g: {
 }): string {
   if (g.action === 'not_claimable') {
     const note = (g.note ?? '').trim();
-    return `${g.name}: ${note || 'not LP-claimable (claimFees() reverts); AERO rewards not read (#93)'}`;
+    return `${g.name}: ${note || 'not LP-claimable (claimFees() reverts); unclaimed AERO not reported'}`;
   }
-  return `${g.name}: ${String(g.action).toUpperCase()} ($${g.claimable} earned / gas $${g.gasBreakEven} — ${Number(g.ratio).toFixed(0)}x ROI)`;
+  const aero = (g.note ?? '').trim();
+  return `${g.name}: ${String(g.action).toUpperCase()} ($${g.claimable} earned / gas $${g.gasBreakEven} — ${Number(g.ratio).toFixed(0)}x ROI)${aero ? ` · ${aero}` : ''}`;
 }

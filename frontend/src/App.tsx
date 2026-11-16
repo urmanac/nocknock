@@ -38,6 +38,8 @@ import { floorState, floorDeltaText, floorSummaryText, regimeLabel, regimeTone }
 import { buildChartRows, compositionReadout, syncWindowOrDefault, type ChartSeries, type GapRow } from './timeline.ts';
 import { ethUsdPrice, gasLine, hwmSubtitle, pillarLine } from './pillars.ts';
 import { LEDGER_TITLE, ledgerView } from './ledger.ts';
+import { aeroRewardsSentence, aeroStatSubtitle } from './aero.ts';
+import { AeroPillarLines, PositionAeroLine } from './components/AeroPillar.tsx';
 
 function Dashboard() {
   // The worker's real cadence when the historical response reports it; 300 s otherwise.
@@ -284,12 +286,21 @@ function Dashboard() {
             prefix="$"
             subtitle={hwmSubtitle(global?.high_water_mark_date)}
           />
+          {/* AERO, the fourth pillar (issue #93): an amount, never a "Goal". */}
+          <StatCard
+            label="AERO (wallet)"
+            value={global?.wallet_aero_amount ?? undefined}
+            suffix=" AERO"
+            subtitle={aeroStatSubtitle(global, positionsList)}
+            highlightColor="#fdba74"
+          />
         </div>
         {/* Pillars (issue #94): ETH is gas, a pillar line and never a "Goal". */}
         <div style={styles.pillarLine}>
           <span>Pillars: {pillarLine(global)}</span>
           <span style={{ color: '#a78bfa' }}>{gasLine(global)}</span>
         </div>
+        <AeroPillarLines global={global} positions={positionsList} />
       </header>
 
       {/* Tactical Shot Advice Cockpit */}
@@ -359,7 +370,7 @@ function Dashboard() {
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>LP Positions / Range Risk:</span>
             <span style={styles.shotPillText}>
-              {positionsSummary(positionsList)} Uniswap LP fees are read on-chain; rewards on staked Aero LP are not read yet (#93).
+              {positionsSummary(positionsList)} LP fees are read on-chain. {aeroRewardsSentence(global, positionsList)}
             </span>
           </div>
         </div>
@@ -404,6 +415,7 @@ function Dashboard() {
                 {p.token0.symbol}: {p.amount0} ({p.token1.symbol}: {p.amount1}) · {positionFeesText(p)}
               </div>
               <PositionStakingLine position={p} style={styles.positionCardMeta} />
+              <PositionAeroLine position={p} style={styles.positionCardMeta} />
               <div style={styles.positionCardMeta}>
                 {p.protocol === 'aerodrome' ? 'LP token' : `#${p.nft_id}`} · {p.network}{p.is_price_source ? ' · price source' : ''}
               </div>
@@ -608,7 +620,7 @@ function Dashboard() {
             <span><span style={{ color: '#10b981' }}>■</span> Actual: On Target</span>
             <span><span style={{ color: '#f59e0b' }}>■</span> Actual: Under-Funded</span>
             <span><span style={{ color: '#ef4444' }}>■</span> Actual: Over-Funded</span>
-            <span><span style={{ color: '#8b949e' }}>■</span> Actual: No Target Set (incl. Gas: counted, never rebalanced)</span>
+            <span><span style={{ color: '#8b949e' }}>■</span> Actual: No Target Set (incl. Gas and AERO: counted, never rebalanced)</span>
           </div>
         </CanvasPanel>
 

@@ -203,7 +203,10 @@ describe('Freshness Contract', () => {
     const data = latestSnapshot!.data as any;
     const g = data.derived_metrics?.global_status;
     const n = (k: string) => parseFloat(g[k]);
-    expect(Math.abs(n('total_native_usd') + n('total_stable_usd') + n('total_eth_usd') - n('total_portfolio_usd'))).toBeLessThan(0.03);
+    // Wallet AERO is the fourth pillar once the worker reports it (#93); a worker that
+    // predates it has no such field and three pillars.
+    const aero = g.wallet_aero_usd == null ? 0 : n('wallet_aero_usd');
+    expect(Math.abs(n('total_native_usd') + n('total_stable_usd') + n('total_eth_usd') + aero - n('total_portfolio_usd'))).toBeLessThan(0.04);
     expect(n('eth_price_usd')).toBeGreaterThan(0);
     expect(n('wallet_gas_eth')).toBeGreaterThanOrEqual(0);
     expect(n('total_eth_usd')).toBeGreaterThanOrEqual(n('wallet_gas_usd'));
