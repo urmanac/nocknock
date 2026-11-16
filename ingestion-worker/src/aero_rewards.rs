@@ -16,6 +16,10 @@ use crate::*;
 //
 // How much is unclaimed. Neither gauge has `rewardToken()` (it reverts on both).
 //   - Basic (volatile pool) gauge: `earned(address)`.
+//     A LEGACY Aerodrome gauge answers the same `earned(address)` but pays the older
+//     token, and it does have `rewardToken()`. So `rewardToken()` is asked first: a
+//     gauge that names any token other than AERO_BASE is "not read", never shown or
+//     priced as AERO (gauge_pays_aero).
 //   - CL gauge: `earned(address,uint256[])`, the account and the token ids it staked.
 //     `earned(address,uint256)` of the older Slipstream gauge reverts here, and the
 //     array form reverts with "NA" for an id the account has not staked.
@@ -40,6 +44,7 @@ pub(crate) const DEFAULT_AERO_PRICE_POOL: &str = "0xd0acf293547457fb4fe9ee32ca93
 pub(crate) const ERC20_BALANCE_OF: &str = "0x70a08231"; // balanceOf(address)
 pub(crate) const GAUGE_EARNED_BASIC: &str = "0x008cc262"; // earned(address)
 pub(crate) const GAUGE_EARNED_CL: &str = "0xd942be03"; // earned(address,uint256[])
+pub(crate) const GAUGE_REWARD_TOKEN: &str = "0xf7c618c1"; // rewardToken()
 
 /// The deviation matrix row for the AERO pillar: a measured share, status `no_target`.
 pub(crate) const AERO_BUCKET_NAME: &str = "AERO (wallet)";
@@ -156,6 +161,36 @@ pub(crate) fn resolve_aero_price(wallet_aero: f64, price: Result<f64>) -> Result
     }
 }
 
+/// Does this gauge pay AERO? Decided from its `rewardToken()` eth_call before `earned`
+/// is trusted. Pure. Err is the reason the gauge's figure must not be read as AERO.
+/// - It reverted: the gauge has no `rewardToken()`. That is the Aero app's gauge (both
+///   of its types revert here), which was shown to pay AERO_BASE by what real claims
+///   minted (ONCHAIN_INTEGRATION.md §9). Proceed.
+/// - It returned AERO_BASE: proceed.
+/// - It returned any other token: a different gauge. A legacy Aerodrome gauge answers
+///   `earned(address)` too, but in the older token `0x940181a9…8631`; publishing that
+///   figure as AERO, priced from the AERO pool, would be a wrong number.
+/// - The node did not answer, or the answer is not an address: not known, so not read.
+pub(crate) fn gauge_pays_aero(gauge: &str, reward_token_call: &Result<Option<String>>) -> std::result::Result<(), String> {
+    match reward_token_call {
+        Ok(None) => Ok(()),
+        Ok(Some(hex)) => match address_from_word(hex) {
+            Ok(token) if token.eq_ignore_ascii_case(AERO_BASE) => Ok(()),
+            Ok(token) => Err(format!(
+                "gauge {gauge} pays {token} (its rewardToken()), not AERO {}",
+                AERO_BASE.to_lowercase()
+            )),
+            Err(e) => Err(format!("gauge {gauge} rewardToken() is not an address: {e}")),
+        },
+        Err(e) => Err(format!("gauge {gauge} rewardToken() read failed: {e}")),
+    }
+}
+
+/// The entry for a gauge whose figure is not read as AERO (see gauge_pays_aero). Pure.
+pub(crate) fn unclaimed_not_read(position_id: &str, gauge: &str, note: String) -> AeroUnclaimed {
+    AeroUnclaimed { position_id: position_id.to_string(), gauge: Some(gauge.to_string()), amount: None, note: Some(note) }
+}
+
 /// One gauge's answer to `earned`, as an entry for the cycle. Pure. `call` is the
 /// outcome of the eth_call: Ok(Some(hex)) = returned data, Ok(None) = it reverted,
 /// Err = the node did not answer. Only returned data is an amount; a revert or a failed
@@ -185,9 +220,12 @@ pub(crate) fn unclaimed_without_gauge(position_id: &str) -> AeroUnclaimed {
 
 /// The AERO pillar from one cycle's reads. Pure.
 /// - A zero amount is worth $0 whatever the price, so it needs none.
-/// - The unclaimed total covers the gauges that were read. If any gauge read failed the
-///   total is None (a partial sum would understate it). A position with no gauge to
-///   read is outside the total and says so on its own row.
+/// - The unclaimed total is stated only when every entry has an amount. If any gauge
+///   read failed, or a position has no gauge to read (an Aero basic pool without
+///   `gauge_address`), the total is None: a partial sum would understate it, and a 0
+///   would say "nothing unclaimed" about something that was never read. The note names
+///   each such position. Some(0.0) therefore means either that every gauge answered 0
+///   or that no tracked position earns AERO (no entries).
 pub(crate) fn aero_pillar(reads: &AeroReads) -> AeroPillar {
     let price = reads.price_usd.filter(|p| p.is_finite() && *p > 0.0);
     let usd = |amount: Option<f64>| match (amount, price) {
@@ -197,7 +235,7 @@ pub(crate) fn aero_pillar(reads: &AeroReads) -> AeroPillar {
     };
     let unclaimed_amount = reads.unclaimed.as_ref().and_then(|entries| {
         let mut sum = 0.0;
-        for e in entries.iter().filter(|e| e.gauge.is_some()) {
+        for e in entries {
             sum += e.amount?;
         }
         Some(sum)
@@ -269,6 +307,18 @@ pub(crate) fn apply_aero_rewards(positions: &mut [Position], reads: &AeroReads) 
             p.unclaimed_aero_usd = usd;
             p.unclaimed_aero_note = note;
         }
+    }
+}
+
+/// A velocity/fee row's note. Pure.
+/// - Fees not LP-claimable: the reason, then the position's AERO statement if it has one.
+/// - Fees LP-claimable: never an AERO statement. That row carries a fee action
+///   (claim_now, accumulate), and "unclaimed AERO" beside it would read as advice to
+///   claim or accumulate AERO. The amount stays on the position and the pillar lines.
+pub(crate) fn fee_row_note(lp_claimable: bool, fees_note: Option<String>, aero_statement: Option<String>) -> Option<String> {
+    match (aero_statement, lp_claimable) {
+        (Some(aero), false) => join_reason_and_aero(Some(fees_note_text(fees_note.as_deref())), Some(aero)),
+        (_, _) => fees_note,
     }
 }
 
@@ -348,8 +398,8 @@ pub(crate) async fn fetch_aero_price_usd_at(http_client: &Client, rpc_url: &str,
 
 /// One cycle's AERO reads (issue #93): the wallet balance (required), the unclaimed
 /// AERO of every tracked Aero position that has a gauge (optional: a failed read is
-/// stated on that position, never 0), and the AERO/USD price (required only while the
-/// wallet holds AERO).
+/// stated on that position, never 0; a gauge that names another reward token is not
+/// read as AERO), and the AERO/USD price (required only while the wallet holds AERO).
 pub(crate) async fn fetch_aero_reads(
     http_client: &Client,
     rpc_url: &str,
@@ -371,12 +421,23 @@ pub(crate) async fn fetch_aero_reads(
             AeroRewardSource::NotEarning => {}
             AeroRewardSource::GaugeNotConfigured => unclaimed.push(unclaimed_without_gauge(&position_id)),
             AeroRewardSource::Gauge { gauge, calldata } => {
-                let payload = json!({
-                    "jsonrpc": "2.0", "method": "eth_call", "id": 101,
-                    "params": [{ "to": gauge, "data": calldata(wallet) }, "latest"]
+                // Which token the gauge pays, before its `earned` is read as AERO.
+                let token_payload = json!({
+                    "jsonrpc": "2.0", "method": "eth_call", "id": 102,
+                    "params": [{ "to": gauge, "data": GAUGE_REWARD_TOKEN }, "latest"]
                 });
-                let call = eth_call_allow_revert(http_client, rpc_url, &payload).await;
-                let entry = unclaimed_from_earned_call(&position_id, &gauge, &call);
+                let token_call = eth_call_allow_revert(http_client, rpc_url, &token_payload).await;
+                let entry = match gauge_pays_aero(&gauge, &token_call) {
+                    Err(note) => unclaimed_not_read(&position_id, &gauge, note),
+                    Ok(()) => {
+                        let payload = json!({
+                            "jsonrpc": "2.0", "method": "eth_call", "id": 101,
+                            "params": [{ "to": gauge, "data": calldata(wallet) }, "latest"]
+                        });
+                        let call = eth_call_allow_revert(http_client, rpc_url, &payload).await;
+                        unclaimed_from_earned_call(&position_id, &gauge, &call)
+                    }
+                };
                 if let Some(note) = entry.note.as_ref() {
                     tracing::warn!("position {position_id}: unclaimed AERO not read: {note}");
                 }

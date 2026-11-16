@@ -171,14 +171,13 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
         let fees_note = facts.and_then(|f| f.fees_note.clone());
         let lp_claimable = fees_note.is_none() && !raw.fees_not_lp_claimable.contains(&p.position_id);
         // The row's note (#93): the position's unclaimed AERO, or why it was not read,
-        // after the reason its fees are not LP-claimable when there is one. Amounts
-        // only. With no AERO statement the note is what it was before #93.
-        let aero_statement = aero_statement_for(&raw.aero, &p.position_id);
-        let note = match (&aero_statement, lp_claimable) {
-            (Some(_), false) => join_reason_and_aero(Some(fees_note_text(fees_note.as_deref())), aero_statement),
-            (Some(_), true) => aero_statement,
-            (None, _) => fees_note,
-        };
+        // after the reason its fees are not LP-claimable. Amounts only. A row whose
+        // fees ARE LP-claimable carries a fee action (claim_now, accumulate), and an
+        // AERO amount beside that word would read as advice about AERO, so such a row
+        // gets no AERO statement: the amount is on the position itself
+        // (positions[].unclaimed_aero) and in the pillar lines. With no AERO statement
+        // the note is what it was before #93.
+        let note = fee_row_note(lp_claimable, fees_note, aero_statement_for(&raw.aero, &p.position_id));
         fee_entries.push((
             fee_contract_for(
                 &p.protocol,
@@ -458,10 +457,13 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
                 ),
             },
         }
-    } else if !plan_configured && total_portfolio_usd - wallet_gas_usd - wallet_aero_usd <= 0.0 && total_nock <= 0.0 {
+    } else if !plan_configured && lp_usd + t3_usd + wallet_usdc <= 0.0 && total_nock <= 0.0 {
         // Gas alone is not something to track or deploy: a gas-only wallet is still empty.
         // AERO is treated the same way here (#93), so it never changes which directive
         // is chosen; the amount held is stated, with no advice about it.
+        // The test adds up the parts that are neither gas nor AERO. It must not subtract
+        // gas and AERO back out of the total: (gas + aero) - gas - aero leaves a float
+        // residue, which made a gas-and-AERO-only wallet miss this branch.
         let gas_held = match pillars.wallet_gas_eth {
             Some(g) if g > 0.0 => format!(
                 " It holds {:.6} ETH/WETH for gas, counted in the total; gas is not cash and is never deployed.",

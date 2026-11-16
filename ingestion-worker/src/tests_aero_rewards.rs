@@ -39,6 +39,22 @@ const REAL_BASIC_TOTAL_SUPPLY: u128 = 0x30f5cf6d2eb46;
 /// pool.balanceOf(wallet) = 0; gauge.balanceOf(wallet) = 29684955447174 (all staked).
 const REAL_BASIC_LP_STAKED: u128 = 0x1aff91397f86;
 
+// ---- Legacy Aerodrome gauges: the same reads, the older token (block 58093329) ----
+// Read at block 58093329 (`0x3766f11`, 2026-11-16T06:04:01Z).
+/// The gauge of the legacy vAMM USDC/NOCK pool 0x85f1aa3a…d626:
+/// Voter 0x16613524…80A5 `gauges(pool)` `0xb9a09fd5` returns it, and its
+/// `stakingToken()` is that pool.
+const LEGACY_BASIC_GAUGE: &str = "0x4cbb6188c6101cacd4eb1126cc14882bd93dc3db";
+/// legacyGauge.rewardToken(): the OLDER token 0x940181a9…8631 (name "Aerodrome").
+const REAL_LEGACY_REWARD_TOKEN: &str = "0x000000000000000000000000940181a94a35a4569e4529a3cdfb74e38fd98631";
+/// legacyGauge.earned(wallet): it answers the same `earned(address)` (0 for the wallet).
+const REAL_LEGACY_EARNED_WALLET: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
+/// The gauge of the legacy Slipstream CL100 WETH/USDC pool 0xb2cc224c…dc59
+/// (`pool.gauge()` `0xa6f19c84`) names the older token too. Its
+/// `earned(address,uint256[])` reverts, so it could not be misread anyway.
+const LEGACY_CL_GAUGE: &str = "0xf33a96b5932d9e9b9a0eda447abd8c9d48d2e0c8";
+const REAL_LEGACY_CL_REWARD_TOKEN: &str = "0x000000000000000000000000940181a94a35a4569e4529a3cdfb74e38fd98631";
+
 // ---- The CL gauge and NFT #2914490 ----
 const NPM: &str = "0x4857db576ee0e45f10525ec59527bfd10beec60b";
 const CL_POOL: &str = "0x957256c98d61A714081DE2EE70ae3A96c9b40874";
@@ -249,7 +265,7 @@ fn aero_reads_from(
             AeroRewardSource::GaugeNotConfigured => unclaimed.push(unclaimed_without_gauge(&id)),
             AeroRewardSource::Gauge { gauge, calldata } => {
                 let data = calldata(WALLET);
-                if gauge.eq_ignore_ascii_case(BASIC_GAUGE) {
+                if gauge.eq_ignore_ascii_case(BASIC_GAUGE) || gauge.eq_ignore_ascii_case(LEGACY_BASIC_GAUGE) {
                     assert_eq!(data, "0x008cc262000000000000000000000000ee114cc97ec5adeb34ba5645e315b497d8487a45");
                 } else {
                     assert_eq!(
@@ -257,7 +273,11 @@ fn aero_reads_from(
                         "0xd942be03000000000000000000000000ee114cc97ec5adeb34ba5645e315b497d8487a450000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000002c78ba"
                     );
                 }
-                unclaimed.push(unclaimed_from_earned_call(&id, &gauge, &earned(&gauge)));
+                // As fetch_aero_reads: which token the gauge pays is asked first.
+                unclaimed.push(match gauge_pays_aero(&gauge, &real_reward_token(&gauge)) {
+                    Err(note) => unclaimed_not_read(&id, &gauge, note),
+                    Ok(()) => unclaimed_from_earned_call(&id, &gauge, &earned(&gauge)),
+                });
             }
         }
     }
@@ -265,9 +285,25 @@ fn aero_reads_from(
     Ok(AeroReads { wallet_aero: Some(wallet_aero), price_usd, price_note, unclaimed: Some(unclaimed) })
 }
 
+/// Each gauge's real answer to `rewardToken()`: the Aero app's two gauges revert, the
+/// legacy gauges name the older token.
+fn real_reward_token(gauge: &str) -> Result<Option<String>> {
+    if gauge.eq_ignore_ascii_case(BASIC_GAUGE) || gauge.eq_ignore_ascii_case(CL_GAUGE) {
+        classify_eth_call_response(&serde_json::from_str(REAL_REWARD_TOKEN_RESPONSE).unwrap())
+    } else if gauge.eq_ignore_ascii_case(LEGACY_BASIC_GAUGE) {
+        ok_hex(REAL_LEGACY_REWARD_TOKEN)
+    } else if gauge.eq_ignore_ascii_case(LEGACY_CL_GAUGE) {
+        ok_hex(REAL_LEGACY_CL_REWARD_TOKEN)
+    } else {
+        panic!("unexpected gauge {gauge}")
+    }
+}
+
 fn real_earned(gauge: &str) -> Result<Option<String>> {
     if gauge.eq_ignore_ascii_case(BASIC_GAUGE) {
         ok_hex(REAL_BASIC_EARNED_WALLET)
+    } else if gauge.eq_ignore_ascii_case(LEGACY_BASIC_GAUGE) {
+        ok_hex(REAL_LEGACY_EARNED_WALLET)
     } else if gauge.eq_ignore_ascii_case(CL_GAUGE) {
         ok_hex(REAL_CL_EARNED_WALLET)
     } else {
@@ -560,12 +596,34 @@ fn test_basic_pool_without_a_gauge_says_its_aero_is_not_read() {
         aero_statement(None, None, e.note.as_deref()).as_deref(),
         Some("unclaimed AERO not read (no gauge_address is configured for this position)")
     );
-    // It is outside the total of the gauges that were read, and named in the note.
-    let reads = AeroReads { wallet_aero: Some(0.0), price_usd: Some(0.4176), price_note: None, unclaimed: Some(vec![e]) };
+    // Nothing was read, so there is no total: not 0 (which would say "nothing unclaimed"),
+    // and the note names the position.
+    let reads = AeroReads { wallet_aero: Some(0.0), price_usd: Some(0.4176), price_note: None, unclaimed: Some(vec![e.clone()]) };
     let pillar = aero_pillar(&reads);
-    assert_eq!(pillar.unclaimed_amount, Some(0.0));
+    assert_eq!((pillar.unclaimed_amount, pillar.unclaimed_usd), (None, None));
     assert!(pillar.note.as_deref().unwrap().contains("no gauge_address is configured"));
-    // The MCP text does not present that 0 as an amount read from a gauge.
+    // Beside a gauge that WAS read (the real CL amount) the total is still None, never
+    // the partial sum 11.922078: the basic gauge really held 0.121026 AERO for the wallet.
+    let cl = unclaimed_from_earned_call("aerodrome-cl:base:2914490", CL_GAUGE, &ok_hex(REAL_CL_EARNED_WALLET));
+    assert_eq!(cl.amount.map(|a| format!("{a:.6}")).as_deref(), Some("11.922078"));
+    let mixed = AeroReads { wallet_aero: Some(0.0), price_usd: Some(0.4176), price_note: None, unclaimed: Some(vec![e, cl]) };
+    let pillar = aero_pillar(&mixed);
+    assert_eq!((pillar.unclaimed_amount, pillar.unclaimed_usd), (None, None));
+    assert!(pillar.note.as_deref().unwrap().contains("unclaimed AERO not read for aerodrome:base:0x770f (no gauge_address is configured"));
+    // On the published snapshot: null total, the reason, the read gauge's own amount kept.
+    let raw = real_cycle_with(&|_, facts| {
+        aero_reads_from(&[basic_config(None), cl_config()], facts, REAL_AERO_BALANCE_WALLET, real_aero_price(), &real_earned).unwrap()
+    });
+    let snap = snapshot_of(raw, &OperatorProfile::default(), 0.0);
+    let g = &snap.derived_metrics.global_status;
+    assert_eq!((g.unclaimed_aero_amount.as_deref(), g.unclaimed_aero_usd.as_deref()), (None, None));
+    assert!(g.aero_note.as_deref().unwrap().contains("no gauge_address is configured"), "{:?}", g.aero_note);
+    assert_eq!(snap.positions[0].unclaimed_aero, None);
+    assert_eq!(snap.positions[1].unclaimed_aero.as_deref(), Some("11.922078"));
+    let text = format_portfolio_state_text(&serde_json::to_value(&snap).unwrap());
+    assert!(text.contains("• Unclaimed AERO: not reported\n   - Aero USDC/NOCK: not read (no gauge_address is configured for this position)\n   - Aero CL WETH/NOCK #2914490: 11.922078 AERO ($4.98)"), "{text}");
+    // An older worker's snapshot could carry a 0 total beside an unread row; the MCP text
+    // does not present that 0 as an amount read from a gauge.
     let data = json!({
         "positions": [{ "protocol": "aerodrome", "token0": { "symbol": "USDC" }, "token1": { "symbol": "NOCK" },
                         "unclaimed_aero_note": "no gauge_address is configured for this position" }],
@@ -847,6 +905,30 @@ fn test_no_advice_about_aero_anywhere() {
     assert_eq!(m.global_status.total_portfolio_usd, "0.57");
     let d = &m.global_status.shot_advice_details;
     assert!(d.ends_with("It holds 1.359979 AERO, counted in the total; AERO is not cash and is never deployed."), "{d}");
+    // Nor is a wallet holding gas AND AERO (synthetic balances at the real prices). The
+    // emptiness test must not subtract gas and AERO back out of the total: in f64,
+    // (gas + aero) - gas - aero often leaves a positive residue, which sent four of
+    // these six wallets to "HOLD & ACCRETE (No LP Tracked)".
+    for (eth, weth, aero) in [
+        (0.003, 0.0, 1.359979),
+        (0.0031, 0.0007, 0.121026),
+        (0.02, 0.001, 3.3),
+        (0.0124567, 0.0, 7.77),
+        (0.0123, 0.0, 1.359979366619354917),
+        (0.0001, 0.0, 18.0),
+    ] {
+        let mut raw = RawOnChainData { spot_price_nock_usd: real_nock_usd(), live_eth_price_usd: 1811.33, wallet_eth: Some(eth), wallet_weth: Some(weth), ..Default::default() };
+        raw.aero = AeroReads { wallet_aero: Some(aero), price_usd: Some(0.417608), price_note: None, unclaimed: Some(vec![]) };
+        let with_aero = compute_derived_metrics(&raw, 0.0, &OperatorProfile::default(), StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
+        assert_eq!(with_aero.global_status.shot_advice_action, "NOTHING TO TRACK YET (Empty Wallet)", "eth {eth} weth {weth} aero {aero}");
+        // AERO does not change which directive is chosen: the same wallet without it.
+        raw.aero.wallet_aero = Some(0.0);
+        let without = compute_derived_metrics(&raw, 0.0, &OperatorProfile::default(), StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
+        assert_eq!(without.global_status.shot_advice_action, with_aero.global_status.shot_advice_action);
+        // Both are still counted in the total.
+        let total: f64 = f(&with_aero.global_status.total_portfolio_usd);
+        assert!((total - ((eth + weth) * 1811.33 + aero * 0.417608)).abs() < 0.011, "{total}");
+    }
 }
 
 // ------------------------------------------------------------------
@@ -1164,4 +1246,233 @@ fn test_golden_snapshot_aero_rewards_is_byte_identical() {
         actual == expected,
         "snapshot bytes changed; compare {path} with a fresh NOCKNOCK_BLESS_GOLDEN=1 run and `git diff` it"
     );
+}
+
+// ------------------------------------------------------------------
+// Review fixes: a gauge that pays another token, several AERO mints in one
+// transaction, a fee row that carries a fee action, a row priced on a retry
+// ------------------------------------------------------------------
+
+#[test]
+fn test_a_gauge_that_pays_another_token_is_not_read_as_aero() {
+    // The Aero app's gauges have no rewardToken(): the real revert means "proceed".
+    for gauge in [BASIC_GAUGE, CL_GAUGE] {
+        assert_eq!(gauge_pays_aero(gauge, &real_reward_token(gauge)), Ok(()));
+    }
+    // A gauge that names AERO itself is fine too (synthetic: no such gauge was found).
+    let names_aero = format!("{:0>64}", AERO_BASE.trim_start_matches("0x").to_lowercase());
+    assert_eq!(gauge_pays_aero("0xgauge", &ok_hex(&names_aero)), Ok(()));
+    // Real: the legacy Aerodrome gauges name the older token with the same symbol.
+    assert_eq!(address_from_word(REAL_LEGACY_REWARD_TOKEN).unwrap(), LEGACY_AERODROME_AERO.to_lowercase());
+    for gauge in [LEGACY_BASIC_GAUGE, LEGACY_CL_GAUGE] {
+        let refused = gauge_pays_aero(gauge, &real_reward_token(gauge)).unwrap_err();
+        assert_eq!(
+            refused,
+            format!("gauge {gauge} pays 0x940181a94a35a4569e4529a3cdfb74e38fd98631 (its rewardToken()), not AERO 0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee")
+        );
+    }
+    // Not known is not read either: a failed read (synthetic) or a non-address answer.
+    let failed = gauge_pays_aero(BASIC_GAUGE, &Err(anyhow::anyhow!("HTTP 429 Too Many Requests"))).unwrap_err();
+    assert!(failed.contains("rewardToken() read failed: HTTP 429"), "{failed}");
+    assert!(gauge_pays_aero(BASIC_GAUGE, &ok_hex("0x")).unwrap_err().contains("rewardToken() is not an address"));
+
+    // A legacy-pool position with its legacy gauge configured: the gauge answers
+    // earned(address) (really: one word, 0 for the wallet), and that answer is NOT
+    // published as AERO. No amount, no USD, the reason, and no total.
+    assert!(matches!(real_earned(LEGACY_BASIC_GAUGE), Ok(Some(_))), "the legacy gauge does answer earned(address)");
+    let reads = aero_reads_from(
+        &[basic_config(Some(LEGACY_BASIC_GAUGE)), cl_config()],
+        &real_cycle().position_facts,
+        REAL_AERO_BALANCE_WALLET,
+        real_aero_price(),
+        &real_earned,
+    )
+    .unwrap();
+    let entries = reads.unclaimed.as_ref().unwrap();
+    assert_eq!(entries[0].amount, None);
+    assert_eq!(entries[0].gauge.as_deref(), Some(LEGACY_BASIC_GAUGE));
+    assert!(entries[0].note.as_deref().unwrap().contains("pays 0x940181a9"), "{:?}", entries[0].note);
+    assert_eq!(entries[1].amount.map(|a| format!("{a:.6}")).as_deref(), Some("11.922078"));
+    let pillar = aero_pillar(&reads);
+    assert_eq!((pillar.unclaimed_amount, pillar.unclaimed_usd), (None, None));
+    let (amount, usd, note) = aero_position_fields(&entries[0], reads.price_usd);
+    assert_eq!((amount, usd), (None, None));
+    assert_eq!(
+        aero_statement(None, None, note.as_deref()).as_deref(),
+        Some("unclaimed AERO not read (gauge 0x4cbb6188c6101cacd4eb1126cc14882bd93dc3db pays 0x940181a94a35a4569e4529a3cdfb74e38fd98631 (its rewardToken()), not AERO 0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee)")
+    );
+    // The selector is the one verified on-chain.
+    assert_eq!(GAUGE_REWARD_TOKEN, "0xf7c618c1");
+}
+
+/// Real: tx 0xe32b6e47…3a67 (block 58077008, status 1) claims from seven CL gauges for
+/// 0x091607c3…25f6 in one transaction. These are its fourteen AERO Transfer logs (seven
+/// mints to the claimer, each followed by the further 5% to 0x9beb95cc…1156) and two of
+/// its seven USDC Transfers to the claimer, which come from two different pools. The
+/// other 240 logs are left out.
+const MULTI_CLAIMER: &str = "0x091607c3355f5875400851efc6347a839d3b25f6";
+fn real_multi_gauge_claim_receipt() -> serde_json::Value {
+    let zero = "0x0000000000000000000000000000000000000000000000000000000000000000";
+    let claimer = "0x000000000000000000000000091607c3355f5875400851efc6347a839d3b25f6";
+    let fee_taker = "0x0000000000000000000000009beb95cced809c0667bbb6577ee4066ac5cc1156";
+    let aero = |index: &str, to: &str, amount: &str| {
+        json!({ "address": "0x3f5bf3edac59d650d8fdf9657a71f2f904a3a4ee", "logIndex": index,
+                "topics": [TRANSFER_EVENT_TOPIC, zero, to],
+                "data": format!("0x{:0>64}", amount) })
+    };
+    let usdc = |from: &str, amount: &str| {
+        json!({ "address": "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+                "topics": [TRANSFER_EVENT_TOPIC, format!("0x000000000000000000000000{from}"), claimer],
+                "data": format!("0x{:0>64}", amount) })
+    };
+    json!({
+        "transactionHash": "0xe32b6e476ceff9040c1e22b5a23e9ba2a8c4e5cff8221939e871e9ec84bb3a67",
+        "blockNumber": "0x3762f50",
+        "from": "0x0cf406ec4599b8958696685555a149fa518f382b",
+        "to": MULTI_CLAIMER,
+        "status": "0x1",
+        "logs": [
+            aero("0x1d", claimer, "068f2d2db7c1f478"), aero("0x1e", fee_taker, "53f5757c634c39"),
+            usdc("f668e21993f0acd7ab00bb1cfbaed0df28a3c8ec", "0d8bfc3d"),
+            aero("0x41", claimer, "1647bd2b0076db6c"), aero("0x42", fee_taker, "011d2fdbc005f15f"),
+            usdc("2836e062a3fe75943a7f4a552e2365b98e414e75", "1c459d9a"),
+            aero("0x65", claimer, "14e96780a34a98e1"), aero("0x66", fee_taker, "010bab933b5d5471"),
+            aero("0x8a", claimer, "07456a082ea02904"), aero("0x8b", fee_taker, "5d121a0254ced9"),
+            aero("0xaf", claimer, "035d1a8fcd7dd542"), aero("0xb0", fee_taker, "2b0e20ca464aa9"),
+            aero("0xd4", claimer, "11a215b153672838"), aero("0xd5", fee_taker, "e1b448ddc52869"),
+            aero("0xf9", claimer, "0626cf4c56ccda01"), aero("0xfa", fee_taker, "4ebd909df0a480")
+        ]
+    })
+}
+
+#[test]
+fn test_several_aero_mints_in_one_transaction_are_booked_as_one_summed_row() {
+    // The receipt pays the claimer AERO seven times, once per gauge.
+    let parsed = parse_harvest_transfers(&real_multi_gauge_claim_receipt(), MULTI_CLAIMER);
+    let aero_logs: Vec<&ParsedHarvestTransfer> = parsed.iter().filter(|t| t.token_symbol == "AERO").collect();
+    assert_eq!(aero_logs.len(), 7);
+    assert_eq!(aero_logs[0].amount_raw, "472646160276911224");
+    // The ledger's key is (tx_hash, token_address): unmerged, the insert of the second
+    // AERO row would conflict with the first and 5.59 of 6.07 AERO would be dropped.
+    let merged = merge_harvest_transfers(parsed).unwrap();
+    assert_eq!(merged.iter().map(|t| t.token_symbol.as_str()).collect::<Vec<_>>(), ["AERO", "USDC"]);
+    let mut keys: Vec<String> = merged.iter().map(|t| t.token_address.to_lowercase()).collect();
+    keys.dedup();
+    assert_eq!(keys.len(), merged.len(), "one row per token address");
+    let aero = &merged[0];
+    // 472646160276911224 + 1605459784569903980 + 1506849352525191393 + 523941515033061636
+    // + 242379159878096194 + 1270601896224565304 + 443269540123302401
+    assert_eq!(aero.amount_raw, "6065147408631032132");
+    assert_eq!(aero.amount_human, "6.065147408631032132");
+    assert_eq!(aero.decimals, 18);
+    assert_eq!(aero.from_address, "0x0000000000000000000000000000000000000000");
+    assert_eq!(aero.recipient, MULTI_CLAIMER);
+    // The 5% minted to the other account is not the claimer's and is not in the sum.
+    let fee_taker = merge_harvest_transfers(parse_harvest_transfers(&real_multi_gauge_claim_receipt(), "0x9beb95cced809c0667bbb6577ee4066ac5cc1156")).unwrap();
+    assert_eq!(fee_taker.len(), 1);
+    assert_eq!(fee_taker[0].amount_raw, "303257370431551604");
+    // The same rule for every token: two USDC payments from two pools are one row of
+    // their sum, with the first sender kept.
+    let usdc = &merged[1];
+    assert_eq!(usdc.amount_raw, (0x0d8bfc3du128 + 0x1c459d9a).to_string());
+    assert_eq!(usdc.amount_human, "701.602263");
+    assert_eq!(usdc.from_address, "0xf668e21993f0acd7ab00bb1cfbaed0df28a3c8ec");
+    // The summed row is valued once, at the claim block's price (synthetic price).
+    assert_eq!(harvest_usd_value(&aero.amount_human, Some(0.4176)).as_deref(), Some("2.5328"));
+
+    // The operator's case: both gauges claimed in one transaction (synthetic receipt,
+    // the two real `earned` amounts as two mints).
+    let zero = "0x0000000000000000000000000000000000000000000000000000000000000000";
+    let wallet_word = format!("0x000000000000000000000000{}", WALLET.trim_start_matches("0x").to_lowercase());
+    let both = json!({ "status": "0x1", "from": WALLET, "logs": [
+        { "address": AERO_BASE, "topics": [TRANSFER_EVENT_TOPIC, zero, wallet_word], "data": REAL_BASIC_EARNED_WALLET },
+        { "address": AERO_BASE, "topics": [TRANSFER_EVENT_TOPIC, zero, wallet_word], "data": REAL_CL_EARNED_WALLET }
+    ]});
+    let rows = merge_harvest_transfers(parse_harvest_transfers(&both, WALLET)).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].amount_raw, (0x01adf89b6483d30du128 + 0xa573ba928fdaf5d2).to_string());
+    assert_eq!(rows[0].amount_human, "12.043103888520169695");
+
+    // A single-transfer receipt is unchanged, and nothing in is nothing out.
+    let single = parse_harvest_transfers(&real_claim_receipt(), CLAIMER);
+    assert_eq!(merge_harvest_transfers(single.clone()).unwrap(), single);
+    assert!(merge_harvest_transfers(vec![]).unwrap().is_empty());
+    // An amount that cannot be summed is an error, never a truncated row (synthetic).
+    let mut huge = single.clone();
+    huge[0].amount_raw = u128::MAX.to_string();
+    huge.push(single[0].clone());
+    assert!(merge_harvest_transfers(huge).unwrap_err().to_string().contains("overflow"));
+    let mut garbled = single;
+    garbled[0].amount_raw = "1.5".to_string();
+    assert!(merge_harvest_transfers(garbled).is_err());
+}
+
+#[test]
+fn test_a_fee_row_with_a_fee_action_carries_no_aero_statement() {
+    let aero = || Some("unclaimed AERO 0.121026 ($0.05)".to_string());
+    // Not LP-claimable: the reason, then the amount.
+    assert_eq!(
+        fee_row_note(false, None, aero()).as_deref(),
+        Some("not LP-claimable (claimFees() reverts); unclaimed AERO 0.121026 ($0.05)")
+    );
+    assert_eq!(
+        fee_row_note(false, Some(AERO_CL_STAKED_FEES_NOTE.to_string()), aero()).as_deref(),
+        Some("not LP-claimable (staked: swap fees on staked liquidity go to the gauge); unclaimed AERO 0.121026 ($0.05)")
+    );
+    // LP-claimable: the row's action is about LP fees, so it says nothing about AERO.
+    assert_eq!(fee_row_note(true, None, aero()), None);
+    // No AERO statement: exactly the note the row had before #93.
+    assert_eq!(fee_row_note(false, Some("x".to_string()), None).as_deref(), Some("x"));
+    assert_eq!(fee_row_note(true, None, None), None);
+
+    // End to end (synthetic: the real basic position, with claimFees() made to succeed
+    // and $8 of USDC fees). Its velocity row says claim_now about the LP fees and does
+    // not mention AERO; the AERO amount stays on the position and in the pillar lines.
+    let mut raw = real_cycle();
+    let basic_id = raw.positions[0].position_id.clone();
+    raw.fees_not_lp_claimable.retain(|id| id != &basic_id);
+    raw.positions[0] = aerodrome_position_from_reads(
+        &basic_config(Some(BASIC_GAUGE)),
+        WALLET,
+        BASIC_POOL,
+        token_info(&REAL_BASIC_TOKEN0[26..]).unwrap(),
+        token_info(&REAL_BASIC_TOKEN1[26..]).unwrap(),
+        REAL_BASIC_RESERVE0,
+        REAL_BASIC_RESERVE1,
+        REAL_BASIC_TOTAL_SUPPLY,
+        REAL_BASIC_LP_STAKED,
+        8_000_000,
+        0,
+    )
+    .unwrap();
+    let snap = snapshot_of(raw, &OperatorProfile::default(), 0.0);
+    let rows = &snap.derived_metrics.velocity_gas_sandbox.contracts;
+    assert_eq!(rows[0].recommended_action, "claim_now");
+    assert_eq!(rows[0].note, None, "a row with a fee action must not sit beside an AERO amount");
+    assert_eq!(rows[1].recommended_action, "not_claimable");
+    assert!(rows[1].note.as_deref().unwrap().ends_with("; unclaimed AERO 11.922078 ($4.98)"), "{:?}", rows[1].note);
+    assert!(!snap.contract_fees[0].amount.contains("AERO"), "{}", snap.contract_fees[0].amount);
+    assert_eq!(snap.positions[0].unclaimed_aero.as_deref(), Some("0.121026"));
+    let g = &snap.derived_metrics.global_status;
+    assert_eq!(g.unclaimed_aero_amount.as_deref(), Some("12.043104"));
+    // Whatever the directive is, it is about LP fees and does not name AERO.
+    assert!(!g.shot_advice_action.contains("AERO") && !g.shot_advice_details.contains("AERO"), "{}", g.shot_advice_details);
+    // No row anywhere pairs a fee action with AERO.
+    for row in rows {
+        if row.recommended_action != "not_claimable" {
+            assert!(!row.note.as_deref().unwrap_or("").contains("AERO"), "{row:?}");
+        }
+    }
+}
+
+#[test]
+fn test_a_row_recorded_without_a_price_can_be_priced_on_a_retry_and_never_repriced() {
+    // The statement only fills a missing value, on the same transaction, token and
+    // amount. (It is not exercised against a database here.)
+    let sql = FILL_HARVEST_USD_SQL;
+    assert!(sql.starts_with("UPDATE harvest_events SET usd_value = $1, price_usd = $2, price_source = $3 WHERE "), "{sql}");
+    for guard in ["tx_hash = $4", "token_address = $5", "amount_raw = $6", "usd_value IS NULL"] {
+        assert!(sql.contains(guard), "missing guard '{guard}' in: {sql}");
+    }
+    assert!(!sql.to_lowercase().contains("amount_human ="), "the booked amount is never rewritten");
 }

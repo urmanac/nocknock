@@ -947,8 +947,9 @@ struct GlobalStatus {
     #[serde(default)]
     wallet_aero_usd: Option<String>,
     /// AERO earned in the gauges of tracked staked positions and not claimed (v0.6.0,
-    /// #93). NOT counted in total_portfolio_usd, like uncollected LP fees. Null when a
-    /// gauge could not be read: never a partial sum, never 0.
+    /// #93). NOT counted in total_portfolio_usd, like uncollected LP fees. Null when any
+    /// Aero position's gauge was not read (a failed read, a gauge that pays another
+    /// token, or no gauge_address): never a partial sum, never 0.
     #[serde(default)]
     unclaimed_aero_amount: Option<String>,
     #[serde(default)]
