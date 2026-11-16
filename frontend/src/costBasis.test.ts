@@ -16,7 +16,8 @@ import { isGapRow } from './timeline';
 /**
  * The plan-buys figures are the worker's output for the operator's three real fills
  * (ingestion-worker/src/tests_cost_basis.rs; receipts in ONCHAIN_INTEGRATION.md §8).
- * The opening-basis figures are test inputs, not anyone's records.
+ * The opening-basis figures (10,000 NOCK for $200) are made up for the tests: round
+ * numbers that are nobody's records.
  */
 const planOnly: CostBasis = {
   spot_price_usd: '0.011530',
@@ -56,20 +57,21 @@ const withOpening: CostBasis = {
     reason: null,
     source: 'test figures',
     as_of: '2026-11-14T12:00:00+00:00',
-    opening_nock: '90000.0000',
-    opening_cost_usd: '1611.00',
-    opening_avg_cost_usd: '0.017900',
+    opening_nock: '10000.0000',
+    opening_cost_usd: '200.00',
+    opening_avg_cost_usd: '0.020000',
     fills_since: 2,
     bought_since_usdc: '40.00',
     bought_since_nock: '3500.5774',
-    basis_nock: '93500.5774',
-    basis_cost_usd: '1651.00',
-    avg_cost_usd: '0.017658',
-    value_at_spot_usd: '1078.06',
-    unrealized_usd: '-572.94',
-    unrealized_pct: '-34.70',
-    held_nock: '115000.2500',
-    includes: ['The opening figures entered in config: 90000.0000 NOCK for $1611.00, source: test figures.'],
+    basis_nock: '13500.5774',
+    basis_cost_usd: '240.00',
+    avg_cost_usd: '0.017777',
+    value_at_spot_usd: '155.66',
+    unrealized_usd: '-84.34',
+    unrealized_pct: '-35.14',
+    // A whole number of NOCK: the precision the snapshot's own total has.
+    held_nock: '12000',
+    includes: ['The opening figures entered in config: 10000.0000 NOCK for $200.00, source: test figures.'],
     excludes: ['Everything after the as-of that is not a recorded buy: sells, LP ranges, fees earned.'],
   },
 };
@@ -137,12 +139,12 @@ const series = (over: Partial<CostBasisSeries> = {}): CostBasisSeries => ({
 
 const withOpeningSeries = (): CostBasisSeries => {
   const s = series();
-  s.fills[1].whole_stack_avg_cost_usd = '0.01778234';
-  s.fills[2].whole_stack_avg_cost_usd = '0.01765764';
+  s.fills[1].whole_stack_avg_cost_usd = '0.01877098';
+  s.fills[2].whole_stack_avg_cost_usd = '0.01777702';
   s.whole_stack = {
     status: 'ok',
     reason: null,
-    opening: { as_of: '2026-11-14T12:00:00+00:00', nock: '90000.0000', cost_usd: '1611.00', avg_cost_usd: '0.01790000', source: 'test figures' },
+    opening: { as_of: '2026-11-14T12:00:00+00:00', nock: '10000.0000', cost_usd: '200.00', avg_cost_usd: '0.02000000', source: 'test figures' },
   };
   return s;
 };
@@ -151,6 +153,9 @@ const ms = (iso: string) => Date.parse(iso);
 
 /** Words that would turn a measurement into advice (lore: "Why not buy more now?"). */
 const advice = /buy more|average down|averaging down|should|opportunit|cheap|discount|bargain|accumulate|recommend|consider|underwater|\bprofit\b|\bloss\b/i;
+
+/** Claims about what NockNock does not read: it tracks no sells and no LP activity. */
+const unreadClaim = /nothing was sold|not sold|never sold|still h(?:e|o)ld|\bunrealized\b/i;
 
 const allText = (v: ReturnType<typeof costBasisView>) =>
   [v.title, v.configError ?? '', ...v.notes, ...v.tiles.flatMap((t) => [t.label, t.value, t.sub])].join(' | ');
@@ -167,25 +172,30 @@ describe('cost basis summary (#98)', () => {
     expect(diff.label).toBe('PLAN BUYS · VALUE AT SPOT LESS COST');
     expect(diff.value).toBe('−$1.21 (−2.02%)');
     expect(diff.tone).toBe('below');
-    expect(diff.sub).toBe('5,098.51 NOCK is worth $58.79 at spot $0.01153; it cost $60.00. Unrealized: nothing was sold.');
+    expect(diff.sub).toBe(
+      '5,098.51 NOCK is worth $58.79 at spot $0.01153; it cost $60.00. This values the NOCK these buys acquired; NockNock does not track whether it was later sold or moved into LP.',
+    );
     expect(whole).toMatchObject({ label: 'WHOLE STACK · AVERAGE COST', value: 'not configured' });
     expect(whole.sub).toMatch(/cannot derive this from the chain/);
     expect(whole.sub).toMatch(/cost_basis\.opening/);
     expect(v.configError).toBeNull();
     expect(allText(v)).not.toMatch(advice);
+    // Sells are not read, so no text may say the NOCK was kept.
+    expect(allText(v)).not.toMatch(unreadClaim);
   });
 
   it('with an opening basis, the whole-stack tile names the source, the instant and the parts', () => {
     const v = costBasisView(withOpening);
     const whole = v.tiles[3];
-    expect(whole.value).toBe('$0.01766');
+    expect(whole.value).toBe('$0.01778');
     expect(whole.sub).toBe(
-      'On 93,500.58 NOCK costing $1,651.00: your opening basis (90,000 NOCK for $1,611.00, source: test figures, as of 2026-11-14T12:00:00+00:00) plus 2 verified buys since. At spot that NOCK is worth $1,078.06: −$572.94 (−34.70%) against its cost. NockNock reads 115,000.25 NOCK held now (wallet plus tracked LP).',
+      'On 13,500.58 NOCK costing $240.00: your opening basis (10,000 NOCK for $200.00, source: test figures, as of 2026-11-14T12:00:00+00:00) plus 2 verified buys since. At spot that NOCK is worth $155.66: −$84.34 (−35.14%) against its cost. NockNock reads 12,000 NOCK held now (wallet plus tracked LP).',
     );
     expect(v.notes.some((n) => n.startsWith('Whole stack counts:'))).toBe(true);
     expect(v.notes.some((n) => n.startsWith('Whole stack leaves out:') && /sells/.test(n))).toBe(true);
     expect(v.notes.some((n) => n.startsWith('Plan buys leave out:') && /Gas paid in ETH/.test(n))).toBe(true);
     expect(allText(v)).not.toMatch(advice);
+    expect(allText(v)).not.toMatch(unreadClaim);
   });
 
   it('a configuration error is shown with its reason and no whole-stack number', () => {
@@ -196,7 +206,7 @@ describe('cost basis summary (#98)', () => {
     expect(v.tiles[0].value).toBe('$0.01177');
   });
 
-  it('no buys, an unread ledger and no spot are each said plainly, never as $0', () => {
+  it('no buys and no spot are each said plainly, never as $0', () => {
     const none = costBasisView({
       spot_price_usd: '0.011530',
       plan_buys: { status: 'no_fills', fills: 0 },
@@ -205,14 +215,6 @@ describe('cost basis summary (#98)', () => {
     expect(none.tiles[0]).toMatchObject({ value: '—', sub: 'No verified buys recorded yet' });
     expect(none.tiles[2]).toMatchObject({ value: '—', sub: 'Needs at least one verified buy' });
 
-    const unread = costBasisView({
-      spot_price_usd: '0.011530',
-      plan_buys: { status: 'unavailable', reason: 'the accumulation ledger could not be read this cycle', fills: 0 },
-      whole_stack: { status: 'unavailable', reason: 'the accumulation ledger could not be read this cycle', source: 'x' },
-    });
-    expect(unread.tiles[0]).toMatchObject({ value: 'unavailable', sub: 'the accumulation ledger could not be read this cycle' });
-    expect(unread.tiles[3].value).toBe('unavailable');
-
     const noSpot = costBasisView({
       spot_price_usd: null,
       plan_buys: { ...planOnly.plan_buys, value_at_spot_usd: null, unrealized_usd: null, unrealized_pct: null },
@@ -220,7 +222,29 @@ describe('cost basis summary (#98)', () => {
     });
     expect(noSpot.tiles[1].value).toBe('—');
     expect(noSpot.tiles[2]).toMatchObject({ value: '—', sub: 'No spot price in this snapshot, so no comparison' });
-    for (const v of [none, unread, noSpot]) expect(allText(v)).not.toMatch(/\$0\.00/);
+    for (const v of [none, noSpot]) expect(allText(v)).not.toMatch(/\$0\.00/);
+  });
+
+  it('an unread ledger is "unavailable" on both plan-buys tiles, never "no buys"', () => {
+    const reason = 'the accumulation ledger could not be read this cycle';
+    const unread = costBasisView({
+      spot_price_usd: '0.011530',
+      // fills is null in this state: the count was not read.
+      plan_buys: { status: 'unavailable', reason, fills: null },
+      whole_stack: { status: 'unavailable', reason, source: 'x' },
+    });
+    expect(unread.tiles[0]).toMatchObject({ label: 'PLAN BUYS · AVERAGE COST', value: 'unavailable', sub: reason });
+    expect(unread.tiles[2]).toMatchObject({ label: 'PLAN BUYS · VALUE AT SPOT LESS COST', value: 'unavailable', sub: reason });
+    expect(unread.tiles[3].value).toBe('unavailable');
+    // Nothing on the panel reads as "there are no buys" or as a zero.
+    expect(allText(unread)).not.toMatch(/verified buy|\$0\.00/i);
+
+    // Unavailable with no reason given, and a snapshot with no plan-buys block at all.
+    const noReason = costBasisView({ plan_buys: { status: 'unavailable' }, whole_stack: { status: 'not_configured' } });
+    expect(noReason.tiles[2]).toMatchObject({ value: 'unavailable', sub: 'no reason reported' });
+    const noBlock = costBasisView({ whole_stack: { status: 'not_configured' } } as unknown as CostBasis);
+    expect(noBlock.tiles[0]).toMatchObject({ value: '—', sub: 'not reported by this snapshot' });
+    expect(noBlock.tiles[2]).toMatchObject({ value: '—', sub: 'not reported by this snapshot' });
   });
 
   it('a snapshot without the block is not reported, with no tiles', () => {
@@ -309,12 +333,12 @@ describe('average cost vs spot chart (#98)', () => {
   it('draws the whole-stack line only when an opening basis is set, starting at its as-of', () => {
     const chart = buildCostChart(withOpeningSeries())!;
     expect(chart.wholeAvg).toEqual([
-      { t: ms('2026-11-14T12:00:00Z'), v: 0.0179 },
-      { t: ms('2026-11-15T02:58:46Z'), v: 0.01778234 },
-      { t: ms('2026-11-16T03:08:37Z'), v: 0.01765764 },
-      { t: ms('2026-11-16T04:00:00Z'), v: 0.01765764 },
+      { t: ms('2026-11-14T12:00:00Z'), v: 0.02 },
+      { t: ms('2026-11-15T02:58:46Z'), v: 0.01877098 },
+      { t: ms('2026-11-16T03:08:37Z'), v: 0.01777702 },
+      { t: ms('2026-11-16T04:00:00Z'), v: 0.01777702 },
     ]);
-    expect(chart.yDomain![1]).toBeGreaterThan(0.0179);
+    expect(chart.yDomain![1]).toBeGreaterThan(0.02);
     // An invalid or absent opening basis draws nothing for the whole stack, even if a
     // fill carried a stray value.
     const stray = withOpeningSeries();
@@ -401,7 +425,7 @@ describe('fill table (#98)', () => {
   });
 
   it('whole-stack column carries the blended average only for fills after the as-of', () => {
-    expect(fillRows(withOpeningSeries()).map((r) => r.wholeAfter)).toEqual(['—', '$0.01778', '$0.01766']);
+    expect(fillRows(withOpeningSeries()).map((r) => r.wholeAfter)).toEqual(['—', '$0.01877', '$0.01778']);
   });
 
   it('with spot history unavailable the spot column says unavailable; no series is no rows', () => {

@@ -9,6 +9,9 @@
  *   A missing value is "—" or a stated reason, never 0.
  * - Measurements only. No sentence here suggests buying, selling or averaging down: the
  *   panel says where the average is and what the NOCK is worth at spot.
+ * - No claim about what was not read. The difference at spot values the NOCK the buys
+ *   acquired; NockNock does not track sells or LP activity, so the panel never says that
+ *   NOCK is still held.
  * - Stored spot points are drawn as stored. Two points more than 2.5 buckets apart have a
  *   break between them; nothing is interpolated across it. The average-cost lines are
  *   steps because an average cost really is constant between buys.
@@ -40,7 +43,8 @@ export interface PlanBasis {
 export interface PlanBuysBasis {
   status: 'ok' | 'no_fills' | 'unavailable';
   reason?: string | null;
-  fills: number;
+  /** Null when the ledger could not be read: unknown, not 0. */
+  fills?: number | null;
   spent_usdc?: string | null;
   acquired_nock?: string | null;
   avg_cost_usd?: string | null;
@@ -71,6 +75,7 @@ export interface WholeStackBasis {
   value_at_spot_usd?: string | null;
   unrealized_usd?: string | null;
   unrealized_pct?: string | null;
+  /** NOCK read this cycle, to the nearest whole NOCK. */
   held_nock?: string | null;
   includes?: string[];
   excludes?: string[];
@@ -210,7 +215,12 @@ function planTile(p: PlanBuysBasis | undefined): CostTile {
 
 function planDifferenceTile(p: PlanBuysBasis | undefined, spot: unknown): CostTile {
   const label = 'PLAN BUYS · VALUE AT SPOT LESS COST';
-  if (!p || p.status !== 'ok') return { label, value: '—', sub: 'Needs at least one verified buy', tone: 'none' };
+  if (!p) return { label, value: '—', sub: NOT_REPORTED, tone: 'none' };
+  // An unread ledger is not "no buys": say it could not be read, with the reason.
+  if (p.status === 'unavailable') {
+    return { label, value: 'unavailable', sub: p.reason ?? 'no reason reported', tone: 'none' };
+  }
+  if (p.status !== 'ok') return { label, value: '—', sub: 'Needs at least one verified buy', tone: 'none' };
   const d = differenceView(p.unrealized_usd, p.unrealized_pct);
   if (d.tone === 'none') {
     return { label, value: '—', sub: 'No spot price in this snapshot, so no comparison', tone: 'none' };
@@ -218,7 +228,9 @@ function planDifferenceTile(p: PlanBuysBasis | undefined, spot: unknown): CostTi
   return {
     label,
     value: d.text,
-    sub: `${nockText(p.acquired_nock)} NOCK is worth ${usdText(p.value_at_spot_usd)} at spot ${priceText(spot)}; it cost ${usdText(p.spent_usdc)}. Unrealized: nothing was sold.`,
+    // Only what was read: the buys' NOCK valued at spot. Sells and LP activity are not
+    // tracked, so nothing here says that NOCK is still held.
+    sub: `${nockText(p.acquired_nock)} NOCK is worth ${usdText(p.value_at_spot_usd)} at spot ${priceText(spot)}; it cost ${usdText(p.spent_usdc)}. This values the NOCK these buys acquired; NockNock does not track whether it was later sold or moved into LP.`,
     tone: d.tone,
   };
 }

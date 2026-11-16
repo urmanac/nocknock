@@ -46,14 +46,14 @@ const series = (whole: boolean): CostBasisSeries => ({
   spot_error: null,
   fills: [
     fill('0xa', '2026-11-14T06:02:25+00:00', '0.01251616', '0.01251616', null),
-    fill('0xb', '2026-11-15T02:58:46+00:00', '0.01162643', '0.01205490', whole ? '0.01778234' : null),
-    fill('0xc', '2026-11-16T03:08:37+00:00', '0.01123369', '0.01176814', whole ? '0.01765764' : null),
+    fill('0xb', '2026-11-15T02:58:46+00:00', '0.01162643', '0.01205490', whole ? '0.01877098' : null),
+    fill('0xc', '2026-11-16T03:08:37+00:00', '0.01123369', '0.01176814', whole ? '0.01777702' : null),
   ],
   whole_stack: whole
     ? {
         status: 'ok',
         reason: null,
-        opening: { as_of: '2026-11-14T12:00:00+00:00', nock: '90000.0000', cost_usd: '1611.00', avg_cost_usd: '0.01790000', source: 'test figures' },
+        opening: { as_of: '2026-11-14T12:00:00+00:00', nock: '10000.0000', cost_usd: '200.00', avg_cost_usd: '0.02000000', source: 'test figures' },
       }
     : { status: 'not_configured', reason: null, opening: null },
 });
