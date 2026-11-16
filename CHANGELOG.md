@@ -18,7 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   details, and `LIVE ON-CHAIN · read 42s ago` or `NOT LIVE · last read 12m ago`) and, when
   a plan is configured, the accumulation plan panel with RECORD BUY. Before this the Lite
   view showed neither, so a "DCA TRANCHE DUE" push landed on a page without the tranche
-  and with no sign of how old its numbers were.
+  and with no sign of how old its numbers were. The card reads `NOT LIVE · Worker
+  unreachable: … · last read 50s ago` from the first poll that fails, however recent the
+  last read (a phone that left the LAN with the app open), and reads the worker again
+  when the app returns to the foreground.
 - **Notification status and test routes.** `GET /v1/notifications/status` states which of
   Telegram, Pushover and the webhook are configured. `POST /v1/notifications/test` sends
   one message labelled TEST through every configured channel and reports each channel:
@@ -27,10 +30,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   30 s. The dashboard and the Lite cockpit have a SEND TEST NOTIFICATION control.
 - **A plan completing notifies.** When the last buy was recorded while LP was under target,
   the action read `REBUILD LP TRANCHES` before and after, so nothing was pushed. The
-  completion now carries its own sentence, with the plan's own figures.
+  completion now carries its own sentence, with the plan's own figures, placed before
+  the directive's details so Pushover's 1024-character cut keeps it. A cycle that could
+  not read the accumulation ledger no longer makes the next cycle announce an already
+  completed plan again.
+- **A range exit notifies whatever the directive reads.** A floor lock and a due tranche
+  outrank `RANGE EXIT FLASHPOINT`, so under either the action did not change when spot
+  reached the top of the price-source range and nothing was pushed. The exit now carries
+  its own sentence (`Range exit: spot $… is at or above the top of the price-source
+  range ($…)`), from the same rule the directive uses. The return into the range is
+  pushed only when it changes the directive, and the last reading is held in memory, so
+  an exit across a worker restart is pushed only if the directive changes with it.
 - **Opt-in TLS proxy for the Podman deployment.** `NOCKNOCK_TLS=1 deploy/podman/deploy.sh
   <host>` adds the `nocknock-tls` quadlet: Caddy with a private CA on an unprivileged port
-  (default 3443), no `sudo`. `NOCKNOCK_TLS=remove` takes it out. With the variable unset
+  (default 3443; 8080, 3000 and 8081 are refused, and so is a leading zero such as
+  `08080`), no `sudo`.
+  `NOCKNOCK_TLS=remove` takes it out. With the variable unset
   the deploy script's remote commands are identical to before. Each phone must install
   the CA's root certificate; `docs/kb/how-to-phone-install-notifications-tls.md` states
   what that costs and describes the two alternatives that were not built (a tailnet; a
@@ -45,7 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the URL and every detail is redacted before it is logged or returned.
 - **`pushover_user_key` is accepted.** The example config documented that name while the
   worker read only `pushover_user`, so a copied example left Pushover off without a word.
-  Both spellings work; the example now uses `pushover_user`.
+  Both spellings work; the example now uses `pushover_user`. A config that carries both
+  loads: `pushover_user` is used and the status route says `pushover_user_key` is ignored.
 - **Half a channel is reported.** A Telegram token without a chat id (or a Pushover token
   without a user key) was skipped silently. It is now `incomplete`, with the missing key
   named, in the status route and in the log.

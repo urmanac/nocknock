@@ -59,11 +59,17 @@ nothing: an installed copy reads the worker every time, and when it cannot reach
 worker it says so. The cost is that the app does not open offline or away from the
 LAN. It shows the browser's own "cannot connect" page instead.
 
+An app that is already open when the phone leaves the LAN keeps the last snapshot on
+the page. The DIRECTIVE card polls every 10 s, and after the first poll that fails it
+reads `NOT LIVE · Worker unreachable: … · last read 50s ago`, however recent that last
+read is. It reads the worker again as soon as the app comes back to the foreground.
+
 The Lite cockpit gained what a phone needs first:
 
 - **DIRECTIVE**: the current directive and its details, then one line saying whether
   the page is live. A snapshot that has stopped refreshing reads
   `NOT LIVE · last read 12m ago. Everything on this page is from that read.`
+  A failed poll adds the cause, as above.
 - **ACCUMULATION PLAN**, when a plan is configured: the same panel as the full
   dashboard, with RECORD BUY. A "DCA TRANCHE DUE" notification now lands on the
   tranche it is about.
@@ -98,16 +104,37 @@ square image.
   anything to `RANGE EXIT FLASHPOINT (Above Range)`.
 - When an accumulation plan **completes** (new in this release). The message carries
   the plan's own figures: budget deployed, number of verified buys, average cost.
+- When spot **reaches the top of the price-source range** (a range exit), whatever the
+  directive reads (new in this release). A floor lock and a due tranche both outrank
+  `RANGE EXIT FLASHPOINT` in the directive, so the action does not change then; the
+  push says `Range exit: spot $… is at or above the top of the price-source range
+  ($…)` and `Directive unchanged: …`. It states the two prices and leaves the choice
+  to you.
+
+A plan completing or a range exit that arrives together with a directive change is
+one message, with its sentence placed before the directive's details so a provider's
+length cut does not remove it.
 
 It does not notify on a repeat, between `HOLD & ACCRETE` variants, or on the first
 cycle of a worker that has no earlier snapshot.
 
-Known gaps, unchanged by this release:
+Known gaps:
 
 - A failed ingestion cycle sends nothing. `/health` shows it; your phone does not.
 - While LP is under target and a deposit is fundable, every idle plan state reads
   `REBUILD LP TRANCHES`. A change between ON SCHEDULE, PAUSED and BLOCKED sends
   nothing then. A tranche becoming due always notifies.
+- Spot falling **back into** the price-source range is pushed only when it changes the
+  directive (it does when the directive was `RANGE EXIT FLASHPOINT`). Under a floor
+  lock or a due tranche the exit is pushed and the return is not.
+- The worker remembers the last range reading in memory only. A range exit that
+  happens across a worker restart is pushed only if it changes the directive.
+- In a cycle where the accumulation ledger cannot be read, the directive becomes
+  `DCA BLOCKED` and that change is pushed. Its text gives the plan's progress as
+  `$0.00 … 0 verified buy(s)`, which is wrong: the progress is unknown that cycle.
+  This is older than this release and is not fixed here. The next good cycle pushes
+  the directive changing back; it no longer announces an already completed plan as
+  complete a second time.
 
 ### Telegram
 
@@ -149,7 +176,8 @@ notifications:
 
 `pushover_user_key` is accepted as another spelling of `pushover_user`. The example
 config used that name until v0.5.3 while the worker read only `pushover_user`, so a
-copied example left Pushover off without saying so.
+copied example left Pushover off without saying so. A config that carries both keys
+loads; `pushover_user` is the one used, and the status route says the other is ignored.
 
 ### Webhook
 
@@ -227,7 +255,8 @@ NOCKNOCK_TLS=1 NOCKNOCK_TLS_NAMES="chudmax 192.168.1.20" deploy/podman/deploy.sh
   separated by spaces. The certificate covers these and nothing else. Default: the
   host argument.
 - `NOCKNOCK_TLS_PORT`: the host port. Default `3443`. Ports below 1024 are refused
-  (rootless Podman cannot publish them), as are 8080 (Strata), 3000 and 8081.
+  (rootless Podman cannot publish them), as are 8080 (Strata), 3000 and 8081. Write
+  it as a plain number: a leading zero (`08080`) is refused.
 
 This adds one more rootless quadlet, `nocknock-tls`: a Caddy container on the
 `nocknock` network that forwards to the dashboard container. It needs no `sudo` to
@@ -324,8 +353,12 @@ Checked on the workstation:
 
 - **Worker**: unit tests. A tranche becoming due changes the directive action and
   notifies, on its own, under the LP rebuild bias and under a floor lock. A plan
-  completing notifies, including the case where the directive does not change. A
-  floor lock starting and ending notifies. A range exit notifies. Delivery was run
+  completing notifies, including the case where the directive does not change, and
+  its sentence survives Pushover's length cut. A floor lock starting and ending
+  notifies. A range exit notifies when it becomes the directive, and also under a
+  floor lock, under a floor lock with a waiting plan, and with a tranche due, where
+  the directive does not change. A ledger read failure does not announce a completed
+  plan again. A config with both Pushover spellings loads. Delivery was run
   end to end against a local stand-in for each provider (correct payload per
   provider, a bad credential reported per channel, an unreachable provider, no
   channel configured), with assertions that no credential appears in any response.
@@ -334,11 +367,15 @@ Checked on the workstation:
   the absence of any service worker, and for the display helpers. `npm run build`
   succeeds and the manifest and icons are in `dist/`. The Lite cockpit was opened
   in a desktop browser at phone width against a local stand-in API: live,
-  stale (`NOT LIVE`), and worker-unreachable states, and the test button.
+  stale (`NOT LIVE`), and worker-unreachable states, and the test button. The
+  worker-unreachable state was checked both on a cold start and with a snapshot
+  already on the page (the stand-in stopped answering `/v1` while the page was open).
+  Refreshing when the app returns to the foreground is from reading the code only.
 - **Deploy script**: a dry run with a stub in place of `ssh`. With `NOCKNOCK_TLS`
   unset, the remote commands and the output are identical to the script before this
   change. With it set, three more remote commands run. A bad flag, port or name
-  stops before any remote command.
+  stops before any remote command. `tls/render.sh` was run on its own with good and
+  bad ports, including `08080`.
 - **Quadlet**: written with the same keys the existing quadlets use.
 
 Not checked:

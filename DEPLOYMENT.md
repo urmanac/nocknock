@@ -260,13 +260,18 @@ Nothing to configure.
 - There is no service worker. Nothing is cached, so the app never shows an old snapshot
   as live, and it does not open away from the LAN.
 - The Lite cockpit's DIRECTIVE card says whether the page is live. `NOT LIVE · last read
-  12m ago` means the numbers below it are that old.
+  12m ago` means the numbers below it are that old. If the phone leaves the LAN with the
+  app open, the card reads `NOT LIVE · Worker unreachable: …` after the next poll (10 s),
+  and it reads the worker again when the app returns to the foreground.
 
 ### 7.2 Notifications
 
-The worker pushes a message when the directive changes between two cycles and when an
-accumulation plan completes. It is off until `ingestion-worker/config.yaml` has a
-`notifications:` block. Set one channel or several.
+The worker pushes a message when the directive changes between two cycles, when an
+accumulation plan completes, and when spot reaches the top of the price-source range (a
+range exit; pushed even under a floor lock or a due tranche, where the directive does
+not change). It does not push when spot falls back into the range unless that changes
+the directive, and a failed ingestion cycle pushes nothing. It is off until
+`ingestion-worker/config.yaml` has a `notifications:` block. Set one channel or several.
 
 **Telegram**
 
@@ -295,6 +300,9 @@ notifications:
 1. Create an account at pushover.net and install the Pushover app on the phone.
 2. **Your User Key**, on the website's front page after login, is `pushover_user`.
 3. **Create an Application/API Token** gives the **API Token/Key**: `pushover_token`.
+
+`pushover_user_key`, the name the example used until v0.5.3, is read when
+`pushover_user` is not set. A config with both loads, and `pushover_user` is used.
 
 **Webhook**: `webhook_url: "https://…"` receives `POST {"text": "…"}`.
 
@@ -329,7 +337,7 @@ No `sudo`, no privileged port, and host port 8080 is refused.
 |:---|:---|:---|
 | `NOCKNOCK_TLS` | `1` installs and restarts the proxy; `remove` stops it and removes its quadlet (its CA volume is kept). Unset: the deploy does not touch it. | unset |
 | `NOCKNOCK_TLS_NAMES` | Every name or IPv4 address the phone will type, space separated. The certificate covers only these. | the host argument |
-| `NOCKNOCK_TLS_PORT` | Host port, 1024 to 65535, not 8080, 3000 or 8081. | `3443` |
+| `NOCKNOCK_TLS_PORT` | Host port, 1024 to 65535, not 8080, 3000 or 8081, no leading zero. | `3443` |
 
 A private CA means **each phone must install and trust its root certificate**:
 download it from `https://<host>:3443/nocknock-root-ca.crt` (or fetch it with

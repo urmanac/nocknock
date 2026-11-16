@@ -209,7 +209,8 @@ the trade-offs are in [`docs/kb/how-to-phone-install-notifications-tls.md`](docs
   the page is live. There is no service worker: nothing is cached, so an old snapshot is
   never shown as live.
 * **Notifications**: add a `notifications:` block (Telegram, Pushover or a webhook) to
-  `config.yaml`. The worker pushes when the directive changes and when a plan completes.
+  `config.yaml`. The worker pushes when the directive changes, when a plan completes
+  and when spot reaches the top of the price-source range.
   `POST /v1/notifications/test`, or SEND TEST NOTIFICATION on the dashboard, sends one
   message labelled TEST and reports each channel.
 * **HTTPS on the LAN**: `NOCKNOCK_TLS=1 deploy/podman/deploy.sh <host>` adds a Caddy
