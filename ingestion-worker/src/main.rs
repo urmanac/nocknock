@@ -1142,6 +1142,14 @@ async fn main() -> Result<()> {
             "/v1/tax/export",
             axum::routing::get(tax_export_handler),
         )
+        .route(
+            "/v1/notifications/status",
+            axum::routing::get(notification_status_handler),
+        )
+        .route(
+            "/v1/notifications/test",
+            axum::routing::post(notification_test_handler),
+        )
         .layer(Extension(state.clone()));
 
     let port = state.config.port;
@@ -1245,9 +1253,41 @@ struct NotificationConfig {
     telegram_bot_token: Option<String>,
     telegram_chat_id: Option<String>,
     pushover_token: Option<String>,
+    /// The Pushover *user key*. `pushover_user_key` is accepted too: the example config
+    /// documented that name until v0.5.3 while the worker read only `pushover_user`, so a
+    /// copied example left Pushover silently off (#89).
+    #[serde(alias = "pushover_user_key")]
     pushover_user: Option<String>,
     webhook_url: Option<String>,
     cockpit_url: Option<String>,
+}
+
+/// One notification channel's state (#89): what `GET /v1/notifications/status` and
+/// `POST /v1/notifications/test` report per channel. `status` is `configured`,
+/// `incomplete` or `not_configured` before a send, and `delivered` or `failed` after one.
+/// `detail` never carries a token, a user key or a webhook URL.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+struct ChannelReport {
+    channel: String,
+    status: String,
+    detail: String,
+}
+
+/// Where each provider is reached. Production uses the defaults; tests point these at a
+/// local server so delivery is exercised without touching the providers.
+#[derive(Debug, Clone)]
+struct NotifyEndpoints {
+    telegram_base: String,
+    pushover_url: String,
+}
+
+impl Default for NotifyEndpoints {
+    fn default() -> Self {
+        Self {
+            telegram_base: "https://api.telegram.org".to_string(),
+            pushover_url: "https://api.pushover.net/1/messages.json".to_string(),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -1320,3 +1360,5 @@ struct V3PositionDecoded {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_notify;

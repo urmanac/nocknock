@@ -218,6 +218,7 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // Capture directive strings before the metrics move into the snapshot envelope
     let next_directive_action = derived_metrics.global_status.shot_advice_action.clone();
     let next_directive_details = derived_metrics.global_status.shot_advice_details.clone();
+    let next_plan_status = derived_metrics.accumulation_plan.clone();
 
     // Build snapshot data
     let snapshot_data = SnapshotData {
@@ -238,23 +239,24 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
 
     // Build envelope
     let now = Utc::now();
-    // Directive-transition notifications (issue #28): fire only when the tactical
-    // directive changes between cycles. First boot stays silent; delivery failures
-    // are logged, never fatal.
-    let prev_directive = state
-        .latest_snapshot
-        .lock()
-        .await
-        .as_ref()
-        .map(|s| s.data.derived_metrics.global_status.shot_advice_action.clone());
-    if let Some(text) = directive_transition_notification(
+    // Notifications (issues #28, #89): decided here against the previous snapshot, sent
+    // only after this one is stored. A directive change notifies, and so does a plan
+    // completing. A first cycle with no previous snapshot stays silent.
+    let (prev_directive, prev_plan_status) = match state.latest_snapshot.lock().await.as_ref() {
+        Some(s) => (
+            Some(s.data.derived_metrics.global_status.shot_advice_action.clone()),
+            s.data.derived_metrics.accumulation_plan.clone(),
+        ),
+        None => (None, None),
+    };
+    let notification = cycle_notification(
         prev_directive.as_deref(),
         &next_directive_action,
         &next_directive_details,
+        prev_plan_status.as_ref(),
+        next_plan_status.as_ref(),
         state.config.notifications.cockpit_url.as_deref(),
-    ) {
-        dispatch_notifications(state, &text).await;
-    }
+    );
 
     let envelope = SnapshotEnvelope {
         meta: SnapshotMeta {
@@ -275,6 +277,14 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
 
     // Update in-memory cache
     *state.latest_snapshot.lock().await = Some(envelope);
+
+    // Sent after the store: a cycle whose store fails leaves the previous snapshot in
+    // place, so the same transition is decided again next cycle and is pushed once, when
+    // it is on record, instead of once per failed attempt. Delivery failures are logged,
+    // never fatal.
+    if let Some(text) = notification {
+        dispatch_notifications(state, &text).await;
+    }
 
     let duration_ms = start_time.elapsed().as_millis() as u64;
     state.last_sync_duration_ms.store(duration_ms, std::sync::atomic::Ordering::Relaxed);

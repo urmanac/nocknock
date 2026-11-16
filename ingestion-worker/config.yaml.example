@@ -162,15 +162,31 @@ market_data:
 #   daily_lookback: 30
 
 # ============================================================
-# Directive-Transition Notifications (issue #28)
+# Notifications (issues #28, #89): optional, off until you set a channel
 # ============================================================
-# The worker fires a notification only when the tactical directive CHANGES
-# between sync cycles (e.g. HOLD & ACCRETE -> BATCH HARVEST SHOT). Delivery
-# failures are logged, never fatal. All channels optional; leave empty to disable.
+# The worker pushes a message when the directive CHANGES between two sync cycles (for
+# example DCA ON SCHEDULE -> DCA TRANCHE DUE, or HOLD & ACCRETE -> DEFENSIVE LOCK) and
+# when an accumulation plan completes. Never on a repeat. Delivery failures are logged,
+# never fatal. Every channel is optional; with none set nothing is sent.
+#
+# Check a channel without waiting for a change ("SEND TEST NOTIFICATION" on the
+# dashboard does the same):
+#   curl -X POST http://<host>:8081/v1/notifications/test
+#
+# Telegram: in the Telegram app, message BotFather, send /newbot and copy the token it
+#   gives you (telegram_bot_token). Open a chat with your new bot and send it any
+#   message, then open https://api.telegram.org/bot<token>/getUpdates in a browser:
+#   result[0].message.chat.id is telegram_chat_id.
+# Pushover: at pushover.net, "Your User Key" is pushover_user; "Create an
+#   Application/API Token" gives pushover_token.
+# Full steps: DEPLOYMENT.md section 7.
+#
+# Keep this block commented here. This file is the base layer of the worker's config, so
+# a value left uncommented in it is live for every deployment that does not override it.
 # notifications:
-#   telegram_bot_token: "123456:ABC..."
+#   telegram_bot_token: "123456789:AA..."
 #   telegram_chat_id: "123456789"
-#   pushover_token: "pushover-app-token"
-#   pushover_user_key: "pushover-user-key"
-#   webhook_url: "https://hooks.example/nocknock"
-#   cockpit_url: "https://your-host:3000/lite"   # deep link appended to notifications
+#   pushover_token: "your-application-api-token"
+#   pushover_user: "your-user-key"
+#   webhook_url: "https://hooks.example/nocknock"     # receives POST {"text": "..."}
+#   cockpit_url: "http://your-host:3000/?view=lite"   # link appended to each message
