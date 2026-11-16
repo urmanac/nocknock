@@ -429,8 +429,8 @@ struct RawOnChainData {
     rebuild_rules: HashMap<String, RebuildRule>,
     /// position_ids of Aero positions whose claimFees() reverts: their fees are not
     /// LP-claimable (shown as such, never as $0 earned). Since v0.6.0 (#91) also an
-    /// Aero CL position whose fees are not a readable LP claim (staked in its gauge, or
-    /// an unstaked one whose collect() simulation reverted); `position_facts` says which.
+    /// Aero CL position staked in its gauge (swap fees go to the gauge); its
+    /// `position_facts` entry carries the reason.
     fees_not_lp_claimable: Vec<String>,
     /// Facts only some protocols have (tick spacing, gauge staking, why a fee figure is
     /// absent), keyed by position_id (v0.6.0, #91). No entry means none apply.

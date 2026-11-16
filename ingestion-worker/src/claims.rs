@@ -134,8 +134,15 @@ pub(crate) async fn finish_claim_action(
 /// Returns true when the action is settled without a simulation:
 /// - staked in its gauge: "not_claimable" with the reason (nothing to dispatch);
 /// - not in the latest snapshot: left "unavailable" with the reason, never simulated
-///   blind (staked or not is unknown).
-/// Returns false for an unstaked position, which is simulated like a Uniswap v3 collect.
+///   blind (staked or not is unknown);
+/// - any other position whose snapshot row carries a `fees_note`: the note says its
+///   fee figures are not a read of LP-claimable fees, so they are never copied into
+///   the action as expected amounts. It is left "unavailable" with the note and no
+///   expected amounts or USD. (No adapter emits this today: an unstaked position's
+///   failed fee read fails the cycle. The arm keeps the rule "a note means no figure"
+///   true for stored snapshots and for notes added later.)
+/// Returns false for an unstaked position whose fees were read, which is simulated
+/// like a Uniswap v3 collect.
 pub(crate) fn aero_cl_mark_not_claimable(action: &mut ClaimFeeAction, snapshot_position: Option<&Position>) -> bool {
     match snapshot_position {
         None => {
@@ -148,6 +155,14 @@ pub(crate) fn aero_cl_mark_not_claimable(action: &mut ClaimFeeAction, snapshot_p
             action.simulation = "not_claimable".to_string();
             action.simulation_detail =
                 Some(fees_note_text(p.fees_note.as_deref().or(Some(AERO_CL_STAKED_FEES_NOTE))));
+            action.expected_usd = None;
+            true
+        }
+        Some(p) if p.fees_note.as_deref().is_some_and(|n| !n.trim().is_empty()) => {
+            action.simulation = "unavailable".to_string();
+            action.simulation_detail = p.fees_note.clone();
+            action.expected_amount_0 = None;
+            action.expected_amount_1 = None;
             action.expected_usd = None;
             true
         }

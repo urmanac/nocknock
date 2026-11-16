@@ -371,6 +371,7 @@ fn format_claim_simulation(data: &Value) -> String {
     let mut details = String::new();
     let mut total_claimable_usd = 0.0f64;
     let mut gas_usd: Option<f64> = None;
+    let (mut claimable_rows, mut not_claimable_rows) = (0usize, 0usize);
 
     if let Some(list) = fees {
         for fee in list {
@@ -378,13 +379,15 @@ fn format_claim_simulation(data: &Value) -> String {
             let amount = fee.get("amount").and_then(|a| a.as_str()).unwrap_or("0");
             let amount_usd = fee.get("amount_usd").and_then(|a| a.as_str()).unwrap_or("0.00");
             let gas_str = fee.get("gas_break_even_usd").and_then(|g| g.as_str()).unwrap_or_default();
-            if amount.starts_with("not LP-claimable") || amount.starts_with("fees unavailable") {
-                // No fee figure to print: an Aero pool whose claimFees() reverts, an Aero CL
-                // position staked in its gauge, or one whose fees could not be read. The
-                // worker's own reason is shown; nothing to claim, no gas to count.
+            if amount.starts_with("not LP-claimable") {
+                // No fee figure to print: an Aero pool whose claimFees() reverts, or an
+                // Aero CL position staked in its gauge. The worker's own reason is
+                // shown; nothing to claim, no gas to count.
                 details.push_str(&format!("  - {symbol}: {amount}\n"));
+                not_claimable_rows += 1;
                 continue;
             }
+            claimable_rows += 1;
             match gas_str.parse::<f64>() {
                 Ok(g) => {
                     // Live per-contract gas break-even; take the max as representative.
@@ -408,6 +411,12 @@ fn format_claim_simulation(data: &Value) -> String {
         Some(g) => (
             format!("~${:.4} USD", g),
             format!("${:.4} USD", (total_claimable_usd - g).max(0.0)),
+        ),
+        // Every row is one the LP cannot claim: there is no claim to cost, which is
+        // not the same as a gas estimate that could not be read.
+        None if claimable_rows == 0 && not_claimable_rows > 0 => (
+            "n/a (nothing LP-claimable)".to_string(),
+            "n/a (nothing LP-claimable)".to_string(),
         ),
         None => (
             "unavailable".to_string(),

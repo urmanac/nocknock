@@ -4,8 +4,8 @@ use crate::*;
 // Aero concentrated-liquidity ("CL", Slipstream) positions — issue #91
 // ============================================================
 // Every address, selector and layout here was verified by live read-only calls on Base
-// on 2026-11-16 (blocks 58061668 and 58063800; ONCHAIN_INTEGRATION.md §8). The unit
-// tests in tests_aero_cl.rs decode the raw responses captured at those blocks.
+// on 2026-11-16 (blocks 58061668, 58063800 and 58074373; ONCHAIN_INTEGRATION.md §8). The
+// unit tests in tests_aero_cl.rs decode the raw responses captured at those blocks.
 //
 // A CL position is an NFT in Aero's Slipstream position manager. The layouts follow
 // Uniswap v3 with three differences that matter here:
@@ -24,7 +24,13 @@ use crate::*;
 // the LP: `collect` simulated from the gauge (the NFT's owner) returns (0, 0) and from
 // the wallet reverts. The staker earns AERO emissions instead, which this adapter does
 // not read (#93). So a staked position reports no fee figure and says why. An UNSTAKED
-// position's fees are what `collect` simulated from the wallet returns.
+// position's fees are what `collect` simulated from the wallet returns; that read is
+// required like the Uniswap fee reads, so a revert there fails the cycle.
+//
+// The pool. `pool_address` comes from config, so it is checked against the NFT before
+// anything is valued at its price: the pool's `nft()` must be this position manager
+// (which rules out a Uniswap v3 pool of the same pair and spacing, and a pool of the
+// other Slipstream deployment), and its tokens and tick spacing must be the NFT's.
 
 /// Config `protocol` value for an Aero concentrated-liquidity position.
 pub(crate) const AERO_CL_PROTOCOL: &str = "aerodrome-cl";
@@ -35,6 +41,7 @@ pub(crate) const CL_POOL_TOKEN1: &str = "0xd21220a7"; // token1()
 pub(crate) const CL_POOL_TICK_SPACING: &str = "0xd0c93a7c"; // tickSpacing()
 pub(crate) const CL_POOL_FEE: &str = "0xddca3f43"; // fee()
 pub(crate) const CL_POOL_GAUGE: &str = "0xa6f19c84"; // gauge()
+pub(crate) const CL_POOL_NFT: &str = "0x47ccca02"; // nft(): the pool's position manager
 pub(crate) const CL_GAUGE_STAKED_CONTAINS: &str = "0xc69deec5"; // stakedContains(address,uint256)
 // Shared with Uniswap v3 (same selectors, verified on the Slipstream contracts):
 // positions(uint256) V3_POSITIONS, slot0() V3_SLOT0, liquidity() V3_LIQUIDITY and
@@ -44,11 +51,6 @@ pub(crate) const CL_GAUGE_STAKED_CONTAINS: &str = "0xc69deec5"; // stakedContain
 /// "not LP-claimable" like AERO_NOT_LP_CLAIMABLE, which is what the MCP text keys on.
 pub(crate) const AERO_CL_STAKED_FEES_NOTE: &str =
     "not LP-claimable (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)";
-
-/// What NockNock says when an unstaked position's `collect` simulation reverts: the
-/// fees could not be read, which is not the same as none earned.
-pub(crate) const AERO_CL_FEES_UNAVAILABLE_NOTE: &str =
-    "fees unavailable (collect() simulation from the wallet reverted); not counted";
 
 /// Decoded Slipstream `positions(uint256)` return. Same 12 words as Uniswap v3 except
 /// that word 4 carries the pool's tick spacing where v3 has the fee tier.
@@ -201,15 +203,15 @@ pub(crate) fn decode_collect_return(hex_str: &str) -> Result<(u128, u128)> {
     Ok((word(0)?, word(1)?))
 }
 
-/// What one cycle learned about the position's fees.
+/// What one cycle learned about the position's fees. There is no "could not be read"
+/// case: an unstaked position's `collect` simulation is a required read, and a revert
+/// there fails the cycle (`collect_reverted_error`) rather than carrying a zero.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum AeroClFees {
     /// Unstaked: what `collect` simulated from the wallet would pay, in raw units.
     Claimable(u128, u128),
     /// Staked in the gauge: swap fees go to the gauge, AERO rewards are not read (#93).
     StakedNotLpClaimable,
-    /// Unstaked, but the `collect` simulation reverted: unknown, never zero.
-    Unavailable,
 }
 
 impl AeroClFees {
@@ -218,21 +220,56 @@ impl AeroClFees {
         match self {
             AeroClFees::Claimable(..) => None,
             AeroClFees::StakedNotLpClaimable => Some(AERO_CL_STAKED_FEES_NOTE),
-            AeroClFees::Unavailable => Some(AERO_CL_FEES_UNAVAILABLE_NOTE),
         }
     }
 }
 
-/// The pool named in config must be the NFT's pool (same tokens and tick spacing), or
-/// the amounts would be computed at another pool's price. Pure.
+/// The cycle error for an unstaked position whose `collect` simulation reverts. The
+/// wallet holds the NFT, so the call should pay out; a revert means its fees cannot be
+/// read, and an unread fee is never published as 0 (the Uniswap adapters fail the
+/// cycle on a failed fee read in the same way). Pure.
+pub(crate) fn collect_reverted_error(cfg_id: &str, nft_id: u64, npm: &str, wallet: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "position {cfg_id}: collect() for NFT #{nft_id} on position manager {npm}, simulated from the tracked wallet {wallet} that holds it, reverted; its claimable fees cannot be read, so the cycle fails rather than report them as 0"
+    )
+}
+
+/// The pool's answer to `nft()`, which must name the configured position manager.
+/// `nft_call` is the outcome of the eth_call: Some(hex) = returned data, None = the
+/// call reverted (a Uniswap v3 pool has no `nft()`). Pure.
+pub(crate) fn pool_position_manager(cfg_id: &str, pool: &str, npm: &str, nft_call: Option<&str>) -> Result<String> {
+    let not_a_pool = |why: &str| {
+        anyhow::anyhow!(
+            "Configuration error: position {cfg_id}: pool_address {pool} is not an Aero CL pool of position manager {npm} ({why}); correct pool_address"
+        )
+    };
+    let hex = nft_call.ok_or_else(|| not_a_pool("its nft() call reverts, as on a Uniswap v3 pool"))?;
+    address_from_word(hex).map_err(|_| not_a_pool("its nft() call returned no address"))
+}
+
+/// The pool named in config must be the NFT's pool, or the amounts would be computed
+/// at another pool's price. Three things identify it: the pool's own position manager
+/// (`nft()`) is the one the NFT lives on, and its tokens and tick spacing are the
+/// NFT's. Tokens and spacing alone do not: the Uniswap v3 WETH/NOCK 1% pool also has
+/// tick spacing 200, and the legacy Slipstream deployment has same-pair, same-spacing
+/// pools of its own (verified, ONCHAIN_INTEGRATION.md §8). Pure.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn check_pool_is_the_nfts_pool(
     cfg: &PositionConfig,
+    npm: &str,
     pool: &str,
     decoded: &SlipstreamPositionDecoded,
+    pool_nft: &str,
     pool_token0: &str,
     pool_token1: &str,
     pool_tick_spacing: i32,
 ) -> Result<()> {
+    if !same_address(pool_nft, npm) {
+        return Err(anyhow::anyhow!(
+            "Configuration error: position {}: pool_address {} is not a pool of position manager {} (its nft() is {}); NFT #{} cannot be valued at its price",
+            cfg.id, pool, npm, pool_nft, cfg.nft_id
+        ));
+    }
     if !same_address(&decoded.token0, pool_token0)
         || !same_address(&decoded.token1, pool_token1)
         || decoded.tick_spacing != pool_tick_spacing
@@ -256,6 +293,7 @@ pub(crate) fn aero_cl_position_from_reads(
     npm: &str,
     pool: &str,
     decoded: &SlipstreamPositionDecoded,
+    pool_nft: &str,
     pool_token0: &str,
     pool_token1: &str,
     pool_tick_spacing: i32,
@@ -265,7 +303,7 @@ pub(crate) fn aero_cl_position_from_reads(
     staked_in_gauge: Option<String>,
     fees: AeroClFees,
 ) -> Result<(RawPosition, PositionFacts)> {
-    check_pool_is_the_nfts_pool(cfg, pool, decoded, pool_token0, pool_token1, pool_tick_spacing)?;
+    check_pool_is_the_nfts_pool(cfg, npm, pool, decoded, pool_nft, pool_token0, pool_token1, pool_tick_spacing)?;
     if decoded.tick_lower >= decoded.tick_upper {
         return Err(anyhow::anyhow!(
             "position {}: NFT #{} decoded with tickLower {} >= tickUpper {}",
@@ -279,11 +317,12 @@ pub(crate) fn aero_cl_position_from_reads(
         concentrated_amounts_raw(decoded.liquidity, sqrt_price_x96, decoded.tick_lower, decoded.tick_upper);
     let dec0 = 10f64.powi(token0.decimals);
     let dec1 = 10f64.powi(token1.decimals);
-    // A fee that was not read is carried as 0 here AND flagged in the facts, so no
-    // surface prints it as "$0 earned" (see build_contract_fees / PositionFacts).
+    // A staked position has no LP-claimable fee: it is carried as 0 here AND flagged in
+    // the facts, so no surface prints it as "$0 earned" (build_contract_fees,
+    // PositionFacts, claims::aero_cl_mark_not_claimable).
     let (fee0_raw, fee1_raw) = match fees {
         AeroClFees::Claimable(f0, f1) => (f0, f1),
-        AeroClFees::StakedNotLpClaimable | AeroClFees::Unavailable => (0, 0),
+        AeroClFees::StakedNotLpClaimable => (0, 0),
     };
     let raw = RawPosition {
         position_id: position_key(cfg),
@@ -319,9 +358,9 @@ pub(crate) fn aero_cl_position_from_reads(
 }
 
 /// Read an Aero CL position (issue #91). Every read is required: a failed one fails the
-/// cycle, as does a position the wallet neither holds nor staked. The one read that
-/// may degrade is an unstaked position's `collect` simulation: a revert there leaves
-/// the fees "unavailable" with the reason stated, never zero.
+/// cycle, as does a position the wallet neither holds nor staked, a pool that is not
+/// the NFT's pool, and an unstaked position whose `collect` simulation reverts (its
+/// fees cannot be read, and an unread fee is never published as zero).
 pub(crate) async fn fetch_aero_cl_position(
     http_client: &Client,
     alchemy_url: &str,
@@ -368,7 +407,18 @@ pub(crate) async fn fetch_aero_cl_position(
         })?;
     let decoded = decode_slipstream_positions_return(&positions_hex).map_err(|e| ctx(e, "positions()"))?;
 
-    // 2. The pool: identity (tokens, tick spacing), price, tick and current swap fee.
+    // 2. The pool: identity (position manager, tokens, tick spacing), price, tick and
+    //    current swap fee. nft() comes first and may revert: a pool that is not this
+    //    position manager's (a Uniswap v3 pool, say) is a configuration error, said as
+    //    one, while a node that does not answer is a failed read.
+    let nft_payload = json!({
+        "jsonrpc": "2.0", "method": "eth_call", "id": 90,
+        "params": [{ "to": pool, "data": CL_POOL_NFT }, "latest"]
+    });
+    let nft_call = eth_call_allow_revert(http_client, alchemy_url, &nft_payload)
+        .await
+        .map_err(|e| anyhow::anyhow!("position {}: Aero CL pool nft() read failed: {e}", cfg.id))?;
+    let pool_nft = pool_position_manager(&cfg.id, &pool, &npm, nft_call.as_deref())?;
     let pool_token0 = address_from_word(&read(pool.clone(), CL_POOL_TOKEN0.to_string(), 81, "pool token0()").await?)
         .map_err(|e| ctx(e, "pool token0()"))?;
     let pool_token1 = address_from_word(&read(pool.clone(), CL_POOL_TOKEN1.to_string(), 82, "pool token1()").await?)
@@ -384,7 +434,7 @@ pub(crate) async fn fetch_aero_cl_position(
         word_i32(read(pool.clone(), CL_POOL_TICK_SPACING.to_string(), 83, "pool tickSpacing()").await?, "pool tickSpacing()")?;
     // Before anything else is read from it: a pool that is not this NFT's pool is a
     // configuration error, said as one, rather than a failed read further down.
-    check_pool_is_the_nfts_pool(cfg, &pool, &decoded, &pool_token0, &pool_token1, pool_tick_spacing)?;
+    check_pool_is_the_nfts_pool(cfg, &npm, &pool, &decoded, &pool_nft, &pool_token0, &pool_token1, pool_tick_spacing)?;
     let pool_fee = word_i32(read(pool.clone(), CL_POOL_FEE.to_string(), 84, "pool fee()").await?, "pool fee()")?;
     let pool_fee_pips = u32::try_from(pool_fee)
         .map_err(|_| anyhow::anyhow!("position {}: Aero CL pool fee() is negative: {}", cfg.id, pool_fee))?;
@@ -429,20 +479,14 @@ pub(crate) async fn fetch_aero_cl_position(
                         let (f0, f1) = decode_collect_return(&hex).map_err(|e| ctx(e, "collect()"))?;
                         (None, AeroClFees::Claimable(f0, f1))
                     }
-                    Ok(None) => {
-                        tracing::warn!(
-                            "position {}: collect() simulation from the wallet reverted; fees are unavailable this cycle",
-                            cfg.id
-                        );
-                        (None, AeroClFees::Unavailable)
-                    }
+                    Ok(None) => return Err(collect_reverted_error(&cfg.id, cfg.nft_id, &npm, wallet)),
                 }
             }
         }
     };
 
     let (raw, facts) = aero_cl_position_from_reads(
-        cfg, wallet, &npm, &pool, &decoded, &pool_token0, &pool_token1, pool_tick_spacing, pool_fee_pips,
+        cfg, wallet, &npm, &pool, &decoded, &pool_nft, &pool_token0, &pool_token1, pool_tick_spacing, pool_fee_pips,
         sqrt_price_x96, tick, staked_in_gauge, fees,
     )?;
     tracing::info!(

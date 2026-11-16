@@ -1,7 +1,8 @@
 //! Aero concentrated-liquidity (Slipstream) positions — issue #91.
 //!
 //! Every `REAL_*` constant below is a raw `eth_call` result captured from Base mainnet
-//! through https://base-rpc.publicnode.com on 2026-11-16, at a pinned block, and is
+//! through https://base-rpc.publicnode.com on 2026-11-16, at a pinned block (58061668,
+//! 58063800 or 58074373, as each group says), and is
 //! recorded with its call in ONCHAIN_INTEGRATION.md §8. Nothing here is hand-made
 //! except where a test says "synthetic".
 
@@ -53,6 +54,21 @@ const REAL_OWNER_OF_3117536: &str = "0x000000000000000000000000e3c74593442844087
 /// although positions() above reports tokensOwed0 = tokensOwed1 = 0.
 const REAL_COLLECT_3117536_FROM_OWNER: &str = "0x000000000000000000000000000000000000000000000000000000000001f8a80000000000000000000000000000000000000000000000000000000000000257";
 
+// ---- Block 58074373 (0x3762505, 2026-11-16 05:00:50 UTC): whose pool is it ----
+/// pool.nft() on the WETH/NOCK CL200 pool: the position manager above.
+const REAL_POOL_NFT: &str = "0x0000000000000000000000004857db576ee0e45f10525ec59527bfd10beec60b";
+/// The Uniswap v3 WETH/NOCK 1% pool: same tokens, and tickSpacing() = 200 as well.
+/// Its nft() call REVERTS (JSON-RPC error code 3, "execution reverted").
+const UNISWAP_V3_WETH_NOCK_POOL: &str = "0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a";
+const REAL_UNI_V3_POOL_TICK_SPACING: &str = "0x00000000000000000000000000000000000000000000000000000000000000c8";
+const REAL_UNI_V3_POOL_NFT_RESPONSE: &str = r#"{"jsonrpc":"2.0","id":1,"error":{"code":3,"message":"execution reverted"}}"#;
+/// The LEGACY Slipstream deployment (factory 0x5e7BB104…809A) has its own WETH/USDC
+/// CL100 pool, 0xb2cc224c…dc59, beside the current deployment's 0x2a430beb…bc24: same
+/// tokens, same tick spacing, another position manager. nft() of each:
+const LEGACY_WETH_USDC_CL100_POOL: &str = "0xb2cc224c1c9fee385f8ad6a55b4d94e92359dc59";
+const REAL_LEGACY_POOL_NFT: &str = "0x000000000000000000000000827922686190790b37229fd06084350e74485b72";
+const REAL_CURRENT_WETH_USDC_CL100_POOL_NFT: &str = "0x0000000000000000000000004857db576ee0e45f10525ec59527bfd10beec60b";
+
 fn cl_config() -> PositionConfig {
     let yaml = format!(
         "id: aero-cl200-weth-nock\nprotocol: aerodrome-cl\nnetwork: base\nnft_id: {NFT_ID}\nnpm_address: \"{NPM}\"\npool_address: \"{POOL}\"\n"
@@ -80,6 +96,7 @@ fn real_staked_position() -> (RawPosition, PositionFacts) {
         NPM,
         POOL,
         &decoded,
+        &pool_position_manager(&cfg.id, POOL, NPM, Some(REAL_POOL_NFT)).unwrap(),
         &address_from_word(REAL_POOL_TOKEN0).unwrap(),
         &address_from_word(REAL_POOL_TOKEN1).unwrap(),
         word_u(REAL_POOL_TICK_SPACING) as i32,
@@ -151,12 +168,11 @@ fn example_profile() -> OperatorProfile {
 }
 
 /// The tail of fetch_raw_data plus run_ingestion_cycle's pure steps, as tests.rs's
-/// golden_snapshot does, with the #91 step (apply_position_facts) in its real place.
+/// golden_snapshot does. The positions come from `snapshot_positions`, the same call
+/// run_ingestion_cycle publishes from (test_published_positions_carry_the_aero_cl_facts).
 fn snapshot_of(mut raw: RawOnChainData, profile: &OperatorProfile) -> SnapshotData {
     let (spot, eth) = (raw.spot_price_nock_usd, raw.live_eth_price_usd);
-    let mut positions = build_position_snapshots(&raw.positions, spot, eth);
-    apply_pool_activity(&mut positions, &raw.pool_liquidity);
-    apply_position_facts(&mut positions, &raw.position_facts);
+    let positions = snapshot_positions(&raw);
     raw.pool_mechanics = build_pool_mechanics(&raw.positions, spot, eth);
     raw.contract_fees = build_contract_fees(&positions, raw.live_gas_cost_usd, &raw.fees_not_lp_claimable);
     let plan = PlanContext {
@@ -385,7 +401,7 @@ fn test_aero_cl_out_of_range_is_single_sided_on_the_right_side() {
     let decoded = decode_slipstream_positions_return(REAL_POSITIONS_2914490).unwrap();
     let build = |tick: i32, sqrt: U256| {
         aero_cl_position_from_reads(
-            &cfg, WALLET, NPM, POOL, &decoded, WETH_BASE, NOCK_BASE, 200, 9700, sqrt, tick,
+            &cfg, WALLET, NPM, POOL, &decoded, NPM, WETH_BASE, NOCK_BASE, 200, 9700, sqrt, tick,
             Some(GAUGE.to_string()), AeroClFees::StakedNotLpClaimable,
         )
         .unwrap()
@@ -482,7 +498,7 @@ fn test_unstaked_nft_held_by_the_wallet_is_counted_with_its_collectable_fees() {
     let decoded = decode_slipstream_positions_return(REAL_POSITIONS_2914490).unwrap();
     let (sqrt, tick) = decode_slipstream_slot0(REAL_SLOT0).unwrap();
     let build = |fees: AeroClFees| {
-        aero_cl_position_from_reads(&cfg, WALLET, NPM, POOL, &decoded, WETH_BASE, NOCK_BASE, 200, 9700, sqrt, tick, None, fees)
+        aero_cl_position_from_reads(&cfg, WALLET, NPM, POOL, &decoded, NPM, WETH_BASE, NOCK_BASE, 200, 9700, sqrt, tick, None, fees)
             .unwrap()
     };
     let (p, facts) = build(AeroClFees::Claimable(f0, f1));
@@ -492,18 +508,43 @@ fn test_unstaked_nft_held_by_the_wallet_is_counted_with_its_collectable_fees() {
     assert_eq!(facts.fees_note, None);
     assert_eq!(fee_contract_for(&p.protocol, p.npm_address.as_deref(), &p.pool_id, None), NPM);
 
-    // A reverted collect() simulation is "unavailable", stated, never $0 earned.
-    let (p, facts) = build(AeroClFees::Unavailable);
-    assert_eq!(facts.fees_note.as_deref(), Some(AERO_CL_FEES_UNAVAILABLE_NOTE));
+    // Read fees are plain figures on every surface: no note, counted as claimable.
     let mut raw = real_cycle();
+    raw.fees_not_lp_claimable.clear();
     raw.position_facts.insert(p.position_id.clone(), facts);
     raw.positions[0] = p;
     let snap = snapshot_of(raw, &OperatorProfile::default());
-    assert_eq!(snap.contract_fees[0].amount, AERO_CL_FEES_UNAVAILABLE_NOTE);
-    assert!(!snap.contract_fees[0].claimable);
+    assert_eq!(snap.positions[0].fees_note, None);
     assert_eq!(snap.positions[0].staked_in_gauge, None);
-    let text = format_claim_simulation_text(&serde_json::to_value(&snap).unwrap());
-    assert!(text.contains(&format!("WETH+NOCK (Aero CL #2914490): {AERO_CL_FEES_UNAVAILABLE_NOTE}\n")), "{text}");
+    assert!(snap.contract_fees[0].amount.ends_with("WETH + 0.00000000 NOCK"), "{}", snap.contract_fees[0].amount);
+}
+
+#[test]
+fn test_unstaked_collect_revert_fails_the_cycle_instead_of_publishing_zero_fees() {
+    // An unstaked position's collect() simulation is a required read, like the Uniswap
+    // fee reads. A revert has no "unavailable" value to carry: AeroClFees has only the
+    // two cases below, so an unread fee cannot reach the snapshot, the claim payload or
+    // the fee totals as 0.
+    for fees in [AeroClFees::Claimable(1, 2), AeroClFees::StakedNotLpClaimable] {
+        match fees {
+            AeroClFees::Claimable(..) => assert_eq!(fees.note(), None),
+            AeroClFees::StakedNotLpClaimable => assert_eq!(fees.note(), Some(AERO_CL_STAKED_FEES_NOTE)),
+        }
+    }
+    let err = collect_reverted_error("aero-cl200-weth-nock", NFT_ID, NPM, WALLET).to_string();
+    assert!(err.starts_with("position aero-cl200-weth-nock: collect() for NFT #2914490"), "{err}");
+    assert!(err.contains("reverted"), "{err}");
+    assert!(err.contains("cannot be read"), "{err}");
+    assert!(err.contains("the cycle fails rather than report them as 0"), "{err}");
+    // The revert that triggers it is the node's own answer (JSON-RPC error code 3), as
+    // captured for the Uniswap v3 pool's nft() call; an outage is a different error.
+    let revert: serde_json::Value = serde_json::from_str(REAL_UNI_V3_POOL_NFT_RESPONSE).unwrap();
+    assert_eq!(classify_eth_call_response(&revert).unwrap(), None);
+    assert!(classify_eth_call_response(&json!({ "error": { "code": -32005, "message": "rate limited" } })).is_err());
+    // The adapter has no other outcome for that revert: the source says so.
+    let adapter = include_str!("adapters/aero_cl.rs");
+    assert!(adapter.contains("Ok(None) => return Err(collect_reverted_error("), "collect revert must fail the cycle");
+    assert!(!adapter.contains("fees unavailable"), "no degraded fee value may come back");
 }
 
 #[test]
@@ -511,25 +552,146 @@ fn test_pool_that_is_not_the_nfts_pool_is_a_configuration_error() {
     let cfg = cl_config();
     let decoded = decode_slipstream_positions_return(REAL_POSITIONS_2914490).unwrap();
     let (sqrt, tick) = decode_slipstream_slot0(REAL_SLOT0).unwrap();
-    let build = |t0: &str, t1: &str, spacing: i32| {
-        aero_cl_position_from_reads(&cfg, WALLET, NPM, POOL, &decoded, t0, t1, spacing, 9700, sqrt, tick, None, AeroClFees::Claimable(0, 0))
+    let build = |pool_nft: &str, t0: &str, t1: &str, spacing: i32| {
+        aero_cl_position_from_reads(
+            &cfg, WALLET, NPM, POOL, &decoded, pool_nft, t0, t1, spacing, 9700, sqrt, tick, None, AeroClFees::Claimable(0, 0),
+        )
     };
-    assert!(build(WETH_BASE, NOCK_BASE, 200).is_ok());
+    let real_nft = pool_position_manager(&cfg.id, POOL, NPM, Some(REAL_POOL_NFT)).unwrap();
+    assert_eq!(real_nft, NPM);
+    assert!(build(&real_nft, WETH_BASE, NOCK_BASE, 200).is_ok());
     for err in [
-        build(WETH_BASE, NOCK_BASE, 100).unwrap_err().to_string(), // another tick spacing
-        build(USDC_BASE, NOCK_BASE, 200).unwrap_err().to_string(), // another pair
-        build(NOCK_BASE, WETH_BASE, 200).unwrap_err().to_string(), // tokens swapped
+        build(NPM, WETH_BASE, NOCK_BASE, 100).unwrap_err().to_string(), // another tick spacing
+        build(NPM, USDC_BASE, NOCK_BASE, 200).unwrap_err().to_string(), // another pair
+        build(NPM, NOCK_BASE, WETH_BASE, 200).unwrap_err().to_string(), // tokens swapped
     ] {
         assert!(err.starts_with("Configuration error: position aero-cl200-weth-nock: pool_address"), "{err}");
     }
     // A token outside the registry is an explicit error, not a guessed symbol.
     let other = decode_slipstream_positions_return(REAL_POSITIONS_3117536).unwrap();
     let err = aero_cl_position_from_reads(
-        &cfg, WALLET, NPM, POOL, &other, &other.token0, &other.token1, 10, 100, sqrt, tick, None, AeroClFees::Claimable(0, 0),
+        &cfg, WALLET, NPM, POOL, &other, NPM, &other.token0, &other.token1, 10, 100, sqrt, tick, None, AeroClFees::Claimable(0, 0),
     )
     .unwrap_err()
     .to_string();
     assert!(err.contains("Unregistered token"), "{err}");
+}
+
+#[test]
+fn test_pool_of_another_position_manager_is_a_configuration_error_from_real_reads() {
+    let cfg = cl_config();
+    let decoded = decode_slipstream_positions_return(REAL_POSITIONS_2914490).unwrap();
+    let (sqrt, tick) = decode_slipstream_slot0(REAL_SLOT0).unwrap();
+
+    // (a) The Uniswap v3 WETH/NOCK 1% pool, the entry just above this one in the example
+    // config: same token0/token1 and, really, the same tick spacing (200). Tokens and
+    // spacing alone would accept it; its nft() call reverts, and that is the answer.
+    assert_eq!(word_u(REAL_UNI_V3_POOL_TICK_SPACING), 200);
+    let reverted: serde_json::Value = serde_json::from_str(REAL_UNI_V3_POOL_NFT_RESPONSE).unwrap();
+    let nft_call = classify_eth_call_response(&reverted).unwrap();
+    assert_eq!(nft_call, None, "a revert, not an outage");
+    let err = pool_position_manager(&cfg.id, UNISWAP_V3_WETH_NOCK_POOL, NPM, nft_call.as_deref())
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.starts_with(
+            "Configuration error: position aero-cl200-weth-nock: pool_address 0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a is not an Aero CL pool of position manager 0x4857db576ee0e45f10525ec59527bfd10beec60b"
+        ),
+        "{err}"
+    );
+    assert!(err.contains("nft() call reverts"), "{err}");
+    // An address with no such function at all (empty return data) is the same error.
+    let err = pool_position_manager(&cfg.id, WALLET, NPM, Some("")).unwrap_err().to_string();
+    assert!(err.starts_with("Configuration error") && err.contains("returned no address"), "{err}");
+
+    // (b) The legacy Slipstream deployment's pool for a pair: same tokens and spacing
+    // as the current deployment's pool, but its nft() is the legacy position manager.
+    let legacy_nft = pool_position_manager(&cfg.id, LEGACY_WETH_USDC_CL100_POOL, NPM, Some(REAL_LEGACY_POOL_NFT)).unwrap();
+    assert_eq!(legacy_nft, "0x827922686190790b37229fd06084350e74485b72");
+    assert_eq!(address_from_word(REAL_CURRENT_WETH_USDC_CL100_POOL_NFT).unwrap(), NPM);
+    // Applied to the operator's NFT with every other read matching: still refused,
+    // before any amount is computed at that pool's price.
+    let err = aero_cl_position_from_reads(
+        &cfg, WALLET, NPM, LEGACY_WETH_USDC_CL100_POOL, &decoded, &legacy_nft, WETH_BASE, NOCK_BASE, 200, 9700, sqrt, tick,
+        None, AeroClFees::Claimable(0, 0),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.starts_with(
+            "Configuration error: position aero-cl200-weth-nock: pool_address 0xb2cc224c1c9fee385f8ad6a55b4d94e92359dc59 is not a pool of position manager 0x4857db576ee0e45f10525ec59527bfd10beec60b (its nft() is 0x827922686190790b37229fd06084350e74485b72)"
+        ),
+        "{err}"
+    );
+    // The address comparison ignores case and the 0x prefix.
+    assert!(check_pool_is_the_nfts_pool(&cfg, &NPM.to_uppercase().replace("0X", "0x"), POOL, &decoded, NPM, WETH_BASE, NOCK_BASE, 200).is_ok());
+}
+
+// ------------------------------------------------------------------
+// What is published: the snapshot's own positions carry the Aero CL facts
+// ------------------------------------------------------------------
+
+#[test]
+fn test_published_positions_carry_the_aero_cl_facts() {
+    // run_ingestion_cycle publishes `snapshot_positions(&raw_data)`. For the real
+    // staked position that row must carry the staking, the fees note and the tick
+    // spacing: without them the card prints "Fees: $0.000000" and the claim payload
+    // simulates a collect() that reverts (the pre-release bug this test pins).
+    let raw = real_cycle();
+    let published = snapshot_positions(&raw);
+    assert_eq!(published.len(), 1);
+    let p = &published[0];
+    assert_eq!(p.staked_in_gauge.as_deref(), Some(GAUGE));
+    assert_eq!(p.fees_note.as_deref(), Some(AERO_CL_STAKED_FEES_NOTE));
+    assert_eq!(p.tick_spacing, Some(200));
+    assert_eq!(p.pool_active, Some(true));
+    let json = serde_json::to_value(p).unwrap();
+    assert_eq!(json["staked_in_gauge"], GAUGE);
+    assert_eq!(json["fees_note"], AERO_CL_STAKED_FEES_NOTE);
+    assert_eq!(json["tick_spacing"], 200);
+    // So the claim payload, which reads the published snapshot, settles it without a
+    // simulation and keeps it out of the totals of the actions that can execute.
+    let mut action = ClaimFeeAction {
+        platform: AERO_CL_PROTOCOL.to_string(),
+        label: String::new(),
+        to: NPM.to_string(),
+        data: build_v3_collect_calldata(NFT_ID, WALLET),
+        value: "0x0".to_string(),
+        expected_amount_0: None,
+        expected_amount_1: None,
+        expected_usd: None,
+        gas_estimate: None,
+        gas_usd: None,
+        simulation: "unavailable".to_string(),
+        simulation_detail: None,
+    };
+    assert!(aero_cl_mark_not_claimable(&mut action, Some(p)));
+    assert_eq!(action.simulation, "not_claimable");
+    let mut v4 = action.clone();
+    v4.platform = "uniswap-v4".to_string();
+    v4.simulation = "success".to_string();
+    v4.gas_usd = Some("0.0100".to_string());
+    assert_eq!(
+        claim_payload_totals(&[v4, action], "1.00", true),
+        (Some("0.0100".to_string()), Some("0.9900".to_string()))
+    );
+    // Without the facts the same reads give the row the bug published: this is what
+    // the two bare steps produce, and why nothing may publish from them directly.
+    let mut bare = build_position_snapshots(&raw.positions, raw.spot_price_nock_usd, raw.live_eth_price_usd);
+    apply_pool_activity(&mut bare, &raw.pool_liquidity);
+    assert_eq!(bare[0].staked_in_gauge, None);
+    assert_eq!(bare[0].fees_note, None);
+    // Both production call sites go through the one function (source check: the cycle
+    // itself needs a database and a node, so it cannot run here).
+    let ingest = include_str!("ingest.rs");
+    assert!(ingest.contains("let positions = snapshot_positions(&raw_data);"), "run_ingestion_cycle must publish snapshot_positions");
+    assert!(!ingest.contains("build_position_snapshots("), "run_ingestion_cycle must not rebuild positions without the facts");
+    let onchain = include_str!("onchain.rs");
+    assert!(onchain.contains("snapshot_positions_from(&raw_positions,"), "fetch_raw_data must build fee rows from the same positions");
+    assert!(!onchain.contains("build_position_snapshots("));
+    // The snapshot the golden file pins is built from the same call.
+    let snap = snapshot_of(real_cycle(), &example_profile());
+    assert_eq!(serde_json::to_value(&snap.positions).unwrap(), serde_json::to_value(&published).unwrap());
 }
 
 // ------------------------------------------------------------------
@@ -561,6 +723,24 @@ fn test_staked_position_fees_are_not_lp_claimable_on_every_surface() {
     assert!(text.contains(&format!("  - WETH+NOCK (Aero CL #2914490): {AERO_CL_STAKED_FEES_NOTE}\n")), "{text}");
     assert!(!text.contains("Aero CL #2914490): 0."), "{text}");
     assert!(!text.to_lowercase().contains("uniswap"), "{text}");
+    // Gas was read ($0.0041 on the row); with nothing claimable there is no claim to
+    // cost, which is said as such and not as a failed gas estimate.
+    assert_eq!(f.gas_break_even_usd, "0.0041");
+    assert!(text.contains("• Estimated Gas: n/a (nothing LP-claimable)\n"), "{text}");
+    assert!(text.contains("• Net Accretion if Harvested: n/a (nothing LP-claimable)\n"), "{text}");
+    assert!(!text.contains("live gas estimate unavailable"), "{text}");
+    // No fee rows at all keeps the old wording (golden_snapshot.json pins it).
+    let none = format_claim_simulation_text(&json!({ "contract_fees": [] }));
+    assert!(none.contains("• Estimated Gas: unavailable\n"), "{none}");
+    // A claimable row beside it: gas and totals come from that row alone.
+    let mut both = serde_json::to_value(&snap).unwrap();
+    both["contract_fees"].as_array_mut().unwrap().push(json!({
+        "fee_token_symbol": "USDC+NOCK (Uniswap V4 #1)", "amount": "0.1 USDC + 2 NOCK",
+        "amount_usd": "0.12", "claimable": true, "gas_break_even_usd": "0.0014"
+    }));
+    let text = format_claim_simulation_text(&both);
+    assert!(text.contains("• Estimated Gas: ~$0.0014 USD\n"), "{text}");
+    assert!(text.contains("• Total Gross Claimable: $0.1200 USD\n"), "{text}");
     // Even when a caller forgets to list the id, the note alone keeps it not claimable.
     let fees = build_contract_fees(&snap.positions, 0.0041, &[]);
     assert_eq!(fees[0].amount, AERO_CL_STAKED_FEES_NOTE);
@@ -599,6 +779,22 @@ fn test_claim_payload_marks_a_staked_position_not_claimable() {
     let mut a = action();
     assert!(!aero_cl_mark_not_claimable(&mut a, Some(&unstaked)));
     assert_eq!(a.simulation, "unavailable");
+    // A row that carries a fees note but no gauge (no adapter emits one today; a stored
+    // snapshot or a later note could): its placeholder zeros are never copied in as
+    // expected amounts. Settled "unavailable" with the note, nothing expected.
+    let mut noted = unstaked.clone();
+    noted.fees_note = Some("fees not read this cycle".to_string());
+    assert_eq!((noted.tokens_owed_0.as_str(), noted.tokens_owed_1.as_str()), ("0.000000", "0.000000"));
+    let mut a = action();
+    a.expected_amount_0 = Some("0.000000".to_string());
+    a.expected_amount_1 = Some("0.000000".to_string());
+    assert!(aero_cl_mark_not_claimable(&mut a, Some(&noted)));
+    assert_eq!(a.simulation, "unavailable");
+    assert_eq!(a.simulation_detail.as_deref(), Some("fees not read this cycle"));
+    assert_eq!((a.expected_amount_0, a.expected_amount_1, a.expected_usd), (None, None, None));
+    // A blank note is no note.
+    noted.fees_note = Some("  ".to_string());
+    assert!(!aero_cl_mark_not_claimable(&mut action(), Some(&noted)));
     // Not in the snapshot: unknown, never simulated blind, never "success".
     let mut a = action();
     assert!(aero_cl_mark_not_claimable(&mut a, None));
@@ -649,6 +845,67 @@ fn test_aero_cl_is_never_offered_a_rebuild_deposit_and_links_to_the_aero_app() {
         snap.derived_metrics.global_status.shot_advice_action, snap.derived_metrics.global_status.shot_advice_details
     );
     assert!(!advice.contains("AERO"), "{advice}");
+}
+
+#[test]
+fn test_aero_cl_without_an_eth_leg_is_still_not_sized_for_a_rebuild() {
+    // Synthetic: a USDC/NOCK Aero CL position (no such pool is tracked; the real
+    // liquidity and ticks are reused, only the pair is made up). It has no gas leg, so
+    // only the explicit Aero CL rule keeps it out: the app's deposit link would mint a
+    // new NFT that NockNock does not track.
+    let tok = |symbol: &str, address: &str, decimals: i32| PositionTokenInfo {
+        address: address.to_string(),
+        symbol: symbol.to_string(),
+        decimals,
+    };
+    // A floor the wallet clears with room to spare, so that funding is not what stops it.
+    let profile = OperatorProfile { treasury_floor_nock: 50_000.0, ..example_profile() };
+    for staked in [true, false] {
+        let mut raw = real_cycle();
+        let id = raw.positions[0].position_id.clone();
+        raw.positions[0].token0 = tok("USDC", USDC_BASE, 6);
+        raw.positions[0].amount0 = 20.0;
+        if !staked {
+            raw.position_facts.get_mut(&id).unwrap().staked_in_gauge = None;
+            raw.position_facts.get_mut(&id).unwrap().fees_note = None;
+            raw.fees_not_lp_claimable.clear();
+        }
+        let snap = snapshot_of(raw, &profile);
+        let lp = &snap.derived_metrics.lp_rebuild;
+        assert_eq!(lp.status, "under_target", "the LP target is unmet, so a sizable position would be offered a deposit");
+        assert!(lp.suggestions.is_empty(), "staked={staked}: {:?}", lp.suggestions);
+        assert_eq!(lp.excluded.len(), 1);
+        assert_eq!(lp.excluded[0].label, "Aero CL USDC/NOCK 0.97% #2914490");
+        assert_eq!(lp.excluded[0].reason, LP_AERO_CL_REASON);
+        // No surface suggests adding to the NFT or prints a deposit link for it.
+        let full = serde_json::to_value(&snap).unwrap();
+        for text in [
+            full["derived_metrics"]["global_status"]["shot_advice_details"].as_str().unwrap().to_string(),
+            format_accumulation_plan_text(&full),
+            format_shot_advice_text(&full),
+        ] {
+            assert!(!text.contains("to Aero CL"), "{text}");
+            assert!(!text.contains("app.aero.xyz/deposit"), "{text}");
+        }
+    }
+    assert!(LP_AERO_CL_REASON.starts_with("Aero CL: not sized"));
+    assert!(!LP_AERO_CL_REASON.to_lowercase().contains("uniswap"));
+    // The same wallet with a Uniswap v3 USDC/NOCK position of that shape IS sized: the
+    // rule is about the protocol, and the three existing protocols are untouched by it.
+    let mut raw = real_cycle();
+    let old_id = raw.positions[0].position_id.clone();
+    raw.positions[0].token0 = tok("USDC", USDC_BASE, 6);
+    raw.positions[0].amount0 = 20.0;
+    raw.positions[0].protocol = "uniswap-v3".to_string();
+    raw.positions[0].position_id = "uniswap-v3:base:2914490".to_string();
+    let liq = raw.pool_liquidity.remove(&old_id).unwrap();
+    raw.pool_liquidity.insert("uniswap-v3:base:2914490".to_string(), liq);
+    raw.position_facts.clear();
+    raw.fees_not_lp_claimable.clear();
+    let snap = snapshot_of(raw, &profile);
+    let lp = &snap.derived_metrics.lp_rebuild;
+    assert_eq!(lp.suggestions.len(), 1, "{:?}", lp.excluded);
+    assert_eq!(lp.suggestions[0].label, "v3 USDC/NOCK 0.97% #2914490");
 }
 
 #[test]

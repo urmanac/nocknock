@@ -119,6 +119,36 @@ pub(crate) fn apply_position_facts(positions: &mut [Position], facts: &HashMap<S
     }
 }
 
+/// The snapshot's `positions` array for one cycle's reads: built, then stamped with pool
+/// activity and the per-protocol facts. The ONE place those three steps are chained:
+/// fetch_raw_data (for `contract_fees`) and run_ingestion_cycle (for the published
+/// snapshot) both call it, so what is published can never lack a stamp the fee rows
+/// were built from (the v0.6.0 pre-release bug: `staked_in_gauge` and `fees_note` were
+/// stamped only on the copy used for `contract_fees`). Pure.
+pub(crate) fn snapshot_positions_from(
+    raw_positions: &[RawPosition],
+    nock_usd: f64,
+    eth_usd: f64,
+    pool_liquidity: &HashMap<String, String>,
+    position_facts: &HashMap<String, PositionFacts>,
+) -> Vec<Position> {
+    let mut positions = build_position_snapshots(raw_positions, nock_usd, eth_usd);
+    apply_pool_activity(&mut positions, pool_liquidity);
+    apply_position_facts(&mut positions, position_facts);
+    positions
+}
+
+/// `snapshot_positions_from` over a finished cycle's reads. Pure.
+pub(crate) fn snapshot_positions(raw: &RawOnChainData) -> Vec<Position> {
+    snapshot_positions_from(
+        &raw.positions,
+        raw.spot_price_nock_usd,
+        raw.live_eth_price_usd,
+        &raw.pool_liquidity,
+        &raw.position_facts,
+    )
+}
+
 /// One PoolMechanic per tracked position's pool. volatile_assets carry the tracked
 /// wallet's amounts in that pool (NOT pool-wide reserves).
 pub(crate) fn build_pool_mechanics(raw_positions: &[RawPosition], nock_usd: f64, eth_usd: f64) -> Vec<PoolMechanic> {
@@ -158,7 +188,7 @@ pub(crate) fn build_pool_mechanics(raw_positions: &[RawPosition], nock_usd: f64,
 
 /// One ContractFee per tracked position with its unclaimed fees. A position listed in
 /// `not_lp_claimable` (an Aero pool whose claimFees() reverts, or an Aero CL position
-/// whose fees are not a readable LP claim) says so in `amount` and is not claimable,
+/// staked in its gauge) says so in `amount` and is not claimable,
 /// rather than reading as $0 of fees. An Aero CL position carries its own reason
 /// (`fees_note`, stamped by apply_position_facts).
 pub(crate) fn build_contract_fees(positions: &[Position], live_gas_cost_usd: f64, not_lp_claimable: &[String]) -> Vec<ContractFee> {

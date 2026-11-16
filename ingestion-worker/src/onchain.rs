@@ -285,9 +285,8 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
         })
         .collect();
 
-    let mut positions = build_position_snapshots(&raw_positions, spot_price, live_eth_price_usd);
-    apply_pool_activity(&mut positions, &pool_liquidity);
-    apply_position_facts(&mut positions, &position_facts);
+    let positions =
+        snapshot_positions_from(&raw_positions, spot_price, live_eth_price_usd, &pool_liquidity, &position_facts);
     let pool_mechanics = build_pool_mechanics(&raw_positions, spot_price, live_eth_price_usd);
     let contract_fees = build_contract_fees(&positions, live_gas_cost_usd, &fees_not_lp_claimable);
 

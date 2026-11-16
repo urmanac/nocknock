@@ -1007,7 +1007,9 @@ database_url: "postgresql://localhost/test"
         assert!(!fees[0].claimable);
         let text = format_claim_simulation_text(&json!({ "contract_fees": fees }));
         assert!(text.contains("not LP-claimable (claimFees() reverts); AERO rewards not read (#93)"), "{text}");
-        assert!(text.contains("Estimated Gas: unavailable"), "{text}");
+        // Nothing is claimable, so there is no claim to cost: said as such since v0.6.0
+        // (#91), no longer as "live gas estimate unavailable" (gas was read: 0.0037).
+        assert!(text.contains("Estimated Gas: n/a (nothing LP-claimable)"), "{text}");
         // Without the flag the same position reads as ordinary fees.
         let plain = build_contract_fees(&snaps, 0.0037, &[]);
         assert_ne!(plain[0].amount, AERO_NOT_LP_CLAIMABLE);
