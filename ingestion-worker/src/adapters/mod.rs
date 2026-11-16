@@ -1,4 +1,6 @@
 use crate::*;
+mod uniswap_v4;
+pub(crate) use uniswap_v4::*;
 
 /// Stable identifier shared by config rules and RawPosition.position_id.
 pub(crate) fn position_key(c: &PositionConfig) -> String {
