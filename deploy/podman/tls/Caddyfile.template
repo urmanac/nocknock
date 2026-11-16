@@ -1,0 +1,45 @@
+# NockNock opt-in TLS proxy (#89). Rendered by deploy/podman/tls/render.sh into
+# ~/nocknock/tls/Caddyfile on the host. Do not edit it there: change the inputs and
+# redeploy with NOCKNOCK_TLS=1.
+#
+# Caddy signs the certificate with its own private CA ("tls internal"). A phone trusts
+# it only after that CA's root certificate is installed on the phone: docs/kb/
+# how-to-phone-install-notifications-tls.md explains what that means.
+{
+	# No admin API. Nothing reloads this instance; a redeploy restarts it.
+	admin off
+	# The CA stays in the container's /data volume. Without this Caddy tries to add its
+	# root to a system trust store, which it cannot do here and should not.
+	skip_install_trust
+	# Only the one HTTPS port is published, so there is no port-80 redirect listener.
+	auto_https disable_redirects
+	servers {
+		# HTTP/3 would advertise a UDP port that is not published.
+		protocols h1 h2
+	}
+	# A browser opening https://<ip>:<port> sends no server name, and behind Podman's
+	# port forwarding Caddy cannot tell which address was dialled. When an IP address is
+	# among the names, the next line names the certificate to answer with in that case.
+	@DEFAULT_SNI@
+}
+
+@SITES@ {
+	tls internal
+
+	# The CA's public root certificate, so a phone can download and install it. This
+	# serves exactly one file. The CA's private key is never reachable from here.
+	handle /nocknock-root-ca.crt {
+		root * /data/caddy/pki/authorities/local
+		rewrite * /root.crt
+		header Content-Type application/x-x509-ca-cert
+		file_server
+	}
+
+	# Everything else goes to the dashboard container, which serves the app and proxies
+	# /v1 and /health to the worker exactly as it does on plain HTTP. No HSTS header is
+	# added: it would apply to the whole hostname and break http://<host>:3000,
+	# http://<host>:8081 and anything else on this host served over plain HTTP.
+	handle {
+		reverse_proxy nocknock-frontend:80
+	}
+}
