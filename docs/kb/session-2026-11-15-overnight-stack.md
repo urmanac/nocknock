@@ -1,4 +1,4 @@
-# Session 2026-11-14 (evening) → 2026-11-16: v0.5.2, v0.5.3, and the v0.6.0–v0.8.0 stack
+# Session 2026-11-14 (evening) → 2026-11-16: v0.5.2, v0.5.3, and v0.8.0 (the v0.6.0–v0.8.0 stack)
 
 *Claude: Opus 5.5, then Fable 5.2 with Ultracode workflows. It follows the planning session in
 [session-2026-11-14-planning-lore-mining.md](session-2026-11-14-planning-lore-mining.md).
@@ -21,13 +21,40 @@ The last part ran overnight without the operator, by their instruction.*
 - chudmax runs **v0.5.3** at the end of this session. Nothing from the stack below was
   deployed.
 
+## Afterwards, on 2026-11-16: merged and deployed
+
+The sections below were written overnight, before the operator was back. This is what
+happened next, at the operator's instruction ("Yes, merge in order", and a standing
+authorization to deploy to chudmax whenever it is appropriate):
+
+- **Merged.** #120 to #126 went into `main` one at a time, in order, each after a green CI
+  run against `main`. Retargeting a pull request does not start CI, so each was closed and
+  reopened to trigger it. `main` at `1f659c2` is byte-identical to the stack tip that was
+  reviewed and tested, and CI on `main` is green.
+- **Deployed.** `main` at `1f659c2` was deployed to chudmax with the operator's config
+  unchanged (three positions; the Aero CL block has not been added). Checked there:
+  `/health` ok with `last_error: null`; snapshot spec 2.6.0; migrations 10, 11 and 12
+  applied; the plan still reads $60 of $100 over 3 buys at $0.011768; fill detection `ok`
+  back to the plan anchor with nothing uncounted; AERO read (0.16 unclaimed in the basic
+  gauge); the harvest ledger and the tax export unchanged; the MCP playtest passed on both
+  transports; the dashboard rendered with no console errors.
+- **Each buy's reference spot** was written by the corrected lookup (#129) from the
+  worker's own reads within a minute of the swap, and equals the cost-basis panel's figure
+  for the same buy.
+- **Released as v0.8.0** the same day, with the operator's authorization ("Yes, tag
+  v0.8.0"): one minor release for all three milestones. The release pull request added the
+  CHANGELOG version section and moved the worker, brain and frontend versions from 0.5.0
+  to 0.8.0; the tagged commit was then deployed so chudmax matches the tag.
+- **Found on chudmax:** the average-cost chart labels every hourly backfilled candle as a
+  gap (#137, cosmetic).
+
 ## What was filed
 
 - Milestones v0.6.0 (#97, #91, #93, #118), v0.7.0 (#115, #98), v0.8.0 (#89).
 - New issues: #118 (fill detection), #119 (from-zero ingestion, unscheduled). #115 was
   rewritten to cover route quotes only.
 
-## The stack (nothing merged, nothing tagged, nothing deployed)
+## The stack (as it stood overnight: nothing merged, tagged or deployed)
 
 Seven pull requests, each based on the one before it:
 
@@ -138,4 +165,4 @@ hardening), #134 (overlapping ingest cycles), #135 (notice order in the directiv
   "Decisions taken for you". None of them chooses an allocation number.
 - **Going back is not free.** Once a build with migrations 10 to 12 has run against a
   database, v0.5.3 will not start on it (see AGENTS.md section 13).
-- `Cargo.toml` still says 0.5.0. Stale PR #59 is still open in milestone v0.4.0.
+- Stale PR #59 is still open in milestone v0.4.0.
