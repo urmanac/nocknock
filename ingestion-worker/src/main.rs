@@ -52,6 +52,10 @@ mod claims;
 use claims::*;
 mod mcp_http;
 use mcp_http::*;
+mod aero_rewards;
+use aero_rewards::*;
+mod aero_text;
+use aero_text::*;
 mod fill_verify;
 use fill_verify::*;
 mod fill_detection;
@@ -126,20 +130,24 @@ impl Default for OperatorProfile {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PositionConfig {
     pub id: String,
-    /// "uniswap-v4" | "uniswap-v3" | "aerodrome" (volatile x*y=k pool, full range)
+    /// "uniswap-v4" | "uniswap-v3" | "aerodrome" (volatile x*y=k pool, full range) |
+    /// "aerodrome-cl" (Aero concentrated-liquidity NFT, staked or not; v0.6.0, #91).
+    /// Any other value is a configuration error (adapters::validate_positions_config).
     pub protocol: String,
     #[serde(default = "default_network")]
     pub network: String,
-    /// Position NFT id (Uniswap). Unused for aerodrome, whose position is an LP-token
-    /// balance in `pool_address`.
+    /// Position NFT id (Uniswap, aerodrome-cl). Unused for aerodrome, whose position is
+    /// an LP-token balance in `pool_address`.
     #[serde(default)]
     pub nft_id: u64,
     /// aerodrome only: swap fee in basis points, for display (default 30 = 0.30%).
     #[serde(default)]
     pub fee_bps: Option<u32>,
-    /// aerodrome only: the pool's gauge. LP tokens staked there (the aero.xyz app stakes
+    /// aerodrome: the pool's gauge. LP tokens staked there (the aero.xyz app stakes
     /// on deposit) are added to the wallet's own balance; without it a staked position
     /// reads as empty.
+    /// aerodrome-cl: optional. The gauge is read from the pool itself; when this is set
+    /// it must match, or the cycle fails with a configuration error.
     #[serde(default)]
     pub gauge_address: Option<String>,
     /// Where the operator adds liquidity to this position, when the default link is
@@ -150,10 +158,12 @@ pub struct PositionConfig {
     /// v4: bytes32 poolId. Unused for v3 (pool comes from the NPM decode).
     #[serde(default)]
     pub pool_id: Option<String>,
-    /// v3 only: the canonical NonfungiblePositionManager for the network.
+    /// v3: the canonical NonfungiblePositionManager for the network.
+    /// aerodrome-cl: the Aero CL (Slipstream) position manager that minted the NFT.
     #[serde(default)]
     pub npm_address: Option<String>,
-    /// v3 only: pool contract address (pre-resolved via factory getPool).
+    /// v3, aerodrome, aerodrome-cl: pool contract address (v3: pre-resolved via factory
+    /// getPool; aerodrome-cl: checked each cycle against the NFT's tokens and tick spacing).
     #[serde(default)]
     pub pool_address: Option<String>,
     /// v4 only: currency0/currency1 per the pool's canonical ordering (validated
@@ -255,6 +265,10 @@ fn default_eth_price_pool() -> Option<String> {
     Some(DEFAULT_ETH_PRICE_POOL.to_string())
 }
 
+fn default_aero_price_pool() -> Option<String> {
+    Some(DEFAULT_AERO_PRICE_POOL.to_string())
+}
+
 #[allow(dead_code)]
 #[derive(Deserialize, Debug)]
 struct AppConfig {
@@ -284,6 +298,11 @@ struct AppConfig {
     /// Verified default (canonical v3 WETH/USDC 0.05% pool on Base).
     #[serde(default = "default_eth_price_pool")]
     eth_price_pool: Option<String>,
+    /// AERO/USDC pool whose slot0 prices AERO, the fourth pillar (v0.6.0, #93). Verified
+    /// default: the Aero CL200 AERO/USDC pool (ONCHAIN_INTEGRATION.md §9). Checked every
+    /// cycle: its tokens must be AERO and USDC and it must have in-range liquidity.
+    #[serde(default = "default_aero_price_pool")]
+    aero_price_pool: Option<String>,
     #[serde(default)]
     mcp_bearer_token: Option<String>,
     #[serde(default)]
@@ -448,8 +467,68 @@ struct RawOnChainData {
     /// Per-position rebuild controls from config, keyed by position_id.
     rebuild_rules: HashMap<String, RebuildRule>,
     /// position_ids of Aero positions whose claimFees() reverts: their fees are not
-    /// LP-claimable (shown as such, never as $0 earned).
+    /// LP-claimable (shown as such, never as $0 earned). Since v0.6.0 (#91) also an
+    /// Aero CL position staked in its gauge (swap fees go to the gauge); its
+    /// `position_facts` entry carries the reason.
     fees_not_lp_claimable: Vec<String>,
+    /// Facts only some protocols have (tick spacing, gauge staking, why a fee figure is
+    /// absent), keyed by position_id (v0.6.0, #91). No entry means none apply.
+    position_facts: HashMap<String, PositionFacts>,
+    /// AERO, the fourth pillar (v0.6.0, #93): wallet AERO, the AERO/USD price and the
+    /// unclaimed AERO of each staked Aero position. The default (test fixtures that do
+    /// not set it) is "nothing read": every AERO field is then null, never zero.
+    aero: AeroReads,
+}
+
+/// One cycle's AERO reads (v0.6.0, #93). Built by fetch_aero_reads and test fixtures.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct AeroReads {
+    /// Wallet AERO in human units. A required read in production (it is counted in the
+    /// total, so a failed read fails the cycle); None only in fixtures.
+    wallet_aero: Option<f64>,
+    /// AERO/USD from `aero_price_pool`, stale-pool guarded. None when it could not be
+    /// read; `price_note` then says why. Required only while the wallet holds AERO.
+    price_usd: Option<f64>,
+    price_note: Option<String>,
+    /// One entry per tracked Aero position that can earn AERO. None = not read at all
+    /// (fixtures); Some(empty) = read, and no tracked position is staked.
+    unclaimed: Option<Vec<AeroUnclaimed>>,
+}
+
+/// What one cycle learned about one position's unclaimed AERO (v0.6.0, #93).
+#[derive(Debug, Clone, PartialEq)]
+struct AeroUnclaimed {
+    position_id: String,
+    /// The gauge `earned` was read from; None when the position has no gauge to read.
+    gauge: Option<String>,
+    /// Unclaimed AERO in human units; None when it was not read (`note` says why).
+    amount: Option<f64>,
+    note: Option<String>,
+}
+
+/// The AERO pillar's figures, each None when it cannot be stated: an unread balance,
+/// an unread gauge, or an unpriced AERO. Never a zero stand-in. (v0.6.0, #93)
+#[derive(Debug, Default, Clone, PartialEq)]
+struct AeroPillar {
+    wallet_amount: Option<f64>,
+    wallet_usd: Option<f64>,
+    unclaimed_amount: Option<f64>,
+    unclaimed_usd: Option<f64>,
+    price_usd: Option<f64>,
+    /// Stated reason for every None above that a live cycle can produce.
+    note: Option<String>,
+}
+
+/// Per-position facts that only some protocols have (v0.6.0, #91). Carried beside
+/// RawPosition rather than in it; stamped onto the snapshot by apply_position_facts.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct PositionFacts {
+    /// Aero CL: the pool's tick spacing (the "200" in CL200).
+    tick_spacing: Option<i32>,
+    /// Aero CL: the gauge holding the NFT, when the tracked wallet staked it there.
+    staked_in_gauge: Option<String>,
+    /// Why this position reports no LP-claimable fee figure. None when fees were read.
+    fees_note: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
@@ -505,6 +584,31 @@ struct Position {
     /// no range to leave, and lower_price/upper_price are not meaningful. (2.2.0)
     #[serde(default)]
     full_range: bool,
+    /// Aero CL only: the pool's tick spacing, e.g. 200 for a CL200 pool. Absent for
+    /// every other protocol. (v0.6.0, #91)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tick_spacing: Option<i32>,
+    /// Aero CL only: the gauge the tracked wallet staked this NFT in. Absent when the
+    /// wallet holds the NFT itself and for every other protocol. (v0.6.0, #91)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    staked_in_gauge: Option<String>,
+    /// Present when tokens_owed_* and fees_usd are NOT a read of LP-claimable fees:
+    /// the reason, to show in their place (never "$0 earned"). Absent when fees were
+    /// read. (v0.6.0, #91)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fees_note: Option<String>,
+    /// AERO this position has earned in its gauge and not claimed, in AERO (gauge
+    /// `earned`). Present only for an Aero position whose gauge was read. Not counted in
+    /// amount_usd, fees_usd or the portfolio total. (v0.6.0, #93)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unclaimed_aero: Option<String>,
+    /// unclaimed_aero at this cycle's AERO/USD price; absent when AERO is unpriced. (v0.6.0, #93)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unclaimed_aero_usd: Option<String>,
+    /// Why unclaimed_aero is absent for an Aero position that could earn AERO: no gauge
+    /// is configured, or the gauge read failed. Never shown as 0. (v0.6.0, #93)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unclaimed_aero_note: Option<String>,
 }
 
 /// Per-position NOCK series entry for the asset aggregation chart (v2.0.0;
@@ -913,10 +1017,31 @@ struct GlobalStatus {
     total_eth_amount: Option<String>,
     #[serde(default)]
     total_eth_usd: Option<String>,
+    /// AERO/USD from the AERO price pool (v0.6.0, #93). Null when it could not be read
+    /// (`aero_note` says why) or the field is absent from an older snapshot.
+    #[serde(default)]
+    aero_price_usd: Option<String>,
+    /// Wallet AERO, the fourth pillar (v0.6.0, #93). Counted in total_portfolio_usd; never
+    /// cash, never deployable, no target, and NockNock gives no advice about it.
+    #[serde(default)]
+    wallet_aero_amount: Option<String>,
+    #[serde(default)]
+    wallet_aero_usd: Option<String>,
+    /// AERO earned in the gauges of tracked staked positions and not claimed (v0.6.0,
+    /// #93). NOT counted in total_portfolio_usd, like uncollected LP fees. Null when any
+    /// Aero position's gauge was not read (a failed read, a gauge that pays another
+    /// token, or no gauge_address): never a partial sum, never 0.
+    #[serde(default)]
+    unclaimed_aero_amount: Option<String>,
+    #[serde(default)]
+    unclaimed_aero_usd: Option<String>,
+    /// Stated reason whenever an AERO figure above is null in a live cycle (v0.6.0, #93).
+    #[serde(default)]
+    aero_note: Option<String>,
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
-const SNAPSHOT_SPEC_VERSION: &str = "2.4.0";
+const SNAPSHOT_SPEC_VERSION: &str = "2.5.0";
 
 /// The gas (wallet ETH + WETH) and ETH pillar figures, each None when it cannot be
 /// measured: unread wallet balances or an unpriced ETH. Never a zero stand-in.
@@ -1035,6 +1160,10 @@ struct FeeCollectionIndex {
     gas_break_even_usd: String,
     efficiency_ratio: f64,
     recommended_action: String,
+    /// With `not_claimable`: the position's own reason, when it has one (an Aero CL
+    /// position staked in its gauge). Absent otherwise. (v0.6.0, #91)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
 }
 
 // ============================================================
@@ -1084,6 +1213,12 @@ async fn main() -> Result<()> {
     // Load config: config.yaml.example is the base layer, config.yaml overrides it,
     // environment variables override both.
     let config = load_app_config("config.yaml.example", None, true)?;
+    // An unknown position protocol fails every cycle with this message (visible in
+    // /health); say it once at boot as well. The worker keeps serving so the error
+    // can be read from the dashboard and MCP rather than from a crash loop.
+    if let Err(e) = validate_positions_config(&config.positions) {
+        tracing::error!("{e}");
+    }
 
     // Initialize database
     let db = PgPool::connect(&config.database_url)
@@ -1413,5 +1548,9 @@ struct V3PositionDecoded {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_aero_cl;
+#[cfg(test)]
+mod tests_aero_rewards;
 #[cfg(test)]
 mod tests_fills;

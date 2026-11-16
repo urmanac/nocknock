@@ -29,6 +29,14 @@ pub(crate) const LP_SUGGESTION_MIN_USD: f64 = 5.0;
 pub(crate) const LP_GAS_LEG_REASON: &str =
     "needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions";
 
+/// Why an Aero CL position is never sized for a rebuild deposit (issue #91). Observed
+/// 2026-11-16: the Aero app's deposit link for a CL pool starts a NEW custom-range
+/// deposit, which mints another NFT that NockNock does not track; and adding liquidity
+/// to an existing NFT (staked in its gauge or not) has not been verified. A suggestion
+/// to "add to NFT #N" would send capital out of the tracked totals and the floor reading.
+pub(crate) const LP_AERO_CL_REASON: &str =
+    "Aero CL: not sized. The Aero app's deposit link opens a new position (a different NFT, which NockNock would not track), and adding to an existing NFT is not verified";
+
 /// Human amounts of token0/token1 that one USD of value buys in this position's range
 /// at the pool's current price. None when the range has no value at this price or a
 /// leg cannot be priced. Pure.
@@ -56,7 +64,8 @@ pub(crate) fn amounts_per_usd(p: &RawPosition, nock_usd: f64, eth_usd: f64) -> O
 /// so a deposit there would sit alone at a stale price), and the position must be in
 /// range unless its config makes an exception, and it must not need ETH/WETH: wallet
 /// ETH is gas, not investable capital (issue #94), so a position with an ETH or WETH
-/// leg is excluded and its share is redistributed to the eligible positions. Funding:
+/// leg is excluded and its share is redistributed to the eligible positions. An Aero CL
+/// position is excluded whatever its pair (LP_AERO_CL_REASON, issue #91). Funding:
 /// a suggestion is scaled down, never up, to what the wallet can supply; the limit is
 /// named.
 pub(crate) fn lp_rebuild_suggestions(
@@ -99,6 +108,13 @@ pub(crate) fn lp_rebuild_suggestions(
         }
         if is_eth_token(&p.token0) || is_eth_token(&p.token1) {
             skip(LP_GAS_LEG_REASON);
+            continue;
+        }
+        // After the gas rule, which applies to every protocol and is the more basic
+        // reason for a WETH pair: an Aero CL position without an ETH leg is still not
+        // sized, because no verified way to add to its NFT exists (issue #91).
+        if Protocol::parse(&p.protocol) == Some(Protocol::AeroCl) {
+            skip(LP_AERO_CL_REASON);
             continue;
         }
         eligible.push((p, rule.weight_bps));

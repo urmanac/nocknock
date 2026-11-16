@@ -169,7 +169,8 @@ describe('Freshness Contract', () => {
     for (const p of data.positions) {
       expect(typeof p.position_id).toBe('string');
       expect(p.network).toBe('base');
-      expect(['uniswap-v4', 'uniswap-v3', 'aerodrome']).toContain(p.protocol);
+      // 'aerodrome-cl': Aero concentrated-liquidity positions (v0.6.0, issue #91).
+      expect(['uniswap-v4', 'uniswap-v3', 'aerodrome', 'aerodrome-cl']).toContain(p.protocol);
       expect(typeof p.nft_id).toBe('number');
       expect(typeof p.pool_id).toBe('string');
       expect(typeof p.fee_tier_bps).toBe('number');
@@ -191,7 +192,7 @@ describe('Freshness Contract', () => {
     expect(ag.positions_nock.length).toBe(data.positions.length);
     expect(ag.tranche_1_nock).toBeUndefined();
     // Meta version: the current snapshot spec (specs/core/snapshot.yaml info.version).
-    expect(latestSnapshot!.meta.version).toBe('2.4.0');
+    expect(latestSnapshot!.meta.version).toBe('2.5.0');
   });
 
   it('2.3.0 pillars partition the total and the wallet reports its gas', () => {
@@ -202,7 +203,10 @@ describe('Freshness Contract', () => {
     const data = latestSnapshot!.data as any;
     const g = data.derived_metrics?.global_status;
     const n = (k: string) => parseFloat(g[k]);
-    expect(Math.abs(n('total_native_usd') + n('total_stable_usd') + n('total_eth_usd') - n('total_portfolio_usd'))).toBeLessThan(0.03);
+    // Wallet AERO is the fourth pillar once the worker reports it (#93); a worker that
+    // predates it has no such field and three pillars.
+    const aero = g.wallet_aero_usd == null ? 0 : n('wallet_aero_usd');
+    expect(Math.abs(n('total_native_usd') + n('total_stable_usd') + n('total_eth_usd') + aero - n('total_portfolio_usd'))).toBeLessThan(0.04);
     expect(n('eth_price_usd')).toBeGreaterThan(0);
     expect(n('wallet_gas_eth')).toBeGreaterThanOrEqual(0);
     expect(n('total_eth_usd')).toBeGreaterThanOrEqual(n('wallet_gas_usd'));

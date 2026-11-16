@@ -20,6 +20,9 @@ In short:
 - **Four pillars, not a pyramid.** The wallet holds NOCK, cash (USDC), gas (ETH) and AERO.
   NockNock neither minimizes nor maximizes any of them. LP positions are where the pillars
   work together, not a fifth pillar.
+- **AERO is read, never steered.** Since v0.6.0 NockNock reads the wallet's AERO and the
+  AERO each staked Aero position has earned and not claimed, and states the amounts. It
+  sets no target for AERO and gives no advice to claim, sell, hold or accumulate it.
 - **Gas is not cash.** ETH pays for transactions. It is never counted toward a cash
   reserve, and NockNock suggests no amount of it to hold
   ([`OPERATOR_GUIDANCE.md`](OPERATOR_GUIDANCE.md) §7.12).
@@ -35,10 +38,24 @@ In short:
 Everything comes from `ingestion-worker/config.yaml`:
 
 - `tracked_wallets`: the wallet to read.
-- `positions`: the LP positions to track (Uniswap v4, Uniswap v3, Aero volatile pools),
-  one of which is the NOCK/USD price source (`is_price_source: true`). Discovery-verified
-  identifiers for the original operator's positions are in
-  [`ONCHAIN_INTEGRATION.md`](ONCHAIN_INTEGRATION.md) §5.
+- `positions`: the LP positions to track (Uniswap v4, Uniswap v3, Aero volatile pools and,
+  since v0.6.0, Aero concentrated "CL" positions with `protocol: aerodrome-cl`, staked or
+  not), one of which is the NOCK/USD price source (`is_price_source: true`). A position
+  whose `protocol` is none of these is a configuration error, never a guess.
+  Discovery-verified identifiers for the original operator's positions are in
+  [`ONCHAIN_INTEGRATION.md`](ONCHAIN_INTEGRATION.md) §5; Aero CL is §8. An Aero CL position
+  is counted only after you add it to `positions:` (example in `config.yaml.example`):
+  until then it is not tracked and the totals leave it out.
+- AERO, the fourth pillar (since v0.6.0, [`ONCHAIN_INTEGRATION.md`](ONCHAIN_INTEGRATION.md)
+  §9), needs no switch. Every cycle reads the wallet's AERO (counted in the total, like
+  gas), the unclaimed AERO of each staked Aero position (an `aerodrome` position needs
+  its `gauge_address`; an `aerodrome-cl` position's gauge is read from its pool) and
+  AERO/USD from `aero_price_pool` (an AERO/USDC pool; the shipped default is verified and
+  refused if it has no in-range liquidity). Unclaimed AERO is shown beside uncollected LP
+  fees and is not in the total until you claim it. Anything that cannot be read says so
+  with the reason; it is never shown as 0. AERO is the token the Aero gauges pay
+  (`0x3f5bF3Ed…a4Ee`), not the older "Aerodrome" token with the same symbol: a legacy
+  gauge that pays the older token is stated as not read, never shown as AERO.
 - `operator_profile`: an optional NOCK floor, target weights, tax-reserve ratio and LP
   floor tolerance.
 - `accumulation_plan`: an optional dollar-cost-averaging plan that paces NOCK buys you
@@ -107,7 +124,8 @@ a reposition, with no net cash change. With no LP target configured it suggests 
   - Generates deterministic SHA-256 state hashes.
   - Implements snapshot deduplication to prevent database bloat.
 * **React Frontend Dashboard** (`frontend/`):
-  - 6 KPI Stat Cards: Sovereign NOCK Stack, USDC Stack, Net Portfolio, Claimable Yield, Floor Health, High-Water Mark.
+  - 7 KPI Stat Cards: Sovereign NOCK Stack, USDC Stack, Net Portfolio, Claimable Yield, Floor Health, High-Water Mark, AERO (wallet).
+  - Pillar line: NOCK · USDC · ETH · AERO, which add up to the total, with what is held as gas and as AERO and what AERO is unclaimed in each tracked gauge.
   - Tactical Shot Advice Cockpit Banner.
   - 7 Recharts panels with historical time-series curves and 100,000 NOCK Reference Line.
   - Client-side freshness validation (5-minute sync window, zero urgency).
@@ -249,9 +267,9 @@ To connect NockNock to Claude Desktop, Gemini Antigravity, Cursor, or Mecris, ad
 ```
 
 **Exposed MCP Tools:**
-- `get_portfolio_state`: Balances, the NOCK floor buffer (if you set a floor), and the directive.
+- `get_portfolio_state`: Balances, the four pillars (NOCK, USDC, ETH, AERO), gas held, AERO held and unclaimed, the NOCK floor buffer (if you set a floor), and the directive.
 - `get_shot_advice`: The current directive, its details, and the harvest rule.
-- `simulate_claim_fees`: Gas versus uncollected LP fees across the tracked LP positions.
+- `simulate_claim_fees`: Gas versus uncollected LP fees across the tracked LP positions. A position whose fees are not LP-claimable says why, followed by its unclaimed AERO (an amount, not a suggestion to claim).
 - `get_accumulation_plan`: Your DCA plan's status, next tranche, verified buys, swaps found on-chain that await your confirmation (listed only: MCP has no write tool), and the LP rebuild bias.
 
 Every answer ends with the snapshot's generation time and the worker's health.

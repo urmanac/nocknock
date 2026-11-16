@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — snapshot spec 2.5.0 (the whole wallet: #91, #93, #118)
+- `SNAPSHOT_SPEC_VERSION`, `specs/core/snapshot.yaml` and the frontend contract test move
+  from 2.4.0 to 2.5.0. Every field added by #91, #93 and #118 is optional or nullable, so a
+  2.4.0 reader still parses a 2.5.0 snapshot.
+- The golden snapshot was regenerated at this point: against the #93 golden the only
+  differences are `accumulation_plan.fill_detection: null` in the plan case and that
+  case's state hash.
+
 ### Added — fill detection for the accumulation plan (#118)
 - **The worker finds the plan's buys on-chain.** Each ingestion cycle, while a plan is
   active, it lists the NOCK transfers into the tracked wallet back to the plan anchor
@@ -67,9 +75,148 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   offers every buy since the anchor again.
 - **Config.** `fill_detection.enabled` (default `true`) turns the check off. There are no
   thresholds: detection filters nothing by size or price.
-- **Verified on Base** (ONCHAIN_INTEGRATION.md §8): tests run on real receipts. The
+- **Verified on Base** (ONCHAIN_INTEGRATION.md §10): tests run on real receipts. The
   plan's three buys qualify; four Uniswap fee claims and two Aero deposits that returned
   a NOCK refund do not.
+### Added — AERO rewards, the fourth pillar (#93)
+- **AERO is read every cycle.** The wallet's AERO balance, the AERO each staked Aero
+  position has earned in its gauge and not claimed, and an AERO/USD price. NockNock
+  states the amounts. It sets no target for AERO, puts no rebalancing pressure on it,
+  builds no claim transaction for it and gives no advice to claim, sell, hold or
+  accumulate it; no directive reads an AERO figure. A wallet holding only gas and AERO
+  is still "NOTHING TO TRACK YET", exactly as it would be without the AERO.
+- **Which AERO.** Two tokens on Base carry the symbol. The Aero gauges pay
+  `0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee` (name "Aero", 18 decimals): in two real
+  claims, one per gauge type, that token was minted to the claimer for exactly what
+  `earned` reported one block earlier. That is NockNock's AERO. The older
+  `0x940181a9…8631` (name "Aerodrome"), which issue #93 named, is not what these gauges
+  pay and is not read (ONCHAIN_INTEGRATION.md §9).
+- **How unclaimed AERO is read.** A basic (volatile pool) gauge answers `earned(address)`;
+  a CL gauge answers `earned(address,uint256[])` for the token ids the wallet staked.
+  Neither has `rewardToken()`, and the older `earned(address,uint256)` reverts on the CL
+  gauge. An `aerodrome` position is read through its `gauge_address`; an `aerodrome-cl`
+  position through the gauge the cycle proved it is staked in.
+- **A gauge that pays another token is not read as AERO.** A legacy Aerodrome gauge
+  (for example `0x4cbb6188…c3db`, the gauge of the legacy vAMM USDC/NOCK pool) answers
+  the same `earned(address)` but pays the older token `0x940181a9…8631`, and it does
+  have `rewardToken()`. So each cycle asks the gauge `rewardToken()` before `earned`: a
+  revert is the Aero app's gauge and is read; an answer other than NockNock's AERO is
+  stated on the position ("gauge … pays …, not AERO …") with no amount and no USD value.
+- **Price.** New optional config key `aero_price_pool`, an AERO/USDC pool whose `slot0`
+  prices AERO. Default: the Aero CL200 AERO/USDC pool
+  `0xd0acf293547457fb4fe9ee32ca93e89497626816`, the deepest found. Each cycle the pool's
+  tokens must be AERO and USDC and it must have in-range liquidity, or no price is used:
+  four other AERO/USDC pools on Base had none and showed $0.64 to $0.80 against a live
+  $0.418.
+- **Required and optional reads, as #94 decided for gas.** The wallet balance is required
+  (a failed read fails the cycle). The price is required while the wallet holds AERO,
+  because its value is in the total; while the wallet holds none, a failed price read
+  cannot fail the cycle and leaves AERO unpriced with the reason. A gauge read that
+  reverts or fails is stated on that position ("unclaimed AERO not read (…)") and makes
+  the unclaimed total null: never 0, never a partial sum. An `aerodrome` position with
+  no `gauge_address` says its AERO is not read, and it too makes the unclaimed total
+  null, because that position's AERO is part of what the wallet has earned.
+- **One total.** `total_portfolio_usd` now includes wallet AERO, and the cash and LP
+  targets, deviation weights, the high-water mark and history all use that one total.
+  **One-time step:** on the first cycle after the upgrade the total, and so the high-water
+  mark, rises by the value of any AERO already in the wallet (nothing for a wallet that
+  holds none, which is the operator's wallet on 2026-11-16). AERO still unclaimed in a
+  gauge is **not** in the total, exactly as uncollected LP fees are not: the total steps
+  up by its value when it is claimed.
+- **Pillars.** The pillar line is NOCK · USDC · ETH · AERO everywhere (dashboard, both MCP
+  transports) and the four add up to the total. The deviation matrix gains a fifth row,
+  "AERO (wallet)", with status `no_target`.
+- **Snapshot** (spec version unchanged until the v0.6.0 branches are stacked): new
+  `global_status` fields `aero_price_usd`, `wallet_aero_amount`, `wallet_aero_usd`,
+  `unclaimed_aero_amount`, `unclaimed_aero_usd` and `aero_note` (null when not read);
+  optional `positions[].unclaimed_aero`, `unclaimed_aero_usd` and `unclaimed_aero_note`; a
+  fifth `wallet_balances` row, AERO. A snapshot without them renders "not reported" or
+  "—", never 0.
+- **The "AERO rewards not read (#93)" text is gone.** A position whose fees are not
+  LP-claimable now says why and then states its AERO: "not LP-claimable (claimFees()
+  reverts); unclaimed AERO 0.121026 ($0.05)" in `contract_fees[].amount`, the velocity
+  row's `note` and the MCP claim text. `positions[].fees_note` and the claim payload's
+  `simulation_detail` carry the reason alone. A velocity row whose fees ARE claimable
+  (CLAIM_NOW, ACCUMULATE) says nothing about AERO, so a fee action never sits beside an
+  AERO amount; that position's AERO is on its card and in the pillar lines.
+- **Harvest ledger.** `POST /v1/execute/record-harvest` books an AERO `Transfer` to the
+  wallet in the recorded transaction (a gauge claim mints it, so the sender is the zero
+  address), valued from `aero_price_pool` read at the claim's block. When that read fails
+  or the pool had no in-range liquidity at that block the row has no USD value, never a
+  substitute. A receipt that pays only AERO is accepted. The Koinly export describes an
+  AERO row as "NockNock AERO reward claim (…)" and keeps the `income` label. With a
+  `tax_reserve_ratio` set, a priced AERO row counts toward the virtual tax reserve like
+  any other harvest row.
+- **Harvest ledger: one row per transaction and token, summed.** A claim from several
+  gauges in one transaction mints AERO to the wallet once per gauge. The ledger's key is
+  (transaction, token), so only the first mint was booked and the rest were reported as
+  already present. All Transfers of one token to the wallet in a recorded transaction
+  are now summed into its one row. This applies to USDC, NOCK and WETH as well, which
+  had the same limit. Rows recorded before this change are not rewritten.
+- **Harvest ledger: a row recorded without a price can be priced later.** If the price
+  read at the claim's block failed, the row was stored with no USD value and stayed that
+  way. Recording the same transaction again now fills the missing value from that
+  block's price (response field `priced`). A row that has a value is never changed.
+- **Dashboard.** A seventh stat card (AERO in the wallet), AERO lines under the pillar
+  line (held, unclaimed per position, price, and the reason for anything not read), an
+  unclaimed-AERO line on each staked position's card, and an AERO card in the Lite
+  cockpit. None of them has a button. The composition readout no longer counts wallet
+  AERO as "other legs": it states it ("AERO $0.57 (wallet; not cash)"), so the panel's
+  Total equals the parts shown.
+- **Golden files.** `testdata/golden_snapshot.json` and `golden_snapshot_aero_cl.json`
+  change by the new null fields, the AERO deviation row, the pillar line and the shortened
+  reasons; no number moved. A new `testdata/golden_snapshot_aero_rewards.json` is built
+  from reads at Base block 58077673: the operator's two staked positions with 12.043104
+  AERO ($5.03) unclaimed, and the same cycle with the amount of a real claim in the wallet.
+- New worker modules `aero_rewards` (reads, pillar, ledger pricing) and `aero_text` (the
+  AERO lines of the MCP text, one source file compiled into both the worker and
+  `nocknock-mcp`).
+
+### Added — Aero concentrated positions (#91)
+- **New position protocol `aerodrome-cl`.** An Aero concentrated-liquidity ("CL",
+  Slipstream) position is read from its NFT: tokens, tick spacing, ticks and liquidity from
+  the position manager, price, tick and the current swap fee from the pool. Amounts use the
+  same maths as Uniswap v3. Its NOCK counts toward the NOCK total and the floor, its WETH
+  toward the ETH pillar, and its range shows in the tick bracket panel, now with which side
+  an out-of-range position left on. Nothing is tracked until the position is added to
+  `positions:`; `config.yaml.example` carries a commented entry.
+- **Ownership is checked every cycle.** The Aero app stakes the NFT in the pool's gauge, so
+  `ownerOf` is the gauge. The position is counted only if the wallet holds the NFT or the
+  gauge lists it among the wallet's stakes (`stakedContains`); otherwise the cycle fails and
+  names the holder. A staked position says so (`positions[].staked_in_gauge`).
+- **Fees are stated truthfully.** Swap fees on staked liquidity go to the gauge, measured
+  on-chain (ONCHAIN_INTEGRATION.md §8), so a staked position shows "not LP-claimable
+  (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)" on
+  the card, in `contract_fees`, the velocity panel, the claim payload and the MCP text,
+  never $0 earned. An unstaked position's fees are what `collect` simulated from the wallet
+  returns; that read is required like the Uniswap fee reads, so if the simulation reverts
+  the cycle fails and says so, and no unread fee is published as 0. With nothing
+  LP-claimable in the book, the MCP claim text says "Estimated Gas: n/a (nothing
+  LP-claimable)" where it used to blame an unavailable gas estimate (this also changes
+  the text for a book holding only an Aero basic pool whose `claimFees()` reverts).
+- **The configured pool must be the NFT's pool.** The pool's `nft()` must be the
+  position's `npm_address`, and its tokens and tick spacing the NFT's; anything else is a
+  configuration error before any amount is computed. Tokens and spacing alone do not
+  identify it: the Uniswap v3 WETH/NOCK 1% pool also has tick spacing 200.
+- **No rebuild deposit is sized for an Aero CL position**, whatever its pair
+  (`lp_rebuild.excluded[]` states why): the Aero app's deposit link starts a new position,
+  a different NFT that NockNock would not track, and adding to an existing NFT is not
+  verified. A WETH pair keeps the gas reason it already had.
+- The tick bracket panel's new range line says "empty" for a ranged position that holds
+  nothing, on any protocol, where it would have said "in range, holding …".
+- **An unknown `protocol` is a configuration error.** It is reported before any chain read
+  ("Configuration error: position '…' has unknown protocol '…'") and by the claim payload.
+  Labels, deposit links, the fee contract, the pool liveness read and the claim payload used
+  to treat any protocol that was not `uniswap-v3` or `aerodrome` as Uniswap v4.
+- **Negative ticks decode.** Tick words are read as sign-extended `int24` and encoded the
+  same way in calldata; a negative tick used to fail the read (latent for the tracked
+  pairs, whose ticks are positive).
+- Snapshot (spec version unchanged until the v0.6.0 branches are stacked): optional
+  `positions[].tick_spacing`, `staked_in_gauge`, `fees_note` and velocity `contracts[].note`,
+  present only for positions that have them. `record-harvest` and the claim payload accept
+  platform `aerodrome-cl`. `testdata/golden_snapshot.json` is unchanged; the new protocol
+  has its own `testdata/golden_snapshot_aero_cl.json`, built from reads at Base block
+  58061668.
 
 ### Changed — worker split into modules (#97)
 - **Move-only refactor.** `ingestion-worker/src/main.rs` (10,853 lines) is now 1,322 lines

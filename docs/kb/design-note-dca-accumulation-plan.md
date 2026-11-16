@@ -435,7 +435,7 @@ Question 4 has a working default, taken while the operator was away and theirs t
 change: a USDC→NOCK swap the worker notices on-chain is **offered**, not attached. The
 operator confirms it with one click (the existing `record-accumulation` call with the
 offered hash, which verifies the receipt again) or marks it "not part of the plan". The
-reason is in ONCHAIN_INTEGRATION.md §8: the recording rules only net transfers, so a
+reason is in ONCHAIN_INTEGRATION.md §10: the recording rules only net transfers, so a
 transaction that pays USDC and receives NOCK for another reason would count if it were
 attached without anyone looking.
 

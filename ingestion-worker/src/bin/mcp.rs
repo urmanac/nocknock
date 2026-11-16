@@ -322,12 +322,15 @@ fn format_portfolio_state(data: &Value) -> String {
     // Pillars and gas (snapshot 2.3.0, issue #94). Absent fields say so, never $0.00.
     let not_reported = "not reported (snapshot predates 2.3.0)";
     let pillar = |k: &str| get(k).map(|v| format!("${v}")).unwrap_or_else(|| not_reported.to_string());
+    // AERO is the fourth pillar (issue #93): wallet AERO, so the four add up to the total.
     let pillars = format!(
-        "NOCK {} · USDC {} · ETH {}",
+        "NOCK {} · USDC {} · ETH {} · AERO {}",
         pillar("total_native_usd"),
         pillar("total_stable_usd"),
-        pillar("total_eth_usd")
+        pillar("total_eth_usd"),
+        aero_pillar_text(data)
     );
+    let aero = aero_lines(data);
     let gas = match (get("wallet_gas_eth"), get("wallet_gas_usd")) {
         (Some(eth), Some(usd)) => format!("{eth} ETH (${usd}), counted in the total; not cash, not deployable"),
         (Some(eth), None) => format!("{eth} ETH (USD value not reported), counted in the total; not cash, not deployable"),
@@ -342,6 +345,7 @@ fn format_portfolio_state(data: &Value) -> String {
          • Sovereign NOCK Stack: {total_nock} ({floor})\n\
          • Stable Stack: {total_usdc}\n\
          • Gas held (wallet ETH+WETH): {gas}\n\
+         {aero}\n\
          • High-Water Mark: {hwm}\n\
          • Tactical Directive: {advice}"
     )
@@ -377,6 +381,7 @@ fn format_claim_simulation(data: &Value) -> String {
     let mut details = String::new();
     let mut total_claimable_usd = 0.0f64;
     let mut gas_usd: Option<f64> = None;
+    let (mut claimable_rows, mut not_claimable_rows) = (0usize, 0usize);
 
     if let Some(list) = fees {
         for fee in list {
@@ -385,10 +390,14 @@ fn format_claim_simulation(data: &Value) -> String {
             let amount_usd = fee.get("amount_usd").and_then(|a| a.as_str()).unwrap_or("0.00");
             let gas_str = fee.get("gas_break_even_usd").and_then(|g| g.as_str()).unwrap_or_default();
             if amount.starts_with("not LP-claimable") {
-                // An Aero pool whose claimFees() reverts: nothing to claim, no gas to count.
+                // No fee figure to print: an Aero pool whose claimFees() reverts, or an
+                // Aero CL position staked in its gauge. The worker's own reason is
+                // shown; nothing to claim, no gas to count.
                 details.push_str(&format!("  - {symbol}: {amount}\n"));
+                not_claimable_rows += 1;
                 continue;
             }
+            claimable_rows += 1;
             match gas_str.parse::<f64>() {
                 Ok(g) => {
                     // Live per-contract gas break-even; take the max as representative.
@@ -412,6 +421,12 @@ fn format_claim_simulation(data: &Value) -> String {
         Some(g) => (
             format!("~${:.4} USD", g),
             format!("${:.4} USD", (total_claimable_usd - g).max(0.0)),
+        ),
+        // Every row is one the LP cannot claim: there is no claim to cost, which is
+        // not the same as a gas estimate that could not be read.
+        None if claimable_rows == 0 && not_claimable_rows > 0 => (
+            "n/a (nothing LP-claimable)".to_string(),
+            "n/a (nothing LP-claimable)".to_string(),
         ),
         None => (
             "unavailable".to_string(),
@@ -446,6 +461,21 @@ fn zero_db_fallback_text(tool_name: &str, api_base: &str) -> String {
          • Nothing is reported that the worker has not read: no balances, prices, positions or directive."
     )
 }
+
+// AERO lines of the portfolio text (issue #93): the same source file the worker uses.
+#[path = "../aero_text.rs"]
+mod aero_text;
+use aero_text::*;
+
+// Aero CL fee rows (issue #91); kept in its own file beside the worker's tests.
+#[cfg(test)]
+#[path = "../mcp_tests_aero_cl.rs"]
+mod tests_aero_cl;
+
+// The fourth pillar in the fallback text (issue #93).
+#[cfg(test)]
+#[path = "../mcp_tests_aero_rewards.rs"]
+mod tests_aero_rewards;
 
 #[cfg(test)]
 mod tests {
@@ -577,13 +607,13 @@ mod tests {
     #[test]
     fn test_fallback_claim_text_marks_non_claimable_aero_pool() {
         let data = json!({ "contract_fees": [
-            { "fee_token_symbol": "USDC+NOCK (Aerodrome)", "amount": "not LP-claimable (claimFees() reverts); AERO rewards not read (#93)",
+            { "fee_token_symbol": "USDC+NOCK (Aerodrome)", "amount": "not LP-claimable (claimFees() reverts); unclaimed AERO 0.121026 ($0.05)",
               "amount_usd": "0.000000", "claimable": false, "gas_break_even_usd": "0.0037" },
             { "fee_token_symbol": "USDC+NOCK (Uniswap V4 #1)", "amount": "0.1 USDC + 2 NOCK",
               "amount_usd": "0.12", "claimable": true, "gas_break_even_usd": "0.0014" }
         ] });
         let text = format_claim_simulation(&data);
-        assert!(text.contains("USDC+NOCK (Aerodrome): not LP-claimable (claimFees() reverts); AERO rewards not read (#93)\n"), "{text}");
+        assert!(text.contains("USDC+NOCK (Aerodrome): not LP-claimable (claimFees() reverts); unclaimed AERO 0.121026 ($0.05)\n"), "{text}");
         assert!(text.contains("Estimated Gas: ~$0.0014 USD"), "{text}");
     }
 

@@ -44,7 +44,7 @@ export interface MetadataResponse {
 
 
 export interface ClaimFeeAction {
-  platform: 'aerodrome' | 'uniswap-v4' | 'uniswap-v3';
+  platform: 'aerodrome' | 'aerodrome-cl' | 'uniswap-v4' | 'uniswap-v3';
   label: string;
   to: string;
   data: string;
@@ -54,7 +54,8 @@ export interface ClaimFeeAction {
   expected_usd?: string | null;
   gas_estimate?: string | null;
   gas_usd?: string | null;
-  /** 'not_claimable': the Aero pool's claimFees() reverts; nothing to dispatch. */
+  /** 'not_claimable': the Aero pool's claimFees() reverts, or an Aero CL position is
+   *  staked in its gauge (simulation_detail says which); nothing to dispatch. */
   simulation: 'success' | 'failed' | 'unavailable' | 'not_claimable';
   simulation_detail?: string | null;
 }

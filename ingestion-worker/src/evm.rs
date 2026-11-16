@@ -116,10 +116,46 @@ pub(crate) fn parse_hex_word_u128(hex_word: &str) -> Result<u128> {
         .map_err(|e| anyhow::anyhow!("bad hex word: {e}"))
 }
 
+/// A signed 32-bit value (an `int24` tick, say) from an ABI word. Negative values arrive
+/// sign-extended across the whole 32-byte word (`ff…fe98` is -360), so the value is the
+/// low four bytes read as two's complement; the bytes above them must be that sign
+/// extension, or the word is not a small signed integer at all. (Issue #91: this used to
+/// parse the whole word as u32 and so rejected every negative tick.)
 pub(crate) fn parse_hex_word_i32(hex_word: &str) -> Result<i32> {
     let clean = hex_word.trim_start_matches("0x");
-    let v = u32::from_str_radix(clean, 16).map_err(|e| anyhow::anyhow!("bad hex word: {e}"))?;
-    Ok(v as i32)
+    if clean.is_empty() || clean.len() > 64 || !clean.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(anyhow::anyhow!("bad hex word: '{clean}'"));
+    }
+    if clean.len() <= 8 {
+        let v = u32::from_str_radix(clean, 16).map_err(|e| anyhow::anyhow!("bad hex word: {e}"))?;
+        return Ok(v as i32);
+    }
+    let (high, low) = clean.split_at(clean.len() - 8);
+    let v = u32::from_str_radix(low, 16).map_err(|e| anyhow::anyhow!("bad hex word: {e}"))? as i32;
+    let fill = if v < 0 { b'f' } else { b'0' };
+    // A short (unpadded) positive word has no sign extension to check beyond zeros.
+    if !high.bytes().all(|b| b.to_ascii_lowercase() == fill) {
+        return Err(anyhow::anyhow!("hex word does not fit a signed 32-bit integer: '{clean}'"));
+    }
+    Ok(v)
+}
+
+/// ABI-encode a signed tick (`int24`) as a 32-byte calldata word, sign-extended:
+/// -360 becomes `ff…fe98`. (`{:064x}` of `tick as u32` zero-pads a negative tick, which
+/// the contract rejects or reads as a different tick.)
+pub(crate) fn int24_calldata_word(tick: i32) -> String {
+    if tick < 0 {
+        format!("{}{:08x}", "f".repeat(56), tick as u32)
+    } else {
+        format!("{:064x}", tick as u32)
+    }
+}
+
+/// A position is in range while the pool's tick is at or above its lower tick and
+/// below its upper tick (the upper bound is exclusive: at `tick == tick_upper` the
+/// range holds only token1).
+pub(crate) fn tick_in_range(tick: i32, tick_lower: i32, tick_upper: i32) -> bool {
+    tick_lower <= tick && tick < tick_upper
 }
 
 /// Exact decimal formatting: raw integer amount -> human string, no float rounding.

@@ -1,10 +1,13 @@
 /**
- * Pure display helpers for the portfolio pillars (snapshot 2.3.0, issue #94).
+ * Pure display helpers for the portfolio pillars (snapshot 2.3.0, issue #94; AERO added
+ * by issue #93).
  *
- * The total has three pillars: NOCK, USDC and ETH. ETH is gas: wallet ETH + WETH is
+ * The total has four pillars: NOCK, USDC, ETH and AERO. ETH is gas: wallet ETH + WETH is
  * counted in the total but is never cash, never deployable and has no target, so it is
- * shown as a pillar line, never as a "Goal". Fields a pre-2.3.0 snapshot lacks render
- * as "—" or "not reported", never as $0.00.
+ * shown as a pillar line, never as a "Goal". AERO is the wallet's AERO: counted in the
+ * total, with no target and no advice (AERO still unclaimed in a gauge is not in the
+ * total; see aero.ts). Fields an older snapshot lacks render as "—" or "not reported",
+ * never as $0.00.
  */
 
 import { finiteOrNull } from './timeline.ts';
@@ -12,7 +15,7 @@ import { finiteOrNull } from './timeline.ts';
 export const NOT_REPORTED = 'not reported (snapshot predates 2.3.0)';
 
 export interface Pillar {
-  key: 'NOCK' | 'USDC' | 'ETH';
+  key: 'NOCK' | 'USDC' | 'ETH' | 'AERO';
   usd: number | null;
   /** ETH: gas. Counted in the total; never cash, never deployable, no target. */
   gas: boolean;
@@ -22,16 +25,18 @@ function money(v: number): string {
   return `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-/** The three pillars, from the snapshot's own global_status. */
+/** The four pillars, from the snapshot's own global_status. They add up to the total. */
 export function pillarsFromGlobal(global: any): Pillar[] {
   return [
     { key: 'NOCK', usd: finiteOrNull(global?.total_native_usd), gas: false },
     { key: 'USDC', usd: finiteOrNull(global?.total_stable_usd), gas: false },
     { key: 'ETH', usd: finiteOrNull(global?.total_eth_usd), gas: true },
+    // Wallet AERO (#93). Absent from an older snapshot: null, shown as "—".
+    { key: 'AERO', usd: finiteOrNull(global?.wallet_aero_usd), gas: false },
   ];
 }
 
-/** "NOCK $1,312.88 · USDC $1,033.71 · ETH $66.98"; a missing pillar reads "—". */
+/** "NOCK $1,312.88 · USDC $1,033.71 · ETH $66.98 · AERO $0.57"; a missing pillar reads "—". */
 export function pillarLine(global: any): string {
   return pillarsFromGlobal(global)
     .map(p => `${p.key} ${p.usd === null ? '—' : money(p.usd)}`)
