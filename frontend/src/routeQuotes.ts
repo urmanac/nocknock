@@ -169,20 +169,42 @@ export function venueCard(v: VenueQuote, q: Pick<RouteQuotes, 'more_nock_venue' 
   };
 }
 
+/** A refresh's answer, with the block of the snapshot's quotes it was asked against. */
+export interface RefreshedQuotes {
+  quotes: RouteQuotes;
+  /** `block_number` of the snapshot's quotes when REFRESH was pressed; null when it had none. */
+  basisBlock: number | null;
+}
+
+const blockOf = (q: RouteQuotes): number | null => (typeof q.block_number === 'number' ? q.block_number : null);
+
 /**
- * Of two sets of quotes for the same tranche, the one read at the later block: the
- * panel shows a refresh's answer until the snapshot catches up. A set for another
- * amount is never preferred over the snapshot's.
+ * The quotes to draw: the snapshot's, or a refresh's answer while the snapshot has not
+ * moved since the refresh was asked for. As soon as the snapshot carries other quotes
+ * (the next cycle, or the refetch after the refresh) the snapshot wins, so a refreshed
+ * quote is never kept on screen after the worker has reported something newer, such as
+ * "unavailable". A refresh for another amount, or one that read no block, is never shown.
  */
-export function newerQuotes(
+export function quotesToShow(
   snapshot: RouteQuotes | null | undefined,
-  refreshed: RouteQuotes | null | undefined,
+  refreshed: RefreshedQuotes | null | undefined,
 ): RouteQuotes | null {
   if (!snapshot) return null;
-  if (!refreshed || refreshed.amount_usdc !== snapshot.amount_usdc) return snapshot;
-  const a = typeof snapshot.block_number === 'number' ? snapshot.block_number : -1;
-  const b = typeof refreshed.block_number === 'number' ? refreshed.block_number : -1;
-  return b > a ? refreshed : snapshot;
+  if (!refreshed) return snapshot;
+  const snapBlock = blockOf(snapshot);
+  const freshBlock = blockOf(refreshed.quotes);
+  if (refreshed.basisBlock !== snapBlock) return snapshot;
+  if (refreshed.quotes.amount_usdc !== snapshot.amount_usdc || freshBlock === null) return snapshot;
+  return snapBlock === null || freshBlock > snapBlock ? refreshed.quotes : snapshot;
+}
+
+/**
+ * What to say when a refresh came back with nothing quoted: the worker answered, and
+ * its answer is "unavailable". Null when at least one venue was quoted.
+ */
+export function refreshFailure(quotes: RouteQuotes): string | null {
+  if (quotes.status !== 'unavailable') return null;
+  return `neither venue could be quoted (${quotes.detail && quotes.detail.trim() !== '' ? quotes.detail : 'no reason given'})`;
 }
 
 export interface QuoteCostLabel {

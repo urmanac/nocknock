@@ -13,7 +13,16 @@
 import { useState } from 'react';
 import { api } from '../api/client';
 import type { RouteQuotes as RouteQuotesData } from '../types/snapshot';
-import { ROUTE_QUOTE_CAVEAT, newerQuotes, quoteAge, quoteBlockLine, venueCard, type VenueCard } from '../routeQuotes';
+import {
+  ROUTE_QUOTE_CAVEAT,
+  quoteAge,
+  quoteBlockLine,
+  quotesToShow,
+  refreshFailure,
+  venueCard,
+  type RefreshedQuotes,
+  type VenueCard,
+} from '../routeQuotes';
 
 const label = { fontSize: '0.7rem', letterSpacing: 2, color: '#8b949e' } as const;
 const small = { fontSize: '0.7rem', color: '#8b949e', lineHeight: 1.6 } as const;
@@ -138,7 +147,7 @@ export function RouteQuotesView({
       </div>
       {error && (
         <div role="status" style={{ ...small, color: '#f59e0b' }}>
-          Could not refresh the quotes: {error}. The quotes above are unchanged and keep their own block.
+          Could not refresh the quotes: {error}. Any quotes shown above keep their own block and time.
         </div>
       )}
       <div data-testid="quote-caveat" style={{ ...small, color: '#6e7681', marginTop: 6 }}>
@@ -150,18 +159,21 @@ export function RouteQuotesView({
 
 /** The quotes of the snapshot, with a refresh that asks the worker for newer ones. */
 export function RouteQuotes({ quotes, onChanged }: { quotes?: RouteQuotesData | null; onChanged?: () => void }) {
-  const [refreshed, setRefreshed] = useState<RouteQuotesData | null>(null);
+  const [refreshed, setRefreshed] = useState<RefreshedQuotes | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const shown = newerQuotes(quotes, refreshed);
-  if (!shown) return null;
+  const shown = quotesToShow(quotes, refreshed);
+  if (!shown || !quotes) return null;
 
   const refresh = async () => {
     setBusy(true);
     setError(null);
+    const basisBlock = typeof quotes.block_number === 'number' ? quotes.block_number : null;
     try {
       const res = await api.refreshRouteQuotes();
-      setRefreshed(res.route_quotes);
+      setRefreshed({ quotes: res.route_quotes, basisBlock });
+      // The worker answered, but with nothing quoted: say so; do not pass it off as fresh.
+      setError(refreshFailure(res.route_quotes));
       onChanged?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'request failed');

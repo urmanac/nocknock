@@ -11,10 +11,11 @@ import {
   costOverQuote,
   costOverSpotText,
   hopLine,
-  newerQuotes,
   nockAmount,
   quoteAge,
   quoteBlockLine,
+  quotesToShow,
+  refreshFailure,
   swapLinkLabel,
   swapPageUrl,
   venueCard,
@@ -177,24 +178,46 @@ describe('cost over the reference spot', () => {
 });
 
 describe('refreshed quotes', () => {
-  it('replace the snapshot\'s only when read at a later block for the same amount', () => {
-    const later = clone();
-    later.block_number = 58083410;
-    expect(newerQuotes(REAL_ROUTE_QUOTES, later)).toBe(later);
-    expect(newerQuotes(later, REAL_ROUTE_QUOTES)).toBe(later);
-    expect(newerQuotes(REAL_ROUTE_QUOTES, null)).toBe(REAL_ROUTE_QUOTES);
-    // A refresh for another tranche size is not shown against this one.
-    const otherSize = clone();
-    otherSize.block_number = 58090000;
-    otherSize.amount_usdc = '13.37';
-    expect(newerQuotes(REAL_ROUTE_QUOTES, otherSize)).toBe(REAL_ROUTE_QUOTES);
-    // A failed refresh (no block) never replaces quotes that were read.
-    const failed = clone();
-    failed.block_number = null;
-    expect(newerQuotes(REAL_ROUTE_QUOTES, failed)).toBe(REAL_ROUTE_QUOTES);
+  const at = (block: number | null, over: Partial<RouteQuotes> = {}): RouteQuotes => ({ ...clone(), block_number: block, ...over });
+
+  it('are shown only while the snapshot has not moved since the refresh was asked for', () => {
+    const snap = REAL_ROUTE_QUOTES;
+    const later = at(58083410);
+    expect(quotesToShow(snap, { quotes: later, basisBlock: 58081910 })).toBe(later);
+    expect(quotesToShow(snap, null)).toBe(snap);
+    // The snapshot moved on (a new cycle, or the refetch): it wins, whatever it says.
+    const next = at(58083500);
+    expect(quotesToShow(next, { quotes: later, basisBlock: 58081910 })).toBe(next);
+    const nowDown = at(null, { status: 'unavailable', venues: [] });
+    expect(quotesToShow(nowDown, { quotes: later, basisBlock: 58081910 })).toBe(nowDown);
+    // A refresh that is not newer than what it was asked against changes nothing.
+    expect(quotesToShow(snap, { quotes: at(58081910), basisBlock: 58081910 })).toBe(snap);
+  });
+
+  it('never show a refresh for another amount, or one that read no block', () => {
+    const snap = REAL_ROUTE_QUOTES;
+    const otherSize = at(58090000, { amount_usdc: '13.37' });
+    expect(quotesToShow(snap, { quotes: otherSize, basisBlock: 58081910 })).toBe(snap);
+    const failed = at(null, { status: 'unavailable' });
+    expect(quotesToShow(snap, { quotes: failed, basisBlock: 58081910 })).toBe(snap);
+    // The snapshot had no quotes read (both venues unavailable) and the refresh did.
+    const down = at(null, { status: 'unavailable' });
+    const fresh = at(58083410);
+    expect(quotesToShow(down, { quotes: fresh, basisBlock: null })).toBe(fresh);
     // No quotes in the snapshot (no tranche due): nothing is shown, refreshed or not.
-    expect(newerQuotes(null, later)).toBeNull();
-    expect(newerQuotes(undefined, undefined)).toBeNull();
+    expect(quotesToShow(null, { quotes: fresh, basisBlock: null })).toBeNull();
+    expect(quotesToShow(undefined, undefined)).toBeNull();
+  });
+
+  it('say so when the worker answered with nothing quoted', () => {
+    expect(refreshFailure(REAL_ROUTE_QUOTES)).toBeNull();
+    expect(refreshFailure(at(58083410, { status: 'partial', detail: 'Uniswap: the quote request timed out' }))).toBeNull();
+    expect(refreshFailure(at(null, { status: 'unavailable', detail: 'no Alchemy RPC key is configured' }))).toBe(
+      'neither venue could be quoted (no Alchemy RPC key is configured)',
+    );
+    expect(refreshFailure(at(null, { status: 'unavailable', detail: null }))).toBe(
+      'neither venue could be quoted (no reason given)',
+    );
   });
 });
 
