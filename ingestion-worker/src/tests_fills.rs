@@ -608,6 +608,33 @@ fn test_scan_status_is_ok_only_for_a_complete_check() {
 }
 
 #[test]
+fn test_rpc_error_reason_names_the_error_and_nothing_else() {
+    // What Alchemy returns for a bad request, and what a node without the method returns.
+    let bad = json!({ "jsonrpc": "2.0", "id": 44, "error": { "code": -32602, "message": "invalid params" } });
+    assert_eq!(rpc_error_reason(&bad).as_deref(), Some("the RPC answered with error -32602: invalid params"));
+    let missing = json!({ "jsonrpc": "2.0", "id": 44, "error": { "code": -32601, "message": "the method alchemy_getAssetTransfers does not exist/is not available" } });
+    assert!(rpc_error_reason(&missing).unwrap().contains("-32601: the method alchemy_getAssetTransfers does not exist"));
+    // The public RPC's real answer to a 200,000-block eth_getLogs (ONCHAIN_INTEGRATION.md §8).
+    let range = json!({ "jsonrpc": "2.0", "error": { "code": -32701, "message": "exceed maximum block range: 50000" }, "id": 1 });
+    assert_eq!(rpc_error_reason(&range).as_deref(), Some("the RPC answered with error -32701: exceed maximum block range: 50000"));
+    // A long message is cut, an odd error still reads as an error, an answer is not one.
+    let long = json!({ "error": { "message": "x".repeat(500) } });
+    assert_eq!(rpc_error_reason(&long).unwrap().len(), "the RPC answered with an error: ".len() + 160);
+    assert_eq!(rpc_error_reason(&json!({ "error": {} })).as_deref(), Some("the RPC answered with an error: no message"));
+    assert_eq!(rpc_error_reason(&transfers_response()), None);
+}
+
+#[test]
+fn test_shipped_example_config_leaves_detection_on_and_adds_no_numbers() {
+    let example = concat!(env!("CARGO_MANIFEST_DIR"), "/config.yaml.example");
+    let cfg = load_app_config(example, Some("/nonexistent/nocknock-config.yaml"), false).unwrap();
+    assert!(cfg.fill_detection.enabled);
+    // The example documents the switch as a comment; detection has no other setting.
+    let text = std::fs::read_to_string(example).unwrap();
+    assert!(text.contains("# fill_detection:\n#   enabled: true"));
+}
+
+#[test]
 fn test_fill_detection_config_is_on_by_default_and_can_be_switched_off() {
     let default: AppConfig = serde_yaml::from_str("port: 8080\n").unwrap();
     assert!(default.fill_detection.enabled);
@@ -870,7 +897,7 @@ fn test_mcp_plan_text_lists_offers_and_never_confuses_could_not_check_with_none_
     );
 
     // Could not check: never "none found".
-    let mut down = FillDetection::unavailable("the wallet's transfer history could not be read (alchemy_getAssetTransfers gave no answer)");
+    let mut down = FillDetection::unavailable("the wallet's transfer history could not be read (the request timed out)");
     down.last_checked_at = Some("2026-11-16T03:55:00+00:00".to_string());
     let text = plan_text(Some(&down));
     assert!(text.contains("• Swap detection: could not check this cycle (the wallet's transfer history could not be read"), "{text}");

@@ -28,6 +28,11 @@ pub(crate) const FILL_SCAN_MAX_PAGES: usize = 10;
 /// New transactions examined per cycle (one receipt each, plus one block header for a
 /// purchase). The rest wait for the next cycle and the status says so.
 pub(crate) const FILL_CLASSIFY_MAX_PER_CYCLE: usize = 25;
+/// The whole check is abandoned after this long, so a stalled RPC cannot hold up the
+/// cycle. What was classified before the cut stays classified.
+pub(crate) const FILL_SCAN_TIMEOUT_SECONDS: u64 = 60;
+/// One transfer-history request may take this long.
+const FILL_SCAN_REQUEST_TIMEOUT_SECONDS: u64 = 20;
 
 // ---------------- Transfer history (a hint, never trusted) ----------------
 
@@ -107,6 +112,59 @@ pub(crate) fn parse_asset_transfers(resp: &serde_json::Value) -> std::result::Re
         .filter(|k| !k.is_empty())
         .map(|k| k.to_string());
     Ok(TransferPage { transfers: out, page_key })
+}
+
+/// Why a JSON-RPC response is not an answer, in words fit for the plan status. Pure.
+pub(crate) fn rpc_error_reason(resp: &serde_json::Value) -> Option<String> {
+    let err = resp.get("error")?;
+    let code = err.get("code").and_then(|c| c.as_i64());
+    let message: String = err
+        .get("message")
+        .and_then(|m| m.as_str())
+        .unwrap_or("no message")
+        .chars()
+        .take(160)
+        .collect();
+    Some(match code {
+        Some(code) => format!("the RPC answered with error {code}: {message}"),
+        None => format!("the RPC answered with an error: {message}"),
+    })
+}
+
+/// One transfer-history call, with the reason when it fails. The reason is written by
+/// hand from the kind of failure: a transport error's own text is never used, because
+/// it can contain the request URL and the URL contains the API key.
+async fn transfer_history_call(
+    client: &Client,
+    rpc_url: &str,
+    payload: &serde_json::Value,
+) -> std::result::Result<serde_json::Value, String> {
+    let mut last = "no response".to_string();
+    for attempt in 0..3u32 {
+        let sent = client
+            .post(rpc_url)
+            .timeout(std::time::Duration::from_secs(FILL_SCAN_REQUEST_TIMEOUT_SECONDS))
+            .json(payload)
+            .send()
+            .await;
+        match sent {
+            Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+                Ok(v) => match rpc_error_reason(&v) {
+                    None => return Ok(v),
+                    Some(why) => last = why,
+                },
+                Err(_) => last = "the RPC's answer was not JSON".to_string(),
+            },
+            Ok(resp) => last = format!("the RPC answered HTTP {}", resp.status().as_u16()),
+            Err(e) if e.is_timeout() => last = "the request timed out".to_string(),
+            Err(e) if e.is_connect() => last = "the connection to the RPC failed".to_string(),
+            Err(_) => last = "the request failed in transit".to_string(),
+        }
+        if attempt < 2 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(150 * (1 << attempt))).await;
+        }
+    }
+    Err(last)
 }
 
 /// Folds transfer pages (newest first) into distinct transaction hashes back to the
@@ -638,9 +696,9 @@ async fn scan_for_fills(
     let mut page_key: Option<String> = None;
     loop {
         let payload = asset_transfers_request(wallet, page_key.as_deref());
-        let resp = post_rpc_with_retry(&state.http_client, &alchemy_url, &payload, 2)
+        let resp = transfer_history_call(&state.http_client, &alchemy_url, &payload)
             .await
-            .ok_or("the wallet's transfer history could not be read (alchemy_getAssetTransfers gave no answer)")?;
+            .map_err(|why| format!("the wallet's transfer history could not be read ({why})"))?;
         let page = parse_asset_transfers(&resp)
             .map_err(|e| format!("the transfer history response was not understood ({e})"))?;
         page_key = scan.absorb(page);
@@ -649,12 +707,15 @@ async fn scan_for_fills(
         }
     }
 
-    let known = known_candidate_hashes(&state.db, wallet)
-        .await
-        .map_err(|e| format!("the candidates table could not be read ({e})"))?;
-    let recorded = recorded_fill_hashes(&state.db)
-        .await
-        .map_err(|e| format!("the accumulation ledger could not be read ({e})"))?;
+    // Database errors are logged, not quoted: the plan status is a public surface.
+    let known = known_candidate_hashes(&state.db, wallet).await.map_err(|e| {
+        tracing::warn!("Fill detection: candidates table unreadable: {e}");
+        "the candidates table could not be read".to_string()
+    })?;
+    let recorded = recorded_fill_hashes(&state.db).await.map_err(|e| {
+        tracing::warn!("Fill detection: accumulation ledger unreadable: {e}");
+        "the accumulation ledger could not be read".to_string()
+    })?;
     let fresh: Vec<&TransferHint> = scan
         .hints
         .iter()
@@ -721,7 +782,19 @@ pub(crate) async fn detect_fills(state: &Arc<AppState>, plan: &PlanContext) -> O
     };
 
     let scan = match &gate {
-        DetectionGate::Run => Some(scan_for_fills(state, &wallet, anchor).await),
+        DetectionGate::Run => Some(
+            match tokio::time::timeout(
+                tokio::time::Duration::from_secs(FILL_SCAN_TIMEOUT_SECONDS),
+                scan_for_fills(state, &wallet, anchor),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => Err(format!(
+                    "the check took longer than {FILL_SCAN_TIMEOUT_SECONDS} seconds and was abandoned"
+                )),
+            },
+        ),
         DetectionGate::Skip { .. } => None,
     };
     if let Some(Ok(_)) = &scan {

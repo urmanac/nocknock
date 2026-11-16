@@ -68,7 +68,7 @@ describe('detection state', () => {
     const s = detectionSummary(
       detection({
         status: 'unavailable',
-        detail: "the wallet's transfer history could not be read (alchemy_getAssetTransfers gave no answer)",
+        detail: "the wallet's transfer history could not be read (the request timed out)",
         checked_back_to: null,
         last_checked_at: '2026-11-16T03:55:00+00:00',
       }),

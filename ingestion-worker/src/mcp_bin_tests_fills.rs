@@ -47,7 +47,7 @@ fn test_fallback_plan_text_lists_offers_read_only() {
 fn test_fallback_could_not_check_is_never_none_found() {
     let down = format_accumulation_plan(&snapshot_with(json!({
         "status": "unavailable",
-        "detail": "the wallet's transfer history could not be read (alchemy_getAssetTransfers gave no answer)",
+        "detail": "the wallet's transfer history could not be read (the request timed out)",
         "checked_back_to": null, "last_checked_at": null, "offers": [], "dismissed": []
     })));
     assert!(down.contains("• Swap detection: could not check this cycle (the wallet's transfer history could not be read"), "{down}");
