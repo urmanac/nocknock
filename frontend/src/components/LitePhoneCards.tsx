@@ -11,7 +11,7 @@ import { api, describeApiError } from '../api/client';
 import { useFreshness } from '../hooks/useFreshness';
 import type { DerivedMetrics } from '../types/snapshot';
 import { syncWindowOrDefault } from '../timeline';
-import { LITE_TONE_COLOR, liteStatusView } from '../liteStatus';
+import { LITE_TONE_COLOR, freshnessAt, liteStatusView } from '../liteStatus';
 import { detectPlatform, installHint, isStandalone } from '../pwa';
 import { AccumulationPlanPanel } from './AccumulationPlanPanel';
 import { NotificationTestPanel } from './NotificationTestPanel';
@@ -42,17 +42,47 @@ export function LiteStatusCard() {
     };
   }, []);
 
+  // useFreshness keeps the last snapshot through a failed poll and reports an error only
+  // on a cold start. This card must say so the moment the worker stops answering (a
+  // phone that left the LAN with the app open), so the failure is recorded here. The
+  // callback is stable: the hook restarts its polling when the fetcher's identity changes.
+  const [pollError, setPollError] = React.useState<string | null>(null);
+  const fetchLatest = React.useCallback(async () => {
+    try {
+      const latest = await api.latestSnapshot<{ derived_metrics?: DerivedMetrics }>();
+      setPollError(null);
+      return latest;
+    } catch (e) {
+      setPollError(describeApiError(e));
+      throw e;
+    }
+  }, []);
+
   const { snapshot, loading, error, freshness, refetch } = useFreshness<{ derived_metrics?: DerivedMetrics }>(
-    api.latestSnapshot,
+    fetchLatest,
     { syncWindowSeconds, pollIntervalMs: 10_000 },
   );
+
+  // A home-screen app is suspended in the background and its timers stop. Coming back
+  // to the foreground reads the worker at once instead of waiting for the next tick.
+  React.useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refetch();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [refetch]);
+
   const metrics = snapshot?.data?.derived_metrics;
+  // Age and status as of this render, not as of the hook's last tick.
+  const now = freshnessAt(snapshot?.meta?.generated_at, Date.now(), syncWindowSeconds, freshness.syncGraceSeconds);
   const view = liteStatusView({
     hasSnapshot: !!snapshot,
     loading,
     error: error ? describeApiError(error) : null,
-    syncStatus: freshness.syncStatus,
-    ageSeconds: freshness.ageSeconds,
+    pollError,
+    syncStatus: now?.syncStatus ?? freshness.syncStatus,
+    ageSeconds: now?.ageSeconds ?? freshness.ageSeconds,
     action: metrics?.global_status?.shot_advice_action,
     details: metrics?.global_status?.shot_advice_details,
   });
