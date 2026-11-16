@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — worker split into modules (#97)
+- **Move-only refactor.** `ingestion-worker/src/main.rs` (10,853 lines) is now 1,322 lines
+  plus 22 modules: `evm`, `calldata`, `contracts`, `rpc`, `adapters/{uniswap_v3,uniswap_v4,
+  aero_basic}`, `valuation`, `onchain`, `lp_rebuild`, `advice`, `plan`, `market`, `ledger`,
+  `ingest`, `api`, `claims`, `notify`, `mcp_text`, `mcp_http` and `tests`. Functions and
+  constants moved verbatim and gained `pub(crate)`; types stay in `main.rs`. No behaviour
+  change.
+- **Golden snapshot test** (`testdata/golden_snapshot.json`): pins the state hash, the
+  canonical snapshot and the four MCP texts for three fixtures, byte for byte. It was added
+  before anything moved and is unchanged by the split.
+
 ## [0.5.3] - 2026-11-15
 
 ### Fixed — harvest ledger (#102, #111; snapshot spec 2.4.0)
