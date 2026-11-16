@@ -51,12 +51,17 @@ pub fn route_quote_lines(plan: &Value) -> String {
             ));
             continue;
         }
-        let cost = text(v, "cost_over_spot_pct")
-            .map(|c| {
-                let signed = if c.starts_with('-') { c } else { format!("+{c}") };
-                format!("{signed}% over the reference spot")
-            })
-            .unwrap_or_else(|| "cost over spot unavailable".to_string());
+        // Negative is real: the reference is one pool's mid price, not the market.
+        let cost = match text(v, "cost_over_spot_pct") {
+            Some(c) => match c.strip_prefix('-') {
+                Some(under) if under.chars().any(|d| d.is_ascii_digit() && d != '0') => {
+                    format!("{under}% under the reference spot")
+                }
+                _ if !c.chars().any(|d| d.is_ascii_digit() && d != '0') => "at the reference spot".to_string(),
+                _ => format!("{c}% over the reference spot"),
+            },
+            None => "cost over spot unavailable".to_string(),
+        };
         let hops: Vec<String> = v
             .get("hops")
             .and_then(|h| h.as_array())

@@ -57,8 +57,8 @@ fn test_fallback_plan_text_shows_both_venues_and_the_caveat() {
     let shared = route_quote_lines(&data["derived_metrics"]["accumulation_plan"]);
     assert!(text.contains(&shared), "{text}");
     assert!(text.contains("• Route quotes for $20.00 USDC → NOCK at block 58081910 (2026-11-16T05:25:57+00:00), reference spot $0.01128675:"), "{text}");
-    assert!(text.contains("Aero: 1773.0768 NOCK at $0.01127983 (-0.06% over the reference spot) via USDC → USDT → WETH → NOCK"), "{text}");
-    assert!(text.contains("Uniswap: 1772.2085 NOCK at $0.01128535 (-0.01% over the reference spot) via USDC → WETH → NOCK"), "{text}");
+    assert!(text.contains("Aero: 1773.0768 NOCK at $0.01127983 (0.06% under the reference spot) via USDC → USDT → WETH → NOCK"), "{text}");
+    assert!(text.contains("Uniswap: 1772.2085 NOCK at $0.01128535 (0.01% under the reference spot) via USDC → WETH → NOCK"), "{text}");
     assert!(text.contains("WETH→NOCK Aero concentrated 0x957256c98d61a714081de2ee70ae3a96c9b40874 fee 0.97%"), "{text}");
     assert!(text.contains("swap page: https://app.aero.xyz/swap"), "{text}");
     assert!(text.contains("swap page: https://app.uniswap.org/swap"), "{text}");

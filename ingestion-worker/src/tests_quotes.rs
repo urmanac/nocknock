@@ -891,12 +891,12 @@ fn test_plan_text_shows_both_venues_and_says_what_a_quote_is() {
     assert_eq!(
         lines,
         "• Route quotes for $20.00 USDC → NOCK at block 58081910 (2026-11-16T05:25:57+00:00), reference spot $0.01128675:\n   \
-         Aero: 1773.0768 NOCK at $0.01127983 (-0.06% over the reference spot) via USDC → USDT → WETH → NOCK\n      \
+         Aero: 1773.0768 NOCK at $0.01127983 (0.06% under the reference spot) via USDC → USDT → WETH → NOCK\n      \
          USDC→USDT Aero concentrated 0xd448990883e3bf9cdd8ebca368a3ecf9d629aaf7 fee 0.0008%\n      \
          USDT→WETH Aero concentrated 0x2dbe0e264c7c246e05c6614794899937f264cf7b fee 0.0468%\n      \
          WETH→NOCK Aero concentrated 0x957256c98d61a714081de2ee70ae3a96c9b40874 fee 0.97%\n      \
          swap page: https://app.aero.xyz/swap (enter $20.00 USDC → NOCK yourself; nothing is prefilled)\n   \
-         Uniswap: 1772.2085 NOCK at $0.01128535 (-0.01% over the reference spot) via USDC → WETH → NOCK\n      \
+         Uniswap: 1772.2085 NOCK at $0.01128535 (0.01% under the reference spot) via USDC → WETH → NOCK\n      \
          USDC→WETH Uniswap v3 0xd0b53d9277642d899df5c87a3966a349a798f224 fee 0.05%\n      \
          WETH→NOCK Uniswap v3 0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a fee 1%\n      \
          swap page: https://app.uniswap.org/swap (enter $20.00 USDC → NOCK yourself; nothing is prefilled)\n   \
@@ -923,6 +923,14 @@ fn test_plan_text_says_unavailable_with_the_reason_and_nothing_when_not_due() {
     let lines = route_quote_lines(&snapshot_with_quotes(Some(q))["derived_metrics"]["accumulation_plan"]);
     assert!(lines.contains("USDT→WETH Aero concentrated 0x2dbe0e264c7c246e05c6614794899937f264cf7b fee not read\n"), "{lines}");
     assert!(lines.contains("Uniswap: 1772.2085 NOCK at $0.01128535 (cost over spot unavailable)"), "{lines}");
+
+    // The cost reads in words: over, under, or at the reference spot.
+    let mut q = real_quotes();
+    q.venues[0].cost_over_spot_pct = Some("3.21".to_string());
+    q.venues[1].cost_over_spot_pct = Some("-0.00".to_string());
+    let lines = route_quote_lines(&snapshot_with_quotes(Some(q))["derived_metrics"]["accumulation_plan"]);
+    assert!(lines.contains("Aero: 1773.0768 NOCK at $0.01127983 (3.21% over the reference spot)"), "{lines}");
+    assert!(lines.contains("Uniswap: 1772.2085 NOCK at $0.01128535 (at the reference spot)"), "{lines}");
 
     // No quotes in the snapshot (nothing due, switched off, or an older worker): no line.
     for none in [snapshot_with_quotes(None), json!({ "derived_metrics": { "accumulation_plan": { "status": "waiting" } } })] {
