@@ -182,6 +182,10 @@ at boot and survive logout.
    make sure the entry flagged `is_price_source: true` is a pool that still has active
    liquidity; the worker refuses to publish a price from an empty pool.
 
+8. **On your phone** (home-screen install, notifications, optional HTTPS): see
+   [section 7](#7-on-your-phone-install-notifications-https-opt-in). A default deploy
+   installs none of the HTTPS parts.
+
 ---
 
 ## 4. Reverse Proxy & SSL (HTTPS) with Caddy
@@ -202,6 +206,10 @@ Reload Caddy:
 ```bash
 sudo systemctl reload caddy
 ```
+
+This section is for a public server with a real domain. For a LAN-only host, where no
+public certificate authority can vouch for the name, see
+[section 7.3](#73-https-on-the-lan-opt-in).
 
 ---
 
@@ -227,3 +235,115 @@ sudo systemctl reload caddy
   # Systemd / Bare Metal
   journalctl -u nocknock-worker -f
   ```
+
+---
+
+## 7. On Your Phone: Install, Notifications, HTTPS (opt-in)
+
+For the Podman deployment (Option D). Three separate parts; each is off until you turn
+it on. The full guide, with the trade-offs and a precise list of what has and has not
+been tested, is
+[`docs/kb/how-to-phone-install-notifications-tls.md`](docs/kb/how-to-phone-install-notifications-tls.md).
+None of this has been tried on a real phone or on the host yet.
+
+### 7.1 Install on a phone
+
+The dashboard ships a web app manifest, icons and the iOS and Android home-screen tags.
+Nothing to configure.
+
+1. On the phone, on the same network, open `http://<host>:3000/?view=lite`.
+2. iPhone: Safari, Share, "Add to Home Screen". Android: Chrome, ⋮, "Add to Home screen".
+3. Open it from the home screen: it opens the Lite cockpit.
+
+- Android installs a web app only from an HTTPS address. Over plain HTTP it adds a
+  bookmark that opens in a browser tab (see 7.3).
+- There is no service worker. Nothing is cached, so the app never shows an old snapshot
+  as live, and it does not open away from the LAN.
+- The Lite cockpit's DIRECTIVE card says whether the page is live. `NOT LIVE · last read
+  12m ago` means the numbers below it are that old.
+
+### 7.2 Notifications
+
+The worker pushes a message when the directive changes between two cycles and when an
+accumulation plan completes. It is off until `ingestion-worker/config.yaml` has a
+`notifications:` block. Set one channel or several.
+
+**Telegram**
+
+```yaml
+notifications:
+  telegram_bot_token: "123456789:AAExampleExample"
+  telegram_chat_id: "123456789"
+  cockpit_url: "http://<host>:3000/?view=lite"
+```
+
+1. In Telegram, message **BotFather**, send `/newbot`, and follow it. The token it
+   gives you is `telegram_bot_token`.
+2. Open a chat with your new bot and send it any message.
+3. `curl -s "https://api.telegram.org/bot<token>/getUpdates"`: in the answer,
+   `result[0].message.chat.id` is `telegram_chat_id`.
+
+**Pushover**
+
+```yaml
+notifications:
+  pushover_token: "your-application-api-token"
+  pushover_user: "your-user-key"
+  cockpit_url: "http://<host>:3000/?view=lite"
+```
+
+1. Create an account at pushover.net and install the Pushover app on the phone.
+2. **Your User Key**, on the website's front page after login, is `pushover_user`.
+3. **Create an Application/API Token** gives the **API Token/Key**: `pushover_token`.
+
+**Webhook**: `webhook_url: "https://…"` receives `POST {"text": "…"}`.
+
+Then deploy (`deploy/podman/deploy.sh <host>`) and test:
+
+```bash
+curl -s http://<host>:8081/v1/notifications/status         # which channels are configured
+curl -s -X POST http://<host>:8081/v1/notifications/test   # send one message labelled TEST
+```
+
+or press **SEND TEST NOTIFICATION** on the dashboard (last panel) or the Lite cockpit
+(bottom card). Each channel is reported as `delivered`, `failed` with the provider's
+reason, `incomplete` (half a channel is set) or `not_configured`. `delivered` means the
+provider accepted the message. With no channel configured the route says so and sends
+nothing. Tokens are never logged or returned. Test sends are limited to one per 30 s.
+
+Keep credentials in `config.yaml` only (gitignored; stored on the host as the Podman
+secret `nocknock-config`). `config.yaml.example` is the base layer of every deployment's
+config, so nothing real belongs in it.
+
+### 7.3 HTTPS on the LAN (opt-in)
+
+```bash
+NOCKNOCK_TLS=1 NOCKNOCK_TLS_NAMES="<host> <host-ip>" deploy/podman/deploy.sh <host>
+```
+
+This installs one more rootless quadlet, `nocknock-tls`: a Caddy container with its own
+private certificate authority, serving `https://<host>:3443` in front of the dashboard.
+No `sudo`, no privileged port, and host port 8080 is refused.
+
+| Variable | Meaning | Default |
+|:---|:---|:---|
+| `NOCKNOCK_TLS` | `1` installs and restarts the proxy; `remove` stops it and removes its quadlet (its CA volume is kept). Unset: the deploy does not touch it. | unset |
+| `NOCKNOCK_TLS_NAMES` | Every name or IPv4 address the phone will type, space separated. The certificate covers only these. | the host argument |
+| `NOCKNOCK_TLS_PORT` | Host port, 1024 to 65535, not 8080, 3000 or 8081. | `3443` |
+
+A private CA means **each phone must install and trust its root certificate**:
+download it from `https://<host>:3443/nocknock-root-ca.crt` (or fetch it with
+`deploy/podman/tls/export-root-ca.sh <host>`), compare its SHA-256 fingerprint with the
+one the deploy printed, then install it (iPhone: Settings, Profile Downloaded, then
+General, About, Certificate Trust Settings; Android: Settings, Security, Encryption &
+credentials, Install a certificate, CA certificate).
+
+Know the cost before doing that. The root you install can vouch for **any** website, and
+its private key sits in the `nocknock-tls-data` volume on the host. Install it only on
+your own devices and remove it when you stop using this. Ports 3000 and 8081 still serve
+plain HTTP.
+
+Two alternatives avoid the private root but need accounts that are yours to open, so
+they are described in the guide and not built: a tailnet (Tailscale issues a public
+certificate and also reaches the dashboard away from home), or a real domain with a
+DNS-01 certificate.

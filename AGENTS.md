@@ -240,5 +240,10 @@ charts restart. See
   plainly, remove their ledger rows afterwards, and restore the operator's config.
 - **Do not** leave it running an unmerged branch at the end of a session without saying
   so in the session log.
+- **Opt-in TLS proxy (#89)**: `NOCKNOCK_TLS=1 deploy/podman/deploy.sh chudmax` adds the
+  `nocknock-tls` quadlet (Caddy, private CA, `https://chudmax:3443`). A deploy without
+  that variable never installs, restarts or removes it. Its `nocknock-tls-data` volume
+  holds the CA's root key: do not delete it casually (every phone would need the new
+  root) and never copy the key off the host. See `DEPLOYMENT.md` §7.
 - Other hosts (`netmoom`, `metnoom`) reject the workstation's SSH key; nothing runs there.
 
