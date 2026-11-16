@@ -12,6 +12,9 @@ import {
   costOverSpotText,
   hopLine,
   nockAmount,
+  quotesKey,
+  routeName,
+  ROUTE_QUOTES_POLL_MS,
   quoteAge,
   quoteBlockLine,
   quotesToShow,
@@ -79,7 +82,7 @@ describe('venue card', () => {
     const card = venueCard(aero, REAL_ROUTE_QUOTES);
     expect(card.quoted).toBe(true);
     expect(card.returnsMore).toBe(true);
-    expect(card.headline).toBe('1,773.0769 NOCK');
+    expect(card.headline).toBe('1,773.0768 NOCK');
     expect(card.exactNock).toBe('1773.0768618618146014');
     expect(card.detail).toBe('$0.011280 per NOCK · 0.06% under the reference spot $0.011287');
     expect(card.route).toBe('USDC → USDT → WETH → NOCK');
@@ -89,11 +92,14 @@ describe('venue card', () => {
       'WETH → NOCK · Aero concentrated · fee 0.97% · 0x957256c9…0874',
     ]);
     // The venue's other candidates are listed with what each returned.
+    // Two of them go USDC → WETH → NOCK through different pools: each carries its
+    // route id, so no two lines with different amounts share one name.
     expect(card.otherRoutes).toEqual([
       'USDC → NOCK: 1,742.2508 NOCK',
-      'USDC → WETH → NOCK: 1,772.5260 NOCK',
-      'USDC → WETH → NOCK: 1,772.2004 NOCK',
+      'USDC → WETH → NOCK (aero-cl50-weth): 1,772.5259 NOCK',
+      'USDC → WETH → NOCK (aero-cl100-weth): 1,772.2004 NOCK',
     ]);
+    expect(new Set(card.otherRoutes.map((r) => r.split(':')[0])).size).toBe(card.otherRoutes.length);
     expect(card.swapUrl).toBe('https://app.aero.xyz/swap');
 
     const other = venueCard(uniswap, REAL_ROUTE_QUOTES);
@@ -104,7 +110,36 @@ describe('venue card', () => {
       'USDC → WETH · Uniswap v3 · fee 0.05% · 0xd0b53d92…f224',
       'WETH → NOCK · Uniswap v3 · fee 1% · 0x71a4a6f6…ad9a',
     ]);
-    expect(other.otherRoutes).toEqual(['USDC → NOCK: 1,716.8661 NOCK', 'USDC → ETH → NOCK: 1,692.7635 NOCK']);
+    expect(other.route).toBe('USDC → WETH → NOCK');
+    expect(other.otherRoutes).toEqual(['USDC → NOCK: 1,716.8660 NOCK', 'USDC → ETH → NOCK: 1,692.7635 NOCK']);
+  });
+
+  it('tells two routes with the same tokens apart, the best one included', () => {
+    // As read live at block 58091628: Aero's best was through the CL50 USDC/WETH pool,
+    // and the CL100 route has the same tokens and another amount.
+    const q = clone();
+    const v = q.venues[0];
+    const tried = v.routes_tried ?? [];
+    const cl50 = tried.find((r) => r.route_id === 'aero-cl50-weth')!;
+    const cl100 = tried.find((r) => r.route_id === 'aero-cl100-weth')!;
+    cl50.nock_out = '1786.6983000000000000';
+    cl100.nock_out = '1786.4361000000000000';
+    v.nock_out = cl50.nock_out;
+    v.route = cl50.route;
+    const card = venueCard(v, q);
+    expect(card.headline).toBe('1,786.6983 NOCK');
+    expect(card.route).toBe('USDC → WETH → NOCK (aero-cl50-weth)');
+    expect(card.otherRoutes).toContain('USDC → WETH → NOCK (aero-cl100-weth): 1,786.4361 NOCK');
+    expect(card.otherRoutes).toHaveLength(3);
+    expect(card.otherRoutes.some((r) => r.startsWith(card.route))).toBe(false);
+    // A label that is the only one of its kind stays as it is.
+    expect(routeName({ route: 'USDC → NOCK', route_id: 'aero-basic-direct' }, tried)).toBe('USDC → NOCK');
+    // An unavailable candidate is named the same way.
+    cl100.nock_out = null;
+    cl100.reason = 'the quote request timed out';
+    expect(venueCard(v, q).otherRoutes).toContain(
+      'USDC → WETH → NOCK (aero-cl100-weth): unavailable (the quote request timed out)',
+    );
   });
 
   it('shows only the reason for a venue that could not be quoted', () => {
@@ -169,8 +204,19 @@ describe('cost over the reference spot', () => {
   });
 
   it('formats NOCK for reading and leaves what it cannot parse alone', () => {
-    expect(nockAmount('1773.0768618618146014')).toBe('1,773.0769');
+    // Cut, not rounded: the worker's comparison sentence and the MCP text say
+    // 1773.0768 for this amount, and the card must not say 1,773.0769 beside them.
+    expect(nockAmount('1773.0768618618146014')).toBe('1,773.0768');
+    expect(REAL_ROUTE_QUOTES.comparison).toContain('1773.0768 NOCK against 1772.2085 on Uniswap');
+    expect(nockAmount('1772.2085413951150619')).toBe('1,772.2085');
+    expect(nockAmount('0.99999')).toBe('0.9999');
+    expect(nockAmount('1234567.5')).toBe('1,234,567.5000');
+    expect(nockAmount('007.12')).toBe('7.1200');
+    // No float is involved: an amount too large for one keeps every digit.
+    expect(nockAmount('12345678901234567890.123456')).toBe('12,345,678,901,234,567,890.1234');
     expect(nockAmount('5')).toBe('5.0000');
+    expect(nockAmount('-5.1')).toBe('-5.1');
+    expect(nockAmount('1e3')).toBe('1e3');
     expect(nockAmount(null)).toBe('n/a');
     expect(nockAmount('')).toBe('n/a');
     expect(nockAmount('lots')).toBe('lots');
@@ -180,33 +226,64 @@ describe('cost over the reference spot', () => {
 describe('refreshed quotes', () => {
   const at = (block: number | null, over: Partial<RouteQuotes> = {}): RouteQuotes => ({ ...clone(), block_number: block, ...over });
 
-  it('are shown only while the snapshot has not moved since the refresh was asked for', () => {
+  it('from the worker are shown while the snapshot they were asked against is still on screen', () => {
     const snap = REAL_ROUTE_QUOTES;
     const later = at(58083410);
-    expect(quotesToShow(snap, { quotes: later, basisBlock: 58081910 })).toBe(later);
+    expect(quotesToShow(snap, { quotes: later, basis: snap })).toBe(later);
     expect(quotesToShow(snap, null)).toBe(snap);
-    // The snapshot moved on (a new cycle, or the refetch): it wins, whatever it says.
+    // A new snapshot arrived (its state hash moved): it wins, whatever it says, until
+    // the worker is asked again.
     const next = at(58083500);
-    expect(quotesToShow(next, { quotes: later, basisBlock: 58081910 })).toBe(next);
+    expect(quotesToShow(next, { quotes: later, basis: snap })).toBe(next);
     const nowDown = at(null, { status: 'unavailable', venues: [] });
-    expect(quotesToShow(nowDown, { quotes: later, basisBlock: 58081910 })).toBe(nowDown);
-    // A refresh that is not newer than what it was asked against changes nothing.
-    expect(quotesToShow(snap, { quotes: at(58081910), basisBlock: 58081910 })).toBe(snap);
+    expect(quotesToShow(nowDown, { quotes: later, basis: snap })).toBe(nowDown);
+    // Two snapshots can carry equal quotes; it is the object on screen that counts.
+    expect(quotesToShow(clone(), { quotes: later, basis: snap })).not.toBe(later);
   });
 
-  it('never show a refresh for another amount, or one that read no block', () => {
+  it('show what the worker holds when the state hash did not move', () => {
+    // The quotes are not part of the state hash, so the dashboard keeps the snapshot
+    // it has while the worker reads new quotes each cycle. The worker's answer is shown.
+    const snap = REAL_ROUTE_QUOTES;
+    const nextCycle = at(58083410);
+    expect(quotesToShow(snap, { quotes: nextCycle, basis: snap }, '20.00')).toBe(nextCycle);
+    // Also when the newer answer is "unavailable": the older quotes are not kept on
+    // screen as if they were current.
+    const failed = at(null, { status: 'unavailable', quoted_at: null });
+    expect(quotesToShow(snap, { quotes: failed, basis: snap }, '20.00')).toBe(failed);
+    // The snapshot had no quotes read and the worker has some now.
+    const down = at(null, { status: 'unavailable' });
+    expect(quotesToShow(down, { quotes: nextCycle, basis: down }, '20.00')).toBe(nextCycle);
+    // The snapshot carries none at all (the worker restarted): the worker's are shown
+    // for the tranche the plan panel shows.
+    expect(quotesToShow(null, { quotes: nextCycle, basis: null }, '20.00')).toBe(nextCycle);
+    expect(quotesToShow(undefined, { quotes: nextCycle, basis: null }, '20.00')).toBe(nextCycle);
+    // The worker holds none (nothing due in its latest cycle): the snapshot's stay.
+    expect(quotesToShow(snap, { quotes: null, basis: snap }, '20.00')).toBe(snap);
+    expect(quotesToShow(null, { quotes: null, basis: null }, '20.00')).toBeNull();
+  });
+
+  it('never show an answer for another amount than the tranche on screen', () => {
     const snap = REAL_ROUTE_QUOTES;
     const otherSize = at(58090000, { amount_usdc: '13.37' });
-    expect(quotesToShow(snap, { quotes: otherSize, basisBlock: 58081910 })).toBe(snap);
-    const failed = at(null, { status: 'unavailable' });
-    expect(quotesToShow(snap, { quotes: failed, basisBlock: 58081910 })).toBe(snap);
-    // The snapshot had no quotes read (both venues unavailable) and the refresh did.
-    const down = at(null, { status: 'unavailable' });
-    const fresh = at(58083410);
-    expect(quotesToShow(down, { quotes: fresh, basisBlock: null })).toBe(fresh);
-    // No quotes in the snapshot (no tranche due): nothing is shown, refreshed or not.
-    expect(quotesToShow(null, { quotes: fresh, basisBlock: null })).toBeNull();
+    expect(quotesToShow(snap, { quotes: otherSize, basis: snap })).toBe(snap);
+    expect(quotesToShow(snap, { quotes: otherSize, basis: snap }, '20.00')).toBe(snap);
+    expect(quotesToShow(null, { quotes: otherSize, basis: null }, '20.00')).toBeNull();
+    // The plan panel's tranche decides, not the older quotes' amount.
+    expect(quotesToShow(snap, { quotes: otherSize, basis: snap }, '13.37')).toBe(otherSize);
+    // Without a snapshot's quotes or a tranche there is no amount to match: nothing.
+    expect(quotesToShow(null, { quotes: at(58083410), basis: null })).toBeNull();
     expect(quotesToShow(undefined, undefined)).toBeNull();
+  });
+
+  it('are asked for again when the snapshot quotes change', () => {
+    expect(quotesKey(null)).toBe('none');
+    expect(quotesKey(undefined)).toBe('none');
+    expect(quotesKey(REAL_ROUTE_QUOTES)).toBe('58081910|2026-11-16T05:25:57+00:00|ok|20.00');
+    expect(quotesKey(at(58083410))).not.toBe(quotesKey(REAL_ROUTE_QUOTES));
+    expect(quotesKey(at(null, { status: 'unavailable', quoted_at: null }))).toBe('no-block||unavailable|20.00');
+    expect(quotesKey(clone())).toBe(quotesKey(REAL_ROUTE_QUOTES));
+    expect(ROUTE_QUOTES_POLL_MS).toBe(30_000);
   });
 
   it('say so when the worker answered with nothing quoted', () => {
@@ -236,12 +313,12 @@ describe('cost over quote, per fill', () => {
     expect(costOverQuote(fill)).toEqual({
       known: true,
       text: '+50 bps (0.50%) over the quote',
-      reference: 'best quote: Aero, $20.00 for 1,773.0769 NOCK at block 58,081,910 (2026-11-16 05:25:57 UTC)',
+      reference: 'best quote: Aero, $20.00 for 1,773.0768 NOCK at block 58,081,910 (2026-11-16 05:25:57 UTC)',
     });
     expect(costOverQuote({ ...fill, quote_cost_bps: -12 }).text).toBe('−12 bps (0.12%) under the quote');
     expect(costOverQuote({ ...fill, quote_cost_bps: 0 }).text).toBe('at the quote');
     expect(costOverQuote({ ...fill, quote_block_number: null, quoted_at: null }).reference).toBe(
-      'best quote: Aero, $20.00 for 1,773.0769 NOCK block not recorded',
+      'best quote: Aero, $20.00 for 1,773.0768 NOCK block not recorded',
     );
   });
 

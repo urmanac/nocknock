@@ -9,19 +9,26 @@
  *
  * REFRESH asks the worker to quote the same tranche again at the latest block. It takes
  * no amount: the worker quotes only the tranche its own plan says is due.
+ *
+ * The quotes are not part of the snapshot's state hash, and the dashboard takes a new
+ * snapshot only when that hash changes. So the panel also asks the worker, on mount,
+ * every 30 seconds and whenever the snapshot's quotes change, for the quotes it holds
+ * (GET /accumulation/quotes/latest, a read of the worker's memory that calls nothing).
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import type { RouteQuotes as RouteQuotesData } from '../types/snapshot';
 import {
   ROUTE_QUOTE_CAVEAT,
+  ROUTE_QUOTES_POLL_MS,
   quoteAge,
   quoteBlockLine,
+  quotesKey,
   quotesToShow,
   refreshFailure,
   venueCard,
-  type RefreshedQuotes,
   type VenueCard,
+  type WorkerQuotes,
 } from '../routeQuotes';
 
 const label = { fontSize: '0.7rem', letterSpacing: 2, color: '#8b949e' } as const;
@@ -157,21 +164,70 @@ export function RouteQuotesView({
   );
 }
 
-/** The quotes of the snapshot, with a refresh that asks the worker for newer ones. */
-export function RouteQuotes({ quotes, onChanged }: { quotes?: RouteQuotesData | null; onChanged?: () => void }) {
-  const [refreshed, setRefreshed] = useState<RefreshedQuotes | null>(null);
+/**
+ * The quotes for the due tranche: the snapshot's, or the worker's own latest answer
+ * when it was read after that snapshot arrived. `trancheUsdc` is the tranche the plan
+ * panel shows; an answer for another amount is never drawn.
+ */
+export function RouteQuotes({
+  quotes,
+  trancheUsdc,
+  onChanged,
+}: {
+  quotes?: RouteQuotesData | null;
+  trancheUsdc?: string | null;
+  onChanged?: () => void;
+}) {
+  const snapshotQuotes = quotes ?? null;
+  const [worker, setWorker] = useState<WorkerQuotes | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const shown = quotesToShow(quotes, refreshed);
-  if (!shown || !quotes) return null;
+  // The snapshot's quotes at the moment a request is issued: the answer's basis.
+  const basisRef = useRef(snapshotQuotes);
+  basisRef.current = snapshotQuotes;
+  // Requests are numbered so an answer that was asked for earlier never replaces one
+  // asked for later (a slow poll arriving after a refresh).
+  const issuedRef = useRef(0);
+  const appliedRef = useRef(0);
+  const apply = (issued: number, answer: WorkerQuotes) => {
+    if (issued <= appliedRef.current) return;
+    appliedRef.current = issued;
+    setWorker(answer);
+  };
+
+  const snapshotKey = quotesKey(snapshotQuotes);
+  useEffect(() => {
+    let mounted = true;
+    const poll = async () => {
+      const issued = ++issuedRef.current;
+      const basis = basisRef.current;
+      try {
+        const res = await api.latestRouteQuotes();
+        if (mounted) apply(issued, { quotes: res.route_quotes ?? null, basis });
+      } catch {
+        // The worker did not answer: the quotes on screen stay, with their own block and time.
+      }
+    };
+    void poll();
+    const timer = setInterval(poll, ROUTE_QUOTES_POLL_MS);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+    // Asked again whenever the snapshot's quotes change; the refs carry the rest.
+  }, [snapshotKey]);
+
+  const shown = quotesToShow(snapshotQuotes, worker, trancheUsdc);
+  if (!shown) return null;
 
   const refresh = async () => {
     setBusy(true);
     setError(null);
-    const basisBlock = typeof quotes.block_number === 'number' ? quotes.block_number : null;
+    const issued = ++issuedRef.current;
+    const basis = basisRef.current;
     try {
       const res = await api.refreshRouteQuotes();
-      setRefreshed({ quotes: res.route_quotes, basisBlock });
+      apply(issued, { quotes: res.route_quotes, basis });
       // The worker answered, but with nothing quoted: say so; do not pass it off as fresh.
       setError(refreshFailure(res.route_quotes));
       onChanged?.();

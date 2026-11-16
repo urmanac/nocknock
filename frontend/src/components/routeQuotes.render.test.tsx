@@ -64,7 +64,10 @@ describe('route quotes', () => {
     expect(plain).toContain('ROUTE QUOTES · $20.00 USDC → NOCK · READ-ONLY');
     expect(plain).toContain('block 58,081,910 · 2026-11-16 05:25:57 UTC · read 4 min ago');
     expect(plain).toContain('AERO');
-    expect(plain).toContain('1,773.0769 NOCK');
+    expect(plain).toContain('1,773.0768 NOCK');
+    // The card and the worker's comparison sentence below it give the same figure.
+    expect(plain).toContain('1773.0768 NOCK against 1772.2085 on Uniswap');
+    expect(plain).not.toContain('1,773.0769');
     expect(plain).toContain('$0.011280 per NOCK · 0.06% under the reference spot $0.011287');
     expect(plain).toContain('USDC → USDT → WETH → NOCK');
     expect(plain).toContain('WETH → NOCK · Aero concentrated · fee 0.97% · 0x957256c9…0874');
@@ -138,7 +141,7 @@ describe('route quotes', () => {
       comparison: 'Only Aero could be quoted at block 58081910; with one quote there is nothing to compare.',
     };
     const html = renderToStaticMarkup(<RouteQuotesView quotes={one} nowMs={NOW} />);
-    expect(text(html)).toContain('1,773.0769 NOCK');
+    expect(text(html)).toContain('1,773.0768 NOCK');
     expect(count(text(html), 'UNAVAILABLE')).toBe(1);
     expect(html).not.toContain('data-testid="returns-more"');
     expect(text(html)).toContain('Only Aero could be quoted at block 58081910');
@@ -223,7 +226,7 @@ describe('recorded buys', () => {
     const cells = html.split('data-testid="cost-over-quote"').slice(1).map((c) => text(c.slice(c.indexOf('>') + 1, c.indexOf('</td>'))));
     expect(cells).toEqual([
       'no quote on record',
-      '+50 bps (0.50%) over the quotebest quote: Aero, $20.00 for 1,773.0769 NOCK at block 58,081,910 (2026-11-16 05:25:57 UTC)',
+      '+50 bps (0.50%) over the quotebest quote: Aero, $20.00 for 1,773.0768 NOCK at block 58,081,910 (2026-11-16 05:25:57 UTC)',
     ]);
     expect(text(html)).toContain('The market can move between the quote\'s block and the swap');
   });

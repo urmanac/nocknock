@@ -11,7 +11,7 @@
  * recommendation to buy, and the worker never signs, sizes or sends anything.
  */
 import type { AccumulationEvent } from './api/client';
-import type { RouteHop, RouteQuotes, VenueQuote } from './types/snapshot';
+import type { RouteAttempt, RouteHop, RouteQuotes, VenueQuote } from './types/snapshot';
 
 /** Said under every set of quotes. Same wording as the worker's MCP text. */
 export const ROUTE_QUOTE_CAVEAT =
@@ -19,7 +19,7 @@ export const ROUTE_QUOTE_CAVEAT =
 
 /** The one caveat every cost-over-quote figure needs, shown on the page. */
 export const COST_OVER_QUOTE_CAVEAT =
-  'Cost over quote compares the swap\'s price with the best quote NockNock read for that tranche before the swap\'s block. The market can move between the quote\'s block and the swap, so the figure is not execution cost alone; each one names its quote\'s block.';
+  'Cost over quote compares the swap\'s price with the best quote NockNock read for that tranche in the 60 minutes before the swap\'s block; with no such quote it reads "no quote on record". The market can move between the quote\'s block and the swap, so the figure is not execution cost alone; each one names its quote\'s block.';
 
 /** The only pages a swap link may open. Aero is app.aero.xyz, never aerodrome.finance. */
 const SWAP_PAGES: Record<string, string> = {
@@ -81,12 +81,17 @@ export function quoteAge(quotedAt: string | null | undefined, nowMs: number): st
   return `read ${Math.round(minutes / 60)} h ago`;
 }
 
-/** NOCK amount for reading: "1,773.0769". The exact string stays in the title. */
+/**
+ * NOCK amount for reading: "1,773.0768". Cut to four decimals from the exact decimal
+ * string, never rounded and never through a float, so it reads the same as the worker's
+ * comparison sentence and the MCP text. The exact string stays in the title.
+ */
 export function nockAmount(s: string | null | undefined): string {
   if (!s || s.trim() === '') return 'n/a';
-  const v = Number(s);
-  if (!Number.isFinite(v)) return s;
-  return v.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  const m = /^(\d+)(?:\.(\d*))?$/.exec(s.trim());
+  if (!m) return s;
+  const whole = m[1].replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${whole}.${(m[2] ?? '').slice(0, 4).padEnd(4, '0')}`;
 }
 
 /**
@@ -113,18 +118,29 @@ export interface VenueCard {
   quoted: boolean;
   /** True only for the venue the worker named as returning more NOCK. */
   returnsMore: boolean;
-  /** "1,773.0769 NOCK", or "UNAVAILABLE". */
+  /** "1,773.0768 NOCK", or "UNAVAILABLE". */
   headline: string;
   /** Exact NOCK out as the worker reported it; empty when unavailable. */
   exactNock: string;
   /** "$0.011280 per NOCK · 0.06% under the reference spot $0.011287"; the reason when unavailable. */
   detail: string;
+  /** The best route's tokens, with its route id when another candidate reads the same. */
   route: string;
   hops: string[];
   /** Other candidate routes of this venue and what each returned. */
   otherRoutes: string[];
   swapUrl: string | null;
   swapLabel: string;
+}
+
+/**
+ * A candidate route's name. A route is labelled by its tokens, so two routes through
+ * different pools can read the same ("USDC → WETH → NOCK" by either Aero USDC/WETH
+ * pool). A label shared within the venue gets its route id, so no two lines with
+ * different amounts carry one name.
+ */
+export function routeName(r: Pick<RouteAttempt, 'route' | 'route_id'>, tried: Pick<RouteAttempt, 'route'>[]): string {
+  return tried.filter((t) => t.route === r.route).length > 1 ? `${r.route} (${r.route_id})` : r.route;
 }
 
 /** Everything one venue's card shows. Nothing is drawn for an unavailable venue but its reason. */
@@ -147,6 +163,8 @@ export function venueCard(v: VenueQuote, q: Pick<RouteQuotes, 'more_nock_venue' 
       swapLabel,
     };
   }
+  // The candidate the worker reported as this venue's best: same route, same amount.
+  const best = tried.find((r) => r.nock_out === v.nock_out && r.route === v.route);
   const price = Number(v.effective_price_usd);
   const priceText =
     v.effective_price_usd && Number.isFinite(price) ? `$${price.toFixed(6)} per NOCK` : 'price unavailable';
@@ -157,45 +175,57 @@ export function venueCard(v: VenueQuote, q: Pick<RouteQuotes, 'more_nock_venue' 
     headline: `${nockAmount(v.nock_out)} NOCK`,
     exactNock: v.nock_out,
     detail: `${priceText} · ${costOverSpotText(v.cost_over_spot_pct, q.reference_spot_usd)}`,
-    route: v.route ?? '',
+    route: best ? routeName(best, tried) : (v.route ?? ''),
     hops: (v.hops ?? []).map(hopLine),
     otherRoutes: tried
-      .filter((r) => r.nock_out !== v.nock_out || r.route !== v.route)
-      .map((r) =>
-        r.nock_out ? `${r.route}: ${nockAmount(r.nock_out)} NOCK` : `${r.route}: unavailable (${r.reason ?? 'no reason given'})`,
-      ),
+      .filter((r) => r !== best)
+      .map((r) => {
+        const name = routeName(r, tried);
+        return r.nock_out ? `${name}: ${nockAmount(r.nock_out)} NOCK` : `${name}: unavailable (${r.reason ?? 'no reason given'})`;
+      }),
     swapUrl,
     swapLabel,
   };
 }
 
-/** A refresh's answer, with the block of the snapshot's quotes it was asked against. */
-export interface RefreshedQuotes {
-  quotes: RouteQuotes;
-  /** `block_number` of the snapshot's quotes when REFRESH was pressed; null when it had none. */
-  basisBlock: number | null;
+/**
+ * An answer read from the worker's memory (the latest-quotes endpoint, or a refresh),
+ * with the snapshot's quotes object that was on screen when it was asked for.
+ */
+export interface WorkerQuotes {
+  /** Null when the worker holds no quotes (nothing due in its latest cycle). */
+  quotes: RouteQuotes | null;
+  /** The snapshot's `route_quotes` when the request was issued; null when it had none. */
+  basis: RouteQuotes | null;
 }
 
-const blockOf = (q: RouteQuotes): number | null => (typeof q.block_number === 'number' ? q.block_number : null);
+/** How often the panel asks the worker for the quotes it holds. */
+export const ROUTE_QUOTES_POLL_MS = 30_000;
+
+/** Changes whenever the snapshot's quotes do; "none" without quotes. */
+export function quotesKey(q: RouteQuotes | null | undefined): string {
+  return q ? `${q.block_number ?? 'no-block'}|${q.quoted_at ?? ''}|${q.status}|${q.amount_usdc}` : 'none';
+}
 
 /**
- * The quotes to draw: the snapshot's, or a refresh's answer while the snapshot has not
- * moved since the refresh was asked for. As soon as the snapshot carries other quotes
- * (the next cycle, or the refetch after the refresh) the snapshot wins, so a refreshed
- * quote is never kept on screen after the worker has reported something newer, such as
- * "unavailable". A refresh for another amount, or one that read no block, is never shown.
+ * The quotes to draw. The snapshot's quotes are left out of its state hash, and the
+ * dashboard only takes a new snapshot when that hash changes, so the snapshot's copy
+ * can be older than what the worker holds. An answer read from the worker's memory is
+ * therefore shown instead, while the snapshot object it was asked against is still the
+ * one on screen: it was read after that snapshot arrived, so it is the same or newer,
+ * including when it says "unavailable". Once a new snapshot arrives the answer is
+ * dropped until the worker is asked again. An answer for another amount than the
+ * tranche the plan panel shows is never drawn.
  */
 export function quotesToShow(
   snapshot: RouteQuotes | null | undefined,
-  refreshed: RefreshedQuotes | null | undefined,
+  worker: WorkerQuotes | null | undefined,
+  trancheUsdc?: string | null,
 ): RouteQuotes | null {
-  if (!snapshot) return null;
-  if (!refreshed) return snapshot;
-  const snapBlock = blockOf(snapshot);
-  const freshBlock = blockOf(refreshed.quotes);
-  if (refreshed.basisBlock !== snapBlock) return snapshot;
-  if (refreshed.quotes.amount_usdc !== snapshot.amount_usdc || freshBlock === null) return snapshot;
-  return snapBlock === null || freshBlock > snapBlock ? refreshed.quotes : snapshot;
+  const snap = snapshot ?? null;
+  if (!worker || worker.basis !== snap || !worker.quotes) return snap;
+  const amount = trancheUsdc ?? snap?.amount_usdc ?? null;
+  return amount !== null && worker.quotes.amount_usdc === amount ? worker.quotes : snap;
 }
 
 /**
@@ -211,7 +241,7 @@ export interface QuoteCostLabel {
   /** False when no quote was on record for the fill's tranche. */
   known: boolean;
   text: string;
-  /** "best quote: Aero, $20.00 for 1,773.0769 NOCK at block 58,081,910 (2026-11-16 05:25:57 UTC)" */
+  /** "best quote: Aero, $20.00 for 1,773.0768 NOCK at block 58,081,910 (2026-11-16 05:25:57 UTC)" */
   reference: string;
 }
 
@@ -228,7 +258,8 @@ type QuoteCostFigures = Pick<
 
 /**
  * A fill's cost over the best quote that was current for its tranche. Without a stored
- * quote there is no figure: "no quote on record", never 0 and never a later quote.
+ * quote there is no figure: "no quote on record", never 0 and never a later quote. The
+ * worker pairs them (same tranche, read within 60 minutes before the fill).
  */
 export function costOverQuote(f: QuoteCostFigures): QuoteCostLabel {
   const bps = f.quote_cost_bps;

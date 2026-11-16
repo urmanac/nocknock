@@ -125,6 +125,18 @@ export interface AccumulationEvent {
   quote_cost_bps?: number | null;
 }
 
+/**
+ * GET /accumulation/quotes/latest: the quotes the worker holds in memory for the due
+ * tranche. It makes no call. Every field is null without a snapshot or a plan.
+ */
+export interface LatestRouteQuotesResponse {
+  plan_id: string | null;
+  status: string | null;
+  tranche_index: number | null;
+  tranche_usdc: string | null;
+  route_quotes: RouteQuotes | null;
+}
+
 /** POST /accumulation/quotes/refresh: the due tranche quoted again at the latest block. */
 export interface RefreshRouteQuotesResponse {
   plan_id: string;
@@ -277,4 +289,9 @@ export const api = {
   // It takes no amount: the worker quotes only the tranche its own plan says is due.
   refreshRouteQuotes: () =>
     request<RefreshRouteQuotesResponse>('/accumulation/quotes/refresh', { method: 'POST' }),
+
+  // The quotes the worker holds now. The snapshot's ETag is its state hash and the
+  // quotes are not part of it, so a revalidated snapshot can carry older ones.
+  latestRouteQuotes: () =>
+    request<LatestRouteQuotesResponse>('/accumulation/quotes/latest', { cache: 'no-store' }),
 };
