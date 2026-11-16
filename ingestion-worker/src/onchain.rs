@@ -268,6 +268,21 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
         .and_then(|h| u128::from_str_radix(h.trim_start_matches("0x"), 16).ok())
         .map(|wei| wei as f64 / 1e18);
     let (gas_eth, gas_weth) = require_gas_balances(wallet_eth, wallet_weth)?;
+    // 5b'. AERO, the fourth pillar (issue #93): wallet AERO (required, counted in the
+    //      total), unclaimed AERO per staked Aero position (a failed gauge read is stated
+    //      on that position, never 0) and the AERO/USD price (required only while the
+    //      wallet holds AERO; otherwise a failed read degrades with its reason).
+    let aero_price_pool =
+        state.config.aero_price_pool.clone().unwrap_or_else(|| DEFAULT_AERO_PRICE_POOL.to_string());
+    let aero = fetch_aero_reads(
+        &state.http_client,
+        &alchemy_url,
+        wallet_addr,
+        &aero_price_pool,
+        &state.config.positions,
+        &position_facts,
+    )
+    .await?;
     // 5c. Per-position rebuild rules from config, keyed like RawPosition.position_id.
     let rebuild_rules: HashMap<String, RebuildRule> = state
         .config
@@ -286,15 +301,16 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
         .collect();
 
     let positions =
-        snapshot_positions_from(&raw_positions, spot_price, live_eth_price_usd, &pool_liquidity, &position_facts);
+        snapshot_positions_from(&raw_positions, spot_price, live_eth_price_usd, &pool_liquidity, &position_facts, &aero);
     let pool_mechanics = build_pool_mechanics(&raw_positions, spot_price, live_eth_price_usd);
     let contract_fees = build_contract_fees(&positions, live_gas_cost_usd, &fees_not_lp_claimable);
 
     tracing::info!(
-        "Live position reads: {} position(s), NOCK spot ${:.6}, ETH/USD ${:.2}",
+        "Live position reads: {} position(s), NOCK spot ${:.6}, ETH/USD ${:.2}, AERO/USD {}",
         positions.len(),
         spot_price,
-        live_eth_price_usd
+        live_eth_price_usd,
+        aero.price_usd.map(|p| format!("${:.4}", p)).unwrap_or_else(|| "unavailable".to_string())
     );
 
     Ok(RawOnChainData {
@@ -332,6 +348,8 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
                 amount_usd: format!("{:.2}", gas_weth * live_eth_price_usd),
                 updated_at: now_str.clone(),
             },
+            // AERO (v0.6.0, #93) comes last: earlier rows keep their indexes.
+            aero_wallet_balance(wallet_addr, aero.wallet_aero.unwrap_or(0.0), aero.price_usd, &now_str),
         ],
         pool_mechanics,
         concentrated_liquidity: vec![], // DEPRECATED since v2.0.0 — see `positions`
@@ -346,6 +364,7 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
         rebuild_rules,
         fees_not_lp_claimable,
         position_facts,
+        aero,
     })
 }
 

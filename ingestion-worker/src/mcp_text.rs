@@ -50,12 +50,15 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
     // Pillars and gas (snapshot 2.3.0, issue #94). Absent fields say so, never $0.00.
     let not_reported = "not reported (snapshot predates 2.3.0)";
     let pillar = |k: &str| get(k).map(|v| format!("${v}")).unwrap_or_else(|| not_reported.to_string());
+    // AERO is the fourth pillar (issue #93): wallet AERO, so the four add up to the total.
     let pillars = format!(
-        "NOCK {} · USDC {} · ETH {}",
+        "NOCK {} · USDC {} · ETH {} · AERO {}",
         pillar("total_native_usd"),
         pillar("total_stable_usd"),
-        pillar("total_eth_usd")
+        pillar("total_eth_usd"),
+        aero_pillar_text(data)
     );
+    let aero = aero_lines(data);
     let gas = match (get("wallet_gas_eth"), get("wallet_gas_usd")) {
         (Some(eth), Some(usd)) => format!("{eth} ETH (${usd}), counted in the total; not cash, not deployable"),
         (Some(eth), None) => format!("{eth} ETH (USD value not reported), counted in the total; not cash, not deployable"),
@@ -70,6 +73,7 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
          • Sovereign NOCK Stack: {total_nock} ({floor})\n\
          • Stable Stack: {total_usdc}\n\
          • Gas held (wallet ETH+WETH): {gas}\n\
+         {aero}\n\
          • High-Water Mark: {hwm}\n\
          • Tactical Directive: {advice}"
     )

@@ -126,9 +126,13 @@ components:
       type: object
       description: |
         One wallet token balance. Rows are NOCK, USDC, then (2.3.0) ETH (zero address)
-        and WETH: the gas pillar. Every row is a required live read; a failed read fails
-        the cycle, never reads as 0. Gas rows are counted in total_portfolio_usd but are
-        never cash, never deployable dry powder and never fund an LP deposit.
+        and WETH: the gas pillar, then (v0.6.0, #93) AERO, the fourth pillar. Every row
+        is a required live read; a failed read fails the cycle, never reads as 0. Gas
+        and AERO rows are counted in total_portfolio_usd but are never cash, never
+        deployable dry powder and never fund an LP deposit. AERO is the token the Aero
+        gauges pay, 0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee (name "Aero"); the older
+        "Aerodrome" token with the same symbol is not read. A snapshot from before
+        v0.6.0 has no AERO row.
       required: [wallet_address, token_symbol, token_address, amount, amount_usd]
       properties:
         wallet_address:
@@ -258,10 +262,41 @@ components:
             Present when tokens_owed_0, tokens_owed_1 and fees_usd are NOT a read of
             LP-claimable fees; it is the reason and clients show it in their place,
             never "$0 earned". A staked aerodrome-cl position: swap fees on staked
-            liquidity go to the gauge, and the AERO rewards earned instead are not
-            read (#93). Absent when the fee figures were read, which is every
-            other position: an unstaked aerodrome-cl position's fees are read from
-            a collect() simulation, and a revert there fails the cycle. (v0.6.0)
+            liquidity go to the gauge. The AERO earned instead is in unclaimed_aero
+            (v0.6.0, #93), not in this note. Absent when the fee figures were read,
+            which is every other position: an unstaked aerodrome-cl position's fees
+            are read from a collect() simulation, and a revert there fails the
+            cycle. (v0.6.0)
+        unclaimed_aero:
+          type: string
+          description: >
+            AERO this position has earned in its gauge and not claimed, in AERO to 6
+            decimals: the gauge's earned(wallet) for an aerodrome position with a
+            gauge_address, earned(wallet, [nft_id]) for a staked aerodrome-cl
+            position. "0.000000" is a read zero. Not part of amount_usd, fees_usd or
+            total_portfolio_usd. Absent for every position that cannot earn AERO
+            (Uniswap, an unstaked aerodrome-cl NFT), when the gauge was not read
+            (see unclaimed_aero_note), and on a snapshot from before v0.6.0: clients
+            show "not reported", never 0. NockNock states this amount and gives no
+            advice about it. (v0.6.0, #93)
+          example: "11.922078"
+        unclaimed_aero_usd:
+          type: string
+          description: >
+            unclaimed_aero at aero_price_usd, 2 decimals. Absent when AERO could not
+            be priced this cycle (a zero amount is "0.00" whatever the price).
+            (v0.6.0, #93)
+          example: "4.98"
+        unclaimed_aero_note:
+          type: string
+          description: >
+            Why unclaimed_aero is absent for an Aero position that could earn AERO:
+            an aerodrome position with no gauge_address configured, a gauge whose
+            earned() read reverted or failed this cycle, or a gauge whose
+            rewardToken() names a token other than AERO (a legacy Aerodrome gauge
+            answers earned() in the older token 0x940181a9…8631; its figure is not
+            published as AERO). The read is optional: it does not fail the cycle,
+            and the value is never published as 0. (v0.6.0, #93)
 
     PositionToken:
       type: object
@@ -414,7 +449,11 @@ components:
             reason always starts with "not LP-claimable": an Aero basic pool whose
             claimFees() reverts, or (v0.6.0) an aerodrome-cl position staked in
             its gauge, whose text is positions[].fees_note. Clients test for that
-            prefix and print the reason instead of an amount.
+            prefix and print the reason instead of an amount. Since v0.6.0 (#93)
+            the reason is followed by "; " and the position's AERO statement when
+            it has one: "unclaimed AERO 11.922078 ($4.98)", "unclaimed AERO
+            11.922078 (USD value unavailable)" or "unclaimed AERO not read
+            (<reason>)". The statement is an amount, never advice.
         amount_usd:
           type: string
           description: >
@@ -661,9 +700,13 @@ components:
           type: string
           description: |
             Total portfolio value in USD across every pillar: wallet NOCK + wallet USDC +
-            wallet ETH/WETH gas + tracked LP. Includes wallet gas since 2.3.0 (a one-time
-            step of the gas value when it started counting). Equals total_native_usd +
-            total_stable_usd + total_eth_usd. Cash and LP targets, deviation weights, the
+            wallet ETH/WETH gas + wallet AERO + tracked LP. Includes wallet gas since 2.3.0
+            (a one-time step of the gas value when it started counting) and wallet AERO
+            since v0.6.0 (#93: a one-time step of the wallet's AERO value when it started
+            counting, which is 0 for a wallet that holds none). AERO still unclaimed in a
+            gauge is NOT included, like uncollected LP fees; the total steps up by its
+            value when it is claimed. Equals total_native_usd + total_stable_usd +
+            total_eth_usd + wallet_aero_usd. Cash and LP targets, deviation weights, the
             high-water mark and history all use this one total.
         total_native_usd:
           type: string
@@ -742,7 +785,65 @@ components:
         total_eth_usd:
           type: string
           nullable: true
-          description: The ETH pillar in USD (2.3.0). total_native_usd + total_stable_usd + total_eth_usd = total_portfolio_usd.
+          description: The ETH pillar in USD (2.3.0). total_native_usd + total_stable_usd + total_eth_usd + wallet_aero_usd = total_portfolio_usd.
+        aero_price_usd:
+          type: string
+          nullable: true
+          description: >
+            AERO/USD, 6 decimals, from the slot0 of the configured AERO/USDC pool
+            (`aero_price_pool`), read only when that pool's tokens are AERO and USDC
+            and it has in-range liquidity (a pool with none has a frozen price).
+            Null when it could not be read (aero_note says why) or on a snapshot from
+            before v0.6.0. A required read while the wallet holds AERO (a failed read
+            then fails the cycle); otherwise optional. (v0.6.0, #93)
+          example: "0.417608"
+        wallet_aero_amount:
+          type: string
+          nullable: true
+          description: >
+            Wallet AERO in AERO, 6 decimals: the fourth pillar. A required read (a
+            failed read fails the cycle); "0.000000" is a read zero. Counted in
+            total_portfolio_usd; never cash, never deployable, no target. NockNock
+            states it and gives no advice to claim, sell, hold or accumulate AERO.
+            Null only on a snapshot from before v0.6.0: clients show "not reported",
+            never 0. (v0.6.0, #93)
+          example: "1.359979"
+        wallet_aero_usd:
+          type: string
+          nullable: true
+          description: >
+            wallet_aero_amount at aero_price_usd, 2 decimals. This is the AERO pillar
+            in USD. "0.00" for a wallet holding none, whatever the price.
+            (v0.6.0, #93)
+          example: "0.57"
+        unclaimed_aero_amount:
+          type: string
+          nullable: true
+          description: >
+            Sum of positions[].unclaimed_aero, 6 decimals. NOT counted in
+            total_portfolio_usd. Stated only when every Aero position that could
+            earn AERO was read: null when any gauge read failed, when a gauge pays
+            another token, or when an aerodrome position has no gauge_address to
+            read (never a partial sum and never 0 for something not read; aero_note
+            names the position). "0.000000" means every gauge answered zero or, with
+            no position carrying unclaimed_aero, that no staked Aero position is
+            tracked. Null on a snapshot from before v0.6.0. (v0.6.0, #93)
+          example: "12.043104"
+        unclaimed_aero_usd:
+          type: string
+          nullable: true
+          description: >
+            unclaimed_aero_amount at aero_price_usd, 2 decimals. Null when the amount
+            is null or AERO could not be priced. (v0.6.0, #93)
+          example: "5.03"
+        aero_note:
+          type: string
+          nullable: true
+          description: >
+            The stated reason whenever an AERO figure above is null in a live cycle
+            (the price could not be read, or a gauge could not), and for a position
+            whose gauge is not configured. Null when everything was read.
+            (v0.6.0, #93)
 
     AssetAggregationSeries:
       type: object
@@ -861,10 +962,14 @@ components:
           example: "Aerodrome NOCK/USDC"
         target_weight_bps:
           type: integer
-          description: Target allocation in basis points (targets sum = 10000). The "Gas (wallet ETH+WETH)" row (2.3.0) has no target (0, status no_target).
+          description: >
+            Target allocation in basis points (targets sum = 10000). The "Gas (wallet
+            ETH+WETH)" row (2.3.0) and the "AERO (wallet)" row (v0.6.0, issue 93; the
+            fifth row) have no target (0, status no_target) and are never under
+            rebalancing pressure.
         actual_weight_bps:
           type: integer
-          description: Actual allocation in basis points of total_portfolio_usd (gas included); 0 when the total is 0
+          description: Actual allocation in basis points of total_portfolio_usd (gas and wallet AERO included); 0 when the total is 0
         deviation_bps:
           type: integer
           description: Actual - target (positive = over-funded)
@@ -1010,16 +1115,23 @@ components:
           enum: [claim_now, claim_recommended, accumulate, not_claimable]
           description: >
             Gas-economic recommendation. not_claimable marks an Aero pool whose
-            claimFees() reverts: its fees are not LP-claimable and AERO rewards are
-            not read (#93); claimable_usd is then 0.00 and is not an amount earned.
-            Since v0.6.0 also an aerodrome-cl position staked in its gauge (see
-            note).
+            claimFees() reverts: its fees are not LP-claimable; claimable_usd is
+            then 0.00 and is not an amount earned. Since v0.6.0 also an
+            aerodrome-cl position staked in its gauge (see note). The AERO such a
+            position earns instead is stated in note (v0.6.0, #93) and never
+            changes this recommendation: no value of it means "claim AERO".
         note:
           type: string
           description: >
-            With not_claimable, the position's own reason when it has one: an
-            aerodrome-cl position staked in its gauge. Absent otherwise; an Aero
-            basic pool carries no note. (v0.6.0)
+            With not_claimable, the reason (an aerodrome-cl position staked in its
+            gauge, or an Aero basic pool whose claimFees() reverts), followed since
+            #93 by "; " and the position's AERO statement, the same text as in
+            contract_fees[].amount. A claimable row (claim_now, claim_recommended,
+            accumulate) never carries an AERO statement: its action is about LP
+            fees, and an AERO amount beside it would read as advice about AERO. That
+            position's AERO is in positions[].unclaimed_aero. Absent when there is
+            nothing to say; a snapshot from before #93 carries no note for an Aero
+            basic pool, and clients then say its AERO is not reported. (v0.6.0)
 
     # ============================================================
     # INPUT TYPES FOR WASM FUNCTIONS

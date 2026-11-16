@@ -2,15 +2,15 @@
   "aero_cl_staked_block_58061668": {
     "mcp_text": {
       "get_accumulation_plan": "🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n• LP rebuild bias: under_target (holds $180.20 of a $323.18 target, $142.98 short). Rebuilding ranges is a reposition: no net cash change.\n   ✗ Aero CL WETH/NOCK 0.97% #2914490: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions",
-      "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $2154.54 USD\n• Pillars: NOCK $1137.05 · USDC $891.38 · ETH $126.11\n• Sovereign NOCK Stack: 100742 NOCK (+742 above the 100000 NOCK floor)\n• Stable Stack: 891.38 USDC\n• Gas held (wallet ETH+WETH): 0.013347 ETH ($24.30), counted in the total; not cash, not deployable\n• High-Water Mark: $2154.54 USD\n• Tactical Directive: DIP ZONE (No Buy Plan Configured)",
+      "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $2154.54 USD\n• Pillars: NOCK $1137.05 · USDC $891.38 · ETH $126.11 · AERO not reported\n• Sovereign NOCK Stack: 100742 NOCK (+742 above the 100000 NOCK floor)\n• Stable Stack: 891.38 USDC\n• Gas held (wallet ETH+WETH): 0.013347 ETH ($24.30), counted in the total; not cash, not deployable\n• AERO held (wallet): not reported\n• Unclaimed AERO: not reported\n• AERO/USD: not reported\n• High-Water Mark: $2154.54 USD\n• Tactical Directive: DIP ZONE (No Buy Plan Configured)",
       "get_shot_advice": "🎯 Tactical Shot Advice Engine\n===============================\n• Recommended Action: DIP ZONE (No Buy Plan Configured)\n• Decision Matrix Details: Spot $0.01129 is below the $0.020 accumulation line and the wallet holds $891.38 of liquid USDC. Liquid dry powder: $783.66 (wallet USDC $891.38 less the larger of the $107.73 cash target and the $0.00 virtual tax reserve). NockNock does not size buys outside a plan: add an accumulation_plan with your own budget_usdc, tranches and interval_hours and it will pace them. Standing bias: LP holds $180.20 against a $323.18 target (15% of portfolio), $142.98 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. No tracked position is eligible for a deposit right now.\n• Uncollected Claimable Fees: $0.00 USD\n• Net of two claims' gas: -$0.01 USD\n• Harvest rule: BATCH HARVEST is advised once uncollected LP fees reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).",
-      "simulate_claim_fees": "⚡ Fee Claim Simulation\n=======================\n• Total Gross Claimable: $0.0000 USD\n• Estimated Gas: n/a (nothing LP-claimable)\n• Net Accretion if Harvested: n/a (nothing LP-claimable)\nPool Breakdown:\n  - WETH+NOCK (Aero CL #2914490): not LP-claimable (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)\n"
+      "simulate_claim_fees": "⚡ Fee Claim Simulation\n=======================\n• Total Gross Claimable: $0.0000 USD\n• Estimated Gas: n/a (nothing LP-claimable)\n• Net Accretion if Harvested: n/a (nothing LP-claimable)\nPool Breakdown:\n  - WETH+NOCK (Aero CL #2914490): not LP-claimable (staked: swap fees on staked liquidity go to the gauge)\n"
     },
     "snapshot": {
       "concentrated_liquidity": [],
       "contract_fees": [
         {
-          "amount": "not LP-claimable (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)",
+          "amount": "not LP-claimable (staked: swap fees on staked liquidity go to the gauge)",
           "amount_usd": "0.000000",
           "claimable": false,
           "contract_address": "0x3bf70c880adc8370917994ab0df68e763b7a60fd",
@@ -41,6 +41,8 @@
           ]
         },
         "global_status": {
+          "aero_note": null,
+          "aero_price_usd": null,
           "eth_price_usd": "1820.91",
           "gas_to_fee_delta_usd": "-0.01",
           "high_water_mark_usd": "2154.54",
@@ -60,6 +62,10 @@
           "total_portfolio_usd": "2154.54",
           "total_stable_usd": "891.38",
           "total_usdc_amount": "891.38",
+          "unclaimed_aero_amount": null,
+          "unclaimed_aero_usd": null,
+          "wallet_aero_amount": null,
+          "wallet_aero_usd": null,
           "wallet_gas_eth": "0.013347",
           "wallet_gas_usd": "24.30"
         },
@@ -108,6 +114,13 @@
               "actual_weight_bps": 112,
               "bucket_name": "Gas (wallet ETH+WETH)",
               "deviation_bps": 112,
+              "status": "no_target",
+              "target_weight_bps": 0
+            },
+            {
+              "actual_weight_bps": 0,
+              "bucket_name": "AERO (wallet)",
+              "deviation_bps": 0,
               "status": "no_target",
               "target_weight_bps": 0
             }
@@ -165,7 +178,7 @@
               "contract_name": "Aero CL WETH/NOCK 0.97% #2914490",
               "efficiency_ratio": 0.0,
               "gas_break_even_usd": "0.0041",
-              "note": "not LP-claimable (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)",
+              "note": "not LP-claimable (staked: swap fees on staked liquidity go to the gauge)",
               "recommended_action": "not_claimable"
             }
           ]
@@ -203,7 +216,7 @@
           "amount1": "6945.829656",
           "amount_usd": "180.20",
           "fee_tier_bps": 97,
-          "fees_note": "not LP-claimable (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)",
+          "fees_note": "not LP-claimable (staked: swap fees on staked liquidity go to the gauge)",
           "fees_usd": "0.000000",
           "full_range": false,
           "in_range": true,
@@ -268,6 +281,6 @@
         }
       ]
     },
-    "state_hash": "53fbdb1e517a73f7a9679d59761f7c76c3af75dd15e32aa79d1ad1302e5132ff"
+    "state_hash": "2f508f8b35deb0379dd4de2cff37810084d2c60a8efc5f6e8a730b9a8afc88ab"
   }
 }

@@ -135,8 +135,23 @@ export interface GlobalStatus {
   wallet_gas_usd?: string | null;
   /** The ETH pillar in ETH: wallet gas + ETH/WETH legs of tracked LP (2.3.0) */
   total_eth_amount?: string | null;
-  /** The ETH pillar in USD (2.3.0). native + stable + eth = total */
+  /** The ETH pillar in USD (2.3.0). native + stable + eth + wallet AERO = total */
   total_eth_usd?: string | null;
+  /** AERO/USD from the AERO price pool (v0.6.0, #93); null when it could not be read */
+  aero_price_usd?: string | null;
+  /** Wallet AERO, the fourth pillar (v0.6.0, #93). Counted in the total; not cash, not
+   *  deployable, no target, and no advice is given about it */
+  wallet_aero_amount?: string | null;
+  /** wallet_aero_amount in USD: the AERO pillar (v0.6.0, #93) */
+  wallet_aero_usd?: string | null;
+  /** AERO earned in the gauges of tracked staked positions and not claimed (v0.6.0, #93).
+   *  NOT in total_portfolio_usd. Null when any Aero position's gauge was not read (a
+   *  failed read, a gauge that pays another token, or no gauge_address): never a partial
+   *  sum, never 0 for something not read */
+  unclaimed_aero_amount?: string | null;
+  unclaimed_aero_usd?: string | null;
+  /** The worker's stated reason whenever an AERO figure above is null (v0.6.0, #93) */
+  aero_note?: string | null;
 }
 
 export interface AssetAggregationSeries {
@@ -223,7 +238,9 @@ export interface FeeCollectionIndex {
   /** What the worker emits; 'not_claimable' is an Aero pool whose claimFees() reverts,
    *  or (v0.6.0) an Aero CL position staked in its gauge (see note). */
   recommended_action: 'claim_now' | 'claim_recommended' | 'accumulate' | 'not_claimable';
-  /** With 'not_claimable': the position's own reason, when it has one (v0.6.0). */
+  /** With 'not_claimable': the position's own reason, when it has one (v0.6.0),
+   *  followed by its unclaimed AERO or why that was not read (#93). A claimable row
+   *  carries no AERO statement: its action is about LP fees only. */
   note?: string;
 }
 
@@ -328,6 +345,13 @@ export interface Position {
   /** Present when tokens_owed_* and fees_usd are not a read of LP-claimable fees: the
    *  reason to show in their place, never "$0 earned" (v0.6.0) */
   fees_note?: string;
+  /** AERO earned in this position's gauge and not claimed (v0.6.0, #93). Present only
+   *  when the gauge was read. Not in amount_usd, fees_usd or the portfolio total */
+  unclaimed_aero?: string;
+  /** unclaimed_aero in USD; absent when AERO is unpriced (v0.6.0, #93) */
+  unclaimed_aero_usd?: string;
+  /** Why unclaimed_aero is absent for an Aero position that could earn AERO (v0.6.0, #93) */
+  unclaimed_aero_note?: string;
 }
 
 export interface RawSnapshotData {

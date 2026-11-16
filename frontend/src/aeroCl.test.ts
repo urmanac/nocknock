@@ -10,8 +10,8 @@ import {
 } from './aeroCl';
 import { positionLabel, positionRangeText, protocolBadge, rangeStatus, velocityRowText } from './positions';
 
-const STAKED_NOTE =
-  'not LP-claimable (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)';
+// The reason alone since #93; the position's unclaimed AERO is its own field (aero.test.ts).
+const STAKED_NOTE = 'not LP-claimable (staked: swap fees on staked liquidity go to the gauge)';
 
 /** The operator's WETH/NOCK CL200 position as the worker emits it (Base block 58061668). */
 const cl = {

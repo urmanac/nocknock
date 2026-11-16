@@ -185,6 +185,47 @@ pub(crate) fn velocity_label(p: &RawPosition) -> String {
     }
 }
 
+/// Where a tracked position's unclaimed AERO is read from (v0.6.0, #93).
+pub(crate) enum AeroRewardSource {
+    /// Not an Aero position, or an Aero CL NFT the wallet holds itself (unstaked, so it
+    /// earns swap fees rather than AERO). Nothing is read and nothing is said.
+    NotEarning,
+    /// An Aero basic pool with no `gauge_address`: staked LP and its AERO cannot be
+    /// read, which the position's row states (never 0).
+    GaugeNotConfigured,
+    /// The gauge to call and, given the wallet, the calldata of its `earned` read.
+    Gauge { gauge: String, calldata: Box<dyn Fn(&str) -> String + Send> },
+}
+
+/// Which gauge call reads a position's unclaimed AERO. The two gauge types differ
+/// (verified, ONCHAIN_INTEGRATION.md §9): a basic gauge answers `earned(address)`, a CL
+/// gauge `earned(address,uint256[])` for the token ids the account staked. Pure.
+/// - Aero basic: the configured `gauge_address`. It is read whether or not LP is staked
+///   there now, because AERO earned before an unstake stays claimable.
+/// - Aero CL: the gauge the cycle proved the wallet staked the NFT in.
+pub(crate) fn aero_reward_source(cfg: &PositionConfig, facts: Option<&PositionFacts>) -> AeroRewardSource {
+    match Protocol::parse(&cfg.protocol) {
+        Some(Protocol::AeroBasic) => match cfg.gauge_address.as_ref().filter(|g| !g.trim().is_empty()) {
+            Some(gauge) => AeroRewardSource::Gauge {
+                gauge: gauge.to_lowercase(),
+                calldata: Box::new(gauge_earned_basic_calldata),
+            },
+            None => AeroRewardSource::GaugeNotConfigured,
+        },
+        Some(Protocol::AeroCl) => match facts.and_then(|f| f.staked_in_gauge.clone()) {
+            Some(gauge) => {
+                let nft_id = cfg.nft_id;
+                AeroRewardSource::Gauge {
+                    gauge,
+                    calldata: Box::new(move |wallet: &str| gauge_earned_cl_calldata(wallet, nft_id)),
+                }
+            }
+            None => AeroRewardSource::NotEarning,
+        },
+        Some(Protocol::UniswapV4) | Some(Protocol::UniswapV3) | None => AeroRewardSource::NotEarning,
+    }
+}
+
 /// What a `not LP-claimable` fee row says: the position's own reason when it has one
 /// (an Aero CL position), otherwise the Aero basic pool's reverting claimFees(). Pure.
 pub(crate) fn fees_note_text(note: Option<&str>) -> String {
