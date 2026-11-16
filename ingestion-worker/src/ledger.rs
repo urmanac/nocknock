@@ -249,12 +249,18 @@ pub(crate) async fn record_accumulation_handler(
     // stored price near that time means no cost figure: all three columns stay null.
     // A swap confirmed from an offer keeps the figure the offer showed.
     let reference = reference_for_recorded_fill(&state.db, &wallet, &tx_hash, &effective_price, confirmed_at).await;
+    // Cost over the best quote that was current for this tranche (issue #115): the
+    // latest stored quote read before the fill's block. None on record means all eight
+    // columns stay null; a later quote is never used.
+    let quote = fill_quote_reference(&effective_price, quote_for_fill(&state.db, &plan.id, block_number).await);
 
     let res = sqlx::query(
         "INSERT INTO accumulation_events \
             (plan_id, tx_hash, venue, usdc_spent_raw, nock_received_raw, usdc_spent, nock_received, effective_price_usd, block_number, confirmed_at, \
-             reference_spot_usd, reference_spot_source, execution_cost_bps) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) \
+             reference_spot_usd, reference_spot_source, execution_cost_bps, \
+             quote_venue, quote_route, quote_usdc, quote_nock_out, quote_effective_price_usd, quote_block_number, \
+             quoted_at, quote_cost_bps) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) \
          ON CONFLICT (tx_hash) DO NOTHING",
     )
     .bind(&plan.id)
@@ -270,6 +276,14 @@ pub(crate) async fn record_accumulation_handler(
     .bind(&reference.spot_usd)
     .bind(&reference.source)
     .bind(reference.cost_bps)
+    .bind(&quote.venue)
+    .bind(&quote.route)
+    .bind(&quote.usdc)
+    .bind(&quote.nock_out)
+    .bind(&quote.effective_price_usd)
+    .bind(quote.block_number)
+    .bind(quote.quoted_at)
+    .bind(quote.cost_bps)
     .execute(&state.db)
     .await;
     match res {
@@ -286,6 +300,16 @@ pub(crate) async fn record_accumulation_handler(
             "reference_spot_usd": reference.spot_usd,
             "reference_spot_source": reference.source,
             "execution_cost_bps": reference.cost_bps,
+            // Null together when no quote was on record for this tranche (#115). On a
+            // duplicate these describe this request, not the stored row.
+            "quote_venue": quote.venue,
+            "quote_route": quote.route,
+            "quote_usdc": quote.usdc,
+            "quote_nock_out": quote.nock_out,
+            "quote_effective_price_usd": quote.effective_price_usd,
+            "quote_block_number": quote.block_number,
+            "quoted_at": quote.quoted_at.map(|t| t.to_rfc3339()),
+            "quote_cost_bps": quote.cost_bps,
             "note": "Plan status updates on the next ingestion cycle (POST /v1/ingest to refresh now)."
         }))
         .into_response(),
@@ -300,7 +324,9 @@ pub(crate) async fn record_accumulation_handler(
 pub(crate) async fn accumulation_events_handler(Extension(state): Extension<Arc<AppState>>) -> impl IntoResponse {
     let rows = sqlx::query(
         "SELECT plan_id, tx_hash, venue, usdc_spent, nock_received, effective_price_usd, block_number, confirmed_at, \
-                reference_spot_usd, reference_spot_source, execution_cost_bps \
+                reference_spot_usd, reference_spot_source, execution_cost_bps, \
+                quote_venue, quote_route, quote_usdc, quote_nock_out, quote_effective_price_usd, quote_block_number, \
+                quoted_at, quote_cost_bps \
          FROM accumulation_events ORDER BY confirmed_at ASC, id ASC",
     )
     .fetch_all(&state.db)
@@ -326,6 +352,19 @@ pub(crate) async fn accumulation_events_handler(Extension(state): Extension<Arc<
                         "reference_spot_usd": r.try_get::<Option<String>, _>("reference_spot_usd").ok().flatten(),
                         "reference_spot_source": r.try_get::<Option<String>, _>("reference_spot_source").ok().flatten(),
                         "execution_cost_bps": r.try_get::<Option<i32>, _>("execution_cost_bps").ok().flatten(),
+                        // Null together: no quote was on record for this fill's tranche (#115).
+                        "quote_venue": r.try_get::<Option<String>, _>("quote_venue").ok().flatten(),
+                        "quote_route": r.try_get::<Option<String>, _>("quote_route").ok().flatten(),
+                        "quote_usdc": r.try_get::<Option<String>, _>("quote_usdc").ok().flatten(),
+                        "quote_nock_out": r.try_get::<Option<String>, _>("quote_nock_out").ok().flatten(),
+                        "quote_effective_price_usd": r.try_get::<Option<String>, _>("quote_effective_price_usd").ok().flatten(),
+                        "quote_block_number": r.try_get::<Option<i64>, _>("quote_block_number").ok().flatten(),
+                        "quoted_at": r
+                            .try_get::<Option<DateTime<Utc>>, _>("quoted_at")
+                            .ok()
+                            .flatten()
+                            .map(|t| t.to_rfc3339()),
+                        "quote_cost_bps": r.try_get::<Option<i32>, _>("quote_cost_bps").ok().flatten(),
                     })
                 })
                 .collect();

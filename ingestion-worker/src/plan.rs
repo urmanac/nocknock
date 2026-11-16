@@ -172,6 +172,9 @@ pub(crate) fn build_plan_status(
         cash_reserve_usdc: cfg.cash_reserve_usdc.map(|r| format!("{:.2}", r)),
         // Attached by the caller that ran fill detection for this cycle (issue #118).
         fill_detection: None,
+        // Attached by the cycle after the directive is known, and only for a due
+        // tranche (issue #115).
+        route_quotes: None,
     }
 }
 

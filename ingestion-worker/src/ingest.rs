@@ -218,6 +218,15 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
         let current_total: f64 = gs.total_portfolio_usd.parse().unwrap_or(f64::INFINITY);
         gs.high_water_mark_date = resolve_high_water_mark_date(prev_peak, current_total, &gs.high_water_mark_date);
     }
+    // Route quotes (issue #115): only when the plan's own status says a tranche is due,
+    // and only for that tranche's amount. Read-only quoter calls; they never fail the
+    // cycle, and a venue that cannot be quoted says why.
+    if let Some(ps) = derived_metrics.accumulation_plan.as_mut() {
+        ps.route_quotes = quote_due_tranche(state, ps, Some(raw_data.spot_price_nock_usd)).await;
+        let gs = &mut derived_metrics.global_status;
+        gs.shot_advice_details =
+            with_route_quote_pointer(&gs.shot_advice_action, std::mem::take(&mut gs.shot_advice_details), ps.route_quotes.as_ref());
+    }
     // Capture directive strings before the metrics move into the snapshot envelope
     let next_directive_action = derived_metrics.global_status.shot_advice_action.clone();
     let next_directive_details = derived_metrics.global_status.shot_advice_details.clone();
@@ -314,7 +323,10 @@ pub(crate) fn canonical_state_json(data: &SnapshotData) -> serde_json::Value {
 }
 
 pub(crate) fn strip_volatile_time_fields(value: &mut serde_json::Value) {
-    const VOLATILE_KEYS: [&str; 8] = [
+    const VOLATILE_KEYS: [&str; 9] = [
+        // Route quotes for a due tranche (issue #115): contract reads at a stated
+        // block, fresh every cycle. They say nothing about the wallet's state.
+        "route_quotes",
         // Fill detection's check time (issue #118): fresh every cycle, no state.
         "last_checked_at",
         "updated_at",
