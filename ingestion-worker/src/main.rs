@@ -305,9 +305,10 @@ struct AppConfig {
     /// Optional dollar-cost-averaging plan (issue #79).
     #[serde(default)]
     accumulation_plan: Option<AccumulationPlanConfig>,
-    /// Optional operator-supplied cost-basis inputs (issue #98).
+    /// Optional operator-supplied cost-basis inputs (issue #98). An Option so that a bare
+    /// `cost_basis:` key with everything under it commented out still loads.
     #[serde(default)]
-    cost_basis: CostBasisConfig,
+    cost_basis: Option<CostBasisConfig>,
     #[serde(default)]
     notifications: NotificationConfig,
     #[serde(default)]
@@ -317,6 +318,10 @@ struct AppConfig {
 impl AppConfig {
     pub fn profile(&self) -> OperatorProfile {
         self.operator_profile.clone()
+    }
+    /// The operator's opening basis block as written, unchecked (issue #98).
+    fn opening_basis(&self) -> Option<&OpeningBasisConfig> {
+        self.cost_basis.as_ref().and_then(|c| c.opening.as_ref())
     }
 }
 
@@ -1138,7 +1143,7 @@ async fn main() -> Result<()> {
     let config = load_app_config("config.yaml.example", None, true)?;
     // A half-filled cost_basis.opening does not stop the worker: every cycle reports it
     // as `whole_stack.status = invalid` with this reason. Say it once in the log too.
-    if let OpeningBasisState::Invalid(reason) = resolve_opening_basis(config.cost_basis.opening.as_ref(), Utc::now()) {
+    if let OpeningBasisState::Invalid(reason) = resolve_opening_basis(config.opening_basis(), Utc::now()) {
         tracing::error!("Configuration error: {reason}");
     }
 

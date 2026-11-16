@@ -333,8 +333,13 @@ fn load_with(extra: &str) -> AppConfig {
 #[test]
 fn test_the_example_config_sets_no_opening_basis() {
     let cfg = load_with("port: 8080\n");
-    assert_eq!(cfg.cost_basis, CostBasisConfig::default());
-    assert_eq!(resolve_opening_basis(cfg.cost_basis.opening.as_ref(), t(NOW)), OpeningBasisState::NotConfigured);
+    assert!(cfg.opening_basis().is_none());
+    // A bare key with everything under it still commented out loads, and means the same.
+    for bare in ["cost_basis:\n", "cost_basis:\n  opening:\n"] {
+        let cfg = load_with(bare);
+        assert_eq!(resolve_opening_basis(cfg.opening_basis(), t(NOW)), OpeningBasisState::NotConfigured, "{bare:?}");
+    }
+    assert_eq!(resolve_opening_basis(cfg.opening_basis(), t(NOW)), OpeningBasisState::NotConfigured);
     // The documented block is there, commented out, with words rather than numbers.
     let example = include_str!("../config.yaml.example");
     assert!(example.contains("# cost_basis:"), "config.yaml.example must document cost_basis");
@@ -356,7 +361,7 @@ fn test_the_example_config_sets_no_opening_basis() {
         .collect();
     assert!(block.starts_with("cost_basis:\n  opening:\n    nock_amount:"), "{block}");
     let cfg = load_with(&block);
-    let OpeningBasisState::Invalid(r) = resolve_opening_basis(cfg.cost_basis.opening.as_ref(), t(NOW)) else {
+    let OpeningBasisState::Invalid(r) = resolve_opening_basis(cfg.opening_basis(), t(NOW)) else {
         panic!("the placeholder block must be a configuration error");
     };
     for needle in ["nock_amount must be a number", "cost_usd must be a number", "as_of \"<the instant", "must be a full timestamp"] {
@@ -370,7 +375,7 @@ fn test_opening_basis_loads_from_yaml_and_a_half_filled_block_does_not_stop_the_
         "cost_basis:\n  opening:\n    nock_amount: 90000\n    cost_usd: 1611.5\n    as_of: \"2026-11-14T21:30:00Z\"\n    source: \"my records\"\n",
     );
     assert_eq!(
-        resolve_opening_basis(cfg.cost_basis.opening.as_ref(), t(NOW)),
+        resolve_opening_basis(cfg.opening_basis(), t(NOW)),
         OpeningBasisState::Set(OpeningBasis { nock: 90000.0, cost_usd: 1611.5, as_of: t("2026-11-14T21:30:00Z"), source: "my records".to_string() })
     );
     // The documented placeholders left in place, and an unquoted date: the config still
@@ -378,7 +383,7 @@ fn test_opening_basis_loads_from_yaml_and_a_half_filled_block_does_not_stop_the_
     let cfg = load_with(
         "cost_basis:\n  opening:\n    nock_amount: <NOCK you held>\n    as_of: 2026-11-14\n    source: my records\n",
     );
-    let OpeningBasisState::Invalid(r) = resolve_opening_basis(cfg.cost_basis.opening.as_ref(), t(NOW)) else {
+    let OpeningBasisState::Invalid(r) = resolve_opening_basis(cfg.opening_basis(), t(NOW)) else {
         panic!("expected a configuration error");
     };
     for needle in ["nock_amount must be a number", "cost_usd is missing", "must be a full timestamp"] {

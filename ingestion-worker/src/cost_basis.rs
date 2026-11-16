@@ -640,7 +640,7 @@ pub(crate) async fn load_spot_points(
 /// This cycle's cost-basis block. The ledger read is optional to the cycle: when it
 /// fails the block says `unavailable` with the reason and the cycle carries on.
 pub(crate) async fn cost_basis_for_cycle(state: &Arc<AppState>, spot: f64, held_nock: Option<f64>) -> CostBasis {
-    let opening = resolve_opening_basis(state.config.cost_basis.opening.as_ref(), Utc::now());
+    let opening = resolve_opening_basis(state.config.opening_basis(), Utc::now());
     let fills = load_basis_fills(&state.db).await;
     compute_cost_basis(fills.as_deref().map_err(|e| e.as_str()), &opening, Some(spot), held_nock)
 }
@@ -679,7 +679,7 @@ pub(crate) async fn cost_basis_series_handler(
                 .into_response()
         }
     };
-    let opening = resolve_opening_basis(state.config.cost_basis.opening.as_ref(), now);
+    let opening = resolve_opening_basis(state.config.opening_basis(), now);
     let first_fill = fills.iter().map(|f| f.confirmed_at).min();
     let opening_at = match &opening {
         OpeningBasisState::Set(o) => Some(o.as_of),
