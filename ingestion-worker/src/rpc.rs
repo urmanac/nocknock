@@ -25,7 +25,9 @@ pub(crate) async fn post_rpc_with_retry(
                 }
             }
             Err(e) => {
-                tracing::warn!("Network error calling RPC (attempt {}/{}): {}", attempt + 1, max_retries + 1, e);
+                // reqwest prints the request URL in its errors, and the RPC URL carries the API
+                // key: never let it reach a log line or a caller.
+                tracing::warn!("Network error calling RPC (attempt {}/{}): {}", attempt + 1, max_retries + 1, e.without_url());
             }
         }
 
@@ -52,10 +54,12 @@ pub(crate) async fn eth_call_allow_revert(
         match client.post(url).json(payload).send().await {
             Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
                 Ok(v) => return classify_eth_call_response(&v),
-                Err(e) => last = format!("unparseable response: {e}"),
+                Err(e) => last = format!("unparseable response: {}", e.without_url()),
             },
             Ok(resp) => last = format!("HTTP {}", resp.status()),
-            Err(e) => last = format!("network error: {e}"),
+            // The error text is returned to callers that publish it (/health, snapshot notes,
+            // MCP text). reqwest appends "for url (<url>)", and the URL holds the API key.
+            Err(e) => last = format!("network error: {}", e.without_url()),
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(150 * (1 << attempt))).await;
     }
