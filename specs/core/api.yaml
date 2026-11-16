@@ -571,7 +571,12 @@ components:
             claimFees() reverts (no LP-claimable fees), or (v0.6.0) an aerodrome-cl
             position is staked in its gauge, where swap fees go to the gauge;
             simulation_detail carries the reason. The action is excluded from
-            estimated_gas_usd and net_after_gas_usd.
+            estimated_gas_usd and net_after_gas_usd. unavailable: not simulated or
+            the simulation got no answer; (v0.6.0) also an aerodrome-cl position
+            that is not in the latest snapshot yet, or whose snapshot row carries
+            a fees_note without a gauge, in which case expected_amount_0/1 and
+            expected_usd are null (never a placeholder 0) and simulation_detail
+            is the reason.
         simulation_detail:
           type: string
           nullable: true

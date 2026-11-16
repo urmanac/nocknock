@@ -347,6 +347,7 @@ was checked against the response it produces. The raw responses are the fixtures
 | `collect((uint256,address,uint128,uint128))` | `0xfc6f7865` | position manager | fees of an UNSTAKED position (simulated from the wallet) |
 | `slot0()` | `0x3850c7bd` | pool | sqrt price and tick |
 | `liquidity()` | `0x1a686502` | pool | in-range liquidity (pool liveness) |
+| `nft()` | `0x47ccca02` | pool | the configured pool belongs to the NFT's position manager (may revert: see "Whose pool it is") |
 | `token0()` / `token1()` | `0x0dfe1681` / `0xd21220a7` | pool | the configured pool is the NFT's pool |
 | `tickSpacing()` | `0xd0c93a7c` | pool | same check |
 | `fee()` | `0xddca3f43` | pool | current swap fee (dynamic) |
@@ -384,6 +385,35 @@ Negative ticks arrive sign-extended over the whole word (`ff…fe98` is -360; se
 #3117536 below and on the ETH/USD price pool's own `slot0`, tick -201250 at this block).
 `parse_hex_word_i32` used to reject such a word; it and the calldata encoder
 (`int24_calldata_word`) were corrected in the same change.
+
+### Whose pool it is (block 58074373)
+
+`pool_address` comes from config, so the adapter proves it is the NFT's pool before it
+values anything at that pool's price. Read at **block 58074373** (`0x3762505`,
+2026-11-16T05:00:50Z, hash `0x381fd9a2…ee2150`):
+
+| Pool | `token0` / `token1` | `tickSpacing()` | `nft()` |
+|---|---|---:|---|
+| Aero CL200 WETH/NOCK `0x957256c9…0874` | WETH / NOCK | 200 | `0x4857db57…c60b` (the position manager) |
+| Uniswap v3 WETH/NOCK 1% `0x71a4a6f6…ad9a` | WETH / NOCK | 200 | **reverts** (error code 3, "execution reverted") |
+| Aero CL100 WETH/USDC, current deployment `0x2a430beb…bc24` | WETH / USDC | 100 | `0x4857db57…c60b` |
+| Aero CL100 WETH/USDC, legacy deployment `0xb2cc224c…dc59` | WETH / USDC | 100 | `0x82792268…5b72` (the legacy position manager) |
+
+- The Uniswap v3 pool of the same pair has the same tokens **and the same tick spacing**
+  as the CL200 pool, so tokens and spacing alone would accept it as `pool_address`.
+- `getPool(address,address,int24)` (`0x28af8d0b`) for (WETH, USDC, 100) returns
+  `0x2a430beb…bc24` on the current factory `0x9cb22058…7a76` and `0xb2cc224c…dc59` on the
+  legacy factory `0x5e7bb104…809a` (that pool's `factory()` returns it): two live pools
+  with one identity, each with its own position manager. No NOCK pair has a legacy pool
+  at this block: the legacy factory's `getPool` returns the zero address for WETH/NOCK
+  and USDC/NOCK at tick spacings 100, 200 and 2000, while the current factory returns
+  `0x957256c9…0874` for (WETH, NOCK, 200).
+
+So the adapter reads `pool.nft()` first and requires it to equal `npm_address`. A revert
+(a Uniswap v3 pool, or an address that is not a pool) and a different position manager are
+both "Configuration error: position …: pool_address … is not …", raised before any amount
+is computed. A node that does not answer is a failed read, not a configuration error.
+Then the pool's tokens and tick spacing must be the NFT's.
 
 ### Amounts at block 58061668
 
@@ -461,9 +491,14 @@ unregistered token, tick spacing 10, ticks -360..-270; burned a few hundred bloc
 `positions()` showed tokensOwed 0/0, while `collect` simulated from the owner returned
 (129192, 599) raw, and from another account reverted. The adapter therefore takes an
 unstaked position's fees from the `collect` simulation, not from `tokensOwed`. One other
-EOA-held NFT (#86038) reverted on the same simulation for a reason not investigated; in
-that case the adapter reports "fees unavailable (collect() simulation from the wallet
-reverted); not counted" rather than zero.
+EOA-held NFT (#86038) reverted on the same simulation for a reason not investigated. The
+simulation is a required read, like the Uniswap adapters' fee reads: if it reverts for a
+tracked position the **cycle fails** with "collect() for NFT #… simulated from the tracked
+wallet … reverted; its claimable fees cannot be read", and nothing is published with that
+fee as 0. (The first version of the adapter carried such a position as "fees unavailable"
+with zero amounts; the zeros reached the claim payload and the fee totals, so it was
+removed. Whether to degrade instead is the operator's call; it would need a stated
+"unread" marker on every total that includes fees.)
 
 ### Swap fee units
 
@@ -480,14 +515,21 @@ used.
 - It is a ranged position: in/out of range comes from the pool tick against its ticks
   (upper bound exclusive), and it appears in the tick bracket panel like the Uniswap ones.
 - It is never offered an LP rebuild deposit: its WETH leg would have to come from gas
-  (issue #94). Were a link ever needed, it is `https://app.aero.xyz/deposit/8453-<pool>`.
+  (issue #94). No Aero CL position is sized for a rebuild, whatever its pair
+  (`lp_rebuild.excluded[]` gives the reason): the app's deposit link starts a new position
+  (see "Not verified"), a different NFT that NockNock would not track, so a suggestion to
+  "add to NFT #N" would send capital out of the totals and the floor reading.
 
 ### Not verified
 
-- **The deposit link for a CL pool.** `https://app.aero.xyz/deposit/8453-0x957256c9…0874`
-  follows the form settled for the basic pool (§7). The app is a client-rendered page, so
-  whether that URL opens the CL200 pool, and whether it adds to the existing NFT or mints
-  a new one, was not confirmed. No suggestion uses it today.
+- **Adding liquidity to an existing CL NFT.** `https://app.aero.xyz/deposit/8453-0x957256c9…0874`
+  does open the WETH/NOCK CL200 pool (observed 2026-11-16 in a browser with no wallet
+  connected: "DEPOSIT WETH / NOCK 0.97% Base CL200", then "Select deposit type: Custom:
+  set your own price range"). That is the start of a **new** deposit; nothing on the page
+  refers to an existing NFT. Whether the app, or the contracts (`increaseLiquidity` on
+  the position manager, `increaseStakedLiquidity` on the older gauges), can add to an
+  NFT that is staked in this gauge was not tested. Until it is, no rebuild suggestion is
+  made for an Aero CL position and no deposit link is shown for one.
 - **AERO**: token address, value and claim path (`claimEmissions`) are not read (#93).
 - **Other CL pools.** Only the WETH/NOCK CL200 pool and its gauge were exercised. The
   adapter reads the gauge from the pool, so another pool works only if its gauge answers

@@ -24,7 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)" on
   the card, in `contract_fees`, the velocity panel, the claim payload and the MCP text,
   never $0 earned. An unstaked position's fees are what `collect` simulated from the wallet
-  returns; if that simulation reverts they are "fees unavailable", not zero.
+  returns; that read is required like the Uniswap fee reads, so if the simulation reverts
+  the cycle fails and says so, and no unread fee is published as 0. With nothing
+  LP-claimable in the book, the MCP claim text says "Estimated Gas: n/a (nothing
+  LP-claimable)" where it used to blame an unavailable gas estimate (this also changes
+  the text for a book holding only an Aero basic pool whose `claimFees()` reverts).
+- **The configured pool must be the NFT's pool.** The pool's `nft()` must be the
+  position's `npm_address`, and its tokens and tick spacing the NFT's; anything else is a
+  configuration error before any amount is computed. Tokens and spacing alone do not
+  identify it: the Uniswap v3 WETH/NOCK 1% pool also has tick spacing 200.
+- **No rebuild deposit is sized for an Aero CL position**, whatever its pair
+  (`lp_rebuild.excluded[]` states why): the Aero app's deposit link starts a new position,
+  a different NFT that NockNock would not track, and adding to an existing NFT is not
+  verified. A WETH pair keeps the gas reason it already had.
+- The tick bracket panel's new range line says "empty" for a ranged position that holds
+  nothing, on any protocol, where it would have said "in range, holding …".
 - **An unknown `protocol` is a configuration error.** It is reported before any chain read
   ("Configuration error: position '…' has unknown protocol '…'") and by the claim payload.
   Labels, deposit links, the fee contract, the pool liveness read and the claim payload used

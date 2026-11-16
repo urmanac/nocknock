@@ -82,14 +82,16 @@ positions:
   # above this is a RANGED position: it can go out of range, and then holds one token.
   #   nft_id        the position NFT's token id (app.aero.xyz dashboard, or the deposit tx)
   #   npm_address   the Aero CL position manager that minted it
-  #   pool_address  the CL pool; checked every cycle against the NFT's tokens and tick spacing
+  #   pool_address  the CL pool; checked every cycle: its nft() must be npm_address, and its
+  #                 tokens and tick spacing the NFT's (a Uniswap pool of the same pair is refused)
   # The Aero app stakes the NFT in the pool's gauge on deposit. NockNock reads the gauge
   # from the pool and counts the position only if the gauge lists the NFT among this
   # wallet's stakes (or the wallet holds the NFT itself); otherwise the cycle fails.
   # While staked, swap fees go to the gauge, not to you: fees show as "not LP-claimable",
   # and the AERO rewards you earn instead are not read yet (#93). Its WETH counts in the
   # ETH pillar and its NOCK toward your NOCK total and floor. It is never offered an LP
-  # rebuild deposit, because its WETH leg would have to come from gas.
+  # rebuild deposit: its WETH leg would have to come from gas, and no Aero CL position is
+  # sized at all (the Aero app's deposit link starts a new position, not an add to this NFT).
   # Values below are the WETH/NOCK CL200 pool, verified on Base 2026-11-16
   # (ONCHAIN_INTEGRATION.md §8):
   # - id: "aero-cl200-weth-nock"
