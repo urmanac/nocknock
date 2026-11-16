@@ -223,11 +223,32 @@ impl AeroClFees {
     }
 }
 
-/// Pure core of the Aero CL read: turn the decoded NFT, the pool's price and fee and
-/// the custody result into a RawPosition and its side facts. Unit-testable.
-///
 /// The pool named in config must be the NFT's pool (same tokens and tick spacing), or
-/// the amounts would be computed at another pool's price.
+/// the amounts would be computed at another pool's price. Pure.
+pub(crate) fn check_pool_is_the_nfts_pool(
+    cfg: &PositionConfig,
+    pool: &str,
+    decoded: &SlipstreamPositionDecoded,
+    pool_token0: &str,
+    pool_token1: &str,
+    pool_tick_spacing: i32,
+) -> Result<()> {
+    if !same_address(&decoded.token0, pool_token0)
+        || !same_address(&decoded.token1, pool_token1)
+        || decoded.tick_spacing != pool_tick_spacing
+    {
+        return Err(anyhow::anyhow!(
+            "Configuration error: position {}: pool_address {} ({}/{} tick spacing {}) is not the pool of NFT #{} ({}/{} tick spacing {})",
+            cfg.id, pool, pool_token0, pool_token1, pool_tick_spacing,
+            cfg.nft_id, decoded.token0, decoded.token1, decoded.tick_spacing
+        ));
+    }
+    Ok(())
+}
+
+/// Pure core of the Aero CL read: turn the decoded NFT, the pool's price and fee and
+/// the custody result into a RawPosition and its side facts. Unit-testable. Checks
+/// again that the pool is the NFT's pool, so no caller can skip it.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn aero_cl_position_from_reads(
     cfg: &PositionConfig,
@@ -244,16 +265,7 @@ pub(crate) fn aero_cl_position_from_reads(
     staked_in_gauge: Option<String>,
     fees: AeroClFees,
 ) -> Result<(RawPosition, PositionFacts)> {
-    if !same_address(&decoded.token0, pool_token0)
-        || !same_address(&decoded.token1, pool_token1)
-        || decoded.tick_spacing != pool_tick_spacing
-    {
-        return Err(anyhow::anyhow!(
-            "Configuration error: position {}: pool_address {} ({}/{} tick spacing {}) is not the pool of NFT #{} ({}/{} tick spacing {})",
-            cfg.id, pool, pool_token0, pool_token1, pool_tick_spacing,
-            cfg.nft_id, decoded.token0, decoded.token1, decoded.tick_spacing
-        ));
-    }
+    check_pool_is_the_nfts_pool(cfg, pool, decoded, pool_token0, pool_token1, pool_tick_spacing)?;
     if decoded.tick_lower >= decoded.tick_upper {
         return Err(anyhow::anyhow!(
             "position {}: NFT #{} decoded with tickLower {} >= tickUpper {}",
@@ -346,7 +358,14 @@ pub(crate) async fn fetch_aero_cl_position(
     let wallet_word = format!("{:0>64}", wallet.trim_start_matches("0x").to_lowercase());
 
     // 1. The NFT: tokens, tick spacing, ticks, liquidity. A burned or unknown id reverts.
-    let positions_hex = read(npm.clone(), format!("{V3_POSITIONS}{id_word}"), 80, "positions()").await?;
+    let positions_hex = read(npm.clone(), format!("{V3_POSITIONS}{id_word}"), 80, "positions()")
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "{e} (NFT #{} on position manager {}: the call reverts for an id that does not exist, such as a withdrawn-and-burned position or a mistyped nft_id)",
+                cfg.nft_id, npm
+            )
+        })?;
     let decoded = decode_slipstream_positions_return(&positions_hex).map_err(|e| ctx(e, "positions()"))?;
 
     // 2. The pool: identity (tokens, tick spacing), price, tick and current swap fee.
@@ -363,6 +382,9 @@ pub(crate) async fn fetch_aero_cl_position(
     };
     let pool_tick_spacing =
         word_i32(read(pool.clone(), CL_POOL_TICK_SPACING.to_string(), 83, "pool tickSpacing()").await?, "pool tickSpacing()")?;
+    // Before anything else is read from it: a pool that is not this NFT's pool is a
+    // configuration error, said as one, rather than a failed read further down.
+    check_pool_is_the_nfts_pool(cfg, &pool, &decoded, &pool_token0, &pool_token1, pool_tick_spacing)?;
     let pool_fee = word_i32(read(pool.clone(), CL_POOL_FEE.to_string(), 84, "pool fee()").await?, "pool fee()")?;
     let pool_fee_pips = u32::try_from(pool_fee)
         .map_err(|_| anyhow::anyhow!("position {}: Aero CL pool fee() is negative: {}", cfg.id, pool_fee))?;
