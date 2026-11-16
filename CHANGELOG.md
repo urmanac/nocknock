@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-16
+
+One minor release carrying three planned milestones, built as a stack of seven pull
+requests (#120 to #126), reviewed as a whole and merged in order:
+
+- **The whole wallet** (planned as v0.6.0): the worker split into modules (#97), Aero
+  concentrated positions (#91), AERO as the fourth pillar (#93), and plan buys detected
+  on-chain and offered for confirmation (#118). Snapshot spec 2.5.0.
+- **Guided buys** (planned as v0.7.0): read-only route quotes for a due tranche (#115),
+  and average cost against spot (#98). Snapshot spec 2.6.0.
+- **On your phone** (planned as v0.8.0): install to the home screen, a notification test,
+  and an opt-in TLS proxy (#89).
+
+Before you upgrade:
+
+- **Nothing new is required in `config.yaml`.** An existing config loads unchanged. To
+  track an Aero concentrated position, add an `aerodrome-cl` entry to `positions:` (see
+  `config.yaml.example`); the total and the directive step once when it is first counted.
+- **Upgrades are forward-only.** Three additive migrations run at start. An older build
+  will not start on a database they have run on (AGENTS.md section 13).
+- **Not exercised before release:** anything on a real phone, any Telegram or Pushover
+  send, and the TLS proxy, which has never run. They are opt-in.
+- Field descriptions tagged "(v0.6.0)" or "(v0.7.0)" in the specs and source name the
+  milestone the work was planned under; all of it ships in 0.8.0.
+
 ### Added — phone install, notification test, opt-in TLS (#89)
 - **Install on a phone.** The dashboard ships a web app manifest (start URL
   `/?view=lite`, standalone), icons, and the iOS and Android home-screen tags. The icons

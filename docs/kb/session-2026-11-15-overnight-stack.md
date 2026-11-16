@@ -1,4 +1,4 @@
-# Session 2026-11-14 (evening) → 2026-11-16: v0.5.2, v0.5.3, and the v0.6.0–v0.8.0 stack
+# Session 2026-11-14 (evening) → 2026-11-16: v0.5.2, v0.5.3, and v0.8.0 (the v0.6.0–v0.8.0 stack)
 
 *Claude: Opus 5.5, then Fable 5.2 with Ultracode workflows. It follows the planning session in
 [session-2026-11-14-planning-lore-mining.md](session-2026-11-14-planning-lore-mining.md).
@@ -41,8 +41,10 @@ authorization to deploy to chudmax whenever it is appropriate):
 - **Each buy's reference spot** was written by the corrected lookup (#129) from the
   worker's own reads within a minute of the swap, and equals the cost-basis panel's figure
   for the same buy.
-- **Not done:** no tag. `Cargo.toml` still says 0.5.0 and CHANGELOG has no version section
-  for this work.
+- **Released as v0.8.0** the same day, with the operator's authorization ("Yes, tag
+  v0.8.0"): one minor release for all three milestones. The release pull request added the
+  CHANGELOG version section and moved the worker, brain and frontend versions from 0.5.0
+  to 0.8.0; the tagged commit was then deployed so chudmax matches the tag.
 - **Found on chudmax:** the average-cost chart labels every hourly backfilled candle as a
   gap (#137, cosmetic).
 
@@ -163,4 +165,4 @@ hardening), #134 (overlapping ingest cycles), #135 (notice order in the directiv
   "Decisions taken for you". None of them chooses an allocation number.
 - **Going back is not free.** Once a build with migrations 10 to 12 has run against a
   database, v0.5.3 will not start on it (see AGENTS.md section 13).
-- `Cargo.toml` still says 0.5.0. Stale PR #59 is still open in milestone v0.4.0.
+- Stale PR #59 is still open in milestone v0.4.0.
