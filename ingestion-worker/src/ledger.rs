@@ -15,6 +15,9 @@ pub(crate) const NATIVE_ETH_LEDGER_ADDRESS: &str = "0xEeeeeEeeeEeEeEeEeEeEEEeeee
 
 /// Extract what a fee claim paid the sovereign wallet from a transaction receipt:
 /// - ERC-20 Transfer logs of USDC, NOCK or WETH to the wallet;
+/// - an AERO Transfer to the wallet (issue #93): what a gauge pays when the operator
+///   claims emissions. On the Aero gauges it is a mint, so its `from` is the zero
+///   address (verified on two real claims, ONCHAIN_INTEGRATION.md §9);
 /// - WETH unwrapped by a Uniswap position manager (a WETH `Withdrawal` whose `src` is the
 ///   v3 NonfungiblePositionManager or the v4 PositionManager) in a transaction the wallet
 ///   sent. The Uniswap app collects WETH fees this way and forwards native ETH, which
@@ -97,6 +100,8 @@ pub(crate) fn parse_harvest_transfers(receipt: &serde_json::Value, wallet: &str)
             ("NOCK", 16)
         } else if token_addr.eq_ignore_ascii_case(WETH_BASE) {
             ("WETH", 18)
+        } else if token_addr.eq_ignore_ascii_case(AERO_BASE) {
+            ("AERO", AERO_DECIMALS)
         } else {
             tracing::warn!("Harvest receipt contains a Transfer of an untracked token {}; skipping", token_addr);
             continue;
@@ -512,7 +517,7 @@ pub(crate) async fn record_harvest_handler(
     if transfers.is_empty() {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": "NO_TRACKED_TRANSFERS", "detail": "Receipt pays the sovereign wallet no tracked token (USDC, NOCK, WETH, or ETH unwrapped by a Uniswap position manager)" })),
+            Json(json!({ "error": "NO_TRACKED_TRANSFERS", "detail": "Receipt pays the sovereign wallet no tracked token (USDC, NOCK, WETH, AERO, or ETH unwrapped by a Uniswap position manager)" })),
         )
             .into_response();
     }
@@ -548,7 +553,9 @@ pub(crate) async fn record_harvest_handler(
     };
 
     // USD valuation at the claim's block, never at recording time: NOCK from the stored
-    // price nearest the block time, ETH/WETH from the ETH price pool read at that block.
+    // price nearest the block time, ETH/WETH from the ETH price pool read at that block,
+    // AERO from the AERO price pool read at that block (#93; the pool must be AERO/USDC
+    // and have in-range liquidity at that block).
     // A price we cannot find is an explicit null, never a substitute.
     let needs_nock = transfers.iter().any(|t| t.token_symbol == "NOCK");
     let needs_eth = transfers.iter().any(|t| matches!(t.token_symbol.as_str(), "ETH" | "WETH"));
@@ -566,10 +573,24 @@ pub(crate) async fn record_harvest_handler(
         None
     };
 
+    let needs_aero = transfers.iter().any(|t| t.token_symbol == "AERO");
+    let aero_price: Option<(f64, String)> = if needs_aero && block_number > 0 {
+        let pool = state.config.aero_price_pool.clone().unwrap_or_else(|| DEFAULT_AERO_PRICE_POOL.to_string());
+        match fetch_aero_price_usd_at(&state.http_client, &alchemy_url, &pool, &format!("0x{block_number:x}")).await {
+            Ok(p) => Some((p, format!("aero_price_pool {pool} slot0 at block {block_number}"))),
+            Err(e) => {
+                tracing::warn!("AERO price at block {block_number} unavailable; the AERO row gets no USD value: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let mut recorded = Vec::new();
     let mut skipped = 0usize;
     for t in &transfers {
-        let price = harvest_unit_price(&t.token_symbol, nock_price.as_ref(), eth_price.as_ref());
+        let price = harvest_unit_price_with_aero(&t.token_symbol, nock_price.as_ref(), eth_price.as_ref(), aero_price.as_ref());
         let usd_value = harvest_usd_value(&t.amount_human, price.map(|(p, _)| p));
         let price_usd = price.map(|(p, _)| format!("{p}"));
         let price_source = price.map(|(_, s)| s.to_string());
@@ -629,6 +650,8 @@ pub(crate) async fn record_harvest_handler(
 
 /// Koinly custom-CSV rendering of harvest ledger rows: fee claims are tagged
 /// `income` (per CHANGELOG: Income / Staking Reward) and carry their Base tx hash.
+/// An AERO row is described as a reward claim, not a fee harvest (#93); its label stays
+/// `income`, since the tax category is the operator's and their CPA's to change.
 /// Rebalances/liquidity transfers are not yet ledgered — when they are, they export
 /// with the (non-taxable) `transfer` label; documented gap, not silently omitted.
 pub(crate) fn format_koinly_csv(rows: &[HarvestExportRow]) -> String {
@@ -640,7 +663,7 @@ pub(crate) fn format_koinly_csv(rows: &[HarvestExportRow]) -> String {
             Some(usd) => (usd.clone(), "USD".to_string()),
             None => (String::new(), String::new()),
         };
-        let description = format!("NockNock fee harvest ({})", r.platform);
+        let description = harvest_row_description(&r.token_symbol, &r.platform);
         out.push_str(&format!(
             "{}, , , {}, {}, , , {}, {}, income, \"{}\", {}\n",
             r.confirmed_at,

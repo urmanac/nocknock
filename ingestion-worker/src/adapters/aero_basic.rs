@@ -1,8 +1,9 @@
 use crate::*;
 
 /// What NockNock says about an Aero pool whose claimFees() reverts: its swap fees are
-/// not paid to LPs that way, and the AERO rewards a staked LP earns are not read yet.
-pub(crate) const AERO_NOT_LP_CLAIMABLE: &str = "not LP-claimable (claimFees() reverts); AERO rewards not read (#93)";
+/// not paid to LPs that way. The AERO a staked LP earns instead is read from the gauge
+/// and stated after this reason (aero_rewards.rs, issue #93).
+pub(crate) const AERO_NOT_LP_CLAIMABLE: &str = "not LP-claimable (claimFees() reverts)";
 
 /// Map an Aero claimFees() eth_call to (simulation, detail). Pure. A revert means the
 /// pool pays no LP-claimable fees ("not_claimable"); only a transport failure is

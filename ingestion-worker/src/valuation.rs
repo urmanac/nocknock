@@ -90,6 +90,10 @@ pub(crate) fn build_position_snapshots(raw_positions: &[RawPosition], nock_usd: 
                 tick_spacing: None,
                 staked_in_gauge: None,
                 fees_note: None,
+                // Filled by apply_aero_rewards for Aero positions whose gauge was read.
+                unclaimed_aero: None,
+                unclaimed_aero_usd: None,
+                unclaimed_aero_note: None,
             }
         })
         .collect()
@@ -120,7 +124,7 @@ pub(crate) fn apply_position_facts(positions: &mut [Position], facts: &HashMap<S
 }
 
 /// The snapshot's `positions` array for one cycle's reads: built, then stamped with pool
-/// activity and the per-protocol facts. The ONE place those three steps are chained:
+/// activity, the per-protocol facts and unclaimed AERO (#93). The ONE place those steps are chained:
 /// fetch_raw_data (for `contract_fees`) and run_ingestion_cycle (for the published
 /// snapshot) both call it, so what is published can never lack a stamp the fee rows
 /// were built from (the v0.6.0 pre-release bug: `staked_in_gauge` and `fees_note` were
@@ -131,10 +135,12 @@ pub(crate) fn snapshot_positions_from(
     eth_usd: f64,
     pool_liquidity: &HashMap<String, String>,
     position_facts: &HashMap<String, PositionFacts>,
+    aero: &AeroReads,
 ) -> Vec<Position> {
     let mut positions = build_position_snapshots(raw_positions, nock_usd, eth_usd);
     apply_pool_activity(&mut positions, pool_liquidity);
     apply_position_facts(&mut positions, position_facts);
+    apply_aero_rewards(&mut positions, aero);
     positions
 }
 
@@ -146,6 +152,7 @@ pub(crate) fn snapshot_positions(raw: &RawOnChainData) -> Vec<Position> {
         raw.live_eth_price_usd,
         &raw.pool_liquidity,
         &raw.position_facts,
+        &raw.aero,
     )
 }
 
@@ -190,7 +197,9 @@ pub(crate) fn build_pool_mechanics(raw_positions: &[RawPosition], nock_usd: f64,
 /// `not_lp_claimable` (an Aero pool whose claimFees() reverts, or an Aero CL position
 /// staked in its gauge) says so in `amount` and is not claimable,
 /// rather than reading as $0 of fees. An Aero CL position carries its own reason
-/// (`fees_note`, stamped by apply_position_facts).
+/// (`fees_note`, stamped by apply_position_facts). The reason is followed by the
+/// position's unclaimed AERO, or by why that was not read (stamped by
+/// apply_aero_rewards, #93): an amount, never advice.
 pub(crate) fn build_contract_fees(positions: &[Position], live_gas_cost_usd: f64, not_lp_claimable: &[String]) -> Vec<ContractFee> {
     positions
         .iter()
@@ -209,7 +218,15 @@ pub(crate) fn build_contract_fees(positions: &[Position], live_gas_cost_usd: f64
                 fee_token_address: p.token0.address.clone(),
                 fee_token_symbol: fee_token_label(p),
                 amount: if not_claimable {
-                    fees_note_text(p.fees_note.as_deref())
+                    join_reason_and_aero(
+                        Some(fees_note_text(p.fees_note.as_deref())),
+                        aero_statement(
+                            p.unclaimed_aero.as_deref(),
+                            p.unclaimed_aero_usd.as_deref(),
+                            p.unclaimed_aero_note.as_deref(),
+                        ),
+                    )
+                    .unwrap_or_default()
                 } else {
                     format!(
                         "{:.p0$} {} + {:.p1$} {}",

@@ -22,8 +22,8 @@ use crate::*;
 //
 // Fees. Swap fees on STAKED liquidity are paid to the gauge (`pool.gaugeFees()`), not to
 // the LP: `collect` simulated from the gauge (the NFT's owner) returns (0, 0) and from
-// the wallet reverts. The staker earns AERO emissions instead, which this adapter does
-// not read (#93). So a staked position reports no fee figure and says why. An UNSTAKED
+// the wallet reverts. The staker earns AERO emissions instead, read from the gauge by
+// aero_rewards.rs (#93). So a staked position reports no fee figure and says why. An UNSTAKED
 // position's fees are what `collect` simulated from the wallet returns; that read is
 // required like the Uniswap fee reads, so a revert there fails the cycle.
 //
@@ -50,7 +50,7 @@ pub(crate) const CL_GAUGE_STAKED_CONTAINS: &str = "0xc69deec5"; // stakedContain
 /// What NockNock says about the fees of a position staked in its gauge. It starts with
 /// "not LP-claimable" like AERO_NOT_LP_CLAIMABLE, which is what the MCP text keys on.
 pub(crate) const AERO_CL_STAKED_FEES_NOTE: &str =
-    "not LP-claimable (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)";
+    "not LP-claimable (staked: swap fees on staked liquidity go to the gauge)";
 
 /// Decoded Slipstream `positions(uint256)` return. Same 12 words as Uniswap v3 except
 /// that word 4 carries the pool's tick spacing where v3 has the fee tier.
@@ -210,7 +210,8 @@ pub(crate) fn decode_collect_return(hex_str: &str) -> Result<(u128, u128)> {
 pub(crate) enum AeroClFees {
     /// Unstaked: what `collect` simulated from the wallet would pay, in raw units.
     Claimable(u128, u128),
-    /// Staked in the gauge: swap fees go to the gauge, AERO rewards are not read (#93).
+    /// Staked in the gauge: swap fees go to the gauge. The AERO earned instead is read
+    /// separately (aero_rewards.rs, #93).
     StakedNotLpClaimable,
 }
 

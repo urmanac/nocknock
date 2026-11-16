@@ -4,7 +4,7 @@
 use super::*;
 
 const STAKED: &str =
-    "not LP-claimable (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)";
+    "not LP-claimable (staked: swap fees on staked liquidity go to the gauge); unclaimed AERO 11.922078 ($4.98)";
 
 fn staked_row() -> Value {
     json!({ "fee_token_symbol": "WETH+NOCK (Aero CL #2914490)", "amount": STAKED,

@@ -701,7 +701,9 @@ fn test_published_positions_carry_the_aero_cl_facts() {
 #[test]
 fn test_staked_position_fees_are_not_lp_claimable_on_every_surface() {
     assert!(AERO_CL_STAKED_FEES_NOTE.starts_with("not LP-claimable"));
-    assert!(AERO_CL_STAKED_FEES_NOTE.contains("AERO rewards not read (#93)"));
+    // Since #93 the note is the reason alone: the AERO earned instead is read from the
+    // gauge and stated after it (tests_aero_rewards.rs). This fixture carries no AERO read.
+    assert!(!AERO_CL_STAKED_FEES_NOTE.contains("not read"));
     let snap = snapshot_of(real_cycle(), &OperatorProfile::default());
     // contract_fees: the reason in place of an amount; the gauge as the contract.
     let f = &snap.contract_fees[0];

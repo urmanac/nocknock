@@ -169,6 +169,16 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
         // fees_note (an Aero CL position, #91) has no LP-claimable fee figure.
         let facts = raw.position_facts.get(&p.position_id);
         let fees_note = facts.and_then(|f| f.fees_note.clone());
+        let lp_claimable = fees_note.is_none() && !raw.fees_not_lp_claimable.contains(&p.position_id);
+        // The row's note (#93): the position's unclaimed AERO, or why it was not read,
+        // after the reason its fees are not LP-claimable when there is one. Amounts
+        // only. With no AERO statement the note is what it was before #93.
+        let aero_statement = aero_statement_for(&raw.aero, &p.position_id);
+        let note = match (&aero_statement, lp_claimable) {
+            (Some(_), false) => join_reason_and_aero(Some(fees_note_text(fees_note.as_deref())), aero_statement),
+            (Some(_), true) => aero_statement,
+            (None, _) => fees_note,
+        };
         fee_entries.push((
             fee_contract_for(
                 &p.protocol,
@@ -178,8 +188,8 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
             ),
             velocity_label(p),
             fee_usd,
-            fees_note.is_none() && !raw.fees_not_lp_claimable.contains(&p.position_id),
-            fees_note,
+            lp_claimable,
+            note,
         ));
     }
 
@@ -210,9 +220,17 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
     let pillars = gas_pillars(raw.wallet_eth, raw.wallet_weth, lp_eth, eth_px);
     let wallet_gas_usd = pillars.wallet_gas_usd.unwrap_or(0.0);
 
-    // One definition of the portfolio: every pillar, gas included. Targets, weights, the
-    // high-water mark and history all use it.
-    let total_portfolio_usd = lp_usd + t3_usd + wallet_usdc + wallet_gas_usd;
+    // AERO pillar (issue #93): wallet AERO, counted in the total at the live AERO price
+    // like gas, and like gas never cash, never dry powder, never a funding source and
+    // never under a target. Unclaimed AERO in the gauges is NOT in the total, exactly as
+    // uncollected LP fees are not: it is stated beside them and counts once claimed.
+    // NockNock gives no advice about AERO; no directive below reads these figures.
+    let aero = aero_pillar(&raw.aero);
+    let wallet_aero_usd = aero.wallet_usd.unwrap_or(0.0);
+
+    // One definition of the portfolio: every pillar, gas and AERO included. Targets,
+    // weights, the high-water mark and history all use it.
+    let total_portfolio_usd = lp_usd + t3_usd + wallet_usdc + wallet_gas_usd + wallet_aero_usd;
     // NOCK only (wallet + LP); ETH is its own pillar (total_eth_usd).
     let total_native_usd = (lp_nock + t3_nock) * spot_price;
     let total_stable_usd = lp_usdc + wallet_usdc;
@@ -438,8 +456,10 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
                 ),
             },
         }
-    } else if !plan_configured && total_portfolio_usd - wallet_gas_usd <= 0.0 && total_nock <= 0.0 {
+    } else if !plan_configured && total_portfolio_usd - wallet_gas_usd - wallet_aero_usd <= 0.0 && total_nock <= 0.0 {
         // Gas alone is not something to track or deploy: a gas-only wallet is still empty.
+        // AERO is treated the same way here (#93), so it never changes which directive
+        // is chosen; the amount held is stated, with no advice about it.
         let gas_held = match pillars.wallet_gas_eth {
             Some(g) if g > 0.0 => format!(
                 " It holds {:.6} ETH/WETH for gas, counted in the total; gas is not cash and is never deployed.",
@@ -447,11 +467,15 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
             ),
             _ => String::new(),
         };
+        let aero_held = match aero.wallet_amount {
+            Some(a) if a > 0.0 => format!(" It holds {:.6} AERO, counted in the total; AERO is not cash and is never deployed.", a),
+            _ => String::new(),
+        };
         (
             "NOTHING TO TRACK YET (Empty Wallet)".to_string(),
             format!(
-                "{} holds no NOCK, no USDC and no LP value that NockNock reads. Once it is funded NockNock reports it here. To have NOCK buys paced, {}; set operator_profile.treasury_floor_nock only if you want a floor alarm.{}{}",
-                wallet_label, own_plan_hint, gas_note, gas_held
+                "{} holds no NOCK, no USDC and no LP value that NockNock reads. Once it is funded NockNock reports it here. To have NOCK buys paced, {}; set operator_profile.treasury_floor_nock only if you want a floor alarm.{}{}{}",
+                wallet_label, own_plan_hint, gas_note, gas_held, aero_held
             ),
         )
     } else if regime.overextended && !plan_overrides_cooldown {
@@ -572,6 +596,12 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
             wallet_gas_usd: pillars.wallet_gas_usd.map(|v| format!("{:.2}", v)),
             total_eth_amount: pillars.total_eth_amount.map(|v| format!("{:.6}", v)),
             total_eth_usd: pillars.total_eth_usd.map(|v| format!("{:.2}", v)),
+            aero_price_usd: aero.price_usd.map(|v| format!("{:.6}", v)),
+            wallet_aero_amount: aero.wallet_amount.map(|v| format!("{:.6}", v)),
+            wallet_aero_usd: aero.wallet_usd.map(|v| format!("{:.2}", v)),
+            unclaimed_aero_amount: aero.unclaimed_amount.map(|v| format!("{:.6}", v)),
+            unclaimed_aero_usd: aero.unclaimed_usd.map(|v| format!("{:.2}", v)),
+            aero_note: aero.note.clone(),
         },
         asset_aggregation_series: AssetAggregationSeries {
             time_points: vec![now_str.clone()],
@@ -667,6 +697,8 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
 
                 // Gas has no target: shown as a measured share, never under pressure.
                 let gas_weight = weight(wallet_gas_usd);
+                // Nor has AERO (#93): the fourth pillar is measured, never steered.
+                let aero_weight = weight(wallet_aero_usd);
 
                 vec![
                     AllocationDeviation {
@@ -695,6 +727,13 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
                         target_weight_bps: 0,
                         actual_weight_bps: gas_weight,
                         deviation_bps: gas_weight,
+                        status: "no_target".to_string(),
+                    },
+                    AllocationDeviation {
+                        bucket_name: AERO_BUCKET_NAME.to_string(),
+                        target_weight_bps: 0,
+                        actual_weight_bps: aero_weight,
+                        deviation_bps: aero_weight,
                         status: "no_target".to_string(),
                     },
                 ]
