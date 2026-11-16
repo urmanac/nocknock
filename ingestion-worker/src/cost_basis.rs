@@ -264,22 +264,35 @@ pub(crate) fn compute_cost_basis(
             ..Default::default()
         },
         Ok(fills) => {
+            struct PlanRun {
+                plan_id: String,
+                totals: Totals,
+                fills: i64,
+                first: DateTime<Utc>,
+                last: DateTime<Utc>,
+            }
             let mut all = Totals::default();
             // Per plan, in order of each plan's first fill.
-            let mut plans: Vec<(String, Totals, i64, DateTime<Utc>, DateTime<Utc>)> = Vec::new();
+            let mut plans: Vec<PlanRun> = Vec::new();
             for f in fills {
                 all.add(f);
-                match plans.iter_mut().find(|p| p.0 == f.plan_id) {
+                match plans.iter_mut().find(|p| p.plan_id == f.plan_id) {
                     Some(p) => {
-                        p.1.add(f);
-                        p.2 += 1;
-                        p.3 = p.3.min(f.confirmed_at);
-                        p.4 = p.4.max(f.confirmed_at);
+                        p.totals.add(f);
+                        p.fills += 1;
+                        p.first = p.first.min(f.confirmed_at);
+                        p.last = p.last.max(f.confirmed_at);
                     }
                     None => {
-                        let mut t = Totals::default();
-                        t.add(f);
-                        plans.push((f.plan_id.clone(), t, 1, f.confirmed_at, f.confirmed_at));
+                        let mut totals = Totals::default();
+                        totals.add(f);
+                        plans.push(PlanRun {
+                            plan_id: f.plan_id.clone(),
+                            totals,
+                            fills: 1,
+                            first: f.confirmed_at,
+                            last: f.confirmed_at,
+                        });
                     }
                 }
             }
@@ -298,14 +311,14 @@ pub(crate) fn compute_cost_basis(
                 unrealized_pct: pct,
                 plans: plans
                     .into_iter()
-                    .map(|(plan_id, t, n, first, last)| PlanBasis {
-                        plan_id,
-                        fills: n,
-                        spent_usdc: usd(t.usdc),
-                        acquired_nock: nock_units(t.nock),
-                        avg_cost_usd: t.avg().map(price).unwrap_or_default(),
-                        first_fill_at: first.to_rfc3339(),
-                        last_fill_at: last.to_rfc3339(),
+                    .map(|p| PlanBasis {
+                        plan_id: p.plan_id,
+                        fills: p.fills,
+                        spent_usdc: usd(p.totals.usdc),
+                        acquired_nock: nock_units(p.totals.nock),
+                        avg_cost_usd: p.totals.avg().map(price).unwrap_or_default(),
+                        first_fill_at: p.first.to_rfc3339(),
+                        last_fill_at: p.last.to_rfc3339(),
                     })
                     .collect(),
                 includes: plan_notes.0.clone(),
@@ -584,7 +597,7 @@ pub(crate) async fn load_basis_fills(db: &PgPool) -> std::result::Result<Vec<Bas
     .await
     .map_err(|e| {
         tracing::error!("Cost basis: accumulation ledger query failed: {e}");
-        "the accumulation ledger could not be read this cycle".to_string()
+        "the accumulation ledger could not be read".to_string()
     })?;
     rows.iter()
         .map(|r| {

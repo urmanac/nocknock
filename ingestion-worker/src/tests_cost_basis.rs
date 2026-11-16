@@ -535,8 +535,7 @@ fn test_series_response_thins_spot_in_range_and_survives_a_failed_spot_read() {
 // ---------------- Snapshot shape and MCP text ----------------
 
 fn snapshot_with(cb: Option<CostBasis>) -> serde_json::Value {
-    let mut dm = DerivedMetrics::default();
-    dm.cost_basis = cb;
+    let dm = DerivedMetrics { cost_basis: cb, ..Default::default() };
     json!({ "derived_metrics": serde_json::to_value(&dm).unwrap() })
 }
 
