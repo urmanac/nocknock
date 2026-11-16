@@ -385,6 +385,8 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
         });
     // BATCH HARVEST: the split comes from the configured ratio, and the text says what the
     // harvest ledger actually books (USDC, NOCK and WETH/ETH, each valued at the claim's block).
+    // AERO is deliberately not named here (#93): this directive is about LP fees, and
+    // no directive may read as advice to claim AERO. The ledger books AERO all the same.
     let harvest: Option<(String, String)> = (total_fees_usd >= 5.00).then(|| {
         let gas_efficiency = if gas_cost > 0.0 {
             format!("{:.0}x", total_fees_usd / gas_cost)

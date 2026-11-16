@@ -183,8 +183,8 @@ Aero LP, so this affects only **where NOCK buys are executed** (the accumulation
 and one third-party history feed.
 
 > **Superseded in v0.5.0 (noted 2026-11-14):** the operator holds staked Aero LP, and
-> NockNock tracks Aero positions again (see §7). AERO rewards on staked LP are not read
-> yet (#93).
+> NockNock tracks Aero positions again (see §7). The AERO that staked LP earns is read
+> since v0.6.0 (#93, §9).
 
 > **Verification status.** Everything below was read from Base mainnet. No official
 > Aero contract list was found, so the *identity* of these contracts is inferred:
@@ -297,7 +297,8 @@ For comparison, the new Aero volatile NOCK/USDC pool `0x770fe8fc…` held about 
   but reward emissions stopped at the merger and current fee distribution was not
   confirmed. (aero.xyz states that new-Aero pool revenue goes to AERO stakers; its pool
   page lists separate AERO and fee reward rates for depositors.)
-- Rewards earned by staked LP (AERO emissions) are not read or valued (issue #93).
+- Rewards earned by staked LP (AERO emissions) were not read until v0.6.0. They are now
+  read from the gauge with `earned(address)` and valued (issue #93, §9).
 
 ### First live deposits (2026-11-14, operator, via app.aero.xyz)
 
@@ -476,14 +477,15 @@ Measured, not assumed:
   holders are 45-byte proxies like this gauge, none was confirmed to be a gauge) also
   returned (0, 0) when `collect` was simulated from the holder.
 - **The staker earns AERO instead.** `gauge.earned(wallet, [2914490])` returned
-  `0xa08e3e2faa16f716` (11.569 at 18 decimals) at this block. NockNock does **not** read
-  this value: AERO rewards are issue #93.
+  `0xa08e3e2faa16f716` (11.569 at 18 decimals) at this block. When #91 shipped NockNock
+  did not read this value; since #93 it does, every cycle (§9).
 
 So a staked position reports no fee figure. Its fee fields say
-"not LP-claimable (staked: swap fees on staked liquidity go to the gauge); AERO rewards
-not read (#93)" in `positions[].fees_note`, `contract_fees[].amount`, the velocity row's
-`note`, the claim payload (`not_claimable`) and the MCP text. It is never shown as $0
-earned, and it adds nothing to the claimable total.
+"not LP-claimable (staked: swap fees on staked liquidity go to the gauge)" in
+`positions[].fees_note`, the claim payload (`not_claimable`) and, followed by the
+position's unclaimed AERO (§9), in `contract_fees[].amount`, the velocity row's `note`
+and the MCP text. It is never shown as $0 earned, and it adds nothing to the claimable
+total.
 
 **An unstaked position** (the wallet holds the NFT) can collect. Verified on NFT #3117536
 at **block 58063800** (`0x375fbb8`), then held by the EOA `0xe3c74593…a88a` (USDC / an
@@ -530,11 +532,177 @@ used.
   the position manager, `increaseStakedLiquidity` on the older gauges), can add to an
   NFT that is staked in this gauge was not tested. Until it is, no rebuild suggestion is
   made for an Aero CL position and no deposit link is shown for one.
-- **AERO**: token address, value and claim path (`claimEmissions`) are not read (#93).
+- **AERO**: read since #93; the token, the gauge reads, the price source and what is
+  still unverified about the claim path are in §9.
 - **Other CL pools.** Only the WETH/NOCK CL200 pool and its gauge were exercised. The
   adapter reads the gauge from the pool, so another pool works only if its gauge answers
   `stakedContains(address,uint256)`; one that does not fails the cycle rather than being
   counted.
 - **`unstakedFee()`** and how fees are split when only part of the in-range liquidity is
   staked.
+
+---
+
+## 9. AERO, the Fourth Pillar (v0.6.0, issue #93) — Verified Record
+
+The worker reads the wallet's AERO, the AERO each staked Aero position has earned and
+not claimed, and an AERO/USD price (`ingestion-worker/src/aero_rewards.rs`). Everything
+below was read with `eth_call`, `eth_getLogs` and `eth_getTransactionReceipt` through
+`https://base-rpc.publicnode.com` on 2026-11-16, pinned to **block 58077673**
+(`0x37631e9`, 2026-11-16T05:11:50Z, hash `0xcaef3e28…aecd40`) unless another block is
+named. Selectors and topics were computed from the signatures shown and each was checked
+against the response it produces. The raw responses are the fixtures in
+`ingestion-worker/src/tests_aero_rewards.rs`.
+
+### Which token is "AERO": there are two
+
+| | The token the Aero gauges pay | The older token |
+|---|---|---|
+| Address | `0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee` | `0x940181a94A35A4569E4529A3CDfB74e38FD98631` |
+| `symbol()` `0x95d89b41` | "AERO" | "AERO" |
+| `name()` `0x06fdde03` | "Aero" | "Aerodrome" |
+| `decimals()` `0x313ce567` | 18 | 18 |
+| `totalSupply()` `0x18160ddd` | 2,142,866,660 (raw `0x06ec89aa690b7aba6e31c247`) | 2,008,099,184 (raw `0x067d0f8ae7f0f34ed947e31e`) |
+| `balanceOf(wallet)` `0x70a08231` | 0 | 0 |
+| Paid by the two gauges below | **yes** (see "A claim pays what `earned` said") | no: no `Transfer` of it out of either gauge in blocks 57,000,000 to 58,077,673, and `balanceOf` of each gauge is 0 |
+
+Issue #93 and the work order named `0x940181a9…8631`. That is **not** what the
+operator's gauges pay, so NockNock's AERO is `0x3f5bF3Ed…a4Ee` (`AERO_BASE`). The older
+token is not read, priced or ledgered: a wallet that held it would not see it in
+NockNock. Whether the two are convertible was not investigated.
+
+### The gauges and how each reports unclaimed AERO
+
+| | Basic (volatile pool) gauge | CL gauge |
+|---|---|---|
+| Gauge | `0xc82782ee66d82c4d19db0429652091a085083526` | `0x3bf70c880adc8370917994ab0df68e763b7a60fd` |
+| Its pool | `stakingToken()` `0x72f702f3` = `0x770fE8Fc…9e0A` (USDC/NOCK) | `pool.gauge()` returns it (§8; WETH/NOCK CL200) |
+| Code | 45-byte EIP-1167 proxy to `0xbce3a68f9c22d18ddfff308eb77ce32c31853b03` | 45-byte proxy to `0x89e91a960154b1ed6c093039a8f0725ab67d14e0` |
+| `voter()` `0x46c96aac` | `0x382409fad8503fbcdbb27a4211551fa03e884078` | the same |
+| `gaugeFactory()` `0x0d52333c` | `0x9fbcf2df0dc553ce40ef63963bff465b76792b7e` | `0xf437f62053acb121665b8fdbfea8f214fb8e589d` |
+| `rewardToken()` `0xf7c618c1` | **reverts** | **reverts** |
+| The read NockNock uses | `earned(address)` `0x008cc262` | `earned(address,uint256[])` `0xd942be03` |
+| For the wallet | `0x01adf89b6483d30d` = 0.121026111298851597 AERO | with `[2914490]`: `0xa573ba928fdaf5d2` = 11.922077777221318098 AERO |
+| A zero answer | `earned(0x…dead)` (no stake) = 0 | `earned(wallet, [])` = 0 |
+| What reverts | — | `earned(wallet, [2914491])` (an id the wallet has not staked): "execution reverted: NA". `earned(address,uint256)` `0x3e491d47`, the older Slipstream gauge's form: reverts |
+| Staked | `balanceOf(wallet)` = 29684955447174 LP (the wallet's own `pool.balanceOf` is 0) | `stakedContains(wallet, 2914490)` = true |
+
+Neither gauge names its reward token, so the token was established from what a claim
+pays (next section). The CL calldata is the account word, the array offset `0x40`, the
+length 1 and the token id:
+`0xd942be03 ‖ wallet ‖ 0x40 ‖ 1 ‖ 0x2c78ba`.
+
+The wallet's unclaimed AERO at this block was therefore **12.043104 AERO**, worth
+**$5.03** at the price below. Its wallet AERO was 0: it has not claimed.
+
+### A claim pays what `earned` said (two real claims by other accounts)
+
+| | Basic gauge | CL gauge |
+|---|---|---|
+| Tx | `0x189f6ddfbb0e278ed37b2049d8eb5deeeb78f618a1b20c213c47f42511f9b8f8` | `0x7216bc7edd6d0a98bfbb57d6c8fb817eb328bf0f34556c75b1c5717472c79760` |
+| Block | 57635701 (`0x36f7375`, 2026-11-15T04:38:35Z) | 57427872 |
+| Claimer | `0x7c12cd5b…386d`, calling the gauge directly | `0xa8373266…dbdb` (a contract), NFT #2895206, in a larger transaction |
+| `earned` one block before | `0x12df9e0749351725` | `0x1ae6d93dff2d0957` |
+| AERO `Transfer` to the claimer | from the **zero address**, `0x12df9e0749351725` (1.359979366619354917) | from the zero address, `0x1ae6d93dff2d0957` (1.938475549926951255) |
+| `earned` in the claim's block | 0 | reverts "NA" (the NFT was withdrawn in the same transaction) |
+| Gauge event | `EmissionsClaimed(address,address,uint256)`, topic `0x41a8f9b7…7a968` | `EmissionsClaimed(address,uint256,address,uint256)`, topic `0x7b6bd720…27bb1` |
+
+So in both gauge types `earned` is exactly what a claim then mints, and the AERO arrives
+as a **mint**: an ERC-20 `Transfer` of `0x3f5bF3Ed…a4Ee` from `0x0000…0000` to the
+recipient. The same receipts also show, and NockNock ignores:
+
+- a token `0x6cdda0e730744dc6ff67654b35350adad05ecee7` (symbol "xAERO") minted to and
+  burned from `0x8c37f30f…22c3` for the same amount;
+- a further mint of AERO to `0x9beb95cc…1156`, 5% of the claim (`0x00f194b39075dac1`
+  beside `0x12df9e07…1725`). It is in addition to the claimer's amount, not taken from it.
+
+The claim functions, by selector lookup only and never called by NockNock, are
+`claimEmissions(address,address)` `0x8ed86282` on the basic gauge and
+`claimEmissions(address,address,uint256[])` `0x09902477` on the CL gauge. Simulated from
+the wallet at the pinned block both return empty data without reverting.
+
+### AERO/USD price source
+
+AERO/USDC pools found through the factories at the pinned block (`getPool` on the Aero
+CL factory `0x9cb22058…7a76` with `0x28af8d0b`, and on the Uniswap v3 factory
+`0x33128a8f…fdfd` with `0x1698ee82`):
+
+| Pool | `slot0` price (USDC per AERO) | `liquidity()` | USDC / AERO held |
+|---|---:|---:|---|
+| **Aero CL200 `0xd0acf293547457fb4fe9ee32ca93e89497626816`** | **0.417608** | 718149000491862264365 | 3,330,360 / 4,172,956 |
+| Aero CL100 `0x422df9aa…a1cf` | 0.415519 | 16573887176669224717 | 94,336 / 981,725 |
+| Uniswap v3 0.30% `0x229cfa9f…eb3d` | 0.416275 | 150128334157482 | 1.84 / 383.72 |
+| Aero CL1 `0xb27460d0…f863` | 0.704442 | **0** | dust |
+| Uniswap v3 0.01% `0xed66bcda…5473` | 0.639400 | **0** | dust |
+| Uniswap v3 0.05% `0x32ed1579…6c9e` | 0.803276 | **0** | dust |
+| Uniswap v3 1% `0xcc500ceb…7367` | 0.750975 | **0** | dust |
+
+Four of the seven have no in-range liquidity and show a frozen price 53% to 92% above the
+market. This is the stale-pool case the NOCK and ETH price guards exist for, so the same
+guard applies: a pool whose `liquidity()` is 0 gives no price.
+
+- **Default `aero_price_pool`**: the Aero CL200 pool `0xd0acf293…6816`, the deepest.
+  `token0()` = AERO `0x3f5bf3ed…a4ee`, `token1()` = USDC, `tickSpacing()` = 200, `nft()` =
+  the position manager of §8, `factory()` = `0x9cb22058…7a76`, `fee()` = 10500 pips.
+  `slot0()` returns six words (a Slipstream pool); word 0 is sqrtPriceX96
+  `0xad784fbb267f75a7626`, tick -285057. Price = (sqrtPriceX96 / 2^96)² × 10^(18−6) =
+  **$0.417608**.
+- **Cross-check at the same block**: the Aero CL200 AERO/WETH pool `0xc85d5cb7…c9b3`
+  (sqrtPriceX96 `0x03e0fd7ad1a3064d1658cef5`, 0.000229578 WETH per AERO) times ETH/USD
+  from `eth_price_pool` ($1,811.33) gives $0.415842, within 0.5% of the pool above.
+- **At a past block**: the same pool at block 57635701 read sqrtPriceX96
+  `0xb1d397eb6115a61877a`, $0.438847. That is the read the harvest ledger makes for a
+  claim in that block, and it needs an archive node (Alchemy serves one).
+
+Every cycle the worker reads the pool's `token0()`, `token1()`, `slot0()` and
+`liquidity()`. The tokens must be AERO and USDC, in either order; otherwise it is
+"Configuration error: aero_price_pool … is not an AERO/USDC pool" and no price is used.
+Zero liquidity is "Stale AERO/USD price: price pool … has zero in-range liquidity".
+
+### What NockNock does with it
+
+- **Wallet AERO** is a required read (`AERO.balanceOf(wallet)`), like NOCK, USDC and gas:
+  a failed read fails the cycle. It is counted in `total_portfolio_usd` at the price
+  above, appears as the last `wallet_balances` row and as the "AERO (wallet)" row of the
+  deviation matrix (status `no_target`), and is never cash, never dry powder and never
+  the source of a suggested deposit.
+- **Unclaimed AERO** is read for every tracked Aero position that has a gauge: an
+  `aerodrome` position with `gauge_address`, and an `aerodrome-cl` position the cycle
+  proved staked. It is **not** in the total, exactly as uncollected LP fees are not; it is
+  stated beside them (`positions[].unclaimed_aero`, `global_status.unclaimed_aero_amount`)
+  and counts once claimed. The read is optional: a revert or a failed read is stated as
+  "unclaimed AERO not read (…)" on that position and makes the total null, never 0 and
+  never a partial sum. An `aerodrome` position with no `gauge_address` says so.
+- **The price** is required only while the wallet holds AERO (its value is in the total,
+  so a failed read fails the cycle). While the wallet holds none, a failed read leaves
+  `aero_price_usd` null with the reason in `aero_note`, the amounts stay, and the cycle
+  goes on.
+- **A claim** recorded with `POST /v1/execute/record-harvest` books the AERO `Transfer`
+  to the wallet, valued from the price pool at the claim's block, or with no USD value
+  when that read fails. The Koinly export describes the row as an AERO reward claim.
+- **No advice.** NockNock builds no claim transaction for AERO, sets no target, and no
+  directive reads an AERO figure.
+
+### Not verified
+
+- **Penalties and deferral.** The basic gauge has `isPenaltyActive(address)` `0x9af3a17c`
+  (false for the wallet), `depositBlock(address)` `0x202019a6` (57425187, the deposit) and
+  both gauges have `deferredEmissions(address)` `0xba135be9` and
+  `deferredReferralEmissions(address)` `0xa9d4ee99` (0 for the wallet); the CL gauge has
+  `forfeitRollover()`. What these do to a claim was not investigated. In the two claims
+  observed, `earned` was paid in full. If a penalty can apply, `earned` would overstate
+  what a claim pays; NockNock labels the figure "unclaimed AERO" and does not promise it.
+- **How the Aero app claims.** Both observed claims paid the claimer directly. If the app
+  routes a claim through a contract that receives the AERO and forwards it, the wallet's
+  `Transfer` would come from that contract rather than the zero address. The ledger books
+  any AERO `Transfer` to the wallet in a recorded transaction, whatever its sender, so it
+  would still be booked; a recorded transaction that merely buys AERO would be booked too.
+- **Other gauges.** Only these two gauges were read. Another basic gauge must answer
+  `earned(address)` and another CL gauge `earned(address,uint256[])`; one that does not is
+  reported as "not read", never as 0.
+- **AERO inside a position.** AERO is not in the position token registry, so a pool with
+  an AERO leg cannot be tracked (the cycle fails and names the token).
+- **The names** `EmissionsClaimed`, `claimEmissions` and the others above come from a
+  public signature database; the topic hashes were recomputed from those signatures and
+  match the logs. No verified source for these contracts was read.
 
