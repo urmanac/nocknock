@@ -418,7 +418,10 @@ pub(crate) fn classify_quote_call(v: &serde_json::Value) -> std::result::Result<
 /// never "0 NOCK". Pure.
 pub(crate) fn decode_amount_out(hex: &str) -> std::result::Result<u128, String> {
     let clean = hex.trim_start_matches("0x");
-    if clean.len() < 64 || !clean.is_char_boundary(64) {
+    if !clean.is_ascii() {
+        return Err("the quoter's answer was not hex".to_string());
+    }
+    if clean.len() < 64 {
         return Err("the quoter's answer was too short to hold an amount".to_string());
     }
     let word = &clean[..64];
@@ -435,7 +438,7 @@ pub(crate) fn decode_amount_out(hex: &str) -> std::result::Result<u128, String> 
 /// A single unsigned word (a fee read). Pure.
 pub(crate) fn decode_small_word(hex: &str) -> Option<u128> {
     let clean = hex.trim_start_matches("0x");
-    if clean.len() < 64 || !clean.is_char_boundary(64) || clean[..32].chars().any(|c| c != '0') {
+    if !clean.is_ascii() || clean.len() < 64 || clean[..32].chars().any(|c| c != '0') {
         return None;
     }
     u128::from_str_radix(&clean[32..64], 16).ok()
@@ -926,24 +929,26 @@ pub(crate) async fn fetch_route_quotes(
     let block_hex = format!("0x{block_number:x}");
 
     // Every route at the same block, concurrently: one slow route cannot starve the rest.
+    // A route whose task does not report back stays "unavailable"; it is never dropped
+    // from the list.
+    let mut results: Vec<RouteResult> = route_table()
+        .into_iter()
+        .map(|spec| RouteResult { spec, outcome: QuoteOutcome::Unavailable("the quote did not complete".to_string()) })
+        .collect();
     let mut calls = tokio::task::JoinSet::new();
-    for (i, spec) in route_table().into_iter().enumerate() {
-        let (client, rpc_url, block_hex) = (client.clone(), rpc_url.to_string(), block_hex.clone());
+    for (i, r) in results.iter().enumerate() {
+        let (client, rpc_url, block_hex, spec) = (client.clone(), rpc_url.to_string(), block_hex.clone(), r.spec.clone());
         calls.spawn(async move {
             let (to, data) = quote_request(&spec, amount_usdc_raw);
-            let outcome = outcome_from_call(&spec, quote_eth_call(&client, &rpc_url, to, &data, &block_hex).await);
-            (i, RouteResult { spec, outcome })
+            (i, outcome_from_call(&spec, quote_eth_call(&client, &rpc_url, to, &data, &block_hex).await))
         });
     }
-    let mut indexed: Vec<(usize, RouteResult)> = Vec::new();
     while let Some(joined) = calls.join_next().await {
         match joined {
-            Ok(pair) => indexed.push(pair),
+            Ok((i, outcome)) => results[i].outcome = outcome,
             Err(e) => tracing::warn!("Route quote task failed: {e}"),
         }
     }
-    indexed.sort_by_key(|(i, _)| *i);
-    let results: Vec<RouteResult> = indexed.into_iter().map(|(_, r)| r).collect();
 
     let mut venues = Vec::with_capacity(QUOTE_VENUES.len());
     for venue in QUOTE_VENUES {
@@ -1108,15 +1113,23 @@ pub(crate) fn fill_quote_reference(effective_price_usd: &str, quote: Option<Stor
 }
 
 /// The stored quote for a fill of `plan_id` at `fill_block`: the latest one read before
-/// that block, if it belongs to this fill's tranche. A database error is logged and
-/// reads as "no quote on record"; it never blocks or changes the recording itself.
-pub(crate) async fn quote_for_fill(db: &PgPool, plan_id: &str, fill_block: i64) -> Option<StoredQuote> {
+/// that block, if it belongs to this fill's tranche. "The buy before this one" is the
+/// latest earlier fill of the plan or earlier detected swap still on offer (the rule
+/// fill detection uses for its early / on-schedule label), so confirming offers out of
+/// order does not hand a later buy an earlier tranche's quote. A database error is
+/// logged and reads as "no quote on record"; it never blocks or changes the recording.
+pub(crate) async fn quote_for_fill(db: &PgPool, plan_id: &str, wallet: &str, fill_block: i64) -> Option<StoredQuote> {
     let lookup = async {
         let previous_fill_block: Option<i64> = sqlx::query(
-            "SELECT MAX(block_number) AS prev FROM accumulation_events WHERE plan_id = $1 AND block_number < $2",
+            "SELECT GREATEST( \
+                (SELECT MAX(block_number) FROM accumulation_events WHERE plan_id = $1 AND block_number < $2), \
+                (SELECT MAX(block_number) FROM accumulation_candidates \
+                  WHERE wallet = $3 AND state = 'offered' AND block_number < $2) \
+             ) AS prev",
         )
         .bind(plan_id)
         .bind(fill_block)
+        .bind(wallet.to_lowercase())
         .fetch_one(db)
         .await?
         .try_get::<Option<i64>, _>("prev")?;

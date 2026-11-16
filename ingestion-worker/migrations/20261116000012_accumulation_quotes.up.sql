@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS accumulation_quotes (
 );
 
 -- A fill's cost over the best quote that was current for its tranche: the latest stored
--- quote read before the fill's block and not before the plan's previous fill. All eight
+-- quote read before the fill's block and not before the buy before it (the plan's
+-- previous fill, or an earlier detected swap still on offer). All eight
 -- are null together when there is no such quote ("no quote on record"); a later quote
 -- is never used. The gap between quote_block_number and the fill's block includes price
 -- movement, so quote_cost_bps is not execution cost alone. Existing rows stay null.

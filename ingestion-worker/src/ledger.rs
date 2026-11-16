@@ -252,7 +252,7 @@ pub(crate) async fn record_accumulation_handler(
     // Cost over the best quote that was current for this tranche (issue #115): the
     // latest stored quote read before the fill's block. None on record means all eight
     // columns stay null; a later quote is never used.
-    let quote = fill_quote_reference(&effective_price, quote_for_fill(&state.db, &plan.id, block_number).await);
+    let quote = fill_quote_reference(&effective_price, quote_for_fill(&state.db, &plan.id, &wallet, block_number).await);
 
     let res = sqlx::query(
         "INSERT INTO accumulation_events \

@@ -509,6 +509,10 @@ fn test_answers_that_are_not_an_amount_are_errors_not_zero() {
     assert_eq!(decode_amount_out(&"0".repeat(64)), Err("the quoter returned zero NOCK".to_string()));
     assert_eq!(decode_amount_out(&format!("{}{}", "f".repeat(32), "0".repeat(32))), Err("the quoter's answer does not fit an amount".to_string()));
     assert_eq!(decode_amount_out(&format!("{:064x}", 7u128)), Ok(7));
+    // Not hex at all (a multi-byte character where a digit should be): an error, no panic.
+    assert_eq!(decode_amount_out(&format!("{}é", "0".repeat(63))), Err("the quoter's answer was not hex".to_string()));
+    assert_eq!(decode_small_word(&format!("{}é", "0".repeat(63))), None);
+    assert_eq!(pool_exhausted(&format!("{}é", "0".repeat(127))), None);
     // A two-word V4Quoter answer is never read as a price list.
     let fx = quotes_fixture();
     let v4 = classified(&fx, "uni_v4_usdc_nock_3pct").unwrap();
@@ -894,14 +898,17 @@ async fn test_route_quote_sql_against_a_scratch_database() {
     assert!(name.ends_with("_scratch"), "refusing to run against database {name:?}: its name must end in _scratch");
 
     let plan_id = "scratch-route-quotes";
+    // A wallet of this test's own, so no other test's candidates are touched.
+    const SCRATCH_WALLET: &str = "0x00000000000000000000000000000000000115aa";
     let cleanup = |db: PgPool| async move {
         sqlx::query("DELETE FROM accumulation_quotes WHERE plan_id = $1").bind(plan_id).execute(&db).await.unwrap();
         sqlx::query("DELETE FROM accumulation_events WHERE plan_id = $1").bind(plan_id).execute(&db).await.unwrap();
+        sqlx::query("DELETE FROM accumulation_candidates WHERE wallet = $1").bind(SCRATCH_WALLET).execute(&db).await.unwrap();
     };
     cleanup(db.clone()).await;
 
     // Nothing stored: no quote on record.
-    assert_eq!(quote_for_fill(&db, plan_id, QUOTE_BLOCK + 10).await, None);
+    assert_eq!(quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK + 10).await, None);
 
     // A failed comparison stores nothing; a real one stores one row, once.
     let down = route_quotes_unavailable("20.00", "no Alchemy RPC key is configured");
@@ -914,15 +921,15 @@ async fn test_route_quote_sql_against_a_scratch_database() {
     assert_eq!(serde_json::from_value::<RouteQuotes>(kept).unwrap(), q, "the whole comparison is kept as shown");
 
     // A fill after the quote finds it; a fill at or before the quote's block does not.
-    let found = quote_for_fill(&db, plan_id, QUOTE_BLOCK + 10).await.expect("quote before the fill");
+    let found = quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK + 10).await.expect("quote before the fill");
     assert_eq!((found.venue.as_str(), found.block_number), ("Aero", QUOTE_BLOCK));
     assert_eq!(found.route, "USDC → USDT → WETH → NOCK");
     assert_eq!((found.amount_usdc.as_str(), found.nock_out.as_str()), ("20.00", "1773.0768618618146014"));
     assert_eq!(found.effective_price_usd, "0.01127983");
     assert_eq!(found.quoted_at.to_rfc3339(), "2026-11-16T05:25:57+00:00");
-    assert_eq!(quote_for_fill(&db, plan_id, QUOTE_BLOCK).await, None);
-    assert_eq!(quote_for_fill(&db, plan_id, QUOTE_BLOCK - 1).await, None);
-    assert_eq!(quote_for_fill(&db, "another-plan", QUOTE_BLOCK + 10).await, None);
+    assert_eq!(quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK).await, None);
+    assert_eq!(quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK - 1).await, None);
+    assert_eq!(quote_for_fill(&db, "another-plan", SCRATCH_WALLET, QUOTE_BLOCK + 10).await, None);
 
     // Record a fill with its quote columns, as the record endpoint writes them.
     let insert_fill = |tx: &'static str, block: i64, r: FillQuoteReference| {
@@ -952,7 +959,7 @@ async fn test_route_quote_sql_against_a_scratch_database() {
             .unwrap();
         }
     };
-    let first = fill_quote_reference("0.01133623", quote_for_fill(&db, plan_id, QUOTE_BLOCK + 10).await);
+    let first = fill_quote_reference("0.01133623", quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK + 10).await);
     assert_eq!(first.cost_bps, Some(50));
     insert_fill("0xscratchquotefill1", QUOTE_BLOCK + 10, first).await;
     let row = sqlx::query(
@@ -969,7 +976,7 @@ async fn test_route_quote_sql_against_a_scratch_database() {
 
     // The next tranche's fill has no quote of its own yet: the old one belongs to the
     // tranche before, so it is "no quote on record", never the stale figure.
-    assert_eq!(quote_for_fill(&db, plan_id, QUOTE_BLOCK + 500_000).await, None);
+    assert_eq!(quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK + 500_000).await, None);
     let none = fill_quote_reference("0.01133623", None);
     insert_fill("0xscratchquotefill2", QUOTE_BLOCK + 500_000, none).await;
     let row = sqlx::query("SELECT quote_venue, quote_cost_bps FROM accumulation_events WHERE tx_hash = '0xscratchquotefill2'")
@@ -977,6 +984,24 @@ async fn test_route_quote_sql_against_a_scratch_database() {
         .await
         .unwrap();
     assert_eq!((row.get::<Option<String>, _>("quote_venue"), row.get::<Option<i32>, _>("quote_cost_bps")), (None, None));
+
+    // An earlier swap still on offer is a buy before this one too: a fill recorded
+    // ahead of it does not take the quote that belonged to the offered swap's tranche.
+    sqlx::query("DELETE FROM accumulation_events WHERE plan_id = $1").bind(plan_id).execute(&db).await.unwrap();
+    assert!(quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK + 900).await.is_some());
+    sqlx::query(
+        "INSERT INTO accumulation_candidates (wallet, tx_hash, state, block_number, confirmed_at) \
+         VALUES ($1, '0xscratchquoteoffer', 'offered', $2, NOW())",
+    )
+    .bind(SCRATCH_WALLET)
+    .bind(QUOTE_BLOCK + 10)
+    .execute(&db)
+    .await
+    .unwrap();
+    assert_eq!(quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK + 900).await, None);
+    // The offered swap itself still finds its quote, and another wallet's offers do not count.
+    assert!(quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK + 10).await.is_some());
+    assert!(quote_for_fill(&db, plan_id, "0x00000000000000000000000000000000000115bb", QUOTE_BLOCK + 900).await.is_some());
 
     // The events endpoint's own query reads the new columns.
     sqlx::query(
