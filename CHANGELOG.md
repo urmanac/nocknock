@@ -75,6 +75,358 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Long messages fit the provider.** A directive whose details list LP rebuild steps can
   pass Pushover's 1024-character limit. Messages are now cut to each provider's limit with
   a "…", keeping the cockpit link.
+### Changed — snapshot spec 2.6.0 (guided buys: #115, #98)
+- `SNAPSHOT_SPEC_VERSION`, `specs/core/snapshot.yaml` and the frontend contract test move
+  from 2.5.0 to 2.6.0. `accumulation_plan.route_quotes` (#115) and
+  `derived_metrics.cost_basis` (#98) are optional or nullable, so an older reader still
+  parses a 2.6.0 snapshot.
+- The three golden snapshots were regenerated at this point: each case gains
+  `cost_basis: null`, the line "Cost basis: not reported by this snapshot" in the
+  `get_portfolio_state` text (the fixtures carry no accumulation ledger), and a new state
+  hash. Nothing else differs.
+
+### Added — cost basis and the average-cost chart (#98)
+- **Plan buys: average cost against spot.** The snapshot gains `derived_metrics.cost_basis`.
+  Its `plan_buys` layer is the running average cost of every receipt-verified buy in the
+  accumulation ledger (per plan and across plans), what that NOCK is worth at the current
+  spot, and the signed difference. It needs no operator input and reads
+  `accumulation_events` only; fill recording, receipt verification and plan pacing are
+  untouched.
+- **Whole stack: only from an operator-entered opening basis.** New optional config
+  `cost_basis.opening` (`nock_amount`, `cost_usd`, `as_of`, `source`). NockNock cannot
+  derive the stack's history from the chain and never fills these in. Unset, the
+  `whole_stack` layer is `not_configured` and carries no number. Set, the blended average
+  is (opening cost + verified buys after `as_of`) / (opening NOCK + NOCK bought since),
+  labelled with the source note and the instant, with statements of exactly what is and
+  is not counted: sells, LP rebalancing, fees, transfers and unrecorded buys after
+  `as_of` are not tracked.
+- **Config errors are stated, not defaulted.** A half-filled block, a zero or negative
+  amount or cost, a non-numeric value, a missing source, an `as_of` in the future, or an
+  `as_of` that is a date without a time and offset makes `whole_stack.status` `invalid`
+  with a reason naming every problem. The worker keeps running and plan buys still
+  report; the error is also logged once at startup.
+- **`GET /v1/cost-basis/series`**: every verified fill with the running averages after it
+  (its plan's, the ledger's, and the blended one when configured), the stored spot
+  that stands for it (within 60 minutes, else null), and the stored spot history over
+  the range, thinned to at most one stored observation per bucket. Nothing is
+  interpolated: a bucket with no observation has no point. `?days=` sets the range
+  (1 to 365).
+- **Every spot point is the price at its own time.** The price history stores a
+  third-party candle at its open time with its close as the price, which is the price an
+  hour (or a day) later. The series uses the candle's open instead, so a backfilled
+  point is never a later price shown early; a candle without a usable open yields no
+  point. A buy is matched to the worker's own read when one lies within the 60 minutes,
+  and to a backfilled point only when there is none.
+- **Dashboard panel "Average cost vs spot"** (`AverageCostPanel`, helper `costBasis.ts`):
+  the average-cost step line, the spot line with its gaps shaded and never bridged, a
+  marker on each buy, a table of what each buy did to the average, and the difference at
+  spot stated as a fact. No advice: nothing suggests buying, selling or averaging down.
+  The difference is described as a valuation of the NOCK the buys acquired; the panel
+  does not claim that NOCK is still held, because sells and LP activity are not tracked.
+- **MCP**: `get_portfolio_state` gains two cost-basis lines. Both transports compile them
+  from one file (`src/cost_basis_text.rs`), so they cannot drift, and both say so in the
+  tool's `tools/list` description. The whole-stack line values "the NOCK this basis
+  covers" and puts the NOCK read now beside it.
+- **A failed ledger read is `unavailable`, never "no buys".** It does not fail the cycle,
+  `plan_buys.fills` is null (not 0) in that state, and both plan-buys tiles on the
+  dashboard say "unavailable" with the reason.
+- `whole_stack.held_nock` is a whole number of NOCK, the precision the snapshot's own
+  total has.
+- `/v1/snapshot/historical` rows keep the cost-basis figures and drop the repeated
+  `includes`/`excludes` prose, so the history payload stays bounded.
+- New modules `cost_basis` and `cost_basis_text`; tests in `tests_cost_basis.rs`, built
+  from the operator's three real plan buys re-read from Base (ONCHAIN_INTEGRATION.md §12).
+  No migration. The golden snapshot gains `"cost_basis": null` and one portfolio-text
+  line per fixture (its pure path does not read the ledger); no other byte moved.
+- Specs: `CostBasis`, `PlanBuysBasis`, `WholeStackBasis` in `snapshot.yaml`; the series
+  endpoint and `CostBasisSpotPoint` in `api.yaml`. The spec version is not bumped here.
+
+### Added — route quotes for a due tranche (#115)
+- **Both venues, quoted for the exact tranche.** When the plan's status is `tranche_due`
+  the worker asks each venue's own quoter contract what that tranche amount returns in
+  NOCK, along a built-in table of verified routes, all at one block: four Aero routes
+  through the Aero Metaquoter (the basic pool directly, through WETH by either
+  USDC/WETH pool, and the three-hop route through USDT the Aero app used for the plan's
+  first buy) and three Uniswap routes (the v4 USDC/NOCK 3% pool directly, through WETH on
+  v3, through native ETH on v4). Each venue shows its best route: NOCK out, effective
+  price, cost over the snapshot's reference spot in percent, every hop with its pool and
+  fee, and the block and block time of the quote.
+- **A fact, not advice.** The comparison names the venue that returns more NOCK and by
+  how much ("Aero returns more NOCK by 0.05% for $20.00 USDC at block 58081910 …"). With
+  one quote or none, no venue is named. It compares execution routes for a buy the
+  operator's plan already sized; it is not a recommendation to buy.
+- **Only the plan's own amount.** Quotes are requested only while a tranche is due and
+  only for that tranche's amount (after guardrails), keyed on the status field. No plan,
+  no due tranche or `route_quotes.enabled: false` means no call. Nothing is signed, built
+  or sent: every call is an `eth_call`, and there is no swap calldata, approval, slippage
+  or minimum-out value in the code.
+- **Unavailable is never a number.** A quote that reverts, gets no answer, or comes from
+  a pool that ran dry part-way reads "unavailable" with its reason, for that route and
+  venue only. Uniswap QuoterV2 was observed to answer a dry pool with a partial amount
+  and the post-swap price pinned at the range's bound, and no error; the worker detects
+  that from the price. The Aero pools on these routes hold full-range liquidity and
+  fill any size at a collapsing price, so what the Aero Metaquoter answers for a dry
+  concentrated pool was not observed: the same price-bound check is applied to it. Nothing is derived from
+  the spot price and an older quote is never shown as current. A failed quote never
+  fails the cycle or hides the due tranche.
+- **Snapshot.** `accumulation_plan.route_quotes` (v0.7.0): `status` (`ok`, `partial`,
+  `unavailable`), `amount_usdc`, `block_number`, `quoted_at`, `reference_spot_usd`,
+  `venues[]` (with `hops[]` and every candidate in `routes_tried[]`), `more_nock_venue`,
+  `more_nock_by_pct`, `comparison`. Null unless a tranche is due. The whole object is
+  left out of the state hash, so quotes never force a new snapshot row; the golden
+  snapshot file is unchanged for that reason, and the payload's shape is pinned by its
+  own fixture instead. While a tranche is due with quoting on, the advice details end
+  with one fixed sentence pointing to the quotes; it does not depend on what the
+  quoters answered. A snapshot read back from the database at start-up carries no
+  quotes until the first cycle reads new ones.
+- **Dashboard.** The Accumulation Plan panel shows the two venues side by side while a
+  tranche is due, marks the one the worker named, and links each venue's own swap page
+  (`app.aero.xyz/swap`, `app.uniswap.org/swap`) labelled as a swap page. Nothing is
+  prefilled: neither app documents a link format that also fixes the chain. The panel
+  says that quotes are estimates as of their block and that the wallet app's own router
+  may pick a different route. REFRESH QUOTES reads again at the latest block. The panel
+  reads the quotes from `GET /v1/accumulation/quotes/latest` every 30 seconds, because
+  the snapshot's ETag is the state hash and the quotes are not part of it. NOCK amounts
+  are cut to four decimals, not rounded, as in the comparison sentence and the MCP
+  text. Two candidate routes with the same tokens are told apart by their route id.
+- **Cost over the quote, per fill.** When a buy is recorded or confirmed, the worker
+  attaches the best stored quote read for its tranche before the buy's block (and not
+  before the plan's previous buy) and stores `quote_cost_bps` = fill price / quote price
+  − 1, beside the cost over spot from #118. The quote must have been read for that
+  tranche (the plan keeps quoting a tranche after its buy lands, until the buy is
+  recorded; those quotes never serve the next buy) and within 60 minutes before the
+  buy. The recorded-buys table shows it with the quote's block; without such a quote it
+  reads "no quote on record", never a later quote, another tranche's or an old one. The gap between quote and fill includes price movement, and the table says so.
+- **MCP.** `get_accumulation_plan` prints the quotes, the comparison and the caveat on
+  both transports from one shared source file (`quote_text.rs`). MCP gains no tool.
+- **New REST endpoints**, unauthenticated like the existing routes:
+  `POST /v1/accumulation/quotes/refresh` (no body; 409 `NO_TRANCHE_DUE`, `NO_PLAN` or
+  `QUOTES_DISABLED`; 503 `NO_SNAPSHOT`) and `GET /v1/accumulation/quotes/latest` (the
+  quotes the worker holds in memory; it makes no call and is never cached). A refresh
+  measures cost against the cycle's own full-precision spot; without one it shows no
+  cost over spot. `GET /v1/accumulation/events` and the record
+  response gain the eight `quote_*` fields.
+- **Storage.** New table `accumulation_quotes` and eight nullable `quote_*` columns on
+  `accumulation_events` (migration `20261116000012`, additive). One quote row is kept
+  per cycle while a tranche is due. Disposable like the rest of the database: after a
+  loss, buys recorded later show "no quote on record".
+- **Config.** `route_quotes.enabled` (default `true`). There is nothing else to set: the
+  amount is the plan's and the routes are the verified table.
+- **Verified on Base** (ONCHAIN_INTEGRATION.md §11): every quoter, pool and selector
+  answered a live read-only call before the code relied on it, and the tests run on those
+  answers. Replayed at the block before the plan's first buy, the Aero quoter returns
+  the NOCK that buy received, to the wei. The fee unit of Aero concentrated pools
+  (millionths) and the Aero router's identity, both open since v0.5.0, are now confirmed.
+### Changed — snapshot spec 2.5.0 (the whole wallet: #91, #93, #118)
+- `SNAPSHOT_SPEC_VERSION`, `specs/core/snapshot.yaml` and the frontend contract test move
+  from 2.4.0 to 2.5.0. Every field added by #91, #93 and #118 is optional or nullable, so a
+  2.4.0 reader still parses a 2.5.0 snapshot.
+- The golden snapshot was regenerated at this point: against the #93 golden the only
+  differences are `accumulation_plan.fill_detection: null` in the plan case and that
+  case's state hash.
+
+### Added — fill detection for the accumulation plan (#118)
+- **The worker finds the plan's buys on-chain.** Each ingestion cycle, while a plan is
+  active, it lists the NOCK transfers into the tracked wallet back to the plan anchor
+  (`alchemy_getAssetTransfers`), and checks every transaction it has not seen before
+  against its receipt and block header. Cost: one transfer-history call per cycle, plus
+  one receipt (and one block header for a purchase) per new transaction.
+- **A detected swap is offered, never recorded.** The Accumulation Plan panel shows each
+  one with its full hash, amounts, price and block time. CONFIRM calls the existing
+  `POST /v1/execute/record-accumulation` with the offered hash, so the receipt is fetched
+  and verified again: there is no second write path. NOT PART OF THE PLAN leaves it
+  uncounted; it stays listed and can be restored. The manual hash field is unchanged and
+  does not depend on detection. Open offers change no plan number: fills, spend, average
+  cost and cadence still count ledger rows only. When a tranche is due the panel's hint
+  follows the detection state (it promises to find the swap only when detection is
+  working) and, with a swap on offer, says to answer it before buying again.
+- **One set of rules.** The record handler's checks are now one pure function
+  (`fill_verify.rs`: receipt, wallet, block time, plan anchor) that the handler and the
+  detector both call. The handler's order of checks, status codes, error codes and
+  messages are unchanged.
+- **Honest failure.** Detection never fails a cycle. `accumulation_plan.fill_detection`
+  (snapshot, v0.6.0) carries `status`: `ok`, `partial` (read, but incompletely, with what
+  is missing), `unavailable` (could not check, with the reason) or `not_run` (with the
+  reason). "Could not check" is never shown as "none found". A receipt that could not be
+  read is not classified; it is tried again next cycle. `last_checked_at` is left out of
+  the state hash.
+- **Bounds.** The scan goes back to the plan anchor and no further; swaps from before it
+  are not offered. A transaction already in the ledger (any plan id) is never offered. A
+  swap made less than one plan interval after the buy before it (a recorded fill, or an
+  older swap still on offer) is offered with an `early` label; the label does not depend
+  on the order in which offers are confirmed. A stalled transfer-history call fails with
+  its own reason in about 20 seconds (two 10-second attempts), inside the 60-second cap
+  on the whole check.
+- **Execution cost per fill.** Each recorded fill and each offer carries
+  `execution_cost_bps` over the reference spot at its block time: the stored NOCK/USD
+  price nearest the block, within 60 minutes (the v0.5.3 lookup the harvest ledger uses),
+  kept with its source. No stored price near the block means no figure, never a
+  substitute. Every surface prints the reference's own time next to the figure (the
+  dashboard also says how many minutes it is from the swap), because a price move between
+  the two reads as cost. A fill confirmed from an offer keeps the figure the offer
+  showed. Fills recorded before this release get theirs on the next cycle when a
+  stored price exists. `GET /v1/accumulation/events` returns the three new fields and the
+  panel lists the plan's fills with them.
+- **Advice and MCP.** While a swap is on offer, the advice text leads with it in every
+  directive (also when an overextension, a range exit or a harvest outranks the plan, and
+  after the plan is complete); the action title does not change, so no extra notification
+  fires. `get_accumulation_plan`
+  lists offers and the detection state on both transports, from one shared source file.
+  MCP gains no write tool.
+- **New REST endpoints**, unauthenticated like the existing routes, touching only the
+  candidates table: `GET /v1/accumulation/candidates`,
+  `POST /v1/accumulation/candidates/dismiss`, `POST /v1/accumulation/candidates/restore`
+  (503 `NO_TRACKED_WALLET` when no wallet is configured).
+- **Storage.** New table `accumulation_candidates` (migration `20261116000010`, with a
+  `fills_checked_at` column on `accumulation_plans`) so a transaction is classified once;
+  new nullable columns `reference_spot_usd`, `reference_spot_source`, `execution_cost_bps`
+  on `accumulation_events` (migration `20261116000011`). Both additive. The table is
+  disposable like the rest of the database: after a loss the next cycle rebuilds it and
+  offers every buy since the anchor again.
+- **Config.** `fill_detection.enabled` (default `true`) turns the check off. There are no
+  thresholds: detection filters nothing by size or price.
+- **Verified on Base** (ONCHAIN_INTEGRATION.md §10): tests run on real receipts. The
+  plan's three buys qualify; four Uniswap fee claims and two Aero deposits that returned
+  a NOCK refund do not.
+### Added — AERO rewards, the fourth pillar (#93)
+- **AERO is read every cycle.** The wallet's AERO balance, the AERO each staked Aero
+  position has earned in its gauge and not claimed, and an AERO/USD price. NockNock
+  states the amounts. It sets no target for AERO, puts no rebalancing pressure on it,
+  builds no claim transaction for it and gives no advice to claim, sell, hold or
+  accumulate it; no directive reads an AERO figure. A wallet holding only gas and AERO
+  is still "NOTHING TO TRACK YET", exactly as it would be without the AERO.
+- **Which AERO.** Two tokens on Base carry the symbol. The Aero gauges pay
+  `0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee` (name "Aero", 18 decimals): in two real
+  claims, one per gauge type, that token was minted to the claimer for exactly what
+  `earned` reported one block earlier. That is NockNock's AERO. The older
+  `0x940181a9…8631` (name "Aerodrome"), which issue #93 named, is not what these gauges
+  pay and is not read (ONCHAIN_INTEGRATION.md §9).
+- **How unclaimed AERO is read.** A basic (volatile pool) gauge answers `earned(address)`;
+  a CL gauge answers `earned(address,uint256[])` for the token ids the wallet staked.
+  Neither has `rewardToken()`, and the older `earned(address,uint256)` reverts on the CL
+  gauge. An `aerodrome` position is read through its `gauge_address`; an `aerodrome-cl`
+  position through the gauge the cycle proved it is staked in.
+- **A gauge that pays another token is not read as AERO.** A legacy Aerodrome gauge
+  (for example `0x4cbb6188…c3db`, the gauge of the legacy vAMM USDC/NOCK pool) answers
+  the same `earned(address)` but pays the older token `0x940181a9…8631`, and it does
+  have `rewardToken()`. So each cycle asks the gauge `rewardToken()` before `earned`: a
+  revert is the Aero app's gauge and is read; an answer other than NockNock's AERO is
+  stated on the position ("gauge … pays …, not AERO …") with no amount and no USD value.
+- **Price.** New optional config key `aero_price_pool`, an AERO/USDC pool whose `slot0`
+  prices AERO. Default: the Aero CL200 AERO/USDC pool
+  `0xd0acf293547457fb4fe9ee32ca93e89497626816`, the deepest found. Each cycle the pool's
+  tokens must be AERO and USDC and it must have in-range liquidity, or no price is used:
+  four other AERO/USDC pools on Base had none and showed $0.64 to $0.80 against a live
+  $0.418.
+- **Required and optional reads, as #94 decided for gas.** The wallet balance is required
+  (a failed read fails the cycle). The price is required while the wallet holds AERO,
+  because its value is in the total; while the wallet holds none, a failed price read
+  cannot fail the cycle and leaves AERO unpriced with the reason. A gauge read that
+  reverts or fails is stated on that position ("unclaimed AERO not read (…)") and makes
+  the unclaimed total null: never 0, never a partial sum. An `aerodrome` position with
+  no `gauge_address` says its AERO is not read, and it too makes the unclaimed total
+  null, because that position's AERO is part of what the wallet has earned.
+- **One total.** `total_portfolio_usd` now includes wallet AERO, and the cash and LP
+  targets, deviation weights, the high-water mark and history all use that one total.
+  **One-time step:** on the first cycle after the upgrade the total, and so the high-water
+  mark, rises by the value of any AERO already in the wallet (nothing for a wallet that
+  holds none, which is the operator's wallet on 2026-11-16). AERO still unclaimed in a
+  gauge is **not** in the total, exactly as uncollected LP fees are not: the total steps
+  up by its value when it is claimed.
+- **Pillars.** The pillar line is NOCK · USDC · ETH · AERO everywhere (dashboard, both MCP
+  transports) and the four add up to the total. The deviation matrix gains a fifth row,
+  "AERO (wallet)", with status `no_target`.
+- **Snapshot** (spec version unchanged until the v0.6.0 branches are stacked): new
+  `global_status` fields `aero_price_usd`, `wallet_aero_amount`, `wallet_aero_usd`,
+  `unclaimed_aero_amount`, `unclaimed_aero_usd` and `aero_note` (null when not read);
+  optional `positions[].unclaimed_aero`, `unclaimed_aero_usd` and `unclaimed_aero_note`; a
+  fifth `wallet_balances` row, AERO. A snapshot without them renders "not reported" or
+  "—", never 0.
+- **The "AERO rewards not read (#93)" text is gone.** A position whose fees are not
+  LP-claimable now says why and then states its AERO: "not LP-claimable (claimFees()
+  reverts); unclaimed AERO 0.121026 ($0.05)" in `contract_fees[].amount`, the velocity
+  row's `note` and the MCP claim text. `positions[].fees_note` and the claim payload's
+  `simulation_detail` carry the reason alone. A velocity row whose fees ARE claimable
+  (CLAIM_NOW, ACCUMULATE) says nothing about AERO, so a fee action never sits beside an
+  AERO amount; that position's AERO is on its card and in the pillar lines.
+- **Harvest ledger.** `POST /v1/execute/record-harvest` books an AERO `Transfer` to the
+  wallet in the recorded transaction (a gauge claim mints it, so the sender is the zero
+  address), valued from `aero_price_pool` read at the claim's block. When that read fails
+  or the pool had no in-range liquidity at that block the row has no USD value, never a
+  substitute. A receipt that pays only AERO is accepted. The Koinly export describes an
+  AERO row as "NockNock AERO reward claim (…)" and keeps the `income` label. With a
+  `tax_reserve_ratio` set, a priced AERO row counts toward the virtual tax reserve like
+  any other harvest row.
+- **Harvest ledger: one row per transaction and token, summed.** A claim from several
+  gauges in one transaction mints AERO to the wallet once per gauge. The ledger's key is
+  (transaction, token), so only the first mint was booked and the rest were reported as
+  already present. All Transfers of one token to the wallet in a recorded transaction
+  are now summed into its one row. This applies to USDC, NOCK and WETH as well, which
+  had the same limit. Rows recorded before this change are not rewritten.
+- **Harvest ledger: a row recorded without a price can be priced later.** If the price
+  read at the claim's block failed, the row was stored with no USD value and stayed that
+  way. Recording the same transaction again now fills the missing value from that
+  block's price (response field `priced`). A row that has a value is never changed.
+- **Dashboard.** A seventh stat card (AERO in the wallet), AERO lines under the pillar
+  line (held, unclaimed per position, price, and the reason for anything not read), an
+  unclaimed-AERO line on each staked position's card, and an AERO card in the Lite
+  cockpit. None of them has a button. The composition readout no longer counts wallet
+  AERO as "other legs": it states it ("AERO $0.57 (wallet; not cash)"), so the panel's
+  Total equals the parts shown.
+- **Golden files.** `testdata/golden_snapshot.json` and `golden_snapshot_aero_cl.json`
+  change by the new null fields, the AERO deviation row, the pillar line and the shortened
+  reasons; no number moved. A new `testdata/golden_snapshot_aero_rewards.json` is built
+  from reads at Base block 58077673: the operator's two staked positions with 12.043104
+  AERO ($5.03) unclaimed, and the same cycle with the amount of a real claim in the wallet.
+- New worker modules `aero_rewards` (reads, pillar, ledger pricing) and `aero_text` (the
+  AERO lines of the MCP text, one source file compiled into both the worker and
+  `nocknock-mcp`).
+
+### Added — Aero concentrated positions (#91)
+- **New position protocol `aerodrome-cl`.** An Aero concentrated-liquidity ("CL",
+  Slipstream) position is read from its NFT: tokens, tick spacing, ticks and liquidity from
+  the position manager, price, tick and the current swap fee from the pool. Amounts use the
+  same maths as Uniswap v3. Its NOCK counts toward the NOCK total and the floor, its WETH
+  toward the ETH pillar, and its range shows in the tick bracket panel, now with which side
+  an out-of-range position left on. Nothing is tracked until the position is added to
+  `positions:`; `config.yaml.example` carries a commented entry.
+- **Ownership is checked every cycle.** The Aero app stakes the NFT in the pool's gauge, so
+  `ownerOf` is the gauge. The position is counted only if the wallet holds the NFT or the
+  gauge lists it among the wallet's stakes (`stakedContains`); otherwise the cycle fails and
+  names the holder. A staked position says so (`positions[].staked_in_gauge`).
+- **Fees are stated truthfully.** Swap fees on staked liquidity go to the gauge, measured
+  on-chain (ONCHAIN_INTEGRATION.md §8), so a staked position shows "not LP-claimable
+  (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)" on
+  the card, in `contract_fees`, the velocity panel, the claim payload and the MCP text,
+  never $0 earned. An unstaked position's fees are what `collect` simulated from the wallet
+  returns; that read is required like the Uniswap fee reads, so if the simulation reverts
+  the cycle fails and says so, and no unread fee is published as 0. With nothing
+  LP-claimable in the book, the MCP claim text says "Estimated Gas: n/a (nothing
+  LP-claimable)" where it used to blame an unavailable gas estimate (this also changes
+  the text for a book holding only an Aero basic pool whose `claimFees()` reverts).
+- **The configured pool must be the NFT's pool.** The pool's `nft()` must be the
+  position's `npm_address`, and its tokens and tick spacing the NFT's; anything else is a
+  configuration error before any amount is computed. Tokens and spacing alone do not
+  identify it: the Uniswap v3 WETH/NOCK 1% pool also has tick spacing 200.
+- **No rebuild deposit is sized for an Aero CL position**, whatever its pair
+  (`lp_rebuild.excluded[]` states why): the Aero app's deposit link starts a new position,
+  a different NFT that NockNock would not track, and adding to an existing NFT is not
+  verified. A WETH pair keeps the gas reason it already had.
+- The tick bracket panel's new range line says "empty" for a ranged position that holds
+  nothing, on any protocol, where it would have said "in range, holding …".
+- **An unknown `protocol` is a configuration error.** It is reported before any chain read
+  ("Configuration error: position '…' has unknown protocol '…'") and by the claim payload.
+  Labels, deposit links, the fee contract, the pool liveness read and the claim payload used
+  to treat any protocol that was not `uniswap-v3` or `aerodrome` as Uniswap v4.
+- **Negative ticks decode.** Tick words are read as sign-extended `int24` and encoded the
+  same way in calldata; a negative tick used to fail the read (latent for the tracked
+  pairs, whose ticks are positive).
+- Snapshot (spec version unchanged until the v0.6.0 branches are stacked): optional
+  `positions[].tick_spacing`, `staked_in_gauge`, `fees_note` and velocity `contracts[].note`,
+  present only for positions that have them. `record-harvest` and the claim payload accept
+  platform `aerodrome-cl`. `testdata/golden_snapshot.json` is unchanged; the new protocol
+  has its own `testdata/golden_snapshot_aero_cl.json`, built from reads at Base block
+  58061668.
 
 ### Changed — worker split into modules (#97)
 - **Move-only refactor.** `ingestion-worker/src/main.rs` (10,853 lines) is now 1,322 lines

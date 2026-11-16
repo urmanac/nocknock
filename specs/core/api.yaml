@@ -195,6 +195,9 @@ paths:
         success, and nets the USDC/NOCK Transfer logs touching the sovereign wallet;
         the transaction is accepted only if the wallet ended with less USDC and more
         NOCK. Amounts come from the logs, never from the request. Idempotent on tx_hash.
+        This is the only write path into the accumulation ledger: confirming a swap
+        that fill detection offered (v0.6.0) calls it with the offered hash, and the
+        receipt is verified again.
       requestBody:
         required: true
         content:
@@ -223,6 +226,17 @@ paths:
                   effective_price_usd: { type: string }
                   block_number: { type: integer }
                   confirmed_at: { type: string, format: date-time }
+                  reference_spot_usd: { type: string, nullable: true, description: "Stored NOCK/USD price nearest the fill's block time, within 60 minutes (v0.6.0); null when none was near. A fill confirmed from a detected swap keeps the reference its offer showed, so the two figures cannot differ." }
+                  reference_spot_source: { type: string, nullable: true }
+                  execution_cost_bps: { type: integer, nullable: true, description: "(effective price / reference spot - 1) x 10,000 (v0.6.0); null without a reference" }
+                  quote_venue: { type: string, nullable: true, description: "Venue of the best quote that was current for this fill's tranche (v0.7.0): the latest stored quote read before the fill's block and not before the plan's previous fill, if it was read for this fill's tranche and within 60 minutes before the fill. All eight quote fields are null together when there is none (\"no quote on record\"); a later quote, another tranche's quote or an older one is never used." }
+                  quote_route: { type: string, nullable: true }
+                  quote_usdc: { type: string, nullable: true, description: "The tranche amount that quote was for" }
+                  quote_nock_out: { type: string, nullable: true }
+                  quote_effective_price_usd: { type: string, nullable: true }
+                  quote_block_number: { type: integer, nullable: true, description: "Block the quote was read at. Shown beside the cost figure." }
+                  quoted_at: { type: string, format: date-time, nullable: true }
+                  quote_cost_bps: { type: integer, nullable: true, description: "(fill effective price / quote effective price - 1) x 10,000 (v0.7.0). The market can move between the quote's block and the fill, so this is not execution cost alone." }
         '404':
           description: Receipt not found on-chain yet (retry once the transaction lands)
         '409':
@@ -258,6 +272,289 @@ paths:
                         effective_price_usd: { type: string }
                         block_number: { type: integer }
                         confirmed_at: { type: string, format: date-time }
+                        reference_spot_usd: { type: string, nullable: true, description: "Stored NOCK/USD price nearest the fill's block time (v0.6.0); null when none was near" }
+                        reference_spot_source: { type: string, nullable: true }
+                        execution_cost_bps: { type: integer, nullable: true, description: "Cost over the reference spot in basis points (v0.6.0); null without a reference" }
+                        quote_venue: { type: string, nullable: true, description: "Venue of the best quote that was current for this fill's tranche (v0.7.0); the eight quote fields are null together when no quote was on record" }
+                        quote_route: { type: string, nullable: true }
+                        quote_usdc: { type: string, nullable: true }
+                        quote_nock_out: { type: string, nullable: true }
+                        quote_effective_price_usd: { type: string, nullable: true }
+                        quote_block_number: { type: integer, nullable: true }
+                        quoted_at: { type: string, format: date-time, nullable: true }
+                        quote_cost_bps: { type: integer, nullable: true, description: "Cost over that quote in basis points (v0.7.0); not execution cost alone, since the market can move between the quote's block and the fill" }
+
+  /accumulation/quotes/latest:
+    get:
+      tags: [Execution]
+      summary: The route quotes the worker currently holds for the due tranche
+      operationId: latestRouteQuotes
+      description: |
+        Route quotes for a due tranche (v0.7.0, issue #115), read from the worker's
+        memory. It makes no RPC call and quotes nothing. The quotes are left out of the
+        snapshot's `state_hash`, and the snapshot's ETag is that hash, so a conditional
+        GET of the snapshot can answer 304 while the quotes have moved on (a later
+        cycle, or a refresh). The dashboard reads them here. Answered with
+        `Cache-Control: no-store`.
+      responses:
+        '200':
+          description: The plan's status and its quotes. Every field is null when there is no snapshot or no plan; `route_quotes` is null unless a tranche is due and quoting is on.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan_id: { type: string, nullable: true }
+                  status: { type: string, nullable: true, description: "The plan's status in the worker's latest snapshot" }
+                  tranche_index: { type: integer, nullable: true }
+                  tranche_usdc: { type: string, nullable: true }
+                  route_quotes:
+                    allOf:
+                      - $ref: './snapshot.yaml#/components/schemas/RouteQuotes'
+                    nullable: true
+
+  /accumulation/quotes/refresh:
+    post:
+      tags: [Execution]
+      summary: Quote the due tranche again at the latest block
+      operationId: refreshRouteQuotes
+      description: |
+        Route quotes for a due tranche (v0.7.0, issue #115). Takes no body and no
+        parameters: the worker quotes the tranche amount of the latest snapshot's
+        `accumulation_plan`, and only while its status is `tranche_due`. It makes
+        read-only quoter calls (`eth_call`), stores the result so a later fill can be
+        measured against it, and attaches it to the snapshot being served. It never
+        signs, builds or sends a transaction, and never quotes another amount. Costs are
+        measured against the reference spot of the cycle's own quotes; when the worker
+        holds none (just after a restart), `cost_over_spot_pct` is null.
+        Unauthenticated, like the other endpoints of this LAN-only API; each call
+        makes about a dozen RPC reads.
+      responses:
+        '200':
+          description: The quotes. A venue that could not be quoted is `unavailable` with its reason; that is still a 200.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plan_id: { type: string }
+                  tranche_index: { type: integer }
+                  route_quotes:
+                    $ref: './snapshot.yaml#/components/schemas/RouteQuotes'
+        '409':
+          description: NO_PLAN (no accumulation_plan is configured), QUOTES_DISABLED (route_quotes.enabled is false) or NO_TRANCHE_DUE (nothing is due, so nothing is quoted)
+        '503':
+          description: NO_SNAPSHOT. No snapshot yet, so it is not known whether a tranche is due.
+
+  /accumulation/candidates:
+    get:
+      tags: [Execution]
+      summary: List every transaction fill detection has examined (v0.6.0)
+      operationId: listAccumulationCandidates
+      description: |
+        Transactions that sent NOCK to the tracked wallet and were checked against
+        their receipt, newest first, with the verdict. `offered` and `dismissed` are
+        USDC to NOCK purchases by the wallet; `not_a_purchase` is anything else (a fee
+        claim, a liquidity deposit, a sale). A candidate is never plan progress.
+      responses:
+        '200':
+          description: Candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        tx_hash: { type: string }
+                        state: { type: string, enum: [offered, dismissed, not_a_purchase] }
+                        reason: { type: string, nullable: true, description: "Rejection code for not_a_purchase" }
+                        recorded: { type: boolean, description: "True when the hash is in the accumulation ledger" }
+                        block_number: { type: integer, nullable: true }
+                        confirmed_at: { type: string, format: date-time, nullable: true }
+                        usdc_spent: { type: string, nullable: true }
+                        nock_received: { type: string, nullable: true }
+                        effective_price_usd: { type: string, nullable: true }
+                        reference_spot_usd: { type: string, nullable: true }
+                        reference_spot_source: { type: string, nullable: true }
+                        execution_cost_bps: { type: integer, nullable: true }
+                        first_seen_at: { type: string, format: date-time, nullable: true }
+        '500':
+          description: The candidates table could not be read
+
+  /accumulation/candidates/dismiss:
+    post:
+      tags: [Execution]
+      summary: Mark a detected swap "not part of the plan" (v0.6.0)
+      operationId: dismissAccumulationCandidate
+      description: |
+        Moves a detected swap from `offered` to `dismissed`. It is not written to the
+        ledger and does not advance the plan; it stays listed and can be restored.
+        Idempotent. Touches only the candidates table. Unauthenticated, like the other
+        routes. The snapshot's offer list updates on the next ingestion cycle.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CandidateActionRequest'
+      responses:
+        '200':
+          description: The swap is dismissed (changed is false when it already was)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateActionResponse'
+        '404':
+          description: CANDIDATE_NOT_FOUND. The transaction was never detected; nothing to dismiss.
+        '409':
+          description: ALREADY_RECORDED (the buy is in the ledger) or NOT_AN_OFFER (checked, and not a purchase)
+        '422':
+          description: INVALID_TX_HASH
+        '500':
+          description: The candidates table could not be read or updated; nothing changed
+        '503':
+          description: NO_TRACKED_WALLET. No tracked wallet is configured, so there are no candidates to act on; nothing changed.
+
+  /accumulation/candidates/restore:
+    post:
+      tags: [Execution]
+      summary: Put a dismissed swap back on offer (v0.6.0)
+      operationId: restoreAccumulationCandidate
+      description: |
+        Moves a swap from `dismissed` back to `offered`. It is still not counted until
+        the operator confirms it through /execute/record-accumulation. Idempotent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CandidateActionRequest'
+      responses:
+        '200':
+          description: The swap is on offer (changed is false when it already was)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateActionResponse'
+        '404':
+          description: CANDIDATE_NOT_FOUND
+        '409':
+          description: ALREADY_RECORDED or NOT_AN_OFFER
+        '422':
+          description: INVALID_TX_HASH
+        '500':
+          description: The candidates table could not be read or updated; nothing changed
+        '503':
+          description: NO_TRACKED_WALLET. No tracked wallet is configured; nothing changed.
+
+  /cost-basis/series:
+    get:
+      tags: [Execution]
+      summary: Average cost against spot over time (v0.6.0)
+      operationId: getCostBasisSeries
+      description: |
+        The data behind the "Average cost vs spot" chart (issue #98). Every
+        receipt-verified fill, oldest first, with the average cost as it stood once that
+        fill was confirmed, and the stored NOCK/USD spot over the range.
+
+        Nothing is interpolated. `spot` holds stored observations only, thinned to at
+        most one per `bucket_seconds` (the last stored row in each bucket, with its own
+        timestamp and price); a bucket with no observation has no point, and clients
+        must draw that as a gap. `spot_at_fill` is the stored price that stands for the
+        fill's block time: among the stored points within `spot_match_window_minutes`
+        of it, the worker's own read nearest the fill, or, when there is none, the
+        nearest backfilled point; null when no point lies within the window. Every
+        point is the price at its own `at` (see `CostBasisSpotPoint`).
+        The averages are exact between fills: an average cost changes only when a buy
+        is recorded.
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 365 }
+          description: |
+            Range ending now. Default: back to the earlier of the first fill and the
+            opening basis plus a day, at least 2 and at most 365; 30 when there is
+            neither.
+      responses:
+        '200':
+          description: Series
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [generated_at, from, to, bucket_seconds, spot_match_window_minutes, fills, whole_stack]
+                properties:
+                  generated_at: { type: string, format: date-time }
+                  from: { type: string, format: date-time }
+                  to: { type: string, format: date-time }
+                  bucket_seconds:
+                    type: integer
+                    description: Width of the thinning bucket; two spot points further apart than a few buckets have a gap between them
+                  spot_match_window_minutes: { type: integer }
+                  spot:
+                    type: array
+                    nullable: true
+                    description: Stored spot observations in range, oldest first; null when the price history could not be read (see spot_error)
+                    items:
+                      $ref: '#/components/schemas/CostBasisSpotPoint'
+                  spot_error:
+                    type: string
+                    nullable: true
+                  fills:
+                    type: array
+                    description: Every verified fill in the ledger (not only those in range), oldest first
+                    items:
+                      type: object
+                      required: [plan_id, tx_hash, block_number, confirmed_at, usdc_spent, nock_received, effective_price_usd, plan_avg_cost_usd, avg_cost_usd]
+                      properties:
+                        plan_id: { type: string }
+                        tx_hash: { type: string }
+                        block_number: { type: integer }
+                        confirmed_at: { type: string, format: date-time }
+                        usdc_spent: { type: string }
+                        nock_received: { type: string }
+                        effective_price_usd: { type: string }
+                        plan_avg_cost_usd:
+                          type: string
+                          description: Running average inside this fill's own plan, after this fill
+                        avg_cost_usd:
+                          type: string
+                          description: Running average across every plan in the ledger, after this fill
+                        whole_stack_avg_cost_usd:
+                          type: string
+                          nullable: true
+                          description: Blended average after this fill; null without a valid opening basis, or for a fill at or before its as_of
+                        spot_at_fill:
+                          allOf:
+                            - $ref: '#/components/schemas/CostBasisSpotPoint'
+                          nullable: true
+                  whole_stack:
+                    type: object
+                    required: [status]
+                    properties:
+                      status:
+                        type: string
+                        enum: [not_configured, ok, invalid]
+                      reason: { type: string, nullable: true }
+                      opening:
+                        type: object
+                        nullable: true
+                        description: The operator-entered opening basis, where the blended line starts
+                        properties:
+                          as_of: { type: string, format: date-time }
+                          nock: { type: string }
+                          cost_usd: { type: string }
+                          avg_cost_usd: { type: string }
+                          source: { type: string }
+        '400':
+          description: days is not a whole number from 1 to 365
+        '503':
+          description: The accumulation ledger could not be read (LEDGER_UNAVAILABLE); no series is returned
 
   /execute/record-harvest:
     post:
@@ -267,7 +564,22 @@ paths:
       description: |
         Called by clients after the paired wallet confirms a claim transaction.
         The worker fetches the Base transaction receipt, verifies success, and
-        extracts the ERC-20 Transfer logs (USDC/NOCK) paid to the sovereign wallet.
+        extracts the ERC-20 Transfer logs (USDC, NOCK, WETH, and since v0.6.0 AERO)
+        paid to the sovereign wallet, plus ETH unwrapped by a Uniswap position manager.
+        AERO (#93) is what an Aero gauge pays on a claim: a Transfer of
+        0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee to the wallet, minted from the zero
+        address. It is valued from the AERO price pool read at the claim's block; when
+        that read fails or the pool had no in-range liquidity at that block the row has
+        no usd_value, never a substitute. Record an AERO claim with the platform of the
+        position it came from (aerodrome or aerodrome-cl). NockNock builds no AERO claim
+        transaction and gives no advice to claim.
+        The ledger holds one row per (transaction, token). Several Transfers of one
+        token to the wallet in the transaction (a claim from two gauges mints AERO
+        twice) are summed into that one row.
+        Recording a transaction again never duplicates or changes a valued row. If a
+        row was recorded without a usd_value because the price read at the claim's
+        block failed, recording the same transaction again fills it from that block's
+        price; such rows are returned in `priced`.
         Nothing is recorded without on-chain verification. A 404 RECEIPT_NOT_FOUND
         also covers the Uniswap-app pending-broadcast quirk (approved but not yet
         broadcast): surface "approved, awaiting wallet broadcast" and retry.
@@ -281,8 +593,8 @@ paths:
               properties:
                 platform:
                   type: string
-                  enum: [aerodrome, uniswap-v4, uniswap-v3]
-                  description: aerodrome retained for historical ledger rows (tranche liquidated 2026-10-23)
+                  enum: [aerodrome, aerodrome-cl, uniswap-v4, uniswap-v3]
+                  description: The venue the claim was made on; the same values as a position's protocol. aerodrome-cl is an Aero concentrated-liquidity position (v0.6.0).
                 tx_hash:
                   type: string
                   description: 32-byte hex transaction hash (0x-prefixed or bare)
@@ -307,10 +619,25 @@ paths:
                         block_number: { type: integer }
                   already_present:
                     type: integer
+                  priced:
+                    type: array
+                    description: >
+                      Rows that were already in the ledger with no usd_value and were
+                      given one by this call (same transaction, token and amount;
+                      valued at the claim's block). Empty in the usual case. (v0.6.0)
+                    items:
+                      type: object
+                      properties:
+                        platform: { type: string }
+                        tx_hash: { type: string }
+                        token_symbol: { type: string }
+                        amount_human: { type: string }
+                        usd_value: { type: string }
+                        block_number: { type: integer }
         '404':
           description: Receipt not found on-chain (may be pending broadcast in the wallet)
         '409':
-          description: Transfers already recorded (idempotent retry)
+          description: Transfers already recorded and nothing to fill in (idempotent retry)
         '422':
           description: Invalid platform/hash, reverted transaction, or no tracked transfers
         '503':
@@ -324,7 +651,9 @@ paths:
       description: |
         Exports the receipt-verified harvest ledger. Fee claims are tagged
         `income` and carry their Base tx hash; every row ties out to on-chain
-        receipts. Rebalances/liquidity transfers are not yet ledgered (future
+        receipts. An AERO row (v0.6.0, #93) is described as "NockNock AERO reward
+        claim (<platform>)" instead of "NockNock fee harvest (<platform>)"; its label
+        stays `income`. Rebalances/liquidity transfers are not yet ledgered (future
         work — they will export with a non-taxable `transfer` label).
       parameters:
         - name: format
@@ -467,6 +796,28 @@ components:
             type: string
           description: Recent error messages (if degraded/down)
 
+    CostBasisSpotPoint:
+      type: object
+      description: |
+        One stored NOCK/USD point from the price history (v0.6.0): the price at `at`.
+        Never interpolated. The worker's own read is stamped when it was taken. A
+        third-party candle is stored at its open time, so its point here is the candle's
+        OPEN (the price at that instant); the candle's close, which is the price one
+        candle period later, is never placed at the open time. A candle without a usable
+        open yields no point.
+      required: [at, price_usd, source, is_backfilled]
+      properties:
+        at: { type: string, format: date-time }
+        price_usd:
+          type: string
+          description: The price at `at` (a candle's open, or the observation itself)
+        source:
+          type: string
+          description: Provenance of the row (the worker's own pool read, or a third-party feed)
+        is_backfilled:
+          type: boolean
+          description: True for a third-party point filled in after the fact (a candle, shown at its open), false for the worker's own contemporaneous read
+
     HistoricalResponse:
       type: object
       required: [snapshots, pagination]
@@ -537,6 +888,24 @@ components:
           type: object
           nullable: true
 
+    CandidateActionRequest:
+      type: object
+      description: Names a detected swap by its transaction hash (v0.6.0).
+      required: [tx_hash]
+      properties:
+        tx_hash:
+          type: string
+          description: 32-byte hex transaction hash (0x-prefixed or bare)
+
+    CandidateActionResponse:
+      type: object
+      description: Result of dismissing or restoring a detected swap (v0.6.0). The plan ledger is never touched.
+      properties:
+        tx_hash: { type: string }
+        state: { type: string, enum: [offered, dismissed] }
+        changed: { type: boolean, description: "False when the swap was already in that state" }
+        note: { type: string }
+
     ClaimFeesPayload:
       type: object
       required: [chain_id, from, generated_at, actions]
@@ -572,8 +941,8 @@ components:
       properties:
         platform:
           type: string
-          enum: [aerodrome, uniswap-v4, uniswap-v3]
-          description: aerodrome retained for historical ledger rows; new payloads are uniswap-v4 (and uniswap-v3 if a reachable canonical NPM is confirmed)
+          enum: [aerodrome, aerodrome-cl, uniswap-v4, uniswap-v3]
+          description: The position's protocol. An aerodrome-cl position (v0.6.0) staked in its gauge is always not_claimable; an unstaked one is a collect() on the Aero CL position manager.
         label:
           type: string
           example: "Collect Uniswap V4 LP fees (NOCK/USDC #3163431)"
@@ -609,8 +978,18 @@ components:
           enum: [success, failed, unavailable, not_claimable]
           description: >
             Clients MUST only dispatch "success". not_claimable: the Aero pool's
-            claimFees() reverts (no LP-claimable fees); the action is excluded from
-            estimated_gas_usd and net_after_gas_usd.
+            claimFees() reverts (no LP-claimable fees), or (v0.6.0) an aerodrome-cl
+            position is staked in its gauge, where swap fees go to the gauge;
+            simulation_detail carries the reason. The payload never contains an
+            action that claims AERO from a gauge (#93): unclaimed AERO is stated in
+            the snapshot, and claiming it is the operator's own act in the Aero
+            app. The action is excluded from
+            estimated_gas_usd and net_after_gas_usd. unavailable: not simulated or
+            the simulation got no answer; (v0.6.0) also an aerodrome-cl position
+            that is not in the latest snapshot yet, or whose snapshot row carries
+            a fees_note without a gauge, in which case expected_amount_0/1 and
+            expected_usd are null (never a placeholder 0) and simulation_detail
+            is the reason.
         simulation_detail:
           type: string
           nullable: true

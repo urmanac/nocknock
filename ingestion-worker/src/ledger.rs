@@ -15,6 +15,9 @@ pub(crate) const NATIVE_ETH_LEDGER_ADDRESS: &str = "0xEeeeeEeeeEeEeEeEeEeEEEeeee
 
 /// Extract what a fee claim paid the sovereign wallet from a transaction receipt:
 /// - ERC-20 Transfer logs of USDC, NOCK or WETH to the wallet;
+/// - an AERO Transfer to the wallet (issue #93): what a gauge pays when the operator
+///   claims emissions. On the Aero gauges it is a mint, so its `from` is the zero
+///   address (verified on two real claims, ONCHAIN_INTEGRATION.md §9);
 /// - WETH unwrapped by a Uniswap position manager (a WETH `Withdrawal` whose `src` is the
 ///   v3 NonfungiblePositionManager or the v4 PositionManager) in a transaction the wallet
 ///   sent. The Uniswap app collects WETH fees this way and forwards native ETH, which
@@ -97,6 +100,8 @@ pub(crate) fn parse_harvest_transfers(receipt: &serde_json::Value, wallet: &str)
             ("NOCK", 16)
         } else if token_addr.eq_ignore_ascii_case(WETH_BASE) {
             ("WETH", 18)
+        } else if token_addr.eq_ignore_ascii_case(AERO_BASE) {
+            ("AERO", AERO_DECIMALS)
         } else {
             tracing::warn!("Harvest receipt contains a Transfer of an untracked token {}; skipping", token_addr);
             continue;
@@ -119,6 +124,50 @@ pub(crate) fn parse_harvest_transfers(receipt: &serde_json::Value, wallet: &str)
     }
     out
 }
+
+/// One ledger row per (transaction, token): the ledger's unique key is
+/// `(tx_hash, token_address)`, so several Transfers of one token to the wallet in one
+/// transaction are summed into one row before they are inserted. Without this only the
+/// first was booked and the rest were dropped as "already present" (#93: a claim from
+/// two gauges in one transaction mints AERO to the wallet twice). Pure.
+/// - Amounts are added as integers and `amount_human` is re-derived from the sum.
+/// - `from_address` is the first sender. Gauge mints all come from the zero address;
+///   when senders differ the row keeps the first one.
+/// - Rows keep the order in which each token first appears in the receipt.
+/// An amount that cannot be summed is an error, never a truncated row.
+pub(crate) fn merge_harvest_transfers(transfers: Vec<ParsedHarvestTransfer>) -> Result<Vec<ParsedHarvestTransfer>> {
+    let mut merged: Vec<(ParsedHarvestTransfer, u128)> = Vec::new();
+    for t in transfers {
+        let amount: u128 = t
+            .amount_raw
+            .parse()
+            .map_err(|e| anyhow::anyhow!("{} transfer amount '{}' is not an integer: {e}", t.token_symbol, t.amount_raw))?;
+        match merged.iter_mut().find(|(m, _)| m.token_address.eq_ignore_ascii_case(&t.token_address)) {
+            Some((m, sum)) => {
+                *sum = sum
+                    .checked_add(amount)
+                    .ok_or_else(|| anyhow::anyhow!("{} transfers in one transaction overflow 128 bits", m.token_symbol))?;
+            }
+            None => merged.push((t, amount)),
+        }
+    }
+    Ok(merged
+        .into_iter()
+        .map(|(mut t, sum)| {
+            t.amount_raw = sum.to_string();
+            t.amount_human = format_units(sum, t.decimals);
+            t
+        })
+        .collect())
+}
+
+/// Fills the USD value of a ledger row that was recorded without one (the price read at
+/// the claim's block failed at the time), when the same transaction is recorded again
+/// and the price is now readable. It never touches a row that already has a value, and
+/// only a row booking the same amount, so a retry cannot overwrite or mismatch a price.
+pub(crate) const FILL_HARVEST_USD_SQL: &str = "UPDATE harvest_events \
+     SET usd_value = $1, price_usd = $2, price_source = $3 \
+     WHERE tx_hash = $4 AND token_address = $5 AND amount_raw = $6 AND usd_value IS NULL";
 
 /// Net effect of a transaction on the sovereign wallet for a USDC→NOCK purchase:
 /// `(usdc_spent_raw, nock_received_raw)`. Sums every USDC/NOCK Transfer log touching
@@ -213,60 +262,18 @@ pub(crate) async fn record_accumulation_handler(
         Some(res) => res.get("result").cloned().unwrap_or(serde_json::Value::Null),
         None => return err(StatusCode::SERVICE_UNAVAILABLE, "RPC_UNAVAILABLE", "Could not query receipt; not recorded"),
     };
-    if receipt.is_null() {
-        return err(
-            StatusCode::NOT_FOUND,
-            "RECEIPT_NOT_FOUND",
-            "Transaction not found on-chain. If the wallet shows it approved, it may still be pending broadcast; retry once it lands.",
-        );
-    }
-    if receipt.get("status").and_then(|s| s.as_str()) != Some("0x1") {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "TX_REVERTED", "Receipt status is not success; nothing recorded");
-    }
-    let Some((usdc_raw, nock_raw)) = parse_accumulation_swap(&receipt, &wallet) else {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "NOT_A_NOCK_PURCHASE",
-            "Receipt does not show USDC leaving and NOCK entering the sovereign wallet",
-        );
+    // Every acceptance check lives in fill_verify.rs, shared with fill detection
+    // (issue #118). The receipt checks run first so a transaction that is not a
+    // purchase is rejected without a block read, exactly as before.
+    let reject = |r: &FillRejection| err(r.http_status(), r.code(), &r.detail(&plan.id));
+    let swap = match verify_fill_receipt(&receipt, &wallet) {
+        Ok(swap) => swap,
+        Err(r) => return reject(&r),
     };
-    let usdc_spent = format_units(usdc_raw, 6);
-    let nock_received = format_units(nock_raw, 16);
-    let (usdc_f, nock_f) = (
-        usdc_spent.parse::<f64>().unwrap_or(0.0),
-        nock_received.parse::<f64>().unwrap_or(0.0),
-    );
-    if !(usdc_f > 0.0 && nock_f > 0.0) {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "NOT_A_NOCK_PURCHASE", "Parsed amounts are not positive");
-    }
-    let effective_price = format!("{:.8}", usdc_f / nock_f);
-
-    let block_number: i64 = receipt
-        .get("blockNumber")
-        .and_then(|b| b.as_str())
-        .and_then(|s| i64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
-        .unwrap_or(0);
     // The fill time drives the plan's cadence, so it must be the block time. Unlike
     // the harvest ledger there is no wall-clock fallback: a wrong time would shift
     // when the next tranche comes due.
-    let block_payload = json!({
-        "jsonrpc": "2.0", "id": 43, "method": "eth_getBlockByNumber",
-        "params": [format!("0x{block_number:x}"), false]
-    });
-    let confirmed_at: Option<DateTime<Utc>> = if block_number > 0 {
-        post_rpc_with_retry(&state.http_client, &alchemy_url, &block_payload, 2)
-            .await
-            .and_then(|res| res.get("result").cloned())
-            .and_then(|blk| {
-                blk.get("timestamp")
-                    .and_then(|t| t.as_str())
-                    .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
-            })
-            .and_then(|ts| Utc.timestamp_opt(ts as i64, 0).single())
-    } else {
-        None
-    };
-    let Some(confirmed_at) = confirmed_at else {
+    let Some(confirmed_at) = fetch_block_time(&state.http_client, &alchemy_url, swap.block_number).await else {
         return err(StatusCode::SERVICE_UNAVAILABLE, "RPC_UNAVAILABLE", "Could not read the block timestamp; not recorded");
     };
 
@@ -280,23 +287,33 @@ pub(crate) async fn record_accumulation_handler(
         }
     };
     let anchor = plan_anchor(plan.starts_at, registered_at);
-    if confirmed_at < anchor {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "BEFORE_PLAN_START",
-            &format!(
-                "This purchase was confirmed at {}, before plan \"{}\" began ({}). To count earlier buys, set accumulation_plan.starts_at to an earlier time.",
-                confirmed_at.to_rfc3339(),
-                plan.id,
-                anchor.to_rfc3339()
-            ),
-        );
-    }
+    let fill = match verify_fill(&receipt, &wallet, confirmed_at, anchor) {
+        Ok(fill) => fill,
+        Err(r) => return reject(&r),
+    };
+    let (usdc_raw, nock_raw, block_number) = (fill.swap.usdc_raw, fill.swap.nock_raw, fill.swap.block_number);
+    let (usdc_spent, nock_received, effective_price) =
+        (fill.swap.usdc_spent.clone(), fill.swap.nock_received.clone(), fill.swap.effective_price_usd.clone());
+    // Execution cost over the reference spot at the fill's block time (issue #118). No
+    // stored price near that time means no cost figure: all three columns stay null.
+    // A swap confirmed from an offer keeps the figure the offer showed.
+    let reference = reference_for_recorded_fill(&state.db, &wallet, &tx_hash, &effective_price, confirmed_at).await;
+    // Cost over the best quote that was current for this tranche (issue #115): the
+    // latest stored quote read before the fill's block, for this tranche and within the
+    // hour before the fill. None on record means all eight columns stay null; a later
+    // quote, or one read for the tranche before, is never used.
+    let quote = fill_quote_reference(
+        &effective_price,
+        quote_for_fill(&state.db, &plan.id, &wallet, block_number, confirmed_at).await,
+    );
 
     let res = sqlx::query(
         "INSERT INTO accumulation_events \
-            (plan_id, tx_hash, venue, usdc_spent_raw, nock_received_raw, usdc_spent, nock_received, effective_price_usd, block_number, confirmed_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) \
+            (plan_id, tx_hash, venue, usdc_spent_raw, nock_received_raw, usdc_spent, nock_received, effective_price_usd, block_number, confirmed_at, \
+             reference_spot_usd, reference_spot_source, execution_cost_bps, \
+             quote_venue, quote_route, quote_usdc, quote_nock_out, quote_effective_price_usd, quote_block_number, \
+             quoted_at, quote_cost_bps) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21) \
          ON CONFLICT (tx_hash) DO NOTHING",
     )
     .bind(&plan.id)
@@ -309,6 +326,17 @@ pub(crate) async fn record_accumulation_handler(
     .bind(&effective_price)
     .bind(block_number)
     .bind(confirmed_at)
+    .bind(&reference.spot_usd)
+    .bind(&reference.source)
+    .bind(reference.cost_bps)
+    .bind(&quote.venue)
+    .bind(&quote.route)
+    .bind(&quote.usdc)
+    .bind(&quote.nock_out)
+    .bind(&quote.effective_price_usd)
+    .bind(quote.block_number)
+    .bind(quote.quoted_at)
+    .bind(quote.cost_bps)
     .execute(&state.db)
     .await;
     match res {
@@ -322,6 +350,19 @@ pub(crate) async fn record_accumulation_handler(
             "effective_price_usd": effective_price,
             "block_number": block_number,
             "confirmed_at": confirmed_at.to_rfc3339(),
+            "reference_spot_usd": reference.spot_usd,
+            "reference_spot_source": reference.source,
+            "execution_cost_bps": reference.cost_bps,
+            // Null together when no quote was on record for this tranche (#115). On a
+            // duplicate these describe this request, not the stored row.
+            "quote_venue": quote.venue,
+            "quote_route": quote.route,
+            "quote_usdc": quote.usdc,
+            "quote_nock_out": quote.nock_out,
+            "quote_effective_price_usd": quote.effective_price_usd,
+            "quote_block_number": quote.block_number,
+            "quoted_at": quote.quoted_at.map(|t| t.to_rfc3339()),
+            "quote_cost_bps": quote.cost_bps,
             "note": "Plan status updates on the next ingestion cycle (POST /v1/ingest to refresh now)."
         }))
         .into_response(),
@@ -335,7 +376,10 @@ pub(crate) async fn record_accumulation_handler(
 /// GET /v1/accumulation/events — receipt-verified fills, oldest first.
 pub(crate) async fn accumulation_events_handler(Extension(state): Extension<Arc<AppState>>) -> impl IntoResponse {
     let rows = sqlx::query(
-        "SELECT plan_id, tx_hash, venue, usdc_spent, nock_received, effective_price_usd, block_number, confirmed_at \
+        "SELECT plan_id, tx_hash, venue, usdc_spent, nock_received, effective_price_usd, block_number, confirmed_at, \
+                reference_spot_usd, reference_spot_source, execution_cost_bps, \
+                quote_venue, quote_route, quote_usdc, quote_nock_out, quote_effective_price_usd, quote_block_number, \
+                quoted_at, quote_cost_bps \
          FROM accumulation_events ORDER BY confirmed_at ASC, id ASC",
     )
     .fetch_all(&state.db)
@@ -357,6 +401,23 @@ pub(crate) async fn accumulation_events_handler(Extension(state): Extension<Arc<
                             .try_get::<DateTime<Utc>, _>("confirmed_at")
                             .map(|t| t.to_rfc3339())
                             .unwrap_or_default(),
+                        // Null when no stored price was near the fill's block time (#118).
+                        "reference_spot_usd": r.try_get::<Option<String>, _>("reference_spot_usd").ok().flatten(),
+                        "reference_spot_source": r.try_get::<Option<String>, _>("reference_spot_source").ok().flatten(),
+                        "execution_cost_bps": r.try_get::<Option<i32>, _>("execution_cost_bps").ok().flatten(),
+                        // Null together: no quote was on record for this fill's tranche (#115).
+                        "quote_venue": r.try_get::<Option<String>, _>("quote_venue").ok().flatten(),
+                        "quote_route": r.try_get::<Option<String>, _>("quote_route").ok().flatten(),
+                        "quote_usdc": r.try_get::<Option<String>, _>("quote_usdc").ok().flatten(),
+                        "quote_nock_out": r.try_get::<Option<String>, _>("quote_nock_out").ok().flatten(),
+                        "quote_effective_price_usd": r.try_get::<Option<String>, _>("quote_effective_price_usd").ok().flatten(),
+                        "quote_block_number": r.try_get::<Option<i64>, _>("quote_block_number").ok().flatten(),
+                        "quoted_at": r
+                            .try_get::<Option<DateTime<Utc>>, _>("quoted_at")
+                            .ok()
+                            .flatten()
+                            .map(|t| t.to_rfc3339()),
+                        "quote_cost_bps": r.try_get::<Option<i32>, _>("quote_cost_bps").ok().flatten(),
                     })
                 })
                 .collect();
@@ -435,10 +496,11 @@ pub(crate) async fn record_harvest_handler(
     Extension(state): Extension<Arc<AppState>>,
     Json(req): Json<RecordHarvestRequest>,
 ) -> impl IntoResponse {
-    if !matches!(req.platform.as_str(), "aerodrome" | "uniswap-v4" | "uniswap-v3") {
+    // The same four values a position's `protocol` may carry (adapters::Protocol).
+    if Protocol::parse(&req.platform).is_none() {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": "INVALID_PLATFORM", "detail": "platform must be 'aerodrome' (historical), 'uniswap-v4' or 'uniswap-v3'" })),
+            Json(json!({ "error": "INVALID_PLATFORM", "detail": "platform must be 'aerodrome', 'aerodrome-cl', 'uniswap-v4' or 'uniswap-v3'" })),
         )
             .into_response();
     }
@@ -507,11 +569,21 @@ pub(crate) async fn record_harvest_handler(
         )
             .into_response();
     }
-    let transfers = parse_harvest_transfers(&receipt, &wallet);
+    // One row per token: several payments of one token in the transaction are summed.
+    let transfers = match merge_harvest_transfers(parse_harvest_transfers(&receipt, &wallet)) {
+        Ok(t) => t,
+        Err(e) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({ "error": "UNREADABLE_TRANSFERS", "detail": format!("Receipt transfers could not be summed; nothing recorded: {e}") })),
+            )
+                .into_response();
+        }
+    };
     if transfers.is_empty() {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": "NO_TRACKED_TRANSFERS", "detail": "Receipt pays the sovereign wallet no tracked token (USDC, NOCK, WETH, or ETH unwrapped by a Uniswap position manager)" })),
+            Json(json!({ "error": "NO_TRACKED_TRANSFERS", "detail": "Receipt pays the sovereign wallet no tracked token (USDC, NOCK, WETH, AERO, or ETH unwrapped by a Uniswap position manager)" })),
         )
             .into_response();
     }
@@ -547,7 +619,9 @@ pub(crate) async fn record_harvest_handler(
     };
 
     // USD valuation at the claim's block, never at recording time: NOCK from the stored
-    // price nearest the block time, ETH/WETH from the ETH price pool read at that block.
+    // price nearest the block time, ETH/WETH from the ETH price pool read at that block,
+    // AERO from the AERO price pool read at that block (#93; the pool must be AERO/USDC
+    // and have in-range liquidity at that block).
     // A price we cannot find is an explicit null, never a substitute.
     let needs_nock = transfers.iter().any(|t| t.token_symbol == "NOCK");
     let needs_eth = transfers.iter().any(|t| matches!(t.token_symbol.as_str(), "ETH" | "WETH"));
@@ -565,10 +639,25 @@ pub(crate) async fn record_harvest_handler(
         None
     };
 
+    let needs_aero = transfers.iter().any(|t| t.token_symbol == "AERO");
+    let aero_price: Option<(f64, String)> = if needs_aero && block_number > 0 {
+        let pool = state.config.aero_price_pool.clone().unwrap_or_else(|| DEFAULT_AERO_PRICE_POOL.to_string());
+        match fetch_aero_price_usd_at(&state.http_client, &alchemy_url, &pool, &format!("0x{block_number:x}")).await {
+            Ok(p) => Some((p, format!("aero_price_pool {pool} slot0 at block {block_number}"))),
+            Err(e) => {
+                tracing::warn!("AERO price at block {block_number} unavailable; the AERO row gets no USD value: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let mut recorded = Vec::new();
+    let mut priced = Vec::new();
     let mut skipped = 0usize;
     for t in &transfers {
-        let price = harvest_unit_price(&t.token_symbol, nock_price.as_ref(), eth_price.as_ref());
+        let price = harvest_unit_price_with_aero(&t.token_symbol, nock_price.as_ref(), eth_price.as_ref(), aero_price.as_ref());
         let usd_value = harvest_usd_value(&t.amount_human, price.map(|(p, _)| p));
         let price_usd = price.map(|(p, _)| format!("{p}"));
         let price_source = price.map(|(_, s)| s.to_string());
@@ -605,7 +694,45 @@ pub(crate) async fn record_harvest_handler(
                     "confirmed_at": confirmed_at.to_rfc3339(),
                 }));
             }
-            Ok(_) => skipped += 1,
+            // Already in the ledger. If that row has no USD value (the price read at the
+            // claim's block failed when it was recorded) and this attempt has one, fill
+            // it: the price is the same block's, so nothing already valued can change.
+            Ok(_) => {
+                let filled = match usd_value.as_ref() {
+                    Some(usd) => sqlx::query(FILL_HARVEST_USD_SQL)
+                        .bind(usd)
+                        .bind(&price_usd)
+                        .bind(&price_source)
+                        .bind(&req.tx_hash)
+                        .bind(&t.token_address)
+                        .bind(&t.amount_raw)
+                        .execute(&state.db)
+                        .await
+                        .map(|r| r.rows_affected() > 0),
+                    None => Ok(false),
+                };
+                match filled {
+                    Ok(true) => priced.push(json!({
+                        "platform": req.platform,
+                        "tx_hash": req.tx_hash,
+                        "token_symbol": t.token_symbol,
+                        "amount_human": t.amount_human,
+                        "usd_value": usd_value,
+                        "price_usd": price_usd,
+                        "price_source": price_source,
+                        "block_number": block_number,
+                    })),
+                    Ok(false) => skipped += 1,
+                    Err(e) => {
+                        tracing::error!("Failed to fill the USD value of a harvest event: {e}");
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({ "error": "DB_ERROR", "detail": "Ledger update failed; the row keeps no USD value" })),
+                        )
+                            .into_response();
+                    }
+                }
+            }
             Err(e) => {
                 tracing::error!("Failed to insert harvest event: {e}");
                 return (
@@ -616,18 +743,21 @@ pub(crate) async fn record_harvest_handler(
             }
         }
     }
-    if recorded.is_empty() {
+    if recorded.is_empty() && priced.is_empty() {
         return (
             StatusCode::CONFLICT,
             Json(json!({ "error": "ALREADY_RECORDED", "detail": "All transfers from this transaction are already in the ledger", "skipped": skipped })),
         )
             .into_response();
     }
-    Json(json!({ "recorded": recorded, "already_present": skipped })).into_response()
+    // `priced`: rows that were already in the ledger without a USD value and now have one.
+    Json(json!({ "recorded": recorded, "already_present": skipped, "priced": priced })).into_response()
 }
 
 /// Koinly custom-CSV rendering of harvest ledger rows: fee claims are tagged
 /// `income` (per CHANGELOG: Income / Staking Reward) and carry their Base tx hash.
+/// An AERO row is described as a reward claim, not a fee harvest (#93); its label stays
+/// `income`, since the tax category is the operator's and their CPA's to change.
 /// Rebalances/liquidity transfers are not yet ledgered — when they are, they export
 /// with the (non-taxable) `transfer` label; documented gap, not silently omitted.
 pub(crate) fn format_koinly_csv(rows: &[HarvestExportRow]) -> String {
@@ -639,7 +769,7 @@ pub(crate) fn format_koinly_csv(rows: &[HarvestExportRow]) -> String {
             Some(usd) => (usd.clone(), "USD".to_string()),
             None => (String::new(), String::new()),
         };
-        let description = format!("NockNock fee harvest ({})", r.platform);
+        let description = harvest_row_description(&r.token_symbol, &r.platform);
         out.push_str(&format!(
             "{}, , , {}, {}, , , {}, {}, income, \"{}\", {}\n",
             r.confirmed_at,

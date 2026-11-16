@@ -208,27 +208,44 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     };
 
     let plan_ctx = load_plan_context(state).await;
-    let mut derived_metrics = compute_derived_metrics_with_plan(&raw_data, prev_hwm, &profile, structural_channels,
-        &counterfactual_history, &ledger_agg, &regime, &plan_ctx);
+    // Fill detection (issue #118): look for plan buys on-chain and offer them. It never
+    // fails the cycle; when it cannot run, the plan status says so.
+    let fill_detection = detect_fills(state, &plan_ctx).await;
+    let mut derived_metrics = compute_derived_metrics_with_fills(&raw_data, prev_hwm, &profile, structural_channels,
+        &counterfactual_history, &ledger_agg, &regime, &plan_ctx, fill_detection.as_ref());
     {
         let gs = &mut derived_metrics.global_status;
         let current_total: f64 = gs.total_portfolio_usd.parse().unwrap_or(f64::INFINITY);
         gs.high_water_mark_date = resolve_high_water_mark_date(prev_peak, current_total, &gs.high_water_mark_date);
     }
+    // Route quotes (issue #115): only when the plan's own status says a tranche is due,
+    // and only for that tranche's amount. Read-only quoter calls; they never fail the
+    // cycle, and a venue that cannot be quoted says why.
+    if let Some(ps) = derived_metrics.accumulation_plan.as_mut() {
+        ps.route_quotes = quote_due_tranche(state, ps, Some(raw_data.spot_price_nock_usd)).await;
+        let gs = &mut derived_metrics.global_status;
+        gs.shot_advice_details =
+            with_route_quote_pointer(&gs.shot_advice_action, std::mem::take(&mut gs.shot_advice_details), ps.route_quotes.as_ref());
+    }
+    // Cost basis (issue #98): plan buys from the accumulation ledger, and the whole stack
+    // only when the operator configured an opening basis. A failed ledger read is stated
+    // in the block (`unavailable`); it does not fail the cycle. The NOCK held is this
+    // snapshot's own total, which is a whole number of NOCK, and is reported as one.
+    let held_nock = derived_metrics.global_status.total_nock_amount.trim().parse::<f64>().ok();
+    derived_metrics.cost_basis =
+        Some(cost_basis_for_cycle(state, raw_data.spot_price_nock_usd, held_nock).await);
     // Capture directive strings before the metrics move into the snapshot envelope
     let next_directive_action = derived_metrics.global_status.shot_advice_action.clone();
     let next_directive_details = derived_metrics.global_status.shot_advice_details.clone();
     let next_plan_status = derived_metrics.accumulation_plan.clone();
     let next_range_top = range_top_reading(&raw_data);
 
-    // Build snapshot data
+    // Build snapshot data. The positions carry every stamp the cycle's fee rows were
+    // built from (pool activity and, since #91, staking and the fees note).
+    let positions = snapshot_positions(&raw_data);
     let snapshot_data = SnapshotData {
         wallet_balances: raw_data.wallet_balances,
-        positions: {
-            let mut positions = build_position_snapshots(&raw_data.positions, raw_data.spot_price_nock_usd, raw_data.live_eth_price_usd);
-            apply_pool_activity(&mut positions, &raw_data.pool_liquidity);
-            positions
-        },
+        positions,
         pool_mechanics: raw_data.pool_mechanics,
         concentrated_liquidity: raw_data.concentrated_liquidity,
         contract_fees: raw_data.contract_fees,
@@ -326,7 +343,12 @@ pub(crate) fn canonical_state_json(data: &SnapshotData) -> serde_json::Value {
 }
 
 pub(crate) fn strip_volatile_time_fields(value: &mut serde_json::Value) {
-    const VOLATILE_KEYS: [&str; 7] = [
+    const VOLATILE_KEYS: [&str; 9] = [
+        // Route quotes for a due tranche (issue #115): contract reads at a stated
+        // block, fresh every cycle. They say nothing about the wallet's state.
+        "route_quotes",
+        // Fill detection's check time (issue #118): fresh every cycle, no state.
+        "last_checked_at",
         "updated_at",
         "high_water_mark_date",
         "time_points",

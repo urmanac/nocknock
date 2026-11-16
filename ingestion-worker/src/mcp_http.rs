@@ -57,7 +57,7 @@ pub(crate) async fn mcp_http_handler(
                 "tools": [
                     {
                         "name": "get_portfolio_state",
-                        "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, native token balance, and active tranche allocations.",
+                        "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, native token balance, active tranche allocations, and the average cost of the plan's verified NOCK buys against spot (plus the whole-stack average when an opening basis is configured).",
                         "inputSchema": {
                             "type": "object",
                             "properties": {},
@@ -84,7 +84,7 @@ pub(crate) async fn mcp_http_handler(
                     },
                     {
                         "name": "get_accumulation_plan",
-                        "description": "Returns the dollar-cost-averaging plan: whether a NOCK tranche is due, its size, progress from receipt-verified buys, average cost, and the LP-rebuild bias.",
+                        "description": "Returns the dollar-cost-averaging plan: whether a NOCK tranche is due, its size, progress from receipt-verified buys, average cost, swaps found on-chain that await the operator's confirmation (listed only; this tool confirms nothing), the LP-rebuild bias and, while a tranche is due, read-only route quotes for that amount on Aero and Uniswap (a comparison, not a recommendation).",
                         "inputSchema": {
                             "type": "object",
                             "properties": {},

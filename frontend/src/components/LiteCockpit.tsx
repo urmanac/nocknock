@@ -14,6 +14,7 @@ import React from 'react';
 import { floorDeltaText } from '../floor';
 import { api, describeApiError, ClaimFeeAction, ClaimFeesPayload, LedgerSummary } from '../api/client';
 import { ledgerLiteText } from '../ledger';
+import { AeroLiteCard } from './AeroPillar';
 import {
   connectWallet,
   connectedAccount,
@@ -128,6 +129,8 @@ export function LiteCockpit({ top, bottom }: { top?: React.ReactNode; bottom?: R
   const [ledger, setLedger] = React.useState<LedgerSummary | null>(null);
   const [floorDelta, setFloorDelta] = React.useState<number | null>(null);
   const [floorTarget, setFloorTarget] = React.useState<number | null>(null);
+  // The latest snapshot's data, for the AERO card (issue #93).
+  const [snapshotData, setSnapshotData] = React.useState<any | null>(null);
   const [actionStates, setActionStates] = React.useState<Record<string, ActionState>>({});
 
   const loadPayload = React.useCallback(() => {
@@ -144,6 +147,7 @@ export function LiteCockpit({ top, bottom }: { top?: React.ReactNode; bottom?: R
     api
       .latestSnapshot<any>()
       .then((s) => {
+        setSnapshotData(s.data ?? null);
         const sl = s.data?.derived_metrics?.sovereign_ledger;
         if (sl) setLedger(sl as LedgerSummary);
         const gs = s.data?.derived_metrics?.global_status;
@@ -297,6 +301,9 @@ export function LiteCockpit({ top, bottom }: { top?: React.ReactNode; bottom?: R
           </>
         )}
       </section>
+
+      {/* 2b. AERO, the fourth pillar (issue #93): amounts only, no action */}
+      <AeroLiteCard data={snapshotData} cardStyle={lite.card} labelStyle={lite.label} bigStyle={lite.big} subStyle={lite.sub} />
 
       {/* 3. EXECUTE BATCH HARVEST */}
       <section style={lite.card}>

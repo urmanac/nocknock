@@ -72,7 +72,9 @@ pub(crate) async fn get_latest_snapshot_handler(
                 r.try_get::<String, _>("version"),
                 r.try_get::<serde_json::Value, _>("data"),
             ) {
-                if let Ok(data) = serde_json::from_value::<SnapshotData>(dv) {
+                if let Ok(mut data) = serde_json::from_value::<SnapshotData>(dv) {
+                    // Stored quotes are not current ones (issue #115).
+                    forget_stored_route_quotes(&mut data);
                     *latest = Some(SnapshotEnvelope {
                         meta: SnapshotMeta {
                             generated_at: gen,
@@ -263,6 +265,14 @@ pub(crate) fn slim_historical_payload(data: &mut SnapshotData) {
     // Channels are recomputed by the worker each cycle from history; historical rows
     // never need to carry them
     dm.structural_channels.channels.clear();
+    // The cost-basis statements (#98) are fixed prose repeated in every row; history
+    // keeps the figures and drops the prose. `/snapshot/latest` still carries it.
+    if let Some(cb) = dm.cost_basis.as_mut() {
+        cb.plan_buys.includes.clear();
+        cb.plan_buys.excludes.clear();
+        cb.whole_stack.includes.clear();
+        cb.whole_stack.excludes.clear();
+    }
 }
 
 pub(crate) async fn get_snapshot_metadata_handler(

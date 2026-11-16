@@ -13,7 +13,7 @@ export interface SnapshotMeta {
   snapshot_id: string;
 }
 
-import type { DataProvenance } from '../types/snapshot';
+import type { DataProvenance, RouteQuotes } from '../types/snapshot';
 
 export interface SnapshotEnvelope<T = unknown> {
   meta: SnapshotMeta;
@@ -44,7 +44,7 @@ export interface MetadataResponse {
 
 
 export interface ClaimFeeAction {
-  platform: 'aerodrome' | 'uniswap-v4' | 'uniswap-v3';
+  platform: 'aerodrome' | 'aerodrome-cl' | 'uniswap-v4' | 'uniswap-v3';
   label: string;
   to: string;
   data: string;
@@ -54,7 +54,8 @@ export interface ClaimFeeAction {
   expected_usd?: string | null;
   gas_estimate?: string | null;
   gas_usd?: string | null;
-  /** 'not_claimable': the Aero pool's claimFees() reverts; nothing to dispatch. */
+  /** 'not_claimable': the Aero pool's claimFees() reverts, or an Aero CL position is
+   *  staked in its gauge (simulation_detail says which); nothing to dispatch. */
   simulation: 'success' | 'failed' | 'unavailable' | 'not_claimable';
   simulation_detail?: string | null;
 }
@@ -91,6 +92,69 @@ export interface RecordAccumulationResponse {
   effective_price_usd: string;
   block_number: number;
   confirmed_at: string;
+  /** Reference spot at the fill's block time and the cost over it (v0.6.0); null when unknown. */
+  reference_spot_usd?: string | null;
+  reference_spot_source?: string | null;
+  execution_cost_bps?: number | null;
+}
+
+/** A receipt-verified fill from GET /accumulation/events. */
+export interface AccumulationEvent {
+  plan_id: string;
+  tx_hash: string;
+  venue: string;
+  usdc_spent: string;
+  nock_received: string;
+  effective_price_usd: string;
+  block_number: number;
+  confirmed_at: string;
+  /** Null when no stored price was near the fill's block time (v0.6.0; absent before). */
+  reference_spot_usd?: string | null;
+  reference_spot_source?: string | null;
+  execution_cost_bps?: number | null;
+  /**
+   * The best quote that was current for this fill's tranche, and the fill's cost over
+   * it (v0.7.0, issue #115). Null together when no quote was on record; absent before.
+   */
+  quote_venue?: string | null;
+  quote_route?: string | null;
+  quote_usdc?: string | null;
+  quote_nock_out?: string | null;
+  quote_effective_price_usd?: string | null;
+  quote_block_number?: number | null;
+  quoted_at?: string | null;
+  quote_cost_bps?: number | null;
+}
+
+/**
+ * GET /accumulation/quotes/latest: the quotes the worker holds in memory for the due
+ * tranche. It makes no call. Every field is null without a snapshot or a plan.
+ */
+export interface LatestRouteQuotesResponse {
+  plan_id: string | null;
+  status: string | null;
+  tranche_index: number | null;
+  tranche_usdc: string | null;
+  route_quotes: RouteQuotes | null;
+}
+
+/** POST /accumulation/quotes/refresh: the due tranche quoted again at the latest block. */
+export interface RefreshRouteQuotesResponse {
+  plan_id: string;
+  tranche_index: number;
+  route_quotes: RouteQuotes;
+}
+
+export interface AccumulationEventsResponse {
+  events: AccumulationEvent[];
+}
+
+/** Result of marking a detected swap "not part of the plan", or restoring it (v0.6.0). */
+export interface FillCandidateActionResponse {
+  tx_hash: string;
+  state: 'offered' | 'dismissed';
+  /** False when the swap was already in that state. */
+  changed: boolean;
 }
 
 export interface LedgerSummary {
@@ -203,4 +267,35 @@ export const api = {
 
   // Ask the worker to ingest now (used after recording a buy so the plan advances).
   ingestNow: () => request<unknown>('/ingest', { method: 'POST' }),
+
+  // Receipt-verified fills, oldest first, with each fill's cost over spot (v0.6.0).
+  accumulationEvents: () => request<AccumulationEventsResponse>('/accumulation/events'),
+
+  // Fill detection (v0.6.0, issue #118). Neither call touches the plan ledger: they move
+  // a detected swap between "offered" and "not part of the plan". Confirming an offer is
+  // recordAccumulation with the offered hash; there is no second write path.
+  dismissFillOffer: (txHash: string) =>
+    request<FillCandidateActionResponse>('/accumulation/candidates/dismiss', {
+      method: 'POST',
+      body: JSON.stringify({ tx_hash: txHash }),
+    }),
+
+  restoreFillOffer: (txHash: string) =>
+    request<FillCandidateActionResponse>('/accumulation/candidates/restore', {
+      method: 'POST',
+      body: JSON.stringify({ tx_hash: txHash }),
+    }),
+
+  // Route quotes (v0.7.0, issue #115): quote the due tranche again at the latest block.
+  // It takes no amount: the worker quotes only the tranche its own plan says is due.
+  refreshRouteQuotes: () =>
+    request<RefreshRouteQuotesResponse>('/accumulation/quotes/refresh', { method: 'POST' }),
+
+  // The quotes the worker holds now. The snapshot's ETag is its state hash and the
+  // quotes are not part of it, so a revalidated snapshot can carry older ones.
+  latestRouteQuotes: () =>
+    request<LatestRouteQuotesResponse>('/accumulation/quotes/latest', { cache: 'no-store' }),
+  // Average cost vs spot (v0.6.0, #98): verified fills with running averages, and stored spot.
+  costBasisSeries: (days?: number) =>
+    request<import('../costBasis').CostBasisSeries>(`/cost-basis/series${days ? `?days=${days}` : ''}`),
 };

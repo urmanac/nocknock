@@ -41,6 +41,8 @@ export interface DerivedMetrics {
   accumulation_plan?: AccumulationPlanStatus | null;
   /** Standing LP-rebuild bias (2.1.0) */
   lp_rebuild?: LpRebuild;
+  /** NOCK cost basis (v0.6.0, #98); null/absent from a worker that predates it */
+  cost_basis?: import('../costBasis').CostBasis | null;
 }
 
 /** Plan progress, derived from config + receipt-verified buys only (2.1.0) */
@@ -67,6 +69,110 @@ export interface AccumulationPlanStatus {
   binding_constraint?: string | null;
   /** Protected cash reserve the plan never draws below */
   cash_reserve_usdc?: string | null;
+  /**
+   * Swaps found on-chain that look like plan buys, and whether the check ran (v0.6.0).
+   * Offers are not progress: fills, spend and cadence count recorded buys only.
+   * Null or absent in snapshots from before v0.6.0.
+   */
+  fill_detection?: FillDetection | null;
+  /**
+   * Read-only quotes for this exact tranche on Aero and on Uniswap (v0.7.0, issue #115).
+   * Present only while a tranche is due and quoting is on; null or absent otherwise and
+   * in older snapshots. Not part of state_hash.
+   */
+  route_quotes?: RouteQuotes | null;
+}
+
+/**
+ * Quotes for one due tranche, both venues read at the same block (v0.7.0, issue #115).
+ * A comparison of execution routes for a buy the plan already sized: not a
+ * recommendation, and never an estimate. A venue that could not be quoted is
+ * `unavailable` with its reason.
+ */
+export interface RouteQuotes {
+  /** ok (both venues quoted) | partial (one) | unavailable (none) */
+  status: 'ok' | 'partial' | 'unavailable';
+  detail?: string | null;
+  /** The plan's own tranche amount that was quoted, in USDC */
+  amount_usdc: string;
+  /** Block every quote was read at, and that block's time; null when nothing was read */
+  block_number?: number | null;
+  quoted_at?: string | null;
+  /** The snapshot's NOCK/USD reference spot the costs are measured against */
+  reference_spot_usd?: string | null;
+  venues: VenueQuote[];
+  /** Null unless both venues were quoted and their amounts differ */
+  more_nock_venue?: string | null;
+  more_nock_by_pct?: string | null;
+  /** The comparison as one sentence of fact, written by the worker */
+  comparison: string;
+}
+
+/** One venue's best verified route, or why it could not be quoted (v0.7.0) */
+export interface VenueQuote {
+  venue: string;
+  status: 'quoted' | 'unavailable';
+  reason?: string | null;
+  /** The venue's own swap page; nothing is prefilled */
+  swap_url: string;
+  nock_out?: string | null;
+  effective_price_usd?: string | null;
+  /** (effective price / reference spot − 1) × 100; null without a reference spot */
+  cost_over_spot_pct?: string | null;
+  route?: string | null;
+  hops?: RouteHop[];
+  routes_tried?: RouteAttempt[];
+}
+
+export interface RouteHop {
+  /** Pool address, or the pool id for a Uniswap v4 pool */
+  pool: string;
+  pool_kind: string;
+  token_in: string;
+  token_out: string;
+  /** Swap fee in percent; null when the fee read failed */
+  fee_pct?: string | null;
+}
+
+export interface RouteAttempt {
+  route_id: string;
+  route: string;
+  nock_out?: string | null;
+  reason?: string | null;
+}
+
+/** One cycle's fill-detection result (v0.6.0, issue #118) */
+export interface FillDetection {
+  /** `unavailable` is "could not check", not "checked, nothing found" (`ok`, no offers) */
+  status: 'ok' | 'partial' | 'unavailable' | 'not_run';
+  /** Plain-words reason for partial, unavailable and not_run */
+  detail?: string | null;
+  /** How far back the transfer history was read (the plan anchor after a complete check) */
+  checked_back_to?: string | null;
+  /** Time of the last successful check; not part of state_hash */
+  last_checked_at?: string | null;
+  /** Detected swaps waiting for an answer: confirm, or mark as not part of the plan */
+  offers: FillOffer[];
+  /** Detected swaps marked "not part of the plan"; kept and restorable */
+  dismissed: FillOffer[];
+}
+
+/** A detected USDC→NOCK swap, read from its receipt and block header */
+export interface FillOffer {
+  tx_hash: string;
+  /** Block time of the swap */
+  confirmed_at: string;
+  block_number: number;
+  usdc_spent: string;
+  nock_received: string;
+  effective_price_usd: string;
+  /** early: less than one plan interval after the buy before it (a recorded fill or an older open offer) */
+  timing: 'early' | 'on_schedule';
+  /** Stored NOCK/USD price nearest the swap's block time; null when none was near */
+  reference_spot_usd?: string | null;
+  reference_spot_source?: string | null;
+  /** (effective price / reference spot − 1) × 10,000; null without a reference */
+  execution_cost_bps?: number | null;
 }
 
 /** LP weight vs target; rebuilding is a reposition with no net cash change (2.1.0) */
@@ -135,8 +241,23 @@ export interface GlobalStatus {
   wallet_gas_usd?: string | null;
   /** The ETH pillar in ETH: wallet gas + ETH/WETH legs of tracked LP (2.3.0) */
   total_eth_amount?: string | null;
-  /** The ETH pillar in USD (2.3.0). native + stable + eth = total */
+  /** The ETH pillar in USD (2.3.0). native + stable + eth + wallet AERO = total */
   total_eth_usd?: string | null;
+  /** AERO/USD from the AERO price pool (v0.6.0, #93); null when it could not be read */
+  aero_price_usd?: string | null;
+  /** Wallet AERO, the fourth pillar (v0.6.0, #93). Counted in the total; not cash, not
+   *  deployable, no target, and no advice is given about it */
+  wallet_aero_amount?: string | null;
+  /** wallet_aero_amount in USD: the AERO pillar (v0.6.0, #93) */
+  wallet_aero_usd?: string | null;
+  /** AERO earned in the gauges of tracked staked positions and not claimed (v0.6.0, #93).
+   *  NOT in total_portfolio_usd. Null when any Aero position's gauge was not read (a
+   *  failed read, a gauge that pays another token, or no gauge_address): never a partial
+   *  sum, never 0 for something not read */
+  unclaimed_aero_amount?: string | null;
+  unclaimed_aero_usd?: string | null;
+  /** The worker's stated reason whenever an AERO figure above is null (v0.6.0, #93) */
+  aero_note?: string | null;
 }
 
 export interface AssetAggregationSeries {
@@ -220,8 +341,13 @@ export interface FeeCollectionIndex {
   claimable_usd: string;
   gas_break_even_usd: string;
   efficiency_ratio: number;
-  /** What the worker emits; 'not_claimable' is an Aero pool whose claimFees() reverts. */
+  /** What the worker emits; 'not_claimable' is an Aero pool whose claimFees() reverts,
+   *  or (v0.6.0) an Aero CL position staked in its gauge (see note). */
   recommended_action: 'claim_now' | 'claim_recommended' | 'accumulate' | 'not_claimable';
+  /** With 'not_claimable': the position's own reason, when it has one (v0.6.0),
+   *  followed by its unclaimed AERO or why that was not read (#93). A claimable row
+   *  carries no AERO statement: its action is about LP fees only. */
+  note?: string;
 }
 
 // ============================================================
@@ -293,7 +419,8 @@ export interface Position {
   position_id: string;
   network: string;
   wallet: string;
-  protocol: 'uniswap-v4' | 'uniswap-v3' | 'aerodrome';
+  /** 'aerodrome-cl' (v0.6.0): an Aero concentrated-liquidity NFT, staked in its gauge or not. */
+  protocol: 'uniswap-v4' | 'uniswap-v3' | 'aerodrome' | 'aerodrome-cl';
   nft_id: number;
   pool_id: string;
   npm_address?: string | null;
@@ -317,6 +444,20 @@ export interface Position {
   pool_active?: boolean | null;
   /** True for a position spanning every price (Aerodrome volatile pool); bounds are not meaningful (2.2.0) */
   full_range?: boolean;
+  /** aerodrome-cl only: the pool's tick spacing, 200 for a CL200 pool (v0.6.0) */
+  tick_spacing?: number;
+  /** aerodrome-cl only: the gauge holding the NFT, when this wallet staked it there (v0.6.0) */
+  staked_in_gauge?: string;
+  /** Present when tokens_owed_* and fees_usd are not a read of LP-claimable fees: the
+   *  reason to show in their place, never "$0 earned" (v0.6.0) */
+  fees_note?: string;
+  /** AERO earned in this position's gauge and not claimed (v0.6.0, #93). Present only
+   *  when the gauge was read. Not in amount_usd, fees_usd or the portfolio total */
+  unclaimed_aero?: string;
+  /** unclaimed_aero in USD; absent when AERO is unpriced (v0.6.0, #93) */
+  unclaimed_aero_usd?: string;
+  /** Why unclaimed_aero is absent for an Aero position that could earn AERO (v0.6.0, #93) */
+  unclaimed_aero_note?: string;
 }
 
 export interface RawSnapshotData {

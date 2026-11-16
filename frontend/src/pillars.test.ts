@@ -14,10 +14,11 @@ const G230 = {
 };
 
 describe('pillars (snapshot 2.3.0)', () => {
-  it('NOCK, USDC and ETH, with ETH marked as gas', () => {
+  it('NOCK, USDC, ETH and AERO, with ETH marked as gas', () => {
+    // G230 predates #93: it has no AERO field, so the fourth pillar is unknown, not 0.
     const p = pillarsFromGlobal(G230);
-    expect(p.map(x => x.key)).toEqual(['NOCK', 'USDC', 'ETH']);
-    expect(p.map(x => x.usd)).toEqual([1312.88, 1033.71, 66.98]);
+    expect(p.map(x => x.key)).toEqual(['NOCK', 'USDC', 'ETH', 'AERO']);
+    expect(p.map(x => x.usd)).toEqual([1312.88, 1033.71, 66.98, null]);
     expect(p.filter(x => x.gas).map(x => x.key)).toEqual(['ETH']);
     // The pillars partition the total.
     const sum = p.reduce((a, x) => a + (x.usd ?? 0), 0);
@@ -25,10 +26,23 @@ describe('pillars (snapshot 2.3.0)', () => {
   });
 
   it('the pillar line names each pillar; a missing one reads —, never $0.00', () => {
-    expect(pillarLine(G230)).toBe('NOCK $1,312.88 · USDC $1,033.71 · ETH $66.98');
+    expect(pillarLine(G230)).toBe('NOCK $1,312.88 · USDC $1,033.71 · ETH $66.98 · AERO —');
     const old = { total_portfolio_usd: '2390.58', total_native_usd: '1312.88', total_stable_usd: '1033.71' };
-    expect(pillarLine(old)).toBe('NOCK $1,312.88 · USDC $1,033.71 · ETH —');
-    expect(pillarLine(undefined)).toBe('NOCK — · USDC — · ETH —');
+    expect(pillarLine(old)).toBe('NOCK $1,312.88 · USDC $1,033.71 · ETH — · AERO —');
+    expect(pillarLine(undefined)).toBe('NOCK — · USDC — · ETH — · AERO —');
+  });
+
+  it('the four pillars add up to the total once the wallet holds AERO (#93)', () => {
+    // The worker's figures for the real wallet at Base block 58077673, with the amount
+    // of a real gauge claim (1.359979 AERO) in the wallet.
+    const g = { total_portfolio_usd: '2217.50', total_native_usd: '1167.42', total_stable_usd: '922.80', total_eth_usd: '126.71', wallet_aero_usd: '0.57' };
+    expect(pillarLine(g)).toBe('NOCK $1,167.42 · USDC $922.80 · ETH $126.71 · AERO $0.57');
+    const sum = pillarsFromGlobal(g).reduce((a, x) => a + (x.usd ?? 0), 0);
+    expect(Math.abs(sum - 2217.5)).toBeLessThan(0.03);
+    // AERO is not gas and a wallet holding none reads $0.00: a read zero, not a gap.
+    expect(pillarsFromGlobal(g)[3]).toEqual({ key: 'AERO', usd: 0.57, gas: false });
+    expect(pillarLine({ ...g, wallet_aero_usd: '0.00' })).toContain('AERO $0.00');
+    expect(pillarLine({ ...g, wallet_aero_usd: null })).toContain('AERO —');
   });
 
   it('gas is counted in the total, never cash or deployable; absent says so', () => {

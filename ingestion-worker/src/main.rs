@@ -52,6 +52,24 @@ mod claims;
 use claims::*;
 mod mcp_http;
 use mcp_http::*;
+mod aero_rewards;
+use aero_rewards::*;
+mod aero_text;
+use aero_text::*;
+mod fill_verify;
+use fill_verify::*;
+mod fill_detection;
+use fill_detection::*;
+mod fill_text;
+use fill_text::*;
+mod route_quotes;
+use route_quotes::*;
+mod quote_text;
+use quote_text::*;
+mod cost_basis;
+use cost_basis::*;
+mod cost_basis_text;
+use cost_basis_text::*;
 
 // ============================================================
 // Configuration
@@ -120,20 +138,24 @@ impl Default for OperatorProfile {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PositionConfig {
     pub id: String,
-    /// "uniswap-v4" | "uniswap-v3" | "aerodrome" (volatile x*y=k pool, full range)
+    /// "uniswap-v4" | "uniswap-v3" | "aerodrome" (volatile x*y=k pool, full range) |
+    /// "aerodrome-cl" (Aero concentrated-liquidity NFT, staked or not; v0.6.0, #91).
+    /// Any other value is a configuration error (adapters::validate_positions_config).
     pub protocol: String,
     #[serde(default = "default_network")]
     pub network: String,
-    /// Position NFT id (Uniswap). Unused for aerodrome, whose position is an LP-token
-    /// balance in `pool_address`.
+    /// Position NFT id (Uniswap, aerodrome-cl). Unused for aerodrome, whose position is
+    /// an LP-token balance in `pool_address`.
     #[serde(default)]
     pub nft_id: u64,
     /// aerodrome only: swap fee in basis points, for display (default 30 = 0.30%).
     #[serde(default)]
     pub fee_bps: Option<u32>,
-    /// aerodrome only: the pool's gauge. LP tokens staked there (the aero.xyz app stakes
+    /// aerodrome: the pool's gauge. LP tokens staked there (the aero.xyz app stakes
     /// on deposit) are added to the wallet's own balance; without it a staked position
     /// reads as empty.
+    /// aerodrome-cl: optional. The gauge is read from the pool itself; when this is set
+    /// it must match, or the cycle fails with a configuration error.
     #[serde(default)]
     pub gauge_address: Option<String>,
     /// Where the operator adds liquidity to this position, when the default link is
@@ -144,10 +166,12 @@ pub struct PositionConfig {
     /// v4: bytes32 poolId. Unused for v3 (pool comes from the NPM decode).
     #[serde(default)]
     pub pool_id: Option<String>,
-    /// v3 only: the canonical NonfungiblePositionManager for the network.
+    /// v3: the canonical NonfungiblePositionManager for the network.
+    /// aerodrome-cl: the Aero CL (Slipstream) position manager that minted the NFT.
     #[serde(default)]
     pub npm_address: Option<String>,
-    /// v3 only: pool contract address (pre-resolved via factory getPool).
+    /// v3, aerodrome, aerodrome-cl: pool contract address (v3: pre-resolved via factory
+    /// getPool; aerodrome-cl: checked each cycle against the NFT's tokens and tick spacing).
     #[serde(default)]
     pub pool_address: Option<String>,
     /// v4 only: currency0/currency1 per the pool's canonical ordering (validated
@@ -217,11 +241,79 @@ pub struct AccumulationPlanConfig {
     pub cash_reserve_usdc: Option<f64>,
 }
 
+/// Fill detection for the accumulation plan (issue #118). It only reads the wallet's
+/// NOCK transfer history and offers what it finds; it never records a buy. There are
+/// no thresholds here: nothing is filtered by size or price.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct FillDetectionConfig {
+    /// On by default while an accumulation_plan is configured. Set false to stop the
+    /// worker reading the transfer history; recording by transaction hash still works.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for FillDetectionConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Route quotes for a due tranche (issue #115). Read-only quoter calls for the plan's own
+/// tranche amount; nothing is signed, sized or sent. There are no numbers here: the
+/// amount quoted is the tranche the plan produced, and the candidate routes are the
+/// verified table in route_quotes.rs (ONCHAIN_INTEGRATION.md §11).
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct RouteQuotesConfig {
+    /// On by default while an accumulation_plan is configured. Set false to stop the
+    /// worker calling the quoters; the due tranche is advised exactly as before.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for RouteQuotesConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 fn default_plan_venue() -> String {
     // Aerodrome and Velodrome merged into Aero (aero.xyz) on 2026-10-21; see
     // ONCHAIN_INTEGRATION.md §6. The label is informational: receipt verification
     // is contract-agnostic.
     "Aero".to_string()
+}
+
+/// Cost-basis inputs only the operator can supply (issue #98). Optional: without this
+/// section NockNock reports the average cost of the plan's receipt-verified buys and
+/// nothing else. It never fills these in and never derives them from the chain.
+#[derive(Deserialize, Serialize, Debug, Clone, Default, PartialEq)]
+pub struct CostBasisConfig {
+    /// The operator's own figures for the NOCK held at one instant, read from wherever
+    /// they keep their records. Unset = the whole-stack basis is "not configured".
+    #[serde(default)]
+    pub opening: Option<OpeningBasisConfig>,
+}
+
+/// An operator-entered opening basis. Every field is read loosely (any scalar) and then
+/// checked by `resolve_opening_basis`, so a half-filled block or a placeholder word is
+/// reported as a configuration error in the snapshot instead of stopping the worker or
+/// being replaced by a default.
+#[derive(Deserialize, Serialize, Debug, Clone, Default, PartialEq)]
+pub struct OpeningBasisConfig {
+    /// NOCK held at `as_of`. Must be greater than zero.
+    #[serde(default)]
+    pub nock_amount: Option<serde_json::Value>,
+    /// What that NOCK cost in total, in USD. Must be greater than zero.
+    #[serde(default)]
+    pub cost_usd: Option<serde_json::Value>,
+    /// The instant the figures were read: a full timestamp with a UTC offset, not in the
+    /// future. Buys confirmed at or before it are taken to be inside the figures.
+    #[serde(default)]
+    pub as_of: Option<serde_json::Value>,
+    /// Where the figures came from, in the operator's words. Shown beside every number
+    /// that uses them.
+    #[serde(default)]
+    pub source: Option<serde_json::Value>,
 }
 
 fn default_true() -> bool {
@@ -230,6 +322,10 @@ fn default_true() -> bool {
 
 fn default_eth_price_pool() -> Option<String> {
     Some(DEFAULT_ETH_PRICE_POOL.to_string())
+}
+
+fn default_aero_price_pool() -> Option<String> {
+    Some(DEFAULT_AERO_PRICE_POOL.to_string())
 }
 
 #[allow(dead_code)]
@@ -261,6 +357,11 @@ struct AppConfig {
     /// Verified default (canonical v3 WETH/USDC 0.05% pool on Base).
     #[serde(default = "default_eth_price_pool")]
     eth_price_pool: Option<String>,
+    /// AERO/USDC pool whose slot0 prices AERO, the fourth pillar (v0.6.0, #93). Verified
+    /// default: the Aero CL200 AERO/USDC pool (ONCHAIN_INTEGRATION.md §9). Checked every
+    /// cycle: its tokens must be AERO and USDC and it must have in-range liquidity.
+    #[serde(default = "default_aero_price_pool")]
+    aero_price_pool: Option<String>,
     #[serde(default)]
     mcp_bearer_token: Option<String>,
     #[serde(default)]
@@ -268,6 +369,16 @@ struct AppConfig {
     /// Optional dollar-cost-averaging plan (issue #79).
     #[serde(default)]
     accumulation_plan: Option<AccumulationPlanConfig>,
+    /// Fill detection for the plan (issue #118); on unless switched off.
+    #[serde(default)]
+    fill_detection: FillDetectionConfig,
+    /// Route quotes for a due tranche (issue #115); on unless switched off.
+    #[serde(default)]
+    route_quotes: RouteQuotesConfig,
+    /// Optional operator-supplied cost-basis inputs (issue #98). An Option so that a bare
+    /// `cost_basis:` key with everything under it commented out still loads.
+    #[serde(default)]
+    cost_basis: Option<CostBasisConfig>,
     #[serde(default)]
     notifications: NotificationConfig,
     #[serde(default)]
@@ -277,6 +388,10 @@ struct AppConfig {
 impl AppConfig {
     pub fn profile(&self) -> OperatorProfile {
         self.operator_profile.clone()
+    }
+    /// The operator's opening basis block as written, unchecked (issue #98).
+    fn opening_basis(&self) -> Option<&OpeningBasisConfig> {
+        self.cost_basis.as_ref().and_then(|c| c.opening.as_ref())
     }
 }
 
@@ -422,8 +537,68 @@ struct RawOnChainData {
     /// Per-position rebuild controls from config, keyed by position_id.
     rebuild_rules: HashMap<String, RebuildRule>,
     /// position_ids of Aero positions whose claimFees() reverts: their fees are not
-    /// LP-claimable (shown as such, never as $0 earned).
+    /// LP-claimable (shown as such, never as $0 earned). Since v0.6.0 (#91) also an
+    /// Aero CL position staked in its gauge (swap fees go to the gauge); its
+    /// `position_facts` entry carries the reason.
     fees_not_lp_claimable: Vec<String>,
+    /// Facts only some protocols have (tick spacing, gauge staking, why a fee figure is
+    /// absent), keyed by position_id (v0.6.0, #91). No entry means none apply.
+    position_facts: HashMap<String, PositionFacts>,
+    /// AERO, the fourth pillar (v0.6.0, #93): wallet AERO, the AERO/USD price and the
+    /// unclaimed AERO of each staked Aero position. The default (test fixtures that do
+    /// not set it) is "nothing read": every AERO field is then null, never zero.
+    aero: AeroReads,
+}
+
+/// One cycle's AERO reads (v0.6.0, #93). Built by fetch_aero_reads and test fixtures.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct AeroReads {
+    /// Wallet AERO in human units. A required read in production (it is counted in the
+    /// total, so a failed read fails the cycle); None only in fixtures.
+    wallet_aero: Option<f64>,
+    /// AERO/USD from `aero_price_pool`, stale-pool guarded. None when it could not be
+    /// read; `price_note` then says why. Required only while the wallet holds AERO.
+    price_usd: Option<f64>,
+    price_note: Option<String>,
+    /// One entry per tracked Aero position that can earn AERO. None = not read at all
+    /// (fixtures); Some(empty) = read, and no tracked position is staked.
+    unclaimed: Option<Vec<AeroUnclaimed>>,
+}
+
+/// What one cycle learned about one position's unclaimed AERO (v0.6.0, #93).
+#[derive(Debug, Clone, PartialEq)]
+struct AeroUnclaimed {
+    position_id: String,
+    /// The gauge `earned` was read from; None when the position has no gauge to read.
+    gauge: Option<String>,
+    /// Unclaimed AERO in human units; None when it was not read (`note` says why).
+    amount: Option<f64>,
+    note: Option<String>,
+}
+
+/// The AERO pillar's figures, each None when it cannot be stated: an unread balance,
+/// an unread gauge, or an unpriced AERO. Never a zero stand-in. (v0.6.0, #93)
+#[derive(Debug, Default, Clone, PartialEq)]
+struct AeroPillar {
+    wallet_amount: Option<f64>,
+    wallet_usd: Option<f64>,
+    unclaimed_amount: Option<f64>,
+    unclaimed_usd: Option<f64>,
+    price_usd: Option<f64>,
+    /// Stated reason for every None above that a live cycle can produce.
+    note: Option<String>,
+}
+
+/// Per-position facts that only some protocols have (v0.6.0, #91). Carried beside
+/// RawPosition rather than in it; stamped onto the snapshot by apply_position_facts.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct PositionFacts {
+    /// Aero CL: the pool's tick spacing (the "200" in CL200).
+    tick_spacing: Option<i32>,
+    /// Aero CL: the gauge holding the NFT, when the tracked wallet staked it there.
+    staked_in_gauge: Option<String>,
+    /// Why this position reports no LP-claimable fee figure. None when fees were read.
+    fees_note: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
@@ -479,6 +654,31 @@ struct Position {
     /// no range to leave, and lower_price/upper_price are not meaningful. (2.2.0)
     #[serde(default)]
     full_range: bool,
+    /// Aero CL only: the pool's tick spacing, e.g. 200 for a CL200 pool. Absent for
+    /// every other protocol. (v0.6.0, #91)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tick_spacing: Option<i32>,
+    /// Aero CL only: the gauge the tracked wallet staked this NFT in. Absent when the
+    /// wallet holds the NFT itself and for every other protocol. (v0.6.0, #91)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    staked_in_gauge: Option<String>,
+    /// Present when tokens_owed_* and fees_usd are NOT a read of LP-claimable fees:
+    /// the reason, to show in their place (never "$0 earned"). Absent when fees were
+    /// read. (v0.6.0, #91)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fees_note: Option<String>,
+    /// AERO this position has earned in its gauge and not claimed, in AERO (gauge
+    /// `earned`). Present only for an Aero position whose gauge was read. Not counted in
+    /// amount_usd, fees_usd or the portfolio total. (v0.6.0, #93)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unclaimed_aero: Option<String>,
+    /// unclaimed_aero at this cycle's AERO/USD price; absent when AERO is unpriced. (v0.6.0, #93)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unclaimed_aero_usd: Option<String>,
+    /// Why unclaimed_aero is absent for an Aero position that could earn AERO: no gauge
+    /// is configured, or the gauge read failed. Never shown as 0. (v0.6.0, #93)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unclaimed_aero_note: Option<String>,
 }
 
 /// Per-position NOCK series entry for the asset aggregation chart (v2.0.0;
@@ -593,6 +793,101 @@ struct DerivedMetrics {
     /// Standing LP-rebuild bias (snapshot 2.1.0).
     #[serde(default)]
     lp_rebuild: LpRebuild,
+    /// NOCK cost basis (v0.6.0, issue #98). Null in a snapshot stored before the field
+    /// existed: unknown, never a zero basis.
+    #[serde(default)]
+    cost_basis: Option<CostBasis>,
+}
+
+/// NOCK cost basis in two layers (v0.6.0, issue #98). `plan_buys` is exact: it comes only
+/// from receipt-verified rows in the accumulation ledger. `whole_stack` exists only when
+/// the operator enters an opening basis in config; NockNock cannot derive it from the
+/// chain and never invents it.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct CostBasis {
+    /// NOCK/USD spot the differences below are measured at; null when there is no price.
+    spot_price_usd: Option<String>,
+    plan_buys: PlanBuysBasis,
+    whole_stack: WholeStackBasis,
+}
+
+/// Average cost of the receipt-verified buys, across every plan in the ledger.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct PlanBuysBasis {
+    /// ok | no_fills | unavailable
+    status: String,
+    /// Why the figures are unavailable; null otherwise.
+    reason: Option<String>,
+    /// Verified buys counted. Null when the ledger could not be read (unknown, not 0);
+    /// 0 only when it was read and holds none.
+    fills: Option<i64>,
+    spent_usdc: Option<String>,
+    acquired_nock: Option<String>,
+    /// Σ USDC spent / Σ NOCK received; null without a verified buy.
+    avg_cost_usd: Option<String>,
+    first_fill_at: Option<String>,
+    last_fill_at: Option<String>,
+    /// `acquired_nock` at the current spot; null when there is no price.
+    value_at_spot_usd: Option<String>,
+    /// `value_at_spot_usd` less `spent_usdc`, signed. A measurement, not advice.
+    unrealized_usd: Option<String>,
+    /// The same difference as a percentage of `spent_usdc`, signed.
+    unrealized_pct: Option<String>,
+    /// The same figures for each plan id, oldest plan first.
+    #[serde(default)]
+    plans: Vec<PlanBasis>,
+    /// Exactly what these figures count, and what they leave out.
+    #[serde(default)]
+    includes: Vec<String>,
+    #[serde(default)]
+    excludes: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct PlanBasis {
+    plan_id: String,
+    fills: i64,
+    spent_usdc: String,
+    acquired_nock: String,
+    avg_cost_usd: String,
+    first_fill_at: String,
+    last_fill_at: String,
+}
+
+/// Blended average of the operator-entered opening basis and the verified buys made
+/// after it: (opening cost + USDC spent since) / (opening NOCK + NOCK bought since).
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct WholeStackBasis {
+    /// not_configured | ok | invalid | unavailable
+    status: String,
+    /// The configuration error (invalid) or the failed read (unavailable); null otherwise.
+    reason: Option<String>,
+    /// The operator's own note on where the opening figures came from.
+    source: Option<String>,
+    /// The instant the opening figures were read (RFC 3339, UTC).
+    as_of: Option<String>,
+    opening_nock: Option<String>,
+    opening_cost_usd: Option<String>,
+    opening_avg_cost_usd: Option<String>,
+    /// Verified buys confirmed after `as_of`, and their totals.
+    fills_since: Option<i64>,
+    bought_since_usdc: Option<String>,
+    bought_since_nock: Option<String>,
+    /// Opening plus bought since: the NOCK and the cost this average covers.
+    basis_nock: Option<String>,
+    basis_cost_usd: Option<String>,
+    avg_cost_usd: Option<String>,
+    /// `basis_nock` at the current spot, and its difference from `basis_cost_usd`.
+    value_at_spot_usd: Option<String>,
+    unrealized_usd: Option<String>,
+    unrealized_pct: Option<String>,
+    /// NOCK NockNock reads now (wallet plus tracked LP), to the nearest whole NOCK, for
+    /// comparison with `basis_nock`: the two differ by everything the basis does not track.
+    held_nock: Option<String>,
+    #[serde(default)]
+    includes: Vec<String>,
+    #[serde(default)]
+    excludes: Vec<String>,
 }
 
 /// Plan progress as emitted in snapshots. Everything here derives from the plan
@@ -628,6 +923,157 @@ struct AccumulationPlanStatus {
     /// Protected cash reserve the plan never draws below; null when none is set.
     #[serde(default)]
     cash_reserve_usdc: Option<String>,
+    /// Swaps found on-chain that look like plan buys, offered for confirmation, and
+    /// whether the check ran (v0.6.0, issue #118). Offers are not progress: `fills`,
+    /// `spent_usdc` and the cadence count ledger rows only. Null in snapshots from
+    /// before v0.6.0.
+    #[serde(default)]
+    fill_detection: Option<FillDetection>,
+    /// Read-only quotes for this exact tranche on Aero and on Uniswap (v0.7.0, issue
+    /// #115). Present only while `status` is `tranche_due` and quoting is on; null
+    /// otherwise and in older snapshots. A quote is a contract read at a stated block:
+    /// the whole object is left out of the state hash, so it never forces a new
+    /// snapshot row.
+    #[serde(default)]
+    route_quotes: Option<RouteQuotes>,
+}
+
+/// Quotes for one due tranche, both venues read at the same block (v0.7.0, issue #115).
+/// It compares execution routes for a buy the operator's plan already sized. It is not
+/// a recommendation to buy, and nothing here is an estimate: a venue that could not be
+/// quoted is `unavailable` with the reason.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct RouteQuotes {
+    /// ok (both venues quoted) | partial (one) | unavailable (none).
+    status: String,
+    /// Plain-words reason for partial and unavailable.
+    #[serde(default)]
+    detail: Option<String>,
+    /// The plan's own tranche amount that was quoted, in USDC. Never another size.
+    amount_usdc: String,
+    /// Block every quote was read at, and that block's time. Null when no block was read.
+    #[serde(default)]
+    block_number: Option<i64>,
+    #[serde(default)]
+    quoted_at: Option<String>,
+    /// The snapshot's NOCK/USD reference spot the costs are measured against.
+    #[serde(default)]
+    reference_spot_usd: Option<String>,
+    #[serde(default)]
+    venues: Vec<VenueQuote>,
+    /// The venue that returns more NOCK at that block. Null unless both venues were
+    /// quoted and their amounts differ.
+    #[serde(default)]
+    more_nock_venue: Option<String>,
+    /// How much more, in percent of the other venue's amount.
+    #[serde(default)]
+    more_nock_by_pct: Option<String>,
+    /// The comparison as one sentence of fact.
+    #[serde(default)]
+    comparison: String,
+}
+
+/// One venue's best verified route for the tranche, or why it could not be quoted.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct VenueQuote {
+    /// "Aero" | "Uniswap"
+    venue: String,
+    /// quoted | unavailable
+    status: String,
+    /// Why, when unavailable.
+    #[serde(default)]
+    reason: Option<String>,
+    /// The venue's own swap page. No token or amount is prefilled.
+    swap_url: String,
+    #[serde(default)]
+    nock_out: Option<String>,
+    /// USDC per NOCK for this amount along this route, eight decimals.
+    #[serde(default)]
+    effective_price_usd: Option<String>,
+    /// (effective price / reference spot − 1) × 100. Null without a reference spot.
+    #[serde(default)]
+    cost_over_spot_pct: Option<String>,
+    /// The best route's tokens, e.g. "USDC → WETH → NOCK".
+    #[serde(default)]
+    route: Option<String>,
+    #[serde(default)]
+    hops: Vec<RouteHop>,
+    /// Every candidate route tried for this venue with its own result.
+    #[serde(default)]
+    routes_tried: Vec<RouteAttempt>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct RouteHop {
+    /// Pool address, or the pool id for a Uniswap v4 pool.
+    pool: String,
+    /// "Aero basic volatile" | "Aero concentrated" | "Uniswap v3" | "Uniswap v4"
+    pool_kind: String,
+    token_in: String,
+    token_out: String,
+    /// Swap fee in percent. Null when the fee read failed (the quote itself stands).
+    #[serde(default)]
+    fee_pct: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct RouteAttempt {
+    route_id: String,
+    route: String,
+    #[serde(default)]
+    nock_out: Option<String>,
+    /// Why this route gave no quote.
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+/// One cycle's fill-detection result (v0.6.0, issue #118).
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct FillDetection {
+    /// ok | partial | unavailable | not_run. `unavailable` means "could not check",
+    /// which is not "checked, nothing found" (`ok` with no offers).
+    status: String,
+    /// Plain-words reason for partial, unavailable and not_run.
+    #[serde(default)]
+    detail: Option<String>,
+    /// How far back the transfer history was read: the plan anchor after a complete
+    /// check, a later time when the check was cut short. Null when it did not run.
+    #[serde(default)]
+    checked_back_to: Option<String>,
+    /// Time of the last successful check. A wall-clock field: it is left out of the
+    /// state hash, so it never forces a new snapshot row.
+    #[serde(default)]
+    last_checked_at: Option<String>,
+    /// Detected swaps waiting for the operator: confirm, or mark as not part of the plan.
+    #[serde(default)]
+    offers: Vec<FillOffer>,
+    /// Detected swaps the operator marked "not part of the plan". Kept and restorable.
+    #[serde(default)]
+    dismissed: Vec<FillOffer>,
+}
+
+/// A detected USDC→NOCK swap. Every figure comes from the transaction's receipt and
+/// block header, checked with the rules of the record endpoint.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct FillOffer {
+    tx_hash: String,
+    /// Block time of the swap.
+    confirmed_at: String,
+    block_number: i64,
+    usdc_spent: String,
+    nock_received: String,
+    effective_price_usd: String,
+    /// early | on_schedule: early when the swap landed less than one plan interval
+    /// after the buy before it (a recorded fill, or an older swap still on offer).
+    timing: String,
+    /// Stored NOCK/USD price nearest the swap's block time; null when none was near.
+    #[serde(default)]
+    reference_spot_usd: Option<String>,
+    #[serde(default)]
+    reference_spot_source: Option<String>,
+    /// (effective price / reference spot − 1) × 10,000; null without a reference.
+    #[serde(default)]
+    execution_cost_bps: Option<i32>,
 }
 
 /// Standing bias toward re-establishing LP ranges. Moving NOCK and USDC the wallet
@@ -832,10 +1278,31 @@ struct GlobalStatus {
     total_eth_amount: Option<String>,
     #[serde(default)]
     total_eth_usd: Option<String>,
+    /// AERO/USD from the AERO price pool (v0.6.0, #93). Null when it could not be read
+    /// (`aero_note` says why) or the field is absent from an older snapshot.
+    #[serde(default)]
+    aero_price_usd: Option<String>,
+    /// Wallet AERO, the fourth pillar (v0.6.0, #93). Counted in total_portfolio_usd; never
+    /// cash, never deployable, no target, and NockNock gives no advice about it.
+    #[serde(default)]
+    wallet_aero_amount: Option<String>,
+    #[serde(default)]
+    wallet_aero_usd: Option<String>,
+    /// AERO earned in the gauges of tracked staked positions and not claimed (v0.6.0,
+    /// #93). NOT counted in total_portfolio_usd, like uncollected LP fees. Null when any
+    /// Aero position's gauge was not read (a failed read, a gauge that pays another
+    /// token, or no gauge_address): never a partial sum, never 0.
+    #[serde(default)]
+    unclaimed_aero_amount: Option<String>,
+    #[serde(default)]
+    unclaimed_aero_usd: Option<String>,
+    /// Stated reason whenever an AERO figure above is null in a live cycle (v0.6.0, #93).
+    #[serde(default)]
+    aero_note: Option<String>,
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
-const SNAPSHOT_SPEC_VERSION: &str = "2.4.0";
+const SNAPSHOT_SPEC_VERSION: &str = "2.6.0";
 
 /// The gas (wallet ETH + WETH) and ETH pillar figures, each None when it cannot be
 /// measured: unread wallet balances or an unpriced ETH. Never a zero stand-in.
@@ -954,6 +1421,10 @@ struct FeeCollectionIndex {
     gas_break_even_usd: String,
     efficiency_ratio: f64,
     recommended_action: String,
+    /// With `not_claimable`: the position's own reason, when it has one (an Aero CL
+    /// position staked in its gauge). Absent otherwise. (v0.6.0, #91)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
 }
 
 // ============================================================
@@ -1003,6 +1474,17 @@ async fn main() -> Result<()> {
     // Load config: config.yaml.example is the base layer, config.yaml overrides it,
     // environment variables override both.
     let config = load_app_config("config.yaml.example", None, true)?;
+    // An unknown position protocol fails every cycle with this message (visible in
+    // /health); say it once at boot as well. The worker keeps serving so the error
+    // can be read from the dashboard and MCP rather than from a crash loop.
+    if let Err(e) = validate_positions_config(&config.positions) {
+        tracing::error!("{e}");
+    }
+    // A half-filled cost_basis.opening does not stop the worker: every cycle reports it
+    // as `whole_stack.status = invalid` with this reason. Say it once in the log too.
+    if let OpeningBasisState::Invalid(reason) = resolve_opening_basis(config.opening_basis(), Utc::now()) {
+        tracing::error!("Configuration error: {reason}");
+    }
 
     // Initialize database
     let db = PgPool::connect(&config.database_url)
@@ -1035,7 +1517,9 @@ async fn main() -> Result<()> {
         let state_hash: String = r.try_get("state_hash").ok()?;
         let version: String = r.try_get("version").ok()?;
         let data_val: serde_json::Value = r.try_get("data").ok()?;
-        let data: SnapshotData = serde_json::from_value(data_val).ok()?;
+        let mut data: SnapshotData = serde_json::from_value(data_val).ok()?;
+        // Stored quotes are not current ones (issue #115); the first cycle reads new ones.
+        forget_stored_route_quotes(&mut data);
         Some(SnapshotEnvelope {
             meta: SnapshotMeta {
                 generated_at,
@@ -1139,6 +1623,26 @@ async fn main() -> Result<()> {
             axum::routing::get(accumulation_events_handler),
         )
         .route(
+            "/v1/accumulation/candidates",
+            axum::routing::get(accumulation_candidates_handler),
+        )
+        .route(
+            "/v1/accumulation/candidates/dismiss",
+            axum::routing::post(dismiss_candidate_handler),
+        )
+        .route(
+            "/v1/accumulation/candidates/restore",
+            axum::routing::post(restore_candidate_handler),
+        )
+        .route(
+            "/v1/accumulation/quotes/latest",
+            axum::routing::get(latest_route_quotes_handler),
+        )
+        .route(
+            "/v1/accumulation/quotes/refresh",
+            axum::routing::post(refresh_route_quotes_handler),
+        )
+        .route(
             "/v1/tax/export",
             axum::routing::get(tax_export_handler),
         )
@@ -1149,6 +1653,10 @@ async fn main() -> Result<()> {
         .route(
             "/v1/notifications/test",
             axum::routing::post(notification_test_handler),
+        )
+        .route(
+            "/v1/cost-basis/series",
+            axum::routing::get(cost_basis_series_handler),
         )
         .layer(Extension(state.clone()));
 
@@ -1376,5 +1884,15 @@ struct V3PositionDecoded {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_aero_cl;
+#[cfg(test)]
+mod tests_aero_rewards;
+#[cfg(test)]
+mod tests_fills;
+#[cfg(test)]
+mod tests_quotes;
+#[cfg(test)]
+mod tests_cost_basis;
 #[cfg(test)]
 mod tests_notify;

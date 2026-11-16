@@ -325,8 +325,9 @@ export function compositionRow(dm: any, t: number): CompositionRow {
  * The Stable Reserve readout, from the LATEST snapshot's own totals (never the last
  * history row). The percentage of native value is null when native value is 0 or
  * unknown: undefined, not 0.0%. `ethUsd` is total_eth_usd (2.3.0: wallet gas + LP WETH),
- * null on an older snapshot. `other` is total − native − stable − ETH: about 0 on a
- * 2.3.0 snapshot, and the LP WETH on an older one (which did not report ETH).
+ * null on an older snapshot. `other` is total − native − stable − ETH − wallet AERO
+ * (#93; AERO is its own pillar, shown beside the pillar line): about 0 on a 2.3.0
+ * snapshot, and the LP WETH on an older one (which did not report ETH).
  */
 export function compositionReadout(globalStatus: any): {
   stableUsd: number | null;
@@ -343,7 +344,8 @@ export function compositionReadout(globalStatus: any): {
   const pctOfNative = stableUsd !== null && nativeUsd !== null && nativeUsd > 0 ? (stableUsd / nativeUsd) * 100 : null;
   const otherUsd =
     totalUsd !== null && nativeUsd !== null && stableUsd !== null
-      ? Math.round((totalUsd - nativeUsd - stableUsd - (ethUsd ?? 0)) * 100) / 100
+      ? // "+ 0" turns a rounded -0 into 0.
+        Math.round((totalUsd - nativeUsd - stableUsd - (ethUsd ?? 0) - (finiteOrNull(globalStatus?.wallet_aero_usd) ?? 0)) * 100) / 100 + 0
       : null;
   return { stableUsd, nativeUsd, totalUsd, pctOfNative, ethUsd, otherUsd };
 }
