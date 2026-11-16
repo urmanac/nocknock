@@ -557,6 +557,9 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     };
 
     let (advice_action, advice_details) = apply_lp_rebuild_bias(advice_action, advice_details, &lp_rebuild);
+    // A detected swap waiting for an answer is said in every arm, not only the plan's
+    // own (issue #118). The title is untouched, so the notifier does not fire for it.
+    let advice_details = lead_with_open_offer_notice(plan_status.as_ref(), advice_details);
 
     DerivedMetrics {
         global_status: GlobalStatus {

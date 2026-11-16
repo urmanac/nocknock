@@ -58,12 +58,17 @@ pub fn fill_detection_lines(plan: &Value) -> String {
         ));
     }
     for o in &offers {
+        // The figure is only as good as its reference, so the reference is named with
+        // its own time: a price move between that time and the swap reads as cost.
         let cost = match (o.get("execution_cost_bps").and_then(|b| b.as_i64()), text(o, "reference_spot_usd")) {
-            (Some(bps), Some(spot)) => format!("{bps:+} bps against spot ${spot}"),
+            (Some(bps), Some(spot)) => format!(
+                "{bps:+} bps against the stored price ${spot} ({})",
+                text(o, "reference_spot_source").unwrap_or_else(|| "reference source not recorded".to_string())
+            ),
             _ => "cost over spot unavailable".to_string(),
         };
         let timing = match text(o, "timing").as_deref() {
-            Some("early") => "early (before the open tranche came due)",
+            Some("early") => "early (less than one plan interval after the buy before it)",
             Some("on_schedule") => "on schedule",
             _ => "timing n/a",
         };

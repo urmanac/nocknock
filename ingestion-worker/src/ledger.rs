@@ -247,7 +247,8 @@ pub(crate) async fn record_accumulation_handler(
         (fill.swap.usdc_spent.clone(), fill.swap.nock_received.clone(), fill.swap.effective_price_usd.clone());
     // Execution cost over the reference spot at the fill's block time (issue #118). No
     // stored price near that time means no cost figure: all three columns stay null.
-    let reference = reference_for_fill(&state.db, &effective_price, confirmed_at).await;
+    // A swap confirmed from an offer keeps the figure the offer showed.
+    let reference = reference_for_recorded_fill(&state.db, &wallet, &tx_hash, &effective_price, confirmed_at).await;
 
     let res = sqlx::query(
         "INSERT INTO accumulation_events \

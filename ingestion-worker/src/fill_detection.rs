@@ -32,7 +32,32 @@ pub(crate) const FILL_CLASSIFY_MAX_PER_CYCLE: usize = 25;
 /// cycle. What was classified before the cut stays classified.
 pub(crate) const FILL_SCAN_TIMEOUT_SECONDS: u64 = 60;
 /// One transfer-history request may take this long.
-const FILL_SCAN_REQUEST_TIMEOUT_SECONDS: u64 = 20;
+pub(crate) const FILL_SCAN_REQUEST_TIMEOUT_SECONDS: u64 = 10;
+/// Attempts per transfer-history page, and the pause before the second.
+pub(crate) const FILL_SCAN_REQUEST_ATTEMPTS: u32 = 2;
+const FILL_SCAN_RETRY_BACKOFF_MS: u64 = 150;
+
+/// The longest one transfer-history page can take before it fails with its own reason:
+/// every attempt timing out, plus the pauses between attempts. It is kept well inside
+/// `FILL_SCAN_TIMEOUT_SECONDS` (held to half, below), so a stalled endpoint is
+/// reported as "the request timed out", not as an abandoned check, and a slow answer
+/// still leaves time for the receipts. Pure.
+pub(crate) const fn transfer_history_worst_case_ms() -> u64 {
+    let mut total = 0;
+    let mut attempt = 0;
+    while attempt < FILL_SCAN_REQUEST_ATTEMPTS {
+        total += FILL_SCAN_REQUEST_TIMEOUT_SECONDS * 1000;
+        if attempt + 1 < FILL_SCAN_REQUEST_ATTEMPTS {
+            total += FILL_SCAN_RETRY_BACKOFF_MS << attempt;
+        }
+        attempt += 1;
+    }
+    total
+}
+
+// The budget is a build invariant, not a comment: a change that lets one stalled
+// history page use more than half the whole-check cap does not compile.
+const _: () = assert!(transfer_history_worst_case_ms() * 2 <= FILL_SCAN_TIMEOUT_SECONDS * 1000);
 
 // ---------------- Transfer history (a hint, never trusted) ----------------
 
@@ -140,7 +165,7 @@ async fn transfer_history_call(
     payload: &serde_json::Value,
 ) -> std::result::Result<serde_json::Value, String> {
     let mut last = "no response".to_string();
-    for attempt in 0..3u32 {
+    for attempt in 0..FILL_SCAN_REQUEST_ATTEMPTS {
         let sent = client
             .post(rpc_url)
             .timeout(std::time::Duration::from_secs(FILL_SCAN_REQUEST_TIMEOUT_SECONDS))
@@ -160,8 +185,8 @@ async fn transfer_history_call(
             Err(e) if e.is_connect() => last = "the connection to the RPC failed".to_string(),
             Err(_) => last = "the request failed in transit".to_string(),
         }
-        if attempt < 2 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(150 * (1 << attempt))).await;
+        if attempt + 1 < FILL_SCAN_REQUEST_ATTEMPTS {
+            tokio::time::sleep(tokio::time::Duration::from_millis(FILL_SCAN_RETRY_BACKOFF_MS << attempt)).await;
         }
     }
     Err(last)
@@ -284,12 +309,19 @@ pub(crate) struct FillCandidate {
     pub(crate) execution_cost_bps: Option<i32>,
 }
 
-/// "early" when the swap landed before the open tranche came due (last recorded fill
-/// plus the plan interval), otherwise "on_schedule". Before the first fill nothing is
-/// early. Pure.
-pub(crate) fn fill_timing(confirmed_at: DateTime<Utc>, tranche_due_at: Option<DateTime<Utc>>) -> &'static str {
-    match tranche_due_at {
-        Some(due) if confirmed_at < due => "early",
+/// "early" when the swap landed less than one plan interval after the buy before it,
+/// otherwise "on_schedule". `previous_buy_at` is the buy before THIS swap in time, not
+/// the plan's latest fill: a swap older than the latest recorded fill is judged against
+/// what came before it. With no buy before it (the plan's first) nothing is early.
+/// Compared in whole seconds with the directive's own rounding of the interval, so the
+/// label and `next_due_at` cannot disagree. Pure.
+pub(crate) fn fill_timing(
+    confirmed_at: DateTime<Utc>,
+    previous_buy_at: Option<DateTime<Utc>>,
+    interval_hours: f64,
+) -> &'static str {
+    match previous_buy_at {
+        Some(prev) if ((confirmed_at - prev).num_seconds() as f64) < (interval_hours * 3600.0).round() => "early",
         _ => "on_schedule",
     }
 }
@@ -300,11 +332,18 @@ pub(crate) fn fill_timing(confirmed_at: DateTime<Utc>, tranche_due_at: Option<Da
 /// Left out: a hash already in the ledger (any plan id, compared without case), rows
 /// that are not purchases, anything before the anchor, incomplete rows, and a second
 /// row for a hash already listed. Both lists are oldest first.
+///
+/// Each swap's early / on-schedule label is judged against the buy before it in time:
+/// the latest of this plan's recorded fills (`plan_fill_times`) at or before its block
+/// time and the swaps still on offer that are older than it. A dismissed swap is "not
+/// part of the plan", so it is nobody's previous buy. The label therefore does not
+/// depend on the order in which offers are confirmed.
 pub(crate) fn build_fill_offers(
     candidates: &[FillCandidate],
     recorded_hashes: &HashSet<String>,
     anchor: DateTime<Utc>,
-    tranche_due_at: Option<DateTime<Utc>>,
+    plan_fill_times: &[DateTime<Utc>],
+    interval_hours: f64,
 ) -> (Vec<FillOffer>, Vec<FillOffer>) {
     let recorded: HashSet<String> = recorded_hashes.iter().map(|h| h.to_lowercase()).collect();
     let mut listed: HashSet<String> = HashSet::new();
@@ -350,7 +389,8 @@ pub(crate) fn build_fill_offers(
                 usdc_spent: usdc.clone(),
                 nock_received: nock.clone(),
                 effective_price_usd: price.clone(),
-                timing: fill_timing(confirmed_at, tranche_due_at).to_string(),
+                // Set below, once the rows are in time order.
+                timing: String::new(),
                 reference_spot_usd,
                 reference_spot_source,
                 execution_cost_bps,
@@ -358,6 +398,16 @@ pub(crate) fn build_fill_offers(
         ));
     }
     rows.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.2.tx_hash.cmp(&b.2.tx_hash)));
+    let mut previous_offer_at: Option<DateTime<Utc>> = None;
+    for (confirmed_at, dismissed, offer) in rows.iter_mut() {
+        let previous_fill_at = plan_fill_times.iter().copied().filter(|t| *t <= *confirmed_at).max();
+        // None sorts before any time, so this is the later of the two when both exist.
+        let previous_buy_at = previous_fill_at.max(previous_offer_at);
+        offer.timing = fill_timing(*confirmed_at, previous_buy_at, interval_hours).to_string();
+        if !*dismissed {
+            previous_offer_at = Some(*confirmed_at);
+        }
+    }
     let (mut offers, mut dismissed_out) = (Vec::new(), Vec::new());
     for (_, dismissed, offer) in rows {
         if dismissed {
@@ -507,6 +557,18 @@ pub(crate) fn open_offer_notice(ps: &AccumulationPlanStatus) -> Option<String> {
     })
 }
 
+/// Put the open-offer notice in front of whatever advice was chosen, unless the text
+/// already carries it (the plan's own arms do). An arm that outranks the plan (an
+/// overextension, a range exit, a due harvest) or follows it (a finished plan) would
+/// otherwise say nothing about a swap that is waiting for an answer. Details only: the
+/// action title is never touched. Pure.
+pub(crate) fn lead_with_open_offer_notice(ps: Option<&AccumulationPlanStatus>, details: String) -> String {
+    match ps.and_then(open_offer_notice) {
+        Some(notice) if !details.contains(&notice) => format!("{notice} {details}"),
+        _ => details,
+    }
+}
+
 /// What to do after buying, given whether detection is working this cycle. Without a
 /// detection result (or with one that did not run) it is the pre-v0.6.0 sentence. Pure.
 pub(crate) fn after_buying_sentence(ps: &AccumulationPlanStatus) -> &'static str {
@@ -552,6 +614,77 @@ pub(crate) async fn known_candidate_hashes(db: &PgPool, wallet: &str) -> std::re
 pub(crate) async fn recorded_fill_hashes(db: &PgPool) -> std::result::Result<HashSet<String>, sqlx::Error> {
     let rows = sqlx::query("SELECT lower(tx_hash) AS tx_hash FROM accumulation_events").fetch_all(db).await?;
     Ok(rows.iter().filter_map(|r| r.try_get::<String, _>("tx_hash").ok()).collect())
+}
+
+/// The ledger as the offer list needs it: every recorded hash (lowercase, all plan ids),
+/// and the block times of `plan_id`'s own fills for the early / on-schedule label.
+pub(crate) async fn recorded_fills(
+    db: &PgPool,
+    plan_id: &str,
+) -> std::result::Result<(HashSet<String>, Vec<DateTime<Utc>>), sqlx::Error> {
+    let rows = sqlx::query("SELECT lower(tx_hash) AS tx_hash, plan_id, confirmed_at FROM accumulation_events")
+        .fetch_all(db)
+        .await?;
+    let mut hashes = HashSet::new();
+    let mut plan_fill_times = Vec::new();
+    for r in &rows {
+        if let Ok(h) = r.try_get::<String, _>("tx_hash") {
+            hashes.insert(h);
+        }
+        if r.try_get::<String, _>("plan_id").map_or(false, |p| p == plan_id) {
+            if let Ok(at) = r.try_get::<DateTime<Utc>, _>("confirmed_at") {
+                plan_fill_times.push(at);
+            }
+        }
+    }
+    Ok((hashes, plan_fill_times))
+}
+
+/// The reference a detected swap was offered with, for the record endpoint to reuse, so
+/// the cost shown on the offer and the cost stored with the fill are the same figure.
+/// None unless the row carries a complete reference for exactly this effective price
+/// (the same receipt gives the same price; anything else is looked up afresh). Pure.
+pub(crate) fn offered_reference(candidate: &FillCandidate, effective_price_usd: &str) -> Option<FillReference> {
+    if candidate.effective_price_usd.as_deref() != Some(effective_price_usd) {
+        return None;
+    }
+    match (candidate.reference_spot_usd.as_ref(), candidate.execution_cost_bps) {
+        (Some(spot), Some(bps)) => Some(FillReference {
+            spot_usd: Some(spot.clone()),
+            source: candidate.reference_spot_source.clone(),
+            cost_bps: Some(bps),
+        }),
+        _ => None,
+    }
+}
+
+/// Reference spot and cost for a fill being recorded: the figure its offer already
+/// showed when there is one, otherwise the stored price nearest the block time. A
+/// candidates table that cannot be read falls back to the lookup; it never blocks or
+/// changes the recording itself.
+pub(crate) async fn reference_for_recorded_fill(
+    db: &PgPool,
+    wallet: &str,
+    tx_hash: &str,
+    effective_price_usd: &str,
+    confirmed_at: DateTime<Utc>,
+) -> FillReference {
+    let row = sqlx::query(
+        "SELECT tx_hash, state, block_number, confirmed_at, usdc_spent, nock_received, effective_price_usd, \
+                reference_spot_usd, reference_spot_source, execution_cost_bps \
+         FROM accumulation_candidates WHERE wallet = $1 AND tx_hash = $2",
+    )
+    .bind(wallet.to_lowercase())
+    .bind(tx_hash.to_lowercase())
+    .fetch_optional(db)
+    .await
+    .map_err(|e| tracing::warn!("Candidate reference lookup for {tx_hash} failed: {e}"))
+    .ok()
+    .flatten();
+    match row.as_ref().map(row_to_candidate).and_then(|c| offered_reference(&c, effective_price_usd)) {
+        Some(reference) => reference,
+        None => reference_for_fill(db, effective_price_usd, confirmed_at).await,
+    }
 }
 
 pub(crate) async fn offered_and_dismissed(db: &PgPool, wallet: &str) -> std::result::Result<Vec<FillCandidate>, sqlx::Error> {
@@ -812,9 +945,9 @@ pub(crate) async fn detect_fills(state: &Arc<AppState>, plan: &PlanContext) -> O
 
     // The lists come from the table, so swaps found by an earlier check stay listed
     // when this cycle's check could not run.
-    let lists = match (offered_and_dismissed(&state.db, &wallet).await, recorded_fill_hashes(&state.db).await) {
-        (Ok(candidates), Ok(recorded)) => {
-            Ok(build_fill_offers(&candidates, &recorded, anchor, next_tranche_due_at(cfg, &plan.fills)))
+    let lists = match (offered_and_dismissed(&state.db, &wallet).await, recorded_fills(&state.db, &cfg.id).await) {
+        (Ok(candidates), Ok((recorded, plan_fill_times))) => {
+            Ok(build_fill_offers(&candidates, &recorded, anchor, &plan_fill_times, cfg.interval_hours))
         }
         (Err(e), _) | (_, Err(e)) => Err(e),
     };

@@ -14,6 +14,10 @@ const WALLET: &str = "0xeE114cC97eC5adeB34bA5645e315B497D8487a45";
 const BUY_1: &str = "0x5d0c02d9929f49f71526e0c8d91d1bd99ec19f116befc285d67f6bf9412a3f0e";
 const BUY_2: &str = "0x4644edd99bb2770f369862357eb5647a68a7157ca9e91ecccfce79e6964c61e8";
 const BUY_3: &str = "0x78376f3cc9e80f2eb124a945a452df40556649e3d9983be526b2bd97586e31b9";
+/// Block times of the three buys (ONCHAIN_INTEGRATION.md §8).
+const BUY_1_AT: &str = "2026-11-14T06:02:25Z";
+const BUY_2_AT: &str = "2026-11-15T02:58:46Z";
+const BUY_3_AT: &str = "2026-11-16T03:08:37Z";
 /// A real USDC→NOCK purchase from 2026-11-06, before the plan began.
 const PRE_PLAN_BUY: &str = "0xa8cd45017a2f693fd7bb6c3129c4baffc73923fa3fe765393ca3c6d7249ce4dc";
 const V3_CLAIMS: [&str; 2] = [
@@ -35,6 +39,15 @@ fn t(s: &str) -> DateTime<Utc> {
 }
 
 /// The plan anchor used throughout: the day the plan's first buy was made.
+fn buy_time(tx_hash: &str) -> DateTime<Utc> {
+    match tx_hash {
+        BUY_1 => t(BUY_1_AT),
+        BUY_2 => t(BUY_2_AT),
+        BUY_3 => t(BUY_3_AT),
+        other => panic!("not one of the plan's buys: {other}"),
+    }
+}
+
 fn anchor() -> DateTime<Utc> {
     t("2026-11-14T00:00:00Z")
 }
@@ -401,9 +414,16 @@ fn test_real_history_offers_exactly_the_plan_buys() {
     assert_eq!(rows.iter().filter(|c| c.state == "not_a_purchase").count(), 6, "4 fee claims + 2 deposits");
 
     // Nothing recorded yet: all three buys are offered, oldest first.
-    let (offers, dismissed) = build_fill_offers(&rows, &HashSet::new(), anchor(), None);
+    let (offers, dismissed) = build_fill_offers(&rows, &HashSet::new(), anchor(), &[], 24.0);
     assert!(dismissed.is_empty());
     assert_eq!(offers.iter().map(|o| o.tx_hash.as_str()).collect::<Vec<_>>(), vec![BUY_1, BUY_2, BUY_3]);
+    // The labels are already the ones ONCHAIN_INTEGRATION.md §8 gives: the second buy
+    // came 20 h 56 min after the first (early on a 24 h plan), the third 24 h 10 min
+    // after the second. They do not wait for the first buy to be confirmed.
+    assert_eq!(
+        offers.iter().map(|o| o.timing.as_str()).collect::<Vec<_>>(),
+        vec!["on_schedule", "early", "on_schedule"]
+    );
     let first = &offers[0];
     assert_eq!(first.confirmed_at, "2026-11-14T06:02:25+00:00");
     assert_eq!(first.block_number, 57_228_848);
@@ -414,15 +434,14 @@ fn test_real_history_offers_exactly_the_plan_buys() {
     // No stored price was looked up here, so no cost figure is shown: never a substitute.
     assert_eq!((first.reference_spot_usd.as_ref(), first.execution_cost_bps), (None, None));
 
-    // After the first buy is recorded (24 h plan): the second came 20 h 56 min later,
-    // before its tranche was due, so it is labelled early. The third came after.
+    // After the first buy is recorded (24 h plan) the labels are the same: the second
+    // is early against the recorded fill instead of against the open offer.
     let cfg = plan_cfg();
-    let fills = PlanFills { count: 1, spent_usdc: 20.0, acquired_nock: 1597.93, last_at: Some(t("2026-11-14T06:02:25Z")), first_price: Some(0.01251616) };
-    let due = next_tranche_due_at(&cfg, &fills);
-    assert_eq!(due, Some(t("2026-11-15T06:02:25Z")));
+    let fills = PlanFills { count: 1, spent_usdc: 20.0, acquired_nock: 1597.93, last_at: Some(t(BUY_1_AT)), first_price: Some(0.01251616) };
+    assert_eq!(next_tranche_due_at(&cfg, &fills), Some(t("2026-11-15T06:02:25Z")));
     // The ledger stores the hash as the operator pasted it; case must not matter.
     let recorded: HashSet<String> = [BUY_1.to_uppercase().replace("0X", "0x")].into_iter().collect();
-    let (offers, _) = build_fill_offers(&rows, &recorded, anchor(), due);
+    let (offers, _) = build_fill_offers(&rows, &recorded, anchor(), &[t(BUY_1_AT)], cfg.interval_hours);
     assert_eq!(
         offers.iter().map(|o| (o.tx_hash.as_str(), o.timing.as_str())).collect::<Vec<_>>(),
         vec![(BUY_2, "early"), (BUY_3, "on_schedule")]
@@ -430,11 +449,62 @@ fn test_real_history_offers_exactly_the_plan_buys() {
 
     // An anchor that reaches back to 2026-11-01 also finds the earlier purchase.
     let earlier = candidates_from_fixtures(t("2026-11-01T00:00:00Z"));
-    let (offers, _) = build_fill_offers(&earlier, &HashSet::new(), t("2026-11-01T00:00:00Z"), None);
+    let (offers, _) = build_fill_offers(&earlier, &HashSet::new(), t("2026-11-01T00:00:00Z"), &[], 24.0);
     assert_eq!(offers.iter().map(|o| o.tx_hash.as_str()).collect::<Vec<_>>(), vec![PRE_PLAN_BUY, BUY_1, BUY_2, BUY_3]);
     // The same rows under the later anchor: the early purchase is not offered.
-    let (offers, _) = build_fill_offers(&earlier, &HashSet::new(), anchor(), None);
+    let (offers, _) = build_fill_offers(&earlier, &HashSet::new(), anchor(), &[], 24.0);
     assert_eq!(offers.len(), 3);
+}
+
+/// Review finding on #118: the label used to compare every offer with the plan's LATEST
+/// recorded fill plus the interval, so an offer older than that fill was always "early",
+/// the plan's first buy included. Each offer is judged against the buy before it.
+#[test]
+fn test_timing_is_judged_against_the_buy_before_each_offer_not_the_latest_fill() {
+    let rows = candidates_from_fixtures(anchor());
+    let timing = |recorded: &[&str], dismissed: &[&str]| -> Vec<(String, String)> {
+        let mut rows = rows.clone();
+        for c in rows.iter_mut().filter(|c| dismissed.contains(&c.tx_hash.as_str())) {
+            c.state = "dismissed".to_string();
+        }
+        let hashes: HashSet<String> = recorded.iter().map(|h| h.to_string()).collect();
+        let times: Vec<DateTime<Utc>> = recorded.iter().map(|h| buy_time(h)).collect();
+        let (offers, gone) = build_fill_offers(&rows, &hashes, anchor(), &times, 24.0);
+        offers.into_iter().chain(gone).map(|o| (o.tx_hash, o.timing)).collect()
+    };
+    let label = |h: &str, l: &str| (h.to_string(), l.to_string());
+
+    // Only the newest buy is recorded (pasted by hash, or confirmed first during a
+    // recovery). The first buy is not early: nothing came before it. The second is
+    // early because of the first, not because of the newer recorded fill.
+    assert_eq!(timing(&[BUY_3], &[]), vec![label(BUY_1, "on_schedule"), label(BUY_2, "early")]);
+    // The order of confirmation does not move a label.
+    assert_eq!(timing(&[BUY_2], &[]), vec![label(BUY_1, "on_schedule"), label(BUY_3, "on_schedule")]);
+    assert_eq!(timing(&[BUY_1, BUY_3], &[]), vec![label(BUY_2, "early")]);
+    assert_eq!(timing(&[BUY_1, BUY_2], &[]), vec![label(BUY_3, "on_schedule")]);
+    // A swap marked "not part of the plan" is nobody's previous buy: with the first
+    // dismissed, the second is the plan's first and is not early. The dismissed row
+    // keeps its own label (listed after the open offers here).
+    assert_eq!(
+        timing(&[], &[BUY_1]),
+        vec![label(BUY_2, "on_schedule"), label(BUY_3, "on_schedule"), label(BUY_1, "on_schedule")]
+    );
+    // A dismissed swap is still judged against what came before it.
+    assert_eq!(
+        timing(&[BUY_1], &[BUY_2]),
+        vec![label(BUY_3, "on_schedule"), label(BUY_2, "early")]
+    );
+
+    // Another plan's fills set no cadence for this one: they hide their own hash only.
+    let other_plan: HashSet<String> = [BUY_1.to_string()].into_iter().collect();
+    let (offers, _) = build_fill_offers(&rows, &other_plan, anchor(), &[], 24.0);
+    assert_eq!(
+        offers.iter().map(|o| (o.tx_hash.as_str(), o.timing.as_str())).collect::<Vec<_>>(),
+        vec![(BUY_2, "on_schedule"), (BUY_3, "on_schedule")]
+    );
+    // The interval is the plan's own: on a 12 h plan none of the three is early.
+    let (offers, _) = build_fill_offers(&rows, &HashSet::new(), anchor(), &[], 12.0);
+    assert!(offers.iter().all(|o| o.timing == "on_schedule"), "{offers:?}");
 }
 
 // ---------------- The offer list ----------------
@@ -468,20 +538,20 @@ fn test_offer_list_excludes_recorded_dismissed_non_purchases_and_pre_anchor_rows
         candidate(&h(9), "surprise", "2026-11-15T11:00:00Z"),  // unknown state
     ];
     let recorded: HashSet<String> = [h(6).to_uppercase().replace("0X", "0x")].into_iter().collect();
-    let (offers, dismissed) = build_fill_offers(&rows, &recorded, anchor(), None);
+    let (offers, dismissed) = build_fill_offers(&rows, &recorded, anchor(), &[], 24.0);
     assert_eq!(offers.iter().map(|o| o.tx_hash.clone()).collect::<Vec<_>>(), vec![h(2), h(1)], "oldest first, once each");
     assert_eq!(dismissed.iter().map(|o| o.tx_hash.clone()).collect::<Vec<_>>(), vec![h(3)]);
 
     // Restoring is the reverse of dismissing: the row moves lists, nothing else changes.
     let mut restored = rows.clone();
     restored[2].state = "offered".to_string();
-    let (offers, dismissed) = build_fill_offers(&restored, &recorded, anchor(), None);
+    let (offers, dismissed) = build_fill_offers(&restored, &recorded, anchor(), &[], 24.0);
     assert_eq!(offers.iter().map(|o| o.tx_hash.clone()).collect::<Vec<_>>(), vec![h(3), h(2), h(1)]);
     assert!(dismissed.is_empty());
 
     // Recording a dismissed swap by hand removes it from the dismissed list too.
     let both: HashSet<String> = [h(6), h(3)].into_iter().collect();
-    assert!(build_fill_offers(&rows, &both, anchor(), None).1.is_empty());
+    assert!(build_fill_offers(&rows, &both, anchor(), &[], 24.0).1.is_empty());
 
     // A cost figure is shown only together with its reference.
     let mut priced = candidate(&h(10), "offered", "2026-11-15T12:00:00Z");
@@ -490,21 +560,45 @@ fn test_offer_list_excludes_recorded_dismissed_non_purchases_and_pre_anchor_rows
     priced.execution_cost_bps = Some(163);
     let mut half = candidate(&h(11), "offered", "2026-11-15T13:00:00Z");
     half.execution_cost_bps = Some(40); // a cost with no reference is not shown
-    let (offers, _) = build_fill_offers(&[priced, half], &HashSet::new(), anchor(), None);
+    let (offers, _) = build_fill_offers(&[priced, half], &HashSet::new(), anchor(), &[], 24.0);
     assert_eq!(offers[0].execution_cost_bps, Some(163));
     assert_eq!(offers[0].reference_spot_usd.as_deref(), Some("0.01230000"));
     assert_eq!((offers[1].execution_cost_bps, offers[1].reference_spot_usd.clone()), (None, None));
 }
 
 #[test]
-fn test_timing_labels_a_swap_before_the_open_tranche_came_due_as_early() {
-    let due = Some(t("2026-11-15T06:02:25Z"));
-    assert_eq!(fill_timing(t("2026-11-15T02:58:46Z"), due), "early");
-    assert_eq!(fill_timing(t("2026-11-15T06:02:25Z"), due), "on_schedule");
-    assert_eq!(fill_timing(t("2026-11-16T03:08:37Z"), due), "on_schedule");
-    // Before the first fill the first tranche is due from the start: nothing is early.
-    assert_eq!(fill_timing(t("2026-11-14T06:02:25Z"), None), "on_schedule");
+fn test_timing_labels_a_swap_less_than_one_interval_after_the_buy_before_it_as_early() {
+    let previous = Some(t(BUY_1_AT));
+    assert_eq!(fill_timing(t(BUY_2_AT), previous, 24.0), "early");
+    // Exactly one interval later is the moment the tranche comes due: not early.
+    assert_eq!(fill_timing(t("2026-11-15T06:02:24Z"), previous, 24.0), "early");
+    assert_eq!(fill_timing(t("2026-11-15T06:02:25Z"), previous, 24.0), "on_schedule");
+    assert_eq!(fill_timing(t(BUY_3_AT), previous, 24.0), "on_schedule");
+    // The boundary is the directive's own due time, to the second.
+    let fills = PlanFills { last_at: previous, ..PlanFills::default() };
+    assert_eq!(next_tranche_due_at(&plan_cfg(), &fills), Some(t("2026-11-15T06:02:25Z")));
+    // With no buy before it the first tranche is due from the start: nothing is early.
+    assert_eq!(fill_timing(t(BUY_1_AT), None, 24.0), "on_schedule");
     assert_eq!(next_tranche_due_at(&plan_cfg(), &PlanFills::default()), None);
+    // An interval that is not a number labels nothing early, and nothing panics.
+    assert_eq!(fill_timing(t(BUY_2_AT), previous, f64::NAN), "on_schedule");
+    assert_eq!(fill_timing(t(BUY_2_AT), previous, 1e300), "early");
+}
+
+/// Review finding on #118: three 20 s attempts outlasted the 60 s cap on the whole
+/// check, so a stalled endpoint could never report its own reason.
+#[test]
+fn test_a_stalled_history_call_fails_with_its_own_reason_inside_the_cap() {
+    let worst = transfer_history_worst_case_ms();
+    assert_eq!(worst, 20_150, "two 10 s attempts and one 150 ms pause");
+    assert_eq!(
+        worst,
+        u64::from(FILL_SCAN_REQUEST_ATTEMPTS) * FILL_SCAN_REQUEST_TIMEOUT_SECONDS * 1000 + 150
+    );
+    assert!(
+        worst * 2 <= FILL_SCAN_TIMEOUT_SECONDS * 1000,
+        "a stalled history page must fail by itself with at least half the cap left for receipts"
+    );
 }
 
 // ---------------- Execution cost over the reference spot ----------------
@@ -700,9 +794,11 @@ fn metrics(profile: &OperatorProfile, ctx: &PlanContext, detection: Option<&Fill
     )
 }
 
-fn real_offers(recorded: &[&str], due: Option<DateTime<Utc>>) -> Vec<FillOffer> {
+/// The open offers when `recorded` (some of the plan's three buys) are in the ledger.
+fn real_offers(recorded: &[&str]) -> Vec<FillOffer> {
+    let times: Vec<DateTime<Utc>> = recorded.iter().map(|h| buy_time(h)).collect();
     let recorded: HashSet<String> = recorded.iter().map(|h| h.to_string()).collect();
-    build_fill_offers(&candidates_from_fixtures(anchor()), &recorded, anchor(), due).0
+    build_fill_offers(&candidates_from_fixtures(anchor()), &recorded, anchor(), &times, plan_cfg().interval_hours).0
 }
 
 fn detection_ok(offers: Vec<FillOffer>, checked: &str) -> FillDetection {
@@ -719,7 +815,7 @@ fn detection_ok(offers: Vec<FillOffer>, checked: &str) -> FillDetection {
 #[test]
 fn test_open_offers_are_not_progress_and_lead_the_advice_in_every_plan_branch() {
     let due_ctx = PlanContext { cfg: Some(plan_cfg()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-16T04:00:00Z") };
-    let one_offer = detection_ok(real_offers(&[BUY_1, BUY_2], None), "2026-11-16T04:00:00+00:00");
+    let one_offer = detection_ok(real_offers(&[BUY_1, BUY_2]), "2026-11-16T04:00:00+00:00");
     assert_eq!(one_offer.offers.len(), 1);
     let no_offer = detection_ok(vec![], "2026-11-16T04:00:00+00:00");
     let found = "A swap that looks like a plan buy was found on-chain and is not counted yet: $20.00 USDC for 1780.36 NOCK at 2026-11-16T03:08:37+00:00 (0x78376f3c…6e31b9).";
@@ -765,7 +861,7 @@ fn test_open_offers_are_not_progress_and_lead_the_advice_in_every_plan_branch() 
     assert_eq!(with.accumulation_plan.unwrap().fills, 2);
 
     // Several offers are counted, not listed one by one.
-    let three = detection_ok(real_offers(&[], None), "2026-11-16T04:00:00+00:00");
+    let three = detection_ok(real_offers(&[]), "2026-11-16T04:00:00+00:00");
     let m = metrics(&OperatorProfile::default(), &due_ctx, Some(&three));
     assert!(
         m.global_status.shot_advice_details.starts_with("3 swaps that look like plan buys were found on-chain and are not counted yet ($60.00 USDC in total)."),
@@ -773,6 +869,140 @@ fn test_open_offers_are_not_progress_and_lead_the_advice_in_every_plan_branch() 
     );
     assert_eq!(m.global_status.shot_advice_action, "DCA TRANCHE DUE (1 of 5)");
     assert_eq!(m.accumulation_plan.unwrap().spent_usdc, "0.00");
+}
+
+/// Review finding on #118: the notice was written only by the plan's own advice arms, so
+/// an arm that outranks the plan (overextension, a due harvest) or follows it (a
+/// finished plan) carried offers in the snapshot and said nothing about them.
+#[test]
+fn test_open_offers_lead_the_advice_when_another_arm_outranks_or_follows_the_plan() {
+    let run = |raw: &RawOnChainData, regime: &MarketRegime, ctx: &PlanContext, detection: &FillDetection| {
+        compute_derived_metrics_with_fills(
+            raw, 0.0, &OperatorProfile::default(), StructuralChannels { channels: vec![] }, &[],
+            &LedgerAggregate::default(), regime, ctx, Some(detection),
+        )
+    };
+    let one_offer = detection_ok(real_offers(&[BUY_1, BUY_2]), "2026-11-16T04:00:00+00:00");
+    let no_offer = detection_ok(vec![], "2026-11-16T04:00:00+00:00");
+    let found = "A swap that looks like a plan buy was found on-chain and is not counted yet: $20.00 USDC for 1780.36 NOCK at 2026-11-16T03:08:37+00:00 (0x78376f3c…6e31b9). In the dashboard, confirm it or mark it as not part of the plan.";
+    // In every arm: the title is the one the arm chose (the notifier compares titles),
+    // the notice leads, it is said once, and the arm's own text follows unchanged.
+    let check = |raw: &RawOnChainData, regime: &MarketRegime, ctx: &PlanContext, title: &str, plan_state: &str| {
+        let with = run(raw, regime, ctx, &one_offer);
+        let without = run(raw, regime, ctx, &no_offer);
+        assert_eq!(with.global_status.shot_advice_action, title);
+        assert_eq!(without.global_status.shot_advice_action, title, "an offer must not change the title");
+        let (d, plain) = (&with.global_status.shot_advice_details, &without.global_status.shot_advice_details);
+        assert_eq!(d, &format!("{found} {plain}"), "{title}");
+        assert_eq!(d.matches("was found on-chain").count(), 1, "{d}");
+        assert!(!plain.contains("was found on-chain"), "{plain}");
+        let ps = with.accumulation_plan.as_ref().unwrap();
+        assert_eq!(ps.status, plan_state);
+        assert_eq!(ps.fill_detection.as_ref().unwrap().offers.len(), 1);
+    };
+
+    // Overextended: the plan pauses and the cooldown arm speaks.
+    let two = PlanFills { count: 2, spent_usdc: 40.0, acquired_nock: 3318.15, last_at: Some(t(BUY_2_AT)), first_price: Some(0.01251616) };
+    let due_ctx = PlanContext { cfg: Some(plan_cfg()), fills: two, ledger_unavailable: false, now: t("2026-11-16T04:00:00Z") };
+    let hot = MarketRegime { rsi_5m: None, rsi_1d: Some(75.0), overextended: true };
+    check(&funded_raw(), &hot, &due_ctx, "OVEREXTENDED (Daily RSI ≥ 70, No Buy Advised)", "paused");
+
+    // A due harvest outranks a plan with nothing due.
+    let mut with_fees = funded_raw();
+    with_fees.positions.push(RawPosition {
+        position_id: "uniswap-v4:base:3163431".to_string(),
+        network: "base".to_string(),
+        protocol: "uniswap-v4".to_string(),
+        wallet: WALLET.to_lowercase(),
+        nft_id: 3163431,
+        pool_id: "0x91a9ef0a8dd231b99fa53a2a145a9e8bca7897e0d85852107abb997916f9f99c".to_string(),
+        npm_address: None,
+        fee_tier_bps: 75,
+        token0: PositionTokenInfo { address: USDC_BASE.to_string(), symbol: "USDC".to_string(), decimals: 6 },
+        token1: PositionTokenInfo { address: NOCK_BASE.to_string(), symbol: "NOCK".to_string(), decimals: 16 },
+        // An emptied range that still has $6 of USDC fees to collect.
+        liquidity: 0,
+        sqrt_price_x96: U256::from_hex_be("0x0a9598f7fe4938c0312958557374bf").unwrap(),
+        tick: 269008,
+        tick_lower: 267825,
+        tick_upper: 271050,
+        amount0: 0.0,
+        amount1: 0.0,
+        fee0: 6.0,
+        fee1: 0.0,
+        in_range: true,
+        is_price_source: false,
+    });
+    let waiting_ctx = PlanContext { cfg: Some(plan_cfg()), fills: two, ledger_unavailable: false, now: t("2026-11-15T12:00:00Z") };
+    check(&with_fees, &MarketRegime::default(), &waiting_ctx, "BATCH HARVEST SHOT (Execute Claim)", "waiting");
+
+    // The plan is complete: detection keeps a waiting swap listed, and the advice says so.
+    let spent = PlanFills { count: 5, spent_usdc: 100.0, acquired_nock: 8000.0, last_at: Some(t("2026-11-16T03:30:00Z")), first_price: Some(0.0125) };
+    let done_ctx = PlanContext { cfg: Some(plan_cfg()), fills: spent, ledger_unavailable: false, now: t("2026-11-16T04:00:00Z") };
+    check(&funded_raw(), &MarketRegime::default(), &done_ctx, "HOLD & ACCRETE (No LP Tracked)", "complete");
+
+    // The plan's own arms already carry the notice: it is never said twice, including
+    // below the floor, where it sits inside the recovery sentence.
+    let fresh_ctx = PlanContext { cfg: Some(plan_cfg()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-16T04:00:00Z") };
+    let floor = OperatorProfile { treasury_floor_nock: 100_000.0, ..OperatorProfile::default() };
+    for profile in [OperatorProfile::default(), floor] {
+        let d = metrics(&profile, &fresh_ctx, Some(&one_offer)).global_status.shot_advice_details;
+        assert_eq!(d.matches("was found on-chain").count(), 1, "{d}");
+    }
+
+    // The helper by itself: nothing to say without a plan, without detection, or without offers.
+    let text = "Some advice.".to_string();
+    assert_eq!(lead_with_open_offer_notice(None, text.clone()), text);
+    let mut ps = metrics(&OperatorProfile::default(), &done_ctx, Some(&no_offer)).accumulation_plan.unwrap();
+    assert_eq!(lead_with_open_offer_notice(Some(&ps), text.clone()), text);
+    ps.fill_detection = None;
+    assert_eq!(lead_with_open_offer_notice(Some(&ps), text.clone()), text);
+    ps.fill_detection = Some(one_offer.clone());
+    assert_eq!(lead_with_open_offer_notice(Some(&ps), text.clone()), format!("{found} {text}"));
+    // Already there: left alone.
+    let said = format!("{found} {text}");
+    assert_eq!(lead_with_open_offer_notice(Some(&ps), said.clone()), said);
+}
+
+/// Review finding on #118: the offer's cost was looked up at detection and the fill's
+/// again at recording, so one swap could show two figures. A fill confirmed from an
+/// offer keeps the offer's figure; anything else is looked up afresh.
+#[test]
+fn test_a_recorded_fill_keeps_the_reference_its_offer_showed() {
+    let source = "market_price_history uniswap_rpc at 2026-11-16T03:05:00+00:00";
+    let mut c = candidate(BUY_3, "offered", BUY_3_AT);
+    c.effective_price_usd = Some("0.01123369".to_string());
+    c.reference_spot_usd = Some("0.01120000".to_string());
+    c.reference_spot_source = Some(source.to_string());
+    c.execution_cost_bps = Some(30);
+    assert_eq!(
+        offered_reference(&c, "0.01123369"),
+        Some(FillReference {
+            spot_usd: Some("0.01120000".to_string()),
+            source: Some(source.to_string()),
+            cost_bps: Some(30),
+        })
+    );
+    // The stored figure is the one fill_reference computes from the same two prices.
+    assert_eq!(
+        offered_reference(&c, "0.01123369").unwrap(),
+        fill_reference("0.01123369", Some((0.0112, source.to_string())))
+    );
+    // Dismissed and then recorded by hand: still the figure the operator saw.
+    c.state = "dismissed".to_string();
+    assert!(offered_reference(&c, "0.01123369").is_some());
+    // A different effective price is not this fill's cost: look it up afresh.
+    assert_eq!(offered_reference(&c, "0.01200000"), None);
+    // No reference on the offer (no stored price was near the block): nothing to reuse.
+    let bare = candidate(BUY_3, "offered", BUY_3_AT);
+    assert_eq!(offered_reference(&bare, "0.01250000"), None);
+    // Half a reference is no reference.
+    let mut half = candidate(BUY_3, "offered", BUY_3_AT);
+    half.execution_cost_bps = Some(30);
+    assert_eq!(offered_reference(&half, "0.01250000"), None);
+    // A row that is not a purchase carries no price at all.
+    let other = FillCandidate { tx_hash: BUY_3.to_string(), state: "not_a_purchase".to_string(), ..Default::default() };
+    assert_eq!(offered_reference(&other, "0.01123369"), None);
 }
 
 #[test]
@@ -816,7 +1046,7 @@ fn test_check_time_does_not_enter_the_state_hash() {
         contract_fees: vec![],
         derived_metrics: metrics(&OperatorProfile::default(), &ctx, Some(detection)),
     };
-    let offers = real_offers(&[BUY_1, BUY_2], None);
+    let offers = real_offers(&[BUY_1, BUY_2]);
     let a = data(&detection_ok(offers.clone(), "2026-11-16T04:00:00+00:00"));
     let b = data(&detection_ok(offers.clone(), "2026-11-16T04:05:00+00:00"));
     assert_ne!(
@@ -842,7 +1072,7 @@ fn test_check_time_does_not_enter_the_state_hash() {
 #[test]
 fn test_snapshot_carries_offers_and_older_snapshots_still_parse() {
     let ctx = PlanContext { cfg: Some(plan_cfg()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-16T04:00:00Z") };
-    let mut detection = detection_ok(real_offers(&[BUY_1, BUY_2], None), "2026-11-16T04:00:00+00:00");
+    let mut detection = detection_ok(real_offers(&[BUY_1, BUY_2]), "2026-11-16T04:00:00+00:00");
     detection.offers[0].reference_spot_usd = Some("0.01120000".to_string());
     detection.offers[0].reference_spot_source = Some("market_price_history uniswap_rpc at 2026-11-16T03:05:00+00:00".to_string());
     detection.offers[0].execution_cost_bps = Some(30);
@@ -907,25 +1137,34 @@ fn test_mcp_plan_text_lists_offers_and_never_confuses_could_not_check_with_none_
     assert!(never.contains("last successful check: none on record"), "{never}");
 
     // Offers: the full hash, the amounts, the price, the cost when known, the timing.
-    let mut offers = real_offers(&[BUY_1], Some(t("2026-11-15T06:02:25Z")));
+    let mut offers = real_offers(&[BUY_1]);
     offers[1].reference_spot_usd = Some("0.01120000".to_string());
+    offers[1].reference_spot_source = Some("market_price_history uniswap_rpc at 2026-11-16T03:05:00+00:00".to_string());
     offers[1].execution_cost_bps = Some(30);
     let mut detection = detection_ok(offers, "2026-11-16T04:00:00+00:00");
-    detection.dismissed = real_offers(&[BUY_2, BUY_3], None);
+    detection.dismissed = real_offers(&[BUY_2, BUY_3]);
     let text = plan_text(Some(&detection));
     assert!(text.contains("• 2 detected swap(s) not counted yet."), "{text}");
     assert!(text.contains("(MCP is read-only)"), "{text}");
     assert!(
         text.contains(&format!(
-            "   ? {BUY_2} · 2026-11-15T02:58:46+00:00 · $20 USDC → 1720.2181466216939446 NOCK at $0.01162643 · cost over spot unavailable · early (before the open tranche came due)\n"
+            "   ? {BUY_2} · 2026-11-15T02:58:46+00:00 · $20 USDC → 1720.2181466216939446 NOCK at $0.01162643 · cost over spot unavailable · early (less than one plan interval after the buy before it)\n"
         )),
         "{text}"
     );
+    // The cost names its reference and the reference's own time, in the text itself.
     assert!(
         text.contains(&format!(
-            "   ? {BUY_3} · 2026-11-16T03:08:37+00:00 · $20 USDC → 1780.3592976960049083 NOCK at $0.01123369 · +30 bps against spot $0.01120000 · on schedule\n"
+            "   ? {BUY_3} · 2026-11-16T03:08:37+00:00 · $20 USDC → 1780.3592976960049083 NOCK at $0.01123369 · +30 bps against the stored price $0.01120000 (market_price_history uniswap_rpc at 2026-11-16T03:05:00+00:00) · on schedule\n"
         )),
         "{text}"
+    );
+    // A figure whose source was not stored says so rather than passing as a bare fact.
+    let mut bare = detection.clone();
+    bare.offers[1].reference_spot_source = None;
+    assert!(
+        plan_text(Some(&bare)).contains("+30 bps against the stored price $0.01120000 (reference source not recorded) · on schedule\n"),
+        "{}", plan_text(Some(&bare))
     );
     assert!(text.contains(&format!("   ✗ not part of the plan (dismissed, restorable): {BUY_1} · ")), "{text}");
     // Progress is still zero: the offers are listed, not counted.
@@ -981,7 +1220,12 @@ async fn test_fill_detection_sql_against_a_scratch_database() {
 
     let wallet = WALLET.to_lowercase();
     let plan_id = "scratch-fill-detection";
-    let price_points = [(t("2026-11-16T03:05:00Z"), 0.0112f64), (t("2026-11-14T06:00:00Z"), 0.01229f64)];
+    let price_points = [
+        (t("2026-11-16T03:05:00Z"), 0.0112f64),
+        (t("2026-11-14T06:00:00Z"), 0.01229f64),
+        // Stored later, nearer the third buy than the price its offer was shown with.
+        (t("2026-11-16T03:08:00Z"), 0.0113f64),
+    ];
     let cleanup = |db: PgPool| async move {
         sqlx::query("DELETE FROM accumulation_candidates WHERE wallet = $1").bind(WALLET.to_lowercase()).execute(&db).await.unwrap();
         sqlx::query("DELETE FROM accumulation_events WHERE plan_id = $1").bind(plan_id).execute(&db).await.unwrap();
@@ -1083,6 +1327,14 @@ async fn test_fill_detection_sql_against_a_scratch_database() {
     .await
     .unwrap();
     assert!(recorded_fill_hashes(&db).await.unwrap().contains(BUY_1));
+    // The same ledger read with the plan's own fill times, which place each offer's
+    // early / on-schedule label. Another plan id sees the hash but no cadence.
+    let (hashes, times) = recorded_fills(&db, plan_id).await.unwrap();
+    assert!(hashes.contains(BUY_1));
+    assert_eq!(times, vec![t(BUY_1_AT)]);
+    let (hashes, times) = recorded_fills(&db, "some-other-plan").await.unwrap();
+    assert!(hashes.contains(BUY_1));
+    assert!(times.is_empty());
     let fills = PlanFills { count: 1, spent_usdc: 20.0, acquired_nock: 1597.93, last_at: Some(t("2026-11-14T06:02:25Z")), first_price: Some(0.01251616) };
     let after = PlanContext { cfg: Some(cfg.clone()), fills, ledger_unavailable: false, now: t("2026-11-16T04:00:00Z") };
     let d = detect_fills(&state, &after).await.unwrap();
@@ -1122,6 +1374,23 @@ async fn test_fill_detection_sql_against_a_scratch_database() {
     let first_buy = rows.iter().find(|r| r["tx_hash"] == BUY_1).unwrap();
     assert_eq!((first_buy["recorded"].as_bool(), first_buy["state"].as_str()), (Some(true), Some("offered")));
     assert_eq!(rows.iter().filter(|r| r["state"] == "not_a_purchase" && r["reason"] == "NOT_A_NOCK_PURCHASE").count(), 6);
+
+    // A fill recorded from an offer keeps the figure the offer showed, even when a
+    // nearer price has been stored since. Wallet and hash are matched without case.
+    insert_price_point(&db, price_points[2].0, price_points[2].1, PRICE_SOURCE_RPC, false).await.unwrap();
+    let afresh = reference_for_fill(&db, "0.01123369", t(BUY_3_AT)).await;
+    assert_eq!((afresh.spot_usd.as_deref(), afresh.cost_bps), (Some("0.01130000"), Some(-59)));
+    let upper_3 = format!("0x{}", BUY_3.trim_start_matches("0x").to_uppercase());
+    let kept = reference_for_recorded_fill(&db, WALLET, &upper_3, "0.01123369", t(BUY_3_AT)).await;
+    assert_eq!((kept.spot_usd.as_deref(), kept.cost_bps), (Some("0.01120000"), Some(30)));
+    assert!(kept.source.as_ref().unwrap().contains("uniswap_rpc at 2026-11-16T03:05:00"), "{kept:?}");
+    // The offer itself is unchanged: a row is written once.
+    let d = detect_fills(&state, &after).await.unwrap();
+    assert_eq!(d.offers.last().map(|o| (o.tx_hash.as_str(), o.execution_cost_bps)), Some((BUY_3, Some(30))));
+    // A hash that was never offered, or an offer shown without a figure, is looked up.
+    assert_eq!(reference_for_recorded_fill(&db, WALLET, &unread, "0.01123369", t(BUY_3_AT)).await, afresh);
+    let none_near = reference_for_recorded_fill(&db, WALLET, BUY_2, "0.01162643", t(BUY_2_AT)).await;
+    assert_eq!(none_near, FillReference::default());
 
     // Budget spent: not run, but a swap still waiting stays listed. Ledger unreadable or
     // detection switched off: not run, nothing listed.

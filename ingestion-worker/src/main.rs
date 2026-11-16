@@ -698,8 +698,8 @@ struct FillOffer {
     usdc_spent: String,
     nock_received: String,
     effective_price_usd: String,
-    /// early | on_schedule: whether the swap landed before the open tranche came due
-    /// (last recorded fill plus the plan interval).
+    /// early | on_schedule: early when the swap landed less than one plan interval
+    /// after the buy before it (a recorded fill, or an older swap still on offer).
     timing: String,
     /// Stored NOCK/USD price nearest the swap's block time; null when none was near.
     #[serde(default)]

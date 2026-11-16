@@ -5,7 +5,8 @@ pub(crate) const PLAN_DUST_USDC: f64 = 1.0;
 
 /// When the open tranche comes due by cadence alone: the last verified fill plus the
 /// plan interval. None before the first fill (the first tranche is due from the start).
-/// Pure; shared by the directive and by fill detection's early/on-schedule label.
+/// Pure. Fill detection's early / on-schedule label uses the same rounding of the
+/// interval (`fill_timing`), measured from the buy before each swap.
 pub(crate) fn next_tranche_due_at(cfg: &AccumulationPlanConfig, fills: &PlanFills) -> Option<DateTime<Utc>> {
     fills
         .last_at
