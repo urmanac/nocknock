@@ -4,7 +4,8 @@
 //! eth_getTransactionReceipt and eth_getBlockByNumber on 2026-11-16 (see
 //! ONCHAIN_INTEGRATION.md §8): each receipt shows exactly 20000000 raw USDC leaving the
 //! wallet and the raw NOCK amount below entering it. The opening-basis figures used in
-//! the whole-stack tests are test inputs, not anyone's records.
+//! the whole-stack tests (10,000 NOCK for $200) are made up for the tests: round numbers
+//! that are nobody's records.
 use super::*;
 
 fn t(s: &str) -> DateTime<Utc> {
@@ -59,7 +60,7 @@ const NOW: &str = "2026-11-16T04:00:00Z";
 
 fn test_opening() -> OpeningBasisState {
     resolve_opening_basis(
-        Some(&opening_cfg(json!(90000), json!(1611), json!("2026-11-14T12:00:00Z"), json!("test figures"))),
+        Some(&opening_cfg(json!(10000), json!(200), json!("2026-11-14T12:00:00Z"), json!("test figures"))),
         t(NOW),
     )
 }
@@ -94,7 +95,7 @@ fn test_plan_buys_average_is_spend_over_nock_and_difference_is_measured_at_spot(
     let cb = compute_cost_basis(Ok(&fills), &OpeningBasisState::NotConfigured, Some(0.01153), None);
     let p = &cb.plan_buys;
     assert_eq!(p.status, "ok");
-    assert_eq!(p.fills, 3);
+    assert_eq!(p.fills, Some(3));
     assert_eq!(p.spent_usdc.as_deref(), Some("60.00"));
     assert_eq!(p.acquired_nock.as_deref(), Some("5098.5115"));
     // 60 / 5098.5114918813956667
@@ -138,17 +139,20 @@ fn test_plan_buys_are_reported_per_plan_and_across_plans() {
 fn test_no_fills_and_an_unread_ledger_are_different_states_and_neither_is_zero() {
     let none = compute_cost_basis(Ok(&[]), &OpeningBasisState::NotConfigured, Some(0.01153), None);
     assert_eq!(none.plan_buys.status, "no_fills");
-    assert_eq!(none.plan_buys.fills, 0);
+    assert_eq!(none.plan_buys.fills, Some(0), "the ledger was read and is empty: a real zero");
     assert_eq!((none.plan_buys.avg_cost_usd.as_ref(), none.plan_buys.spent_usdc.as_ref(), none.plan_buys.unrealized_usd.as_ref()), (None, None, None));
 
     let unread = compute_cost_basis(Err("the accumulation ledger could not be read this cycle"), &test_opening(), Some(0.01153), Some(100.0));
     assert_eq!(unread.plan_buys.status, "unavailable");
     assert_eq!(unread.plan_buys.reason.as_deref(), Some("the accumulation ledger could not be read this cycle"));
     assert_eq!(unread.plan_buys.avg_cost_usd, None);
+    // The count was not read: null in the snapshot, never a 0 that reads as "no buys".
+    assert_eq!(unread.plan_buys.fills, None);
+    assert!(serde_json::to_value(&unread).unwrap()["plan_buys"]["fills"].is_null());
     // The blend needs the ledger too: unavailable, with the operator's figures still shown.
     assert_eq!(unread.whole_stack.status, "unavailable");
     assert_eq!(unread.whole_stack.avg_cost_usd, None);
-    assert_eq!(unread.whole_stack.opening_nock.as_deref(), Some("90000.0000"));
+    assert_eq!(unread.whole_stack.opening_nock.as_deref(), Some("10000.0000"));
     assert_eq!(unread.whole_stack.source.as_deref(), Some("test figures"));
 }
 
@@ -190,16 +194,16 @@ fn test_opening_basis_unset_is_not_configured() {
 #[test]
 fn test_opening_basis_complete_block_is_accepted_as_entered() {
     let state = resolve_opening_basis(
-        Some(&opening_cfg(json!(90000.5), json!("1611.25"), json!("2026-11-14T16:30:00-05:00"), json!("Uniswap app, all-time panel"))),
+        Some(&opening_cfg(json!(10000.5), json!("200.25"), json!("2026-11-14T16:30:00-05:00"), json!("my own records, read by hand"))),
         t(NOW),
     );
     assert_eq!(
         state,
         OpeningBasisState::Set(OpeningBasis {
-            nock: 90000.5,
-            cost_usd: 1611.25,
+            nock: 10000.5,
+            cost_usd: 200.25,
             as_of: t("2026-11-14T21:30:00Z"),
-            source: "Uniswap app, all-time panel".to_string(),
+            source: "my own records, read by hand".to_string(),
         })
     );
 }
@@ -207,53 +211,53 @@ fn test_opening_basis_complete_block_is_accepted_as_entered() {
 #[test]
 fn test_partial_opening_basis_is_a_configuration_error_not_a_default() {
     // Amount without cost.
-    let r = invalid_reason(&opening_cfg(json!(90000), json!(null), json!("2026-11-14T12:00:00Z"), json!("notes")));
+    let r = invalid_reason(&opening_cfg(json!(10000), json!(null), json!("2026-11-14T12:00:00Z"), json!("notes")));
     assert!(r.contains("cost_usd is missing"), "{r}");
     assert!(r.starts_with("cost_basis.opening cannot be used:"), "{r}");
     assert!(r.contains("only plan buys are reported"), "{r}");
     // Cost without amount, and nothing else: every missing field is named at once.
-    let r = invalid_reason(&opening_cfg(json!(null), json!(1611), json!(null), json!(null)));
+    let r = invalid_reason(&opening_cfg(json!(null), json!(200), json!(null), json!(null)));
     for needle in ["nock_amount is missing", "as_of is missing", "source is missing"] {
         assert!(r.contains(needle), "{needle} not in: {r}");
     }
     // A source note is required: no figure without a stated source.
-    let r = invalid_reason(&opening_cfg(json!(90000), json!(1611), json!("2026-11-14T12:00:00Z"), json!("   ")));
+    let r = invalid_reason(&opening_cfg(json!(10000), json!(200), json!("2026-11-14T12:00:00Z"), json!("   ")));
     assert!(r.contains("source is missing"), "{r}");
 }
 
 #[test]
 fn test_zero_negative_or_non_numeric_amounts_are_configuration_errors() {
     let ok_time = json!("2026-11-14T12:00:00Z");
-    let r = invalid_reason(&opening_cfg(json!(0), json!(1611), ok_time.clone(), json!("notes")));
+    let r = invalid_reason(&opening_cfg(json!(0), json!(200), ok_time.clone(), json!("notes")));
     assert!(r.contains("nock_amount must be greater than zero (it is 0)"), "{r}");
-    let r = invalid_reason(&opening_cfg(json!(-5.5), json!(1611), ok_time.clone(), json!("notes")));
+    let r = invalid_reason(&opening_cfg(json!(-5.5), json!(200), ok_time.clone(), json!("notes")));
     assert!(r.contains("nock_amount must be greater than zero (it is -5.5)"), "{r}");
     // A zero or negative cost is refused too: it would be shown as a real average.
-    let r = invalid_reason(&opening_cfg(json!(90000), json!(0), ok_time.clone(), json!("notes")));
+    let r = invalid_reason(&opening_cfg(json!(10000), json!(0), ok_time.clone(), json!("notes")));
     assert!(r.contains("cost_usd must be greater than zero"), "{r}");
-    let r = invalid_reason(&opening_cfg(json!(90000), json!(-1), ok_time.clone(), json!("notes")));
+    let r = invalid_reason(&opening_cfg(json!(10000), json!(-1), ok_time.clone(), json!("notes")));
     assert!(r.contains("cost_usd must be greater than zero"), "{r}");
     // A placeholder word left in place is named, not parsed as 0.
-    let r = invalid_reason(&opening_cfg(json!("<NOCK you held>"), json!(1611), ok_time, json!("notes")));
+    let r = invalid_reason(&opening_cfg(json!("<NOCK you held>"), json!(200), ok_time, json!("notes")));
     assert!(r.contains("nock_amount must be a number (it is \"<NOCK you held>\")"), "{r}");
 }
 
 #[test]
 fn test_as_of_must_be_a_full_past_timestamp() {
     // In the future.
-    let r = invalid_reason(&opening_cfg(json!(90000), json!(1611), json!("2026-11-16T04:00:01Z"), json!("notes")));
+    let r = invalid_reason(&opening_cfg(json!(10000), json!(200), json!("2026-11-16T04:00:01Z"), json!("notes")));
     assert!(r.contains("as_of 2026-11-16T04:00:01Z is in the future"), "{r}");
     // Exactly now is not the future.
     assert!(matches!(
-        resolve_opening_basis(Some(&opening_cfg(json!(90000), json!(1611), json!(NOW), json!("notes"))), t(NOW)),
+        resolve_opening_basis(Some(&opening_cfg(json!(10000), json!(200), json!(NOW), json!("notes"))), t(NOW)),
         OpeningBasisState::Set(_)
     ));
     // A date alone is ambiguous about that day's buys, so it is refused with the reason.
-    let r = invalid_reason(&opening_cfg(json!(90000), json!(1611), json!("2026-11-14"), json!("notes")));
+    let r = invalid_reason(&opening_cfg(json!(10000), json!(200), json!("2026-11-14"), json!("notes")));
     assert!(r.contains("as_of \"2026-11-14\" must be a full timestamp with a UTC offset"), "{r}");
     assert!(r.contains("a date alone does not say whether a buy made that day is already inside the figures"), "{r}");
     // No offset: also refused (whose midnight?).
-    let r = invalid_reason(&opening_cfg(json!(90000), json!(1611), json!("2026-11-14T12:00:00"), json!("notes")));
+    let r = invalid_reason(&opening_cfg(json!(10000), json!(200), json!("2026-11-14T12:00:00"), json!("notes")));
     assert!(r.contains("must be a full timestamp with a UTC offset"), "{r}");
 }
 
@@ -261,28 +265,30 @@ fn test_as_of_must_be_a_full_past_timestamp() {
 fn test_whole_stack_blends_the_opening_basis_with_buys_after_the_as_of_only() {
     // as_of 2026-11-14T12:00Z: the first real fill (06:02Z that day) is inside the opening
     // figures; the second and third are added.
-    let cb = compute_cost_basis(Ok(&real_fills()), &test_opening(), Some(0.01153), Some(115000.25));
+    let cb = compute_cost_basis(Ok(&real_fills()), &test_opening(), Some(0.01153), Some(12000.0));
     let w = &cb.whole_stack;
     assert_eq!(w.status, "ok");
     assert_eq!(w.reason, None);
     assert_eq!(w.source.as_deref(), Some("test figures"));
     assert_eq!(w.as_of.as_deref(), Some("2026-11-14T12:00:00+00:00"));
-    assert_eq!(w.opening_nock.as_deref(), Some("90000.0000"));
-    assert_eq!(w.opening_cost_usd.as_deref(), Some("1611.00"));
-    assert_eq!(w.opening_avg_cost_usd.as_deref(), Some("0.017900"));
+    assert_eq!(w.opening_nock.as_deref(), Some("10000.0000"));
+    assert_eq!(w.opening_cost_usd.as_deref(), Some("200.00"));
+    assert_eq!(w.opening_avg_cost_usd.as_deref(), Some("0.020000"));
     assert_eq!(w.fills_since, Some(2));
     assert_eq!(w.bought_since_usdc.as_deref(), Some("40.00"));
     assert_eq!(w.bought_since_nock.as_deref(), Some("3500.5774"));
-    // (1611 + 40) / (90000 + 3500.5774443176988529)
-    assert_eq!(w.basis_nock.as_deref(), Some("93500.5774"));
-    assert_eq!(w.basis_cost_usd.as_deref(), Some("1651.00"));
-    assert_eq!(w.avg_cost_usd.as_deref(), Some("0.017658"));
-    assert_eq!(w.value_at_spot_usd.as_deref(), Some("1078.06"));
-    assert_eq!(w.unrealized_usd.as_deref(), Some("-572.94"));
-    assert_eq!(w.unrealized_pct.as_deref(), Some("-34.70"));
-    assert_eq!(w.held_nock.as_deref(), Some("115000.2500"));
+    // (200 + 40) / (10000 + 3500.5774443176988529)
+    assert_eq!(w.basis_nock.as_deref(), Some("13500.5774"));
+    assert_eq!(w.basis_cost_usd.as_deref(), Some("240.00"));
+    assert_eq!(w.avg_cost_usd.as_deref(), Some("0.017777"));
+    // 13500.5774 NOCK at $0.01153 = $155.66; $155.66 − $240.00 = −$84.34 = −35.14%.
+    assert_eq!(w.value_at_spot_usd.as_deref(), Some("155.66"));
+    assert_eq!(w.unrealized_usd.as_deref(), Some("-84.34"));
+    assert_eq!(w.unrealized_pct.as_deref(), Some("-35.14"));
+    // The cycle passes the snapshot's total_nock_amount, a whole number of NOCK.
+    assert_eq!(w.held_nock.as_deref(), Some("12000"));
     // The statements name the source, the instant, and what is left out.
-    assert!(w.includes[0].contains("90000.0000 NOCK for $1611.00 as of 2026-11-14T12:00:00+00:00, source: test figures"), "{:?}", w.includes);
+    assert!(w.includes[0].contains("10000.0000 NOCK for $200.00 as of 2026-11-14T12:00:00+00:00, source: test figures"), "{:?}", w.includes);
     assert!(w.includes[0].contains("NockNock did not read or check them"));
     assert!(w.includes[1].contains("2 so far"));
     let excluded = w.excludes.join(" ");
@@ -306,8 +312,8 @@ fn test_a_fill_confirmed_exactly_at_the_as_of_is_inside_the_opening_figures() {
 
 #[test]
 fn test_an_invalid_opening_basis_reports_the_error_and_no_whole_stack_number() {
-    let opening = resolve_opening_basis(Some(&opening_cfg(json!(90000), json!(null), json!(null), json!(null))), t(NOW));
-    let cb = compute_cost_basis(Ok(&real_fills()), &opening, Some(0.01153), Some(115000.0));
+    let opening = resolve_opening_basis(Some(&opening_cfg(json!(10000), json!(null), json!(null), json!(null))), t(NOW));
+    let cb = compute_cost_basis(Ok(&real_fills()), &opening, Some(0.01153), Some(12000.0));
     let w = &cb.whole_stack;
     assert_eq!(w.status, "invalid");
     assert!(w.reason.as_deref().unwrap().contains("cost_usd is missing"));
@@ -372,11 +378,11 @@ fn test_the_example_config_sets_no_opening_basis() {
 #[test]
 fn test_opening_basis_loads_from_yaml_and_a_half_filled_block_does_not_stop_the_worker() {
     let cfg = load_with(
-        "cost_basis:\n  opening:\n    nock_amount: 90000\n    cost_usd: 1611.5\n    as_of: \"2026-11-14T21:30:00Z\"\n    source: \"my records\"\n",
+        "cost_basis:\n  opening:\n    nock_amount: 10000\n    cost_usd: 200.5\n    as_of: \"2026-11-14T21:30:00Z\"\n    source: \"my records\"\n",
     );
     assert_eq!(
         resolve_opening_basis(cfg.opening_basis(), t(NOW)),
-        OpeningBasisState::Set(OpeningBasis { nock: 90000.0, cost_usd: 1611.5, as_of: t("2026-11-14T21:30:00Z"), source: "my records".to_string() })
+        OpeningBasisState::Set(OpeningBasis { nock: 10000.0, cost_usd: 200.5, as_of: t("2026-11-14T21:30:00Z"), source: "my records".to_string() })
     );
     // The documented placeholders left in place, and an unquoted date: the config still
     // loads (the worker starts) and the block is reported as an error.
@@ -419,7 +425,7 @@ fn test_fill_series_carries_running_averages_per_plan_across_plans_and_blended()
     // The first fill predates the as-of: no blended value for it, never the opening average.
     assert_eq!(
         col("whole_stack_avg_cost_usd"),
-        vec![None, Some("0.01778234".to_string()), Some("0.01765764".to_string())]
+        vec![None, Some("0.01877098".to_string()), Some("0.01777702".to_string())]
     );
     // Spot at matching times: the nearest stored point within 60 minutes, else null.
     assert_eq!(rows[0]["spot_at_fill"]["at"], json!("2026-11-14T06:00:00+00:00"));
@@ -458,6 +464,141 @@ fn test_nearest_spot_respects_the_window_on_both_sides() {
     assert!(nearest_spot(&pts, t("2026-11-14T03:00:01Z"), w).is_none());
     assert!(nearest_spot(&pts, t("2026-11-13T22:59:59Z"), w).is_none());
     assert!(nearest_spot(&[], t("2026-11-14T00:00:00Z"), w).is_none());
+}
+
+#[test]
+fn test_nearest_spot_prefers_the_workers_own_read_over_a_backfilled_point() {
+    let w = chrono::Duration::minutes(60);
+    let pts = vec![
+        spot_point("2026-11-15T02:10:00Z", 0.0119, "uniswap_rpc", false),
+        spot_point("2026-11-15T03:00:00Z", 0.0117, "geckoterminal", true),
+        spot_point("2026-11-15T03:40:00Z", 0.0116, "uniswap_rpc", false),
+    ];
+    // The candle is 74 seconds away, but two of the worker's own reads are inside the
+    // window: the nearer of those (41 minutes) is taken, not the third-party point.
+    let hit = nearest_spot(&pts, t("2026-11-15T02:58:46Z"), w).unwrap();
+    assert_eq!((hit.at, hit.is_backfilled), (t("2026-11-15T03:40:00Z"), false));
+    // With no worker read inside the window, the backfilled point stands in.
+    let hit = nearest_spot(&pts[1..2], t("2026-11-15T02:58:46Z"), w).unwrap();
+    assert!(hit.is_backfilled);
+    // A worker read outside the window is not preferred over a backfilled one inside it,
+    // and nothing outside the window is ever returned.
+    let far = vec![
+        spot_point("2026-11-15T01:00:00Z", 0.0121, "uniswap_rpc", false),
+        spot_point("2026-11-15T03:00:00Z", 0.0117, "geckoterminal", true),
+    ];
+    assert_eq!(nearest_spot(&far, t("2026-11-15T02:58:46Z"), w).map(|p| p.at), Some(t("2026-11-15T03:00:00Z")));
+    assert!(nearest_spot(&far[..1], t("2026-11-15T02:58:46Z"), w).is_none());
+}
+
+#[test]
+fn test_a_stored_candle_gives_its_open_at_its_open_time_never_its_close() {
+    // market_price_history stores a third-party candle at its OPEN time with price_usd set
+    // to its CLOSE (market.rs upsert_price_candles), so price_usd is the price one candle
+    // period later. The prices below are made up for the test.
+    //
+    // Two hourly candles around the real second buy (2026-11-15T02:58:46Z):
+    //   02:00 open 0.01190 close 0.01170   (the close is the price at 03:00)
+    //   03:00 open 0.01170 close 0.01140   (the close is the price at 04:00)
+    let stored = [
+        ("2026-11-15T02:00:00Z", 0.01170, Some(0.01190)),
+        ("2026-11-15T03:00:00Z", 0.01140, Some(0.01170)),
+    ];
+    let pts: Vec<SpotPoint> = stored
+        .iter()
+        .filter_map(|(at, close, open)| SpotPoint::from_stored(t(at), *close, *open, "geckoterminal", true))
+        .collect();
+    assert_eq!(pts.iter().map(|p| p.price_usd).collect::<Vec<_>>(), [0.01190, 0.01170], "each point is the candle's open");
+    let rows = fill_series(&real_fills()[1..2], None, &pts);
+    // The 03:00 row is 74 seconds after the buy, and what it carries is the price at
+    // 03:00 (its open), not the price at 04:00 (its close).
+    assert_eq!(rows[0]["spot_at_fill"]["at"], json!("2026-11-15T03:00:00+00:00"));
+    assert_eq!(rows[0]["spot_at_fill"]["price_usd"], json!("0.01170000"));
+    assert_eq!(rows[0]["spot_at_fill"]["is_backfilled"], json!(true));
+
+    // A daily candle at 00:00 matched to a buy at 00:30 gives the price 30 minutes before
+    // the buy (its open), never the close 23.5 hours after it.
+    let daily = SpotPoint::from_stored(t("2026-11-15T00:00:00Z"), 0.0111, Some(0.0122), "geckoterminal", true).unwrap();
+    let hit = nearest_spot(std::slice::from_ref(&daily), t("2026-11-15T00:30:00Z"), chrono::Duration::minutes(60)).unwrap();
+    assert_eq!(hit.price_usd, 0.0122);
+
+    // An observation has no OHLC columns and is stamped when it was taken: the worker's
+    // read, and the single DEXScreener seed (backfilled, but not a candle). Its price_usd
+    // is the price at its timestamp.
+    let read = SpotPoint::from_stored(t("2026-11-15T02:55:00Z"), 0.01175, None, "uniswap_rpc", false).unwrap();
+    assert_eq!((read.price_usd, read.is_backfilled), (0.01175, false));
+    let seed = SpotPoint::from_stored(t("2026-11-15T02:55:00Z"), 0.01176, None, "dexscreener", true).unwrap();
+    assert_eq!((seed.price_usd, seed.is_backfilled), (0.01176, true));
+
+    // A candle whose open cannot be used yields no point: its close is not a substitute.
+    for bad_open in [0.0, -1.0, f64::NAN] {
+        assert_eq!(SpotPoint::from_stored(t("2026-11-15T02:00:00Z"), 0.0117, Some(bad_open), "geckoterminal", true), None);
+    }
+    // Nor does an observation without a positive price.
+    for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(SpotPoint::from_stored(t("2026-11-15T02:00:00Z"), bad, None, "uniswap_rpc", false), None);
+    }
+}
+
+/// The stored-history read against PostgreSQL. Skipped without DATABASE_URL, like the
+/// other DB-gated tests. It writes three rows at a random instant in the 2000s (far from
+/// any real price row), reads them back and deletes exactly those rows.
+#[tokio::test]
+async fn test_load_spot_points_reads_a_candle_as_its_open_and_an_observation_as_itself() {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        eprintln!("DATABASE_URL not set; skipping DB integration test");
+        return;
+    };
+    let pool = match PgPool::connect(&url).await {
+        Ok(pool) => pool,
+        Err(e) => {
+            eprintln!("Postgres unreachable ({e}); skipping DB integration test");
+            return;
+        }
+    };
+    // The migration's own table (20261012000004), for a database that has not run it.
+    let ddl = "CREATE TABLE IF NOT EXISTS market_price_history (
+            timestamp      TIMESTAMPTZ NOT NULL PRIMARY KEY,
+            price_usd      FLOAT8 NOT NULL,
+            open_usd       FLOAT8,
+            high_usd       FLOAT8,
+            low_usd        FLOAT8,
+            close_usd      FLOAT8,
+            volume_usd     FLOAT8,
+            source         VARCHAR NOT NULL,
+            is_backfilled  BOOLEAN NOT NULL DEFAULT false,
+            backfilled_at  TIMESTAMPTZ
+        )";
+    if sqlx::query(ddl).execute(&pool).await.is_err() {
+        // A parallel test creating the same table can win the race; once more settles it.
+        sqlx::query(ddl).execute(&pool).await.expect("create market_price_history");
+    }
+    let offset = (Uuid::new_v4().as_u128() % 250_000_000) as i64;
+    let open = DateTime::<Utc>::from_timestamp(978_307_200 + offset, 0).unwrap(); // 2001-01-01 + offset
+    let (read_at, seed_at) = (open + chrono::Duration::minutes(10), open + chrono::Duration::minutes(20));
+    // As the worker stores them: a completed hourly candle (price_usd = its close), its
+    // own read, and a DEXScreener seed (backfilled, no OHLC).
+    let candle = PriceCandle { timestamp: open, open: 0.0119, high: 0.0120, low: 0.0116, close: 0.0117, volume: Some(5.0) };
+    let added = upsert_price_candles(&pool, &[candle], PRICE_SOURCE_GECKOTERMINAL, chrono::Duration::hours(1), open + chrono::Duration::hours(2))
+        .await
+        .unwrap();
+    assert_eq!(added, 1);
+    insert_price_point(&pool, read_at, 0.01185, PRICE_SOURCE_RPC, false).await.unwrap();
+    insert_price_point(&pool, seed_at, 0.0118, PRICE_SOURCE_DEXSCREENER, true).await.unwrap();
+
+    let got = load_spot_points(&pool, open - chrono::Duration::minutes(1), open + chrono::Duration::minutes(30)).await;
+    for at in [open, read_at, seed_at] {
+        sqlx::query("DELETE FROM market_price_history WHERE timestamp = $1").bind(at).execute(&pool).await.unwrap();
+    }
+    assert_eq!(
+        got.unwrap(),
+        vec![
+            // The candle's open at its open time: 0.0119, not the 0.0117 close stored in price_usd.
+            SpotPoint { at: open, price_usd: 0.0119, source: "geckoterminal".to_string(), is_backfilled: true },
+            SpotPoint { at: read_at, price_usd: 0.01185, source: "uniswap_rpc".to_string(), is_backfilled: false },
+            SpotPoint { at: seed_at, price_usd: 0.0118, source: "dexscreener".to_string(), is_backfilled: true },
+        ]
+    );
 }
 
 #[test]
@@ -513,7 +654,7 @@ fn test_series_response_thins_spot_in_range_and_survives_a_failed_spot_read() {
     assert!(body["spot_error"].is_null());
     assert_eq!(body["fills"].as_array().unwrap().len(), 3);
     assert_eq!(body["whole_stack"]["status"], json!("ok"));
-    assert_eq!(body["whole_stack"]["opening"]["avg_cost_usd"], json!("0.01790000"));
+    assert_eq!(body["whole_stack"]["opening"]["avg_cost_usd"], json!("0.02000000"));
     assert_eq!(body["whole_stack"]["opening"]["source"], json!("test figures"));
 
     // Spot history unreadable: spot is null with the reason, fills and averages remain.
@@ -547,14 +688,14 @@ fn test_a_stored_snapshot_without_cost_basis_still_parses_as_unknown() {
     let old: DerivedMetrics = serde_json::from_value(v).unwrap();
     assert_eq!(old.cost_basis, None);
     // And a full block round-trips.
-    let cb = compute_cost_basis(Ok(&real_fills()), &test_opening(), Some(0.01153), Some(115000.0));
+    let cb = compute_cost_basis(Ok(&real_fills()), &test_opening(), Some(0.01153), Some(12000.0));
     let back: CostBasis = serde_json::from_value(serde_json::to_value(&cb).unwrap()).unwrap();
     assert_eq!(back, cb);
 }
 
 #[test]
 fn test_historical_rows_keep_the_cost_basis_figures_and_drop_the_repeated_prose() {
-    let cb = compute_cost_basis(Ok(&real_fills()), &test_opening(), Some(0.01153), Some(115000.0));
+    let cb = compute_cost_basis(Ok(&real_fills()), &test_opening(), Some(0.01153), Some(12000.0));
     assert!(!cb.plan_buys.includes.is_empty() && !cb.whole_stack.excludes.is_empty());
     let mut data = SnapshotData {
         wallet_balances: vec![],
@@ -590,9 +731,12 @@ const ADVICE_WORDS: [&str; 12] = [
     "bargain", "accumulate", "recommend", "consider", "underwater",
 ];
 
+/// Claims about things NockNock does not read (sells, LP activity).
+const UNREAD_CLAIMS: [&str; 3] = ["nothing was sold", "not sold", "never sold"];
+
 fn assert_no_advice(text: &str) {
     let lower = text.to_lowercase();
-    for w in ADVICE_WORDS {
+    for w in ADVICE_WORDS.iter().chain(UNREAD_CLAIMS.iter()) {
         assert!(!lower.contains(w), "\"{w}\" in: {text}");
     }
 }
@@ -610,15 +754,20 @@ fn test_mcp_cost_basis_lines_state_facts_for_every_state() {
     assert_no_advice(&text);
 
     // With an opening basis: labelled with the source, the instant and what is not tracked.
-    let cb = compute_cost_basis(Ok(&real_fills()), &test_opening(), Some(0.02), Some(115000.0));
+    let cb = compute_cost_basis(Ok(&real_fills()), &test_opening(), Some(0.02), Some(12000.0));
     let text = cost_basis_lines(&snapshot_with(Some(cb)));
     let whole = text.lines().nth(1).unwrap();
     assert_eq!(
         whole,
-        "• Whole-stack average cost: $0.017658 per NOCK on 93500.5774 NOCK ($1651.00). Operator-entered opening basis: 90000.0000 NOCK for $1611.00 as of 2026-11-14T12:00:00+00:00, source: test figures; plus 2 verified buy(s) since. At spot $0.020000 that NOCK is worth $1870.01: $219.01 above cost (+13.27%). Not tracked after the as-of: sells, LP rebalancing, fees earned, unrecorded buys."
+        "• Whole-stack average cost: $0.017777 per NOCK on 13500.5774 NOCK ($240.00). Operator-entered opening basis: 10000.0000 NOCK for $200.00 as of 2026-11-14T12:00:00+00:00, source: test figures; plus 2 verified buy(s) since. At spot $0.020000 the NOCK this basis covers is worth $270.01: $30.01 above cost (+12.50%). NockNock reads 12000 NOCK held now (wallet plus tracked LP). Not tracked after the as-of: sells, LP rebalancing, fees earned, unrecorded buys."
     );
     assert!(text.lines().next().unwrap().contains("$41.97 above cost (+69.95%)"), "{text}");
     assert_no_advice(&text);
+    // The value at spot is of the NOCK the basis covers; without the NOCK read now there
+    // is nothing to compare it with, and the line says so instead of staying silent.
+    let cb = compute_cost_basis(Ok(&real_fills()), &test_opening(), Some(0.02), None);
+    let text = cost_basis_lines(&snapshot_with(Some(cb)));
+    assert!(text.contains("the NOCK this basis covers is worth $270.01: $30.01 above cost (+12.50%). The NOCK held now is not reported by this snapshot. Not tracked"), "{text}");
 
     // No buys yet; ledger unread; bad config; no spot; a snapshot from before the field.
     let cb = compute_cost_basis(Ok(&[]), &OpeningBasisState::NotConfigured, Some(0.01153), None);
@@ -626,7 +775,7 @@ fn test_mcp_cost_basis_lines_state_facts_for_every_state() {
     let cb = compute_cost_basis(Err("the accumulation ledger could not be read this cycle"), &OpeningBasisState::NotConfigured, Some(0.01153), None);
     assert!(cost_basis_lines(&snapshot_with(Some(cb)))
         .starts_with("• Plan buys average cost: unavailable (the accumulation ledger could not be read this cycle)\n"));
-    let bad = resolve_opening_basis(Some(&opening_cfg(json!(90000), json!(null), json!(null), json!(null))), t(NOW));
+    let bad = resolve_opening_basis(Some(&opening_cfg(json!(10000), json!(null), json!(null), json!(null))), t(NOW));
     let cb = compute_cost_basis(Ok(&real_fills()), &bad, Some(0.01153), None);
     let text = cost_basis_lines(&snapshot_with(Some(cb)));
     assert!(text.contains("• Whole-stack average cost: configuration error. cost_basis.opening cannot be used: cost_usd is missing"), "{text}");
@@ -640,7 +789,7 @@ fn test_mcp_cost_basis_lines_state_facts_for_every_state() {
 
 #[test]
 fn test_portfolio_text_carries_the_cost_basis_lines_before_the_directive() {
-    let cb = compute_cost_basis(Ok(&real_fills()), &test_opening(), Some(0.01153), Some(115000.0));
+    let cb = compute_cost_basis(Ok(&real_fills()), &test_opening(), Some(0.01153), Some(12000.0));
     let data = snapshot_with(Some(cb));
     let text = format_portfolio_state_text(&data);
     let lines = cost_basis_lines(&data);
@@ -648,6 +797,18 @@ fn test_portfolio_text_carries_the_cost_basis_lines_before_the_directive() {
     let (basis_at, directive_at) = (text.find("• Plan buys average cost").unwrap(), text.find("• Tactical Directive").unwrap());
     assert!(basis_at < directive_at);
     assert_no_advice(&lines);
+}
+
+#[test]
+fn test_both_mcp_transports_say_the_portfolio_tool_carries_cost_basis() {
+    let clause = "the average cost of the plan's verified NOCK buys against spot (plus the whole-stack average when an opening basis is configured)";
+    for (name, source) in [("mcp_http.rs", include_str!("mcp_http.rs")), ("bin/mcp.rs", include_str!("bin/mcp.rs"))] {
+        let line = source
+            .lines()
+            .find(|l| l.contains("\"description\": \"Returns current sovereign portfolio balances"))
+            .unwrap_or_else(|| panic!("{name}: get_portfolio_state description not found"));
+        assert!(line.contains(clause), "{name}: {line}");
+    }
 }
 
 #[test]

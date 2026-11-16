@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
                         "tools": [
                             {
                                 "name": "get_portfolio_state",
-                                "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, native token balance, and tracked LP position totals.",
+                                "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, native token balance, tracked LP position totals, and the average cost of the plan's verified NOCK buys against spot (plus the whole-stack average when an opening basis is configured).",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {},

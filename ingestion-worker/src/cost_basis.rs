@@ -215,6 +215,10 @@ fn nock_units(v: f64) -> String {
 fn price(v: f64) -> String {
     format!("{:.6}", v)
 }
+/// A NOCK amount known only to the nearest whole NOCK.
+fn whole_nock(v: f64) -> String {
+    format!("{:.0}", v)
+}
 
 /// What `nock` is worth at `spot`, its signed difference from `cost`, and that difference
 /// as a percentage of the cost. All None without a price.
@@ -236,7 +240,9 @@ pub(crate) const PLAN_BUYS_EXCLUDES: [&str; 3] = [
 ///
 /// `fills` is the whole accumulation ledger, oldest first, or the reason it could not be
 /// read (then both layers that need it are `unavailable`, never "no buys"). `spot` and
-/// `held_nock` are this cycle's reads; None is reported as null.
+/// `held_nock` are this cycle's reads; None is reported as null. `held_nock` arrives
+/// rounded to a whole NOCK (it is the snapshot's `total_nock_amount`) and is reported
+/// that way: no decimals that were never read.
 pub(crate) fn compute_cost_basis(
     fills: std::result::Result<&[BasisFill], &str>,
     opening: &OpeningBasisState,
@@ -250,6 +256,7 @@ pub(crate) fn compute_cost_basis(
     );
 
     let plan_buys = match fills {
+        // The ledger was not read, so the count is unknown: `fills` stays null, never 0.
         Err(reason) => PlanBuysBasis {
             status: "unavailable".to_string(),
             reason: Some(reason.to_string()),
@@ -259,6 +266,8 @@ pub(crate) fn compute_cost_basis(
         },
         Ok([]) => PlanBuysBasis {
             status: "no_fills".to_string(),
+            // The ledger was read and holds no buy: a real zero.
+            fills: Some(0),
             includes: plan_notes.0.clone(),
             excludes: plan_notes.1.clone(),
             ..Default::default()
@@ -300,7 +309,7 @@ pub(crate) fn compute_cost_basis(
             PlanBuysBasis {
                 status: "ok".to_string(),
                 reason: None,
-                fills: fills.len() as i64,
+                fills: Some(fills.len() as i64),
                 spent_usdc: Some(usd(all.usdc)),
                 acquired_nock: Some(nock_units(all.nock)),
                 avg_cost_usd: all.avg().map(price),
@@ -348,7 +357,7 @@ pub(crate) fn compute_cost_basis(
                 opening_nock: Some(nock_units(o.nock)),
                 opening_cost_usd: Some(usd(o.cost_usd)),
                 opening_avg_cost_usd: Some(price(o.cost_usd / o.nock)),
-                held_nock: held_nock.filter(|h| h.is_finite()).map(nock_units),
+                held_nock: held_nock.filter(|h| h.is_finite()).map(whole_nock),
                 ..Default::default()
             };
             match fills {
@@ -407,7 +416,7 @@ pub(crate) fn compute_cost_basis(
 // Time series: fills with their running averages, and stored spot
 // ============================================================
 
-/// One stored NOCK/USD observation from `market_price_history`.
+/// One stored NOCK/USD observation from `market_price_history`: the price AT `at`.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SpotPoint {
     pub(crate) at: DateTime<Utc>,
@@ -417,6 +426,34 @@ pub(crate) struct SpotPoint {
 }
 
 impl SpotPoint {
+    /// The price a stored row gives for its own `timestamp`. None when it gives none.
+    ///
+    /// The table holds two kinds of row. An observation (the worker's own read, or the
+    /// single DEXScreener seed) is stamped when it was taken and has no OHLC columns:
+    /// its `price_usd` is the price at `timestamp`. A third-party candle is stored at its
+    /// OPEN time with `price_usd` set to its CLOSE, which is the price one candle period
+    /// later (an hour, or a day). For a candle the price at `timestamp` is its open, so
+    /// that is what is used here; the close is never placed at the open time. A candle
+    /// whose open is not a positive number yields no point rather than its close.
+    pub(crate) fn from_stored(
+        timestamp: DateTime<Utc>,
+        price_usd: f64,
+        open_usd: Option<f64>,
+        source: &str,
+        is_backfilled: bool,
+    ) -> Option<Self> {
+        let at_timestamp = match open_usd {
+            Some(open) => open,
+            None => price_usd,
+        };
+        (at_timestamp.is_finite() && at_timestamp > 0.0).then(|| Self {
+            at: timestamp,
+            price_usd: at_timestamp,
+            source: source.to_string(),
+            is_backfilled,
+        })
+    }
+
     fn to_json(&self) -> serde_json::Value {
         json!({
             "at": self.at.to_rfc3339(),
@@ -427,18 +464,18 @@ impl SpotPoint {
     }
 }
 
-/// The stored observation nearest `at`, if one lies within `window`. `points` must be
-/// sorted oldest first. None means there is no price for that time: the caller reports
-/// null and never reaches for a farther point.
+/// The stored price that stands for `at`, if one lies within `window` of it. `points`
+/// must be sorted oldest first. Among the points inside the window, the worker's own
+/// contemporaneous read nearest `at` is taken; only when there is none is the nearest
+/// backfilled (third-party) point used. None means there is no price for that time: the
+/// caller reports null and never reaches for a farther point.
 pub(crate) fn nearest_spot(points: &[SpotPoint], at: DateTime<Utc>, window: chrono::Duration) -> Option<&SpotPoint> {
     let i = points.partition_point(|p| p.at < at);
     let distance = |p: &SpotPoint| (p.at - at).num_milliseconds().abs();
-    [i.checked_sub(1), Some(i)]
-        .into_iter()
-        .flatten()
-        .filter_map(|j| points.get(j))
-        .min_by_key(|p| distance(p))
-        .filter(|p| distance(p) <= window.num_milliseconds())
+    let within = |p: &&SpotPoint| distance(p) <= window.num_milliseconds();
+    let before = points[..i].iter().rev().take_while(within);
+    let after = points[i..].iter().take_while(within);
+    before.chain(after).min_by_key(|p| (p.is_backfilled, distance(p)))
 }
 
 /// The bucket width that keeps a range within `max_points`: the smallest of a fixed
@@ -479,8 +516,8 @@ pub(crate) fn downsample_spot(points: &[SpotPoint], bucket_seconds: i64) -> Vec<
 /// - `avg_cost_usd`: running average across every plan in the ledger;
 /// - `whole_stack_avg_cost_usd`: the blended average, only when an opening basis is set
 ///   and the fill was confirmed after it (null otherwise);
-/// - `spot_at_fill`: the stored spot nearest the fill's block time, or null when none
-///   lies within the match window.
+/// - `spot_at_fill`: the stored price that stands for the fill's block time (see
+///   `nearest_spot`), or null when none lies within the match window.
 pub(crate) fn fill_series(fills: &[BasisFill], opening: Option<&OpeningBasis>, spot: &[SpotPoint]) -> Vec<serde_json::Value> {
     let window = chrono::Duration::minutes(COST_BASIS_SPOT_MATCH_WINDOW_MINUTES);
     let mut all = Totals::default();
@@ -617,14 +654,15 @@ pub(crate) async fn load_basis_fills(db: &PgPool) -> std::result::Result<Vec<Bas
         .collect()
 }
 
-/// Stored spot between two instants, oldest first.
+/// Stored spot between two instants, oldest first. Each row becomes the price at its own
+/// timestamp (`SpotPoint::from_stored`): a candle contributes its open, not its close.
 pub(crate) async fn load_spot_points(
     db: &PgPool,
     from: DateTime<Utc>,
     to: DateTime<Utc>,
 ) -> std::result::Result<Vec<SpotPoint>, String> {
     let rows = sqlx::query(
-        "SELECT timestamp, price_usd, source, is_backfilled FROM market_price_history \
+        "SELECT timestamp, price_usd, open_usd, source, is_backfilled FROM market_price_history \
          WHERE timestamp >= $1 AND timestamp <= $2 ORDER BY timestamp ASC",
     )
     .bind(from)
@@ -638,14 +676,13 @@ pub(crate) async fn load_spot_points(
     Ok(rows
         .iter()
         .filter_map(|r| {
-            let price_usd: f64 = r.try_get("price_usd").ok()?;
-            (price_usd.is_finite() && price_usd > 0.0).then_some(())?;
-            Some(SpotPoint {
-                at: r.try_get("timestamp").ok()?,
-                price_usd,
-                source: r.try_get("source").ok()?,
-                is_backfilled: r.try_get("is_backfilled").ok()?,
-            })
+            SpotPoint::from_stored(
+                r.try_get("timestamp").ok()?,
+                r.try_get("price_usd").ok()?,
+                r.try_get::<Option<f64>, _>("open_usd").ok()?,
+                &r.try_get::<String, _>("source").ok()?,
+                r.try_get("is_backfilled").ok()?,
+            )
         })
         .collect())
 }

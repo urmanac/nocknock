@@ -13,9 +13,10 @@ fn text<'a>(v: Option<&'a Value>, key: &str) -> Option<&'a str> {
     v.and_then(|o| o.get(key)).and_then(|x| x.as_str()).filter(|s| !s.is_empty())
 }
 
-/// "At spot $S that NOCK is worth $V: $D below cost (-P%)." or the reason there is no
-/// comparison. The difference is the snapshot's own signed figure, never recomputed.
-fn at_spot_sentence(layer: Option<&Value>, spot: Option<&str>) -> String {
+/// "At spot $S <subject> is worth $V: $D below cost (-P%)." or the reason there is no
+/// comparison. `subject` names the NOCK being valued. The difference is the snapshot's
+/// own signed figure, never recomputed.
+fn at_spot_sentence(layer: Option<&Value>, spot: Option<&str>, subject: &str) -> String {
     let (Some(spot), Some(value), Some(diff)) =
         (spot, text(layer, "value_at_spot_usd"), text(layer, "unrealized_usd"))
     else {
@@ -30,7 +31,7 @@ fn at_spot_sentence(layer: Option<&Value>, spot: Option<&str>) -> String {
         Ok(_) => format!("${} above cost{pct}", diff.trim()),
         Err(_) => "difference unavailable".to_string(),
     };
-    format!("At spot ${spot} that NOCK is worth ${value}: {relation}.")
+    format!("At spot ${spot} {subject} is worth ${value}: {relation}.")
 }
 
 fn plan_buys_line(cb: &Value, spot: Option<&str>) -> String {
@@ -45,7 +46,7 @@ fn plan_buys_line(cb: &Value, spot: Option<&str>) -> String {
                 get("avg_cost_usd"),
                 get("spent_usdc"),
                 get("acquired_nock"),
-                at_spot_sentence(layer, spot)
+                at_spot_sentence(layer, spot, "that NOCK")
             )
         }
         Some("no_fills") => format!("{label}: no verified buys recorded yet"),
@@ -63,8 +64,14 @@ fn whole_stack_line(cb: &Value, spot: Option<&str>) -> String {
         Some("ok") => {
             let get = |k: &str| text(layer, k).unwrap_or("unavailable");
             let since = layer.and_then(|l| l.get("fills_since")).and_then(|x| x.as_i64()).unwrap_or(0);
+            // The value at spot is of the NOCK the basis covers, which is not a reading of
+            // the wallet. The NOCK read now goes beside it so the two can be compared.
+            let held = match text(layer, "held_nock") {
+                Some(h) => format!(" NockNock reads {h} NOCK held now (wallet plus tracked LP)."),
+                None => " The NOCK held now is not reported by this snapshot.".to_string(),
+            };
             format!(
-                "{label}: ${} per NOCK on {} NOCK (${}). Operator-entered opening basis: {} NOCK for ${} as of {}, source: {}; plus {since} verified buy(s) since. {} Not tracked after the as-of: sells, LP rebalancing, fees earned, unrecorded buys.",
+                "{label}: ${} per NOCK on {} NOCK (${}). Operator-entered opening basis: {} NOCK for ${} as of {}, source: {}; plus {since} verified buy(s) since. {}{held} Not tracked after the as-of: sells, LP rebalancing, fees earned, unrecorded buys.",
                 get("avg_cost_usd"),
                 get("basis_nock"),
                 get("basis_cost_usd"),
@@ -72,7 +79,7 @@ fn whole_stack_line(cb: &Value, spot: Option<&str>) -> String {
                 get("opening_cost_usd"),
                 get("as_of"),
                 get("source"),
-                at_spot_sentence(layer, spot)
+                at_spot_sentence(layer, spot, "the NOCK this basis covers")
             )
         }
         Some("not_configured") => format!(

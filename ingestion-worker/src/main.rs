@@ -663,7 +663,9 @@ struct PlanBuysBasis {
     status: String,
     /// Why the figures are unavailable; null otherwise.
     reason: Option<String>,
-    fills: i64,
+    /// Verified buys counted. Null when the ledger could not be read (unknown, not 0);
+    /// 0 only when it was read and holds none.
+    fills: Option<i64>,
     spent_usdc: Option<String>,
     acquired_nock: Option<String>,
     /// Σ USDC spent / Σ NOCK received; null without a verified buy.
@@ -724,8 +726,8 @@ struct WholeStackBasis {
     value_at_spot_usd: Option<String>,
     unrealized_usd: Option<String>,
     unrealized_pct: Option<String>,
-    /// NOCK NockNock reads now (wallet plus tracked LP), for comparison with
-    /// `basis_nock`: the two differ by everything the basis does not track.
+    /// NOCK NockNock reads now (wallet plus tracked LP), to the nearest whole NOCK, for
+    /// comparison with `basis_nock`: the two differ by everything the basis does not track.
     held_nock: Option<String>,
     #[serde(default)]
     includes: Vec<String>,

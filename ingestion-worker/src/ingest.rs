@@ -217,7 +217,8 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     }
     // Cost basis (issue #98): plan buys from the accumulation ledger, and the whole stack
     // only when the operator configured an opening basis. A failed ledger read is stated
-    // in the block (`unavailable`); it does not fail the cycle.
+    // in the block (`unavailable`); it does not fail the cycle. The NOCK held is this
+    // snapshot's own total, which is a whole number of NOCK, and is reported as one.
     let held_nock = derived_metrics.global_status.total_nock_amount.trim().parse::<f64>().ok();
     derived_metrics.cost_basis =
         Some(cost_basis_for_cycle(state, raw_data.spot_price_nock_usd, held_nock).await);
