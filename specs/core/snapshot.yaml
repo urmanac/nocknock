@@ -175,20 +175,23 @@ components:
           description: Owning wallet
         protocol:
           type: string
-          enum: [uniswap-v4, uniswap-v3, aerodrome]
-          description: AMM family (aerodrome retained for historical rows only)
+          enum: [uniswap-v4, uniswap-v3, aerodrome, aerodrome-cl]
+          description: >
+            AMM family. aerodrome is an Aero basic volatile pool (an LP-token share,
+            full range). aerodrome-cl is an Aero concentrated-liquidity (Slipstream)
+            NFT position, staked in its gauge or held by the wallet (v0.6.0).
         nft_id:
           type: integer
           description: Position NFT token id on the position manager
           example: 3163431
         pool_id:
           type: string
-          description: Uniswap v4 bytes32 poolId or v3 pool contract address
+          description: Uniswap v4 bytes32 poolId, or the pool contract address (v3, aerodrome, aerodrome-cl)
         npm_address:
           type: string
           pattern: '^0x[a-fA-F0-9]{40}$'
           nullable: true
-          description: v3 NonfungiblePositionManager (v3 positions only)
+          description: The position manager that minted the NFT (uniswap-v3 and aerodrome-cl positions only)
         fee_tier_bps:
           type: integer
           description: Fee tier in basis points (200 = 2%, 75 = 0.75%)
@@ -241,6 +244,24 @@ components:
         full_range:
           type: boolean
           description: True for a position spanning every price (an Aerodrome volatile pool). It cannot go out of range; lower_price/upper_price are then "0" and not meaningful. (2.2.0)
+        tick_spacing:
+          type: integer
+          description: aerodrome-cl only. The pool's tick spacing (200 for a CL200 pool). Absent for every other protocol. fee_tier_bps is the pool's current swap fee, which is dynamic on Aero CL pools. (v0.6.0)
+          example: 200
+        staked_in_gauge:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{40}$'
+          description: aerodrome-cl only. The gauge that holds the position NFT, present when the tracked wallet staked it there (proved each cycle by the gauge's stakedContains). Absent when the wallet holds the NFT itself. (v0.6.0)
+        fees_note:
+          type: string
+          description: >
+            Present when tokens_owed_0, tokens_owed_1 and fees_usd are NOT a read of
+            LP-claimable fees; it is the reason and clients show it in their place,
+            never "$0 earned". A staked aerodrome-cl position: swap fees on staked
+            liquidity go to the gauge, and the AERO rewards earned instead are not
+            read (#93). Absent when the fee figures were read, which is every
+            other position: an unstaked aerodrome-cl position's fees are read from
+            a collect() simulation, and a revert there fails the cycle. (v0.6.0)
 
     PositionToken:
       type: object
@@ -285,7 +306,11 @@ components:
           example: "500000.00"
         fee_accrued_usd:
           type: string
-          description: Unclaimed fees in USD (decimal string)
+          description: >
+            Unclaimed fees in USD (decimal string). "0.000000" is NOT an amount
+            earned when the position at the same index of `positions` carries a
+            fees_note (a staked aerodrome-cl position, v0.6.0): its LP-claimable
+            fees are not a figure at all, and the note is the reason.
           example: "123.45"
         fee_tier_bps:
           type: integer
@@ -383,10 +408,19 @@ components:
           type: string
         amount:
           type: string
-          description: Raw fee amount (decimal string)
+          description: >
+            Either the unclaimed amounts ("0.01 USDC + 2.5 NOCK"), or, when the
+            position has no LP-claimable fee figure, the reason in their place. A
+            reason always starts with "not LP-claimable": an Aero basic pool whose
+            claimFees() reverts, or (v0.6.0) an aerodrome-cl position staked in
+            its gauge, whose text is positions[].fees_note. Clients test for that
+            prefix and print the reason instead of an amount.
         amount_usd:
           type: string
-          description: USD value (decimal string)
+          description: >
+            USD value (decimal string). When `amount` is a "not LP-claimable"
+            reason this is "0.000000" and is NOT an amount earned: nothing was
+            read, and it adds nothing to the claimable total.
         claimable:
           type: boolean
           description: Whether fees are currently claimable (gas-economic)
@@ -562,7 +596,7 @@ components:
             $ref: '#/components/schemas/LpSuggestion'
         excluded:
           type: array
-          description: Tracked positions deliberately left out, with the reason (2.2.0). Since 2.3.0 a position with an ETH or WETH leg is always excluded (wallet ETH is gas, not investable capital) and its share goes to the eligible positions.
+          description: Tracked positions deliberately left out, with the reason (2.2.0). Since 2.3.0 a position with an ETH or WETH leg is always excluded (wallet ETH is gas, not investable capital) and its share goes to the eligible positions. Since v0.6.0 an aerodrome-cl position is always excluded, whatever its pair, because no verified way to add to its NFT exists (the Aero app's deposit link starts a new position).
           items:
             type: object
             properties:
@@ -978,6 +1012,14 @@ components:
             Gas-economic recommendation. not_claimable marks an Aero pool whose
             claimFees() reverts: its fees are not LP-claimable and AERO rewards are
             not read (#93); claimable_usd is then 0.00 and is not an amount earned.
+            Since v0.6.0 also an aerodrome-cl position staked in its gauge (see
+            note).
+        note:
+          type: string
+          description: >
+            With not_claimable, the position's own reason when it has one: an
+            aerodrome-cl position staked in its gauge. Absent otherwise; an Aero
+            basic pool carries no note. (v0.6.0)
 
     # ============================================================
     # INPUT TYPES FOR WASM FUNCTIONS

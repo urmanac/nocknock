@@ -32,6 +32,8 @@ const SOURCE_LABELS: Record<string, string> = {
 };
 import type { DerivedMetrics } from './types/snapshot';
 import { POSITION_COLORS, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText, velocityRowText } from './positions.ts';
+import { isAeroProtocol, positionFeesText } from './aeroCl.ts';
+import { PositionStakingLine, RangeSideList } from './components/PositionRangeNotes.tsx';
 import { floorState, floorDeltaText, floorSummaryText, regimeLabel, regimeTone } from './floor.ts';
 import { buildChartRows, compositionReadout, syncWindowOrDefault, type ChartSeries, type GapRow } from './timeline.ts';
 import { ethUsdPrice, gasLine, hwmSubtitle, pillarLine } from './pillars.ts';
@@ -162,6 +164,7 @@ function Dashboard() {
     gasBreakEven: parseFloat(c.gas_break_even_usd),
     ratio: c.efficiency_ratio,
     action: c.recommended_action,
+    note: c.note,
   }));
 
   // Zero-mock: never fabricate a floor target. A missing field is '—'/unavailable; the
@@ -374,7 +377,7 @@ function Dashboard() {
                   ...styles.positionBadge,
                   ...(p.protocol === 'uniswap-v4'
                     ? { background: '#0c4a6e22', color: '#38bdf8', border: '1px solid #0284c7' }
-                    : p.protocol === 'aerodrome'
+                    : isAeroProtocol(p.protocol)
                       ? { background: '#7c2d1222', color: '#fdba74', border: '1px solid #c2410c' }
                       : { background: '#3b076422', color: '#c084fc', border: '1px solid #7e22ce' }),
                 }}>
@@ -398,8 +401,9 @@ function Dashboard() {
                 Range: {positionRangeText(p)}
               </div>
               <div style={styles.positionCardMeta}>
-                {p.token0.symbol}: {p.amount0} ({p.token1.symbol}: {p.amount1}) · Fees: ${p.fees_usd}
+                {p.token0.symbol}: {p.amount0} ({p.token1.symbol}: {p.amount1}) · {positionFeesText(p)}
               </div>
+              <PositionStakingLine position={p} style={styles.positionCardMeta} />
               <div style={styles.positionCardMeta}>
                 {p.protocol === 'aerodrome' ? 'LP token' : `#${p.nft_id}`} · {p.network}{p.is_price_source ? ' · price source' : ''}
               </div>
@@ -536,6 +540,7 @@ function Dashboard() {
               <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </BarChart>
           </ResponsiveContainer>
+          <RangeSideList positions={positionsList} poolMechanics={rawData?.pool_mechanics} />
           <div style={{ marginTop: 12, fontSize: '0.75rem', color: '#aaa', fontFamily: 'monospace', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span>Spot Price: <strong>${metrics?.tick_bracket_hypervisor?.current_price || '0.00'}</strong></span>
             {tickData.some((t: any) => t.converted) && (

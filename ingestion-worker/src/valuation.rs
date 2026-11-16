@@ -86,6 +86,10 @@ pub(crate) fn build_position_snapshots(raw_positions: &[RawPosition], nock_usd: 
                 is_price_source: p.is_price_source,
                 pool_active: None, // filled by apply_pool_activity once pool reads are in
                 full_range: is_full_range(p.tick_lower, p.tick_upper),
+                // Filled by apply_position_facts for the protocols that have them.
+                tick_spacing: None,
+                staked_in_gauge: None,
+                fees_note: None,
             }
         })
         .collect()
@@ -101,18 +105,57 @@ pub(crate) fn apply_pool_activity(positions: &mut [Position], pool_liquidity: &H
     }
 }
 
+/// Stamp each snapshot position with the facts only its protocol has (v0.6.0, #91):
+/// an Aero CL position's tick spacing, the gauge it is staked in, and the reason its
+/// fee figure is not a read of LP-claimable fees. Positions without an entry are left
+/// exactly as built. Run before build_contract_fees, which prints the reason.
+pub(crate) fn apply_position_facts(positions: &mut [Position], facts: &HashMap<String, PositionFacts>) {
+    for p in positions.iter_mut() {
+        if let Some(f) = facts.get(&p.position_id) {
+            p.tick_spacing = f.tick_spacing;
+            p.staked_in_gauge = f.staked_in_gauge.clone();
+            p.fees_note = f.fees_note.clone();
+        }
+    }
+}
+
+/// The snapshot's `positions` array for one cycle's reads: built, then stamped with pool
+/// activity and the per-protocol facts. The ONE place those three steps are chained:
+/// fetch_raw_data (for `contract_fees`) and run_ingestion_cycle (for the published
+/// snapshot) both call it, so what is published can never lack a stamp the fee rows
+/// were built from (the v0.6.0 pre-release bug: `staked_in_gauge` and `fees_note` were
+/// stamped only on the copy used for `contract_fees`). Pure.
+pub(crate) fn snapshot_positions_from(
+    raw_positions: &[RawPosition],
+    nock_usd: f64,
+    eth_usd: f64,
+    pool_liquidity: &HashMap<String, String>,
+    position_facts: &HashMap<String, PositionFacts>,
+) -> Vec<Position> {
+    let mut positions = build_position_snapshots(raw_positions, nock_usd, eth_usd);
+    apply_pool_activity(&mut positions, pool_liquidity);
+    apply_position_facts(&mut positions, position_facts);
+    positions
+}
+
+/// `snapshot_positions_from` over a finished cycle's reads. Pure.
+pub(crate) fn snapshot_positions(raw: &RawOnChainData) -> Vec<Position> {
+    snapshot_positions_from(
+        &raw.positions,
+        raw.spot_price_nock_usd,
+        raw.live_eth_price_usd,
+        &raw.pool_liquidity,
+        &raw.position_facts,
+    )
+}
+
 /// One PoolMechanic per tracked position's pool. volatile_assets carry the tracked
 /// wallet's amounts in that pool (NOT pool-wide reserves).
 pub(crate) fn build_pool_mechanics(raw_positions: &[RawPosition], nock_usd: f64, eth_usd: f64) -> Vec<PoolMechanic> {
     raw_positions
         .iter()
         .map(|p| {
-            let platform = match p.protocol.as_str() {
-                "uniswap-v4" => "UniswapV4",
-                "uniswap-v3" => "UniswapV3",
-                "aerodrome" => "Aerodrome",
-                _ => "Other",
-            };
+            let platform = pool_platform(&p.protocol);
             let p0 = leg_usd_price(&p.token0, nock_usd, eth_usd);
             let p1 = leg_usd_price(&p.token1, nock_usd, eth_usd);
             PoolMechanic {
@@ -144,35 +187,29 @@ pub(crate) fn build_pool_mechanics(raw_positions: &[RawPosition], nock_usd: f64,
 }
 
 /// One ContractFee per tracked position with its unclaimed fees. A position listed in
-/// `not_lp_claimable` (an Aero pool whose claimFees() reverts) says so in `amount`
-/// and is not claimable, rather than reading as $0 of fees.
+/// `not_lp_claimable` (an Aero pool whose claimFees() reverts, or an Aero CL position
+/// staked in its gauge) says so in `amount` and is not claimable,
+/// rather than reading as $0 of fees. An Aero CL position carries its own reason
+/// (`fees_note`, stamped by apply_position_facts).
 pub(crate) fn build_contract_fees(positions: &[Position], live_gas_cost_usd: f64, not_lp_claimable: &[String]) -> Vec<ContractFee> {
     positions
         .iter()
         .map(|p| {
-            let not_claimable = not_lp_claimable.iter().any(|id| id == &p.position_id);
-            let label = match p.protocol.as_str() {
-                "uniswap-v4" => "Uniswap V4".to_string(),
-                "uniswap-v3" => "Uniswap V3".to_string(),
-                "aerodrome" => "Aerodrome".to_string(),
-                _ => p.protocol.clone(),
-            };
+            // A position with a fees_note has no fee figure even if a caller left it out
+            // of `not_lp_claimable`: the note is the position's own statement.
+            let not_claimable =
+                p.fees_note.is_some() || not_lp_claimable.iter().any(|id| id == &p.position_id);
             ContractFee {
-                contract_address: if p.protocol == "uniswap-v3" {
-                    p.npm_address.clone().unwrap_or_else(|| p.pool_id.clone())
-                } else if p.protocol == "aerodrome" {
-                    p.pool_id.clone()
-                } else {
-                    UNISWAP_V4_POSM_BASE.to_string()
-                },
+                contract_address: fee_contract_for(
+                    &p.protocol,
+                    p.npm_address.as_deref(),
+                    &p.pool_id,
+                    p.staked_in_gauge.as_deref(),
+                ),
                 fee_token_address: p.token0.address.clone(),
-                fee_token_symbol: if p.protocol == "aerodrome" {
-                    format!("{}+{} ({})", p.token0.symbol, p.token1.symbol, label)
-                } else {
-                    format!("{}+{} ({} #{})", p.token0.symbol, p.token1.symbol, label, p.nft_id)
-                },
+                fee_token_symbol: fee_token_label(p),
                 amount: if not_claimable {
-                    AERO_NOT_LP_CLAIMABLE.to_string()
+                    fees_note_text(p.fees_note.as_deref())
                 } else {
                     format!(
                         "{:.p0$} {} + {:.p1$} {}",

@@ -279,8 +279,8 @@ paths:
               properties:
                 platform:
                   type: string
-                  enum: [aerodrome, uniswap-v4, uniswap-v3]
-                  description: aerodrome retained for historical ledger rows (tranche liquidated 2026-10-23)
+                  enum: [aerodrome, aerodrome-cl, uniswap-v4, uniswap-v3]
+                  description: The venue the claim was made on; the same values as a position's protocol. aerodrome-cl is an Aero concentrated-liquidity position (v0.6.0).
                 tx_hash:
                   type: string
                   description: 32-byte hex transaction hash (0x-prefixed or bare)
@@ -531,8 +531,8 @@ components:
       properties:
         platform:
           type: string
-          enum: [aerodrome, uniswap-v4, uniswap-v3]
-          description: aerodrome retained for historical ledger rows; new payloads are uniswap-v4 (and uniswap-v3 if a reachable canonical NPM is confirmed)
+          enum: [aerodrome, aerodrome-cl, uniswap-v4, uniswap-v3]
+          description: The position's protocol. An aerodrome-cl position (v0.6.0) staked in its gauge is always not_claimable; an unstaked one is a collect() on the Aero CL position manager.
         label:
           type: string
           example: "Collect Uniswap V4 LP fees (NOCK/USDC #3163431)"
@@ -568,8 +568,15 @@ components:
           enum: [success, failed, unavailable, not_claimable]
           description: >
             Clients MUST only dispatch "success". not_claimable: the Aero pool's
-            claimFees() reverts (no LP-claimable fees); the action is excluded from
-            estimated_gas_usd and net_after_gas_usd.
+            claimFees() reverts (no LP-claimable fees), or (v0.6.0) an aerodrome-cl
+            position is staked in its gauge, where swap fees go to the gauge;
+            simulation_detail carries the reason. The action is excluded from
+            estimated_gas_usd and net_after_gas_usd. unavailable: not simulated or
+            the simulation got no answer; (v0.6.0) also an aerodrome-cl position
+            that is not in the latest snapshot yet, or whose snapshot row carries
+            a fees_note without a gauge, in which case expected_amount_0/1 and
+            expected_usd are null (never a placeholder 0) and simulation_detail
+            is the reason.
         simulation_detail:
           type: string
           nullable: true

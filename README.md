@@ -35,10 +35,14 @@ In short:
 Everything comes from `ingestion-worker/config.yaml`:
 
 - `tracked_wallets`: the wallet to read.
-- `positions`: the LP positions to track (Uniswap v4, Uniswap v3, Aero volatile pools),
-  one of which is the NOCK/USD price source (`is_price_source: true`). Discovery-verified
-  identifiers for the original operator's positions are in
-  [`ONCHAIN_INTEGRATION.md`](ONCHAIN_INTEGRATION.md) §5.
+- `positions`: the LP positions to track (Uniswap v4, Uniswap v3, Aero volatile pools and,
+  since v0.6.0, Aero concentrated "CL" positions with `protocol: aerodrome-cl`, staked or
+  not), one of which is the NOCK/USD price source (`is_price_source: true`). A position
+  whose `protocol` is none of these is a configuration error, never a guess.
+  Discovery-verified identifiers for the original operator's positions are in
+  [`ONCHAIN_INTEGRATION.md`](ONCHAIN_INTEGRATION.md) §5; Aero CL is §8. An Aero CL position
+  is counted only after you add it to `positions:` (example in `config.yaml.example`):
+  until then it is not tracked and the totals leave it out.
 - `operator_profile`: an optional NOCK floor, target weights, tax-reserve ratio and LP
   floor tolerance.
 - `accumulation_plan`: an optional dollar-cost-averaging plan that paces NOCK buys you

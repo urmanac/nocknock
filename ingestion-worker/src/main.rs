@@ -120,20 +120,24 @@ impl Default for OperatorProfile {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PositionConfig {
     pub id: String,
-    /// "uniswap-v4" | "uniswap-v3" | "aerodrome" (volatile x*y=k pool, full range)
+    /// "uniswap-v4" | "uniswap-v3" | "aerodrome" (volatile x*y=k pool, full range) |
+    /// "aerodrome-cl" (Aero concentrated-liquidity NFT, staked or not; v0.6.0, #91).
+    /// Any other value is a configuration error (adapters::validate_positions_config).
     pub protocol: String,
     #[serde(default = "default_network")]
     pub network: String,
-    /// Position NFT id (Uniswap). Unused for aerodrome, whose position is an LP-token
-    /// balance in `pool_address`.
+    /// Position NFT id (Uniswap, aerodrome-cl). Unused for aerodrome, whose position is
+    /// an LP-token balance in `pool_address`.
     #[serde(default)]
     pub nft_id: u64,
     /// aerodrome only: swap fee in basis points, for display (default 30 = 0.30%).
     #[serde(default)]
     pub fee_bps: Option<u32>,
-    /// aerodrome only: the pool's gauge. LP tokens staked there (the aero.xyz app stakes
+    /// aerodrome: the pool's gauge. LP tokens staked there (the aero.xyz app stakes
     /// on deposit) are added to the wallet's own balance; without it a staked position
     /// reads as empty.
+    /// aerodrome-cl: optional. The gauge is read from the pool itself; when this is set
+    /// it must match, or the cycle fails with a configuration error.
     #[serde(default)]
     pub gauge_address: Option<String>,
     /// Where the operator adds liquidity to this position, when the default link is
@@ -144,10 +148,12 @@ pub struct PositionConfig {
     /// v4: bytes32 poolId. Unused for v3 (pool comes from the NPM decode).
     #[serde(default)]
     pub pool_id: Option<String>,
-    /// v3 only: the canonical NonfungiblePositionManager for the network.
+    /// v3: the canonical NonfungiblePositionManager for the network.
+    /// aerodrome-cl: the Aero CL (Slipstream) position manager that minted the NFT.
     #[serde(default)]
     pub npm_address: Option<String>,
-    /// v3 only: pool contract address (pre-resolved via factory getPool).
+    /// v3, aerodrome, aerodrome-cl: pool contract address (v3: pre-resolved via factory
+    /// getPool; aerodrome-cl: checked each cycle against the NFT's tokens and tick spacing).
     #[serde(default)]
     pub pool_address: Option<String>,
     /// v4 only: currency0/currency1 per the pool's canonical ordering (validated
@@ -422,8 +428,25 @@ struct RawOnChainData {
     /// Per-position rebuild controls from config, keyed by position_id.
     rebuild_rules: HashMap<String, RebuildRule>,
     /// position_ids of Aero positions whose claimFees() reverts: their fees are not
-    /// LP-claimable (shown as such, never as $0 earned).
+    /// LP-claimable (shown as such, never as $0 earned). Since v0.6.0 (#91) also an
+    /// Aero CL position staked in its gauge (swap fees go to the gauge); its
+    /// `position_facts` entry carries the reason.
     fees_not_lp_claimable: Vec<String>,
+    /// Facts only some protocols have (tick spacing, gauge staking, why a fee figure is
+    /// absent), keyed by position_id (v0.6.0, #91). No entry means none apply.
+    position_facts: HashMap<String, PositionFacts>,
+}
+
+/// Per-position facts that only some protocols have (v0.6.0, #91). Carried beside
+/// RawPosition rather than in it; stamped onto the snapshot by apply_position_facts.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct PositionFacts {
+    /// Aero CL: the pool's tick spacing (the "200" in CL200).
+    tick_spacing: Option<i32>,
+    /// Aero CL: the gauge holding the NFT, when the tracked wallet staked it there.
+    staked_in_gauge: Option<String>,
+    /// Why this position reports no LP-claimable fee figure. None when fees were read.
+    fees_note: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
@@ -479,6 +502,19 @@ struct Position {
     /// no range to leave, and lower_price/upper_price are not meaningful. (2.2.0)
     #[serde(default)]
     full_range: bool,
+    /// Aero CL only: the pool's tick spacing, e.g. 200 for a CL200 pool. Absent for
+    /// every other protocol. (v0.6.0, #91)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tick_spacing: Option<i32>,
+    /// Aero CL only: the gauge the tracked wallet staked this NFT in. Absent when the
+    /// wallet holds the NFT itself and for every other protocol. (v0.6.0, #91)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    staked_in_gauge: Option<String>,
+    /// Present when tokens_owed_* and fees_usd are NOT a read of LP-claimable fees:
+    /// the reason, to show in their place (never "$0 earned"). Absent when fees were
+    /// read. (v0.6.0, #91)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fees_note: Option<String>,
 }
 
 /// Per-position NOCK series entry for the asset aggregation chart (v2.0.0;
@@ -954,6 +990,10 @@ struct FeeCollectionIndex {
     gas_break_even_usd: String,
     efficiency_ratio: f64,
     recommended_action: String,
+    /// With `not_claimable`: the position's own reason, when it has one (an Aero CL
+    /// position staked in its gauge). Absent otherwise. (v0.6.0, #91)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
 }
 
 // ============================================================
@@ -1003,6 +1043,12 @@ async fn main() -> Result<()> {
     // Load config: config.yaml.example is the base layer, config.yaml overrides it,
     // environment variables override both.
     let config = load_app_config("config.yaml.example", None, true)?;
+    // An unknown position protocol fails every cycle with this message (visible in
+    // /health); say it once at boot as well. The worker keeps serving so the error
+    // can be read from the dashboard and MCP rather than from a crash loop.
+    if let Err(e) = validate_positions_config(&config.positions) {
+        tracing::error!("{e}");
+    }
 
     // Initialize database
     let db = PgPool::connect(&config.database_url)
@@ -1320,3 +1366,5 @@ struct V3PositionDecoded {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_aero_cl;

@@ -13,7 +13,12 @@ export function positionLabel(p: any): string {
   if (!p) return 'Position';
   const proto =
     // The `aerodrome` protocol key is kept for ledger continuity; the venue is Aero now.
-    p.protocol === 'uniswap-v4' ? 'v4' : p.protocol === 'uniswap-v3' ? 'v3' : p.protocol === 'aerodrome' ? 'Aero' : p.protocol;
+    p.protocol === 'uniswap-v4' ? 'v4'
+      : p.protocol === 'uniswap-v3' ? 'v3'
+      : p.protocol === 'aerodrome' ? 'Aero'
+      // Aero concentrated liquidity (#91): "CL200" is how the Aero app names the pool.
+      : p.protocol === 'aerodrome-cl' ? `Aero CL${Number.isFinite(p.tick_spacing) ? p.tick_spacing : ''}`
+      : p.protocol;
   const fee = (p.fee_tier_bps / 100).toFixed(2).replace(/\.?0+$/, '');
   return `${p.token0.symbol}/${p.token1.symbol} ${proto} · ${fee}%`;
 }
@@ -60,6 +65,7 @@ export function protocolBadge(protocol: string): string {
   if (protocol === 'uniswap-v4') return 'UNISWAP V4';
   if (protocol === 'uniswap-v3') return 'UNISWAP V3';
   if (protocol === 'aerodrome') return 'AERO';
+  if (protocol === 'aerodrome-cl') return 'AERO CL';
   return String(protocol ?? '').toUpperCase();
 }
 
@@ -120,16 +126,20 @@ export function walletNockUnits(
 }
 
 /** Velocity panel row for one fee contract. A pool whose claimFees() reverts is not
- *  "$0 earned": its fees are not LP-claimable and its AERO rewards are not read (#93). */
+ *  "$0 earned": its fees are not LP-claimable and its AERO rewards are not read (#93).
+ *  A row that carries the worker's own reason (`note`, v0.6.0: an Aero CL position
+ *  staked in its gauge) prints that reason instead. */
 export function velocityRowText(g: {
   name: string;
   claimable: number;
   gasBreakEven: number;
   ratio: number;
   action: string;
+  note?: string | null;
 }): string {
   if (g.action === 'not_claimable') {
-    return `${g.name}: not LP-claimable (claimFees() reverts); AERO rewards not read (#93)`;
+    const note = (g.note ?? '').trim();
+    return `${g.name}: ${note || 'not LP-claimable (claimFees() reverts); AERO rewards not read (#93)'}`;
   }
   return `${g.name}: ${String(g.action).toUpperCase()} ($${g.claimable} earned / gas $${g.gasBreakEven} — ${Number(g.ratio).toFixed(0)}x ROI)`;
 }

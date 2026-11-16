@@ -149,8 +149,8 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
     let mut lp_fee_usd = 0.0f64;
     // ETH/WETH inside tracked LP: the LP part of the ETH pillar (issue #94).
     let mut lp_eth = 0.0f64;
-    // Per-position (address, label, fee_usd, LP-claimable) tuples for the velocity panel.
-    let mut fee_entries: Vec<(String, String, f64, bool)> = Vec::new();
+    // Per-position (address, label, fee_usd, LP-claimable, reason) tuples for the velocity panel.
+    let mut fee_entries: Vec<(String, String, f64, bool, Option<String>)> = Vec::new();
     for p in &raw.positions {
         let p0 = leg_usd_price(&p.token0, spot_price, raw.live_eth_price_usd);
         let p1 = leg_usd_price(&p.token1, spot_price, raw.live_eth_price_usd);
@@ -165,24 +165,21 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
         lp_fee_usd += fee_usd;
         if is_nock_token(&p.token0) { lp_fee_nock += p.fee0; }
         if is_nock_token(&p.token1) { lp_fee_nock += p.fee1; }
+        // Protocol-specific naming lives in adapters/mod.rs. A position with a
+        // fees_note (an Aero CL position, #91) has no LP-claimable fee figure.
+        let facts = raw.position_facts.get(&p.position_id);
+        let fees_note = facts.and_then(|f| f.fees_note.clone());
         fee_entries.push((
-            if p.protocol == "uniswap-v3" {
-                p.npm_address.clone().unwrap_or_else(|| p.pool_id.clone())
-            } else if p.protocol == "aerodrome" {
-                p.pool_id.clone()
-            } else {
-                UNISWAP_V4_POSM_BASE.to_string()
-            },
-            if p.protocol == "aerodrome" { position_label(p) } else { format!(
-                "{} ({}/{} {:.2}%, #{})",
-                if p.protocol == "uniswap-v4" { "Uniswap V4" } else { "Uniswap V3" },
-                p.token0.symbol,
-                p.token1.symbol,
-                p.fee_tier_bps as f64 / 100.0,
-                p.nft_id
-            ) },
+            fee_contract_for(
+                &p.protocol,
+                p.npm_address.as_deref(),
+                &p.pool_id,
+                facts.and_then(|f| f.staked_in_gauge.as_deref()),
+            ),
+            velocity_label(p),
             fee_usd,
-            !raw.fees_not_lp_claimable.contains(&p.position_id),
+            fees_note.is_none() && !raw.fees_not_lp_claimable.contains(&p.position_id),
+            fees_note,
         ));
     }
 
@@ -724,7 +721,7 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: fee_entries
                 .iter()
-                .map(|(addr, name, fee_usd, lp_claimable)| FeeCollectionIndex {
+                .map(|(addr, name, fee_usd, lp_claimable, note)| FeeCollectionIndex {
                     contract_address: addr.clone(),
                     contract_name: name.clone(),
                     claimable_usd: format!("{:.2}", fee_usd),
@@ -740,6 +737,7 @@ pub(crate) fn compute_derived_metrics_with_plan(raw: &RawOnChainData, prev_hwm: 
                     } else {
                         "not_claimable".to_string()
                     },
+                    note: note.clone(),
                 })
                 .collect(),
         },
