@@ -38,7 +38,8 @@ export function getProvider(): Promise<EthereumProviderInstance> {
         name: 'NockNock',
         description: 'Sovereign Asset State Room - Golden Path execution',
         url: typeof window !== 'undefined' ? window.location.origin : 'https://nocknock.xyz',
-        icons: [],
+        // Shown by the wallet app when it asks to pair (#89). Same origin as the dashboard.
+        icons: typeof window !== 'undefined' ? [`${window.location.origin}/icons/icon-192.png`] : [],
       },
     });
   }

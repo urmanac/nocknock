@@ -121,7 +121,8 @@ export function WalletConnectBadge() {
   );
 }
 
-export function LiteCockpit() {
+/** `top` and `bottom` are slots for cards owned by other files (#89: LitePhoneCards). */
+export function LiteCockpit({ top, bottom }: { top?: React.ReactNode; bottom?: React.ReactNode } = {}) {
   const [payload, setPayload] = React.useState<ClaimFeesPayload | null>(null);
   const [payloadError, setPayloadError] = React.useState<string | null>(null);
   const [ledger, setLedger] = React.useState<LedgerSummary | null>(null);
@@ -246,6 +247,8 @@ export function LiteCockpit() {
         </div>
       </header>
 
+      {top}
+
       {/* 1. Floor health */}
       <section style={lite.card}>
         <div style={lite.label}>SOVEREIGN FLOOR</div>
@@ -343,6 +346,8 @@ export function LiteCockpit() {
           );
         })}
       </section>
+
+      {bottom}
 
       <footer style={lite.footer}>
         Zero custody - the sovereign wallet signs in your wallet app; NockNock only proposes

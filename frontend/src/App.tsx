@@ -1,6 +1,8 @@
 import React from 'react';
 import { LiteCockpit, WalletConnectBadge } from './components/LiteCockpit';
 import { AccumulationPlanPanel } from './components/AccumulationPlanPanel';
+import { LitePhoneSetup, LiteStatusCard } from './components/LitePhoneCards';
+import { NotificationTestPanel } from './components/NotificationTestPanel';
 import { createRoot } from 'react-dom/client';
 import {
   AreaChart,
@@ -764,6 +766,11 @@ function Dashboard() {
             </div>
           </CanvasPanel>
         )}
+
+        {/* Notification channels and a labelled test send (#89) */}
+        <CanvasPanel title="Notifications (Channels & Test Send)">
+          <NotificationTestPanel />
+        </CanvasPanel>
       </main>
 
       {/* Stale Banner — non-obtrusive */}
@@ -1113,7 +1120,7 @@ root.render(
   <React.StrictMode>
     <ErrorBoundary>
       {new URLSearchParams(window.location.search).get('view') === 'lite' ? (
-        <LiteCockpit />
+        <LiteCockpit top={<LiteStatusCard />} bottom={<LitePhoneSetup />} />
       ) : (
         <Dashboard />
       )}
