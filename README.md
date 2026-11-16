@@ -54,7 +54,8 @@ Everything comes from `ingestion-worker/config.yaml`:
   refused if it has no in-range liquidity). Unclaimed AERO is shown beside uncollected LP
   fees and is not in the total until you claim it. Anything that cannot be read says so
   with the reason; it is never shown as 0. AERO is the token the Aero gauges pay
-  (`0x3f5bF3Ed…a4Ee`), not the older "Aerodrome" token with the same symbol.
+  (`0x3f5bF3Ed…a4Ee`), not the older "Aerodrome" token with the same symbol: a legacy
+  gauge that pays the older token is stated as not read, never shown as AERO.
 - `operator_profile`: an optional NOCK floor, target weights, tax-reserve ratio and LP
   floor tolerance.
 - `accumulation_plan`: an optional dollar-cost-averaging plan that paces NOCK buys you

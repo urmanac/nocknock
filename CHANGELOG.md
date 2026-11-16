@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   position has earned in its gauge and not claimed, and an AERO/USD price. NockNock
   states the amounts. It sets no target for AERO, puts no rebalancing pressure on it,
   builds no claim transaction for it and gives no advice to claim, sell, hold or
-  accumulate it; no directive reads an AERO figure.
+  accumulate it; no directive reads an AERO figure. A wallet holding only gas and AERO
+  is still "NOTHING TO TRACK YET", exactly as it would be without the AERO.
 - **Which AERO.** Two tokens on Base carry the symbol. The Aero gauges pay
   `0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee` (name "Aero", 18 decimals): in two real
   claims, one per gauge type, that token was minted to the claimer for exactly what
@@ -24,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Neither has `rewardToken()`, and the older `earned(address,uint256)` reverts on the CL
   gauge. An `aerodrome` position is read through its `gauge_address`; an `aerodrome-cl`
   position through the gauge the cycle proved it is staked in.
+- **A gauge that pays another token is not read as AERO.** A legacy Aerodrome gauge
+  (for example `0x4cbb6188…c3db`, the gauge of the legacy vAMM USDC/NOCK pool) answers
+  the same `earned(address)` but pays the older token `0x940181a9…8631`, and it does
+  have `rewardToken()`. So each cycle asks the gauge `rewardToken()` before `earned`: a
+  revert is the Aero app's gauge and is read; an answer other than NockNock's AERO is
+  stated on the position ("gauge … pays …, not AERO …") with no amount and no USD value.
 - **Price.** New optional config key `aero_price_pool`, an AERO/USDC pool whose `slot0`
   prices AERO. Default: the Aero CL200 AERO/USDC pool
   `0xd0acf293547457fb4fe9ee32ca93e89497626816`, the deepest found. Each cycle the pool's
@@ -36,7 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot fail the cycle and leaves AERO unpriced with the reason. A gauge read that
   reverts or fails is stated on that position ("unclaimed AERO not read (…)") and makes
   the unclaimed total null: never 0, never a partial sum. An `aerodrome` position with
-  no `gauge_address` says its AERO is not read.
+  no `gauge_address` says its AERO is not read, and it too makes the unclaimed total
+  null, because that position's AERO is part of what the wallet has earned.
 - **One total.** `total_portfolio_usd` now includes wallet AERO, and the cash and LP
   targets, deviation weights, the high-water mark and history all use that one total.
   **One-time step:** on the first cycle after the upgrade the total, and so the high-water
@@ -57,7 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LP-claimable now says why and then states its AERO: "not LP-claimable (claimFees()
   reverts); unclaimed AERO 0.121026 ($0.05)" in `contract_fees[].amount`, the velocity
   row's `note` and the MCP claim text. `positions[].fees_note` and the claim payload's
-  `simulation_detail` carry the reason alone.
+  `simulation_detail` carry the reason alone. A velocity row whose fees ARE claimable
+  (CLAIM_NOW, ACCUMULATE) says nothing about AERO, so a fee action never sits beside an
+  AERO amount; that position's AERO is on its card and in the pillar lines.
 - **Harvest ledger.** `POST /v1/execute/record-harvest` books an AERO `Transfer` to the
   wallet in the recorded transaction (a gauge claim mints it, so the sender is the zero
   address), valued from `aero_price_pool` read at the claim's block. When that read fails
@@ -66,11 +76,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   AERO row as "NockNock AERO reward claim (…)" and keeps the `income` label. With a
   `tax_reserve_ratio` set, a priced AERO row counts toward the virtual tax reserve like
   any other harvest row.
+- **Harvest ledger: one row per transaction and token, summed.** A claim from several
+  gauges in one transaction mints AERO to the wallet once per gauge. The ledger's key is
+  (transaction, token), so only the first mint was booked and the rest were reported as
+  already present. All Transfers of one token to the wallet in a recorded transaction
+  are now summed into its one row. This applies to USDC, NOCK and WETH as well, which
+  had the same limit. Rows recorded before this change are not rewritten.
+- **Harvest ledger: a row recorded without a price can be priced later.** If the price
+  read at the claim's block failed, the row was stored with no USD value and stayed that
+  way. Recording the same transaction again now fills the missing value from that
+  block's price (response field `priced`). A row that has a value is never changed.
 - **Dashboard.** A seventh stat card (AERO in the wallet), AERO lines under the pillar
   line (held, unclaimed per position, price, and the reason for anything not read), an
   unclaimed-AERO line on each staked position's card, and an AERO card in the Lite
   cockpit. None of them has a button. The composition readout no longer counts wallet
-  AERO as "other legs".
+  AERO as "other legs": it states it ("AERO $0.57 (wallet; not cash)"), so the panel's
+  Total equals the parts shown.
 - **Golden files.** `testdata/golden_snapshot.json` and `golden_snapshot_aero_cl.json`
   change by the new null fields, the AERO deviation row, the pillar line and the shortened
   reasons; no number moved. A new `testdata/golden_snapshot_aero_rewards.json` is built

@@ -274,6 +274,13 @@ paths:
         no usd_value, never a substitute. Record an AERO claim with the platform of the
         position it came from (aerodrome or aerodrome-cl). NockNock builds no AERO claim
         transaction and gives no advice to claim.
+        The ledger holds one row per (transaction, token). Several Transfers of one
+        token to the wallet in the transaction (a claim from two gauges mints AERO
+        twice) are summed into that one row.
+        Recording a transaction again never duplicates or changes a valued row. If a
+        row was recorded without a usd_value because the price read at the claim's
+        block failed, recording the same transaction again fills it from that block's
+        price; such rows are returned in `priced`.
         Nothing is recorded without on-chain verification. A 404 RECEIPT_NOT_FOUND
         also covers the Uniswap-app pending-broadcast quirk (approved but not yet
         broadcast): surface "approved, awaiting wallet broadcast" and retry.
@@ -313,10 +320,25 @@ paths:
                         block_number: { type: integer }
                   already_present:
                     type: integer
+                  priced:
+                    type: array
+                    description: >
+                      Rows that were already in the ledger with no usd_value and were
+                      given one by this call (same transaction, token and amount;
+                      valued at the claim's block). Empty in the usual case. (v0.6.0)
+                    items:
+                      type: object
+                      properties:
+                        platform: { type: string }
+                        tx_hash: { type: string }
+                        token_symbol: { type: string }
+                        amount_human: { type: string }
+                        usd_value: { type: string }
+                        block_number: { type: integer }
         '404':
           description: Receipt not found on-chain (may be pending broadcast in the wallet)
         '409':
-          description: Transfers already recorded (idempotent retry)
+          description: Transfers already recorded and nothing to fill in (idempotent retry)
         '422':
           description: Invalid platform/hash, reverted transaction, or no tracked transfers
         '503':

@@ -291,10 +291,12 @@ components:
           type: string
           description: >
             Why unclaimed_aero is absent for an Aero position that could earn AERO:
-            an aerodrome position with no gauge_address configured, or a gauge whose
-            earned() read reverted or failed this cycle. The read is optional: it
-            does not fail the cycle, and the value is never published as 0.
-            (v0.6.0, #93)
+            an aerodrome position with no gauge_address configured, a gauge whose
+            earned() read reverted or failed this cycle, or a gauge whose
+            rewardToken() names a token other than AERO (a legacy Aerodrome gauge
+            answers earned() in the older token 0x940181a9…8631; its figure is not
+            published as AERO). The read is optional: it does not fail the cycle,
+            and the value is never published as 0. (v0.6.0, #93)
 
     PositionToken:
       type: object
@@ -818,11 +820,14 @@ components:
           type: string
           nullable: true
           description: >
-            Sum of positions[].unclaimed_aero over the gauges that were read, 6
-            decimals. NOT counted in total_portfolio_usd. Null when any gauge read
-            failed (never a partial sum; aero_note names the position). "0.000000"
-            with no position carrying unclaimed_aero means no staked Aero position
-            is tracked. Null on a snapshot from before v0.6.0. (v0.6.0, #93)
+            Sum of positions[].unclaimed_aero, 6 decimals. NOT counted in
+            total_portfolio_usd. Stated only when every Aero position that could
+            earn AERO was read: null when any gauge read failed, when a gauge pays
+            another token, or when an aerodrome position has no gauge_address to
+            read (never a partial sum and never 0 for something not read; aero_note
+            names the position). "0.000000" means every gauge answered zero or, with
+            no position carrying unclaimed_aero, that no staked Aero position is
+            tracked. Null on a snapshot from before v0.6.0. (v0.6.0, #93)
           example: "12.043104"
         unclaimed_aero_usd:
           type: string
@@ -1121,10 +1126,12 @@ components:
             With not_claimable, the reason (an aerodrome-cl position staked in its
             gauge, or an Aero basic pool whose claimFees() reverts), followed since
             #93 by "; " and the position's AERO statement, the same text as in
-            contract_fees[].amount. On a claimable row of a position that also
-            earns AERO it is the AERO statement alone. Absent when the position has
-            neither; a snapshot from before #93 carries no note for an Aero basic
-            pool, and clients then say its AERO is not reported. (v0.6.0)
+            contract_fees[].amount. A claimable row (claim_now, claim_recommended,
+            accumulate) never carries an AERO statement: its action is about LP
+            fees, and an AERO amount beside it would read as advice about AERO. That
+            position's AERO is in positions[].unclaimed_aero. Absent when there is
+            nothing to say; a snapshot from before #93 carries no note for an Aero
+            basic pool, and clients then say its AERO is not reported. (v0.6.0)
 
     # ============================================================
     # INPUT TYPES FOR WASM FUNCTIONS

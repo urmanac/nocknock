@@ -595,6 +595,39 @@ length 1 and the token id:
 The wallet's unclaimed AERO at this block was therefore **12.043104 AERO**, worth
 **$5.03** at the price below. Its wallet AERO was 0: it has not claimed.
 
+### Legacy Aerodrome gauges answer the same call in the other token
+
+Read at **block 58093329** (`0x3766f11`, 2026-11-16T06:04:01Z, hash `0x0e07395b…2ebdf4`).
+
+| | Legacy basic gauge | Legacy CL gauge |
+|---|---|---|
+| Gauge | `0x4cbb6188c6101cacd4eb1126cc14882bd93dc3db` | `0xf33a96b5932d9e9b9a0eda447abd8c9d48d2e0c8` |
+| How it was found | Voter `0x16613524e02ad97eDfeF371bC883F2F5d6C480A5` `gauges(address)` `0xb9a09fd5` for the legacy vAMM USDC/NOCK pool `0x85f1aa3a…d626` | `gauge()` `0xa6f19c84` on the legacy Slipstream CL100 WETH/USDC pool `0xb2cc224c…dc59` (§8) |
+| `stakingToken()` `0x72f702f3` | `0x85f1aa3a70fedd1c52705c15baed143e675cd626` (that pool) | not read |
+| `rewardToken()` `0xf7c618c1` | `0x000…940181a94a35a4569e4529a3cdfb74e38fd98631`: the **older** token | the same older token |
+| `earned(address)` `0x008cc262` for the wallet | **answers**: one word, 0 | — |
+| `earned(address,uint256[])` `0xd942be03` for the wallet with `[]` | — | reverts |
+| `rewardRate()` `0x7b0a47ee` | `0x13b343813f9f3e` (still emitting) | not read |
+
+At the same block `rewardToken()` on the two Aero-app gauges above still reverts
+(`{"code":3,"message":"execution reverted"}`).
+
+A legacy basic gauge therefore answers the read NockNock uses, in a token that is not
+NockNock's AERO. An `aerodrome` position on the legacy pool with that gauge as its
+`gauge_address` would otherwise have its figure published as "unclaimed AERO" and priced
+from the AERO pool. So each cycle calls `rewardToken()` on the gauge before `earned`
+(`gauge_pays_aero`):
+
+- it reverts: the Aero app's gauge, shown below to pay `0x3f5bF3Ed…a4Ee`. `earned` is read;
+- it returns `0x3f5bF3Ed…a4Ee`: `earned` is read (no such gauge was found; allowed for);
+- it returns any other token: nothing is read as AERO. The position says "unclaimed AERO
+  not read (gauge … pays 0x9401…8631 (its rewardToken()), not AERO 0x3f5b…a4ee)", with
+  no amount and no USD value, and the unclaimed total is null;
+- the read fails or is not an address: not read, with that reason.
+
+The legacy CL gauge could not be misread in any case, since the array form of `earned`
+reverts there; the same check runs for it.
+
 ### A claim pays what `earned` said (two real claims by other accounts)
 
 | | Basic gauge | CL gauge |
@@ -620,6 +653,37 @@ The claim functions, by selector lookup only and never called by NockNock, are
 `claimEmissions(address,address)` `0x8ed86282` on the basic gauge and
 `claimEmissions(address,address,uint256[])` `0x09902477` on the CL gauge. Simulated from
 the wallet at the pinned block both return empty data without reverting.
+
+### A claim from several gauges in one transaction
+
+Tx `0xe32b6e476ceff9040c1e22b5a23e9ba2a8c4e5cff8221939e871e9ec84bb3a67`, block 58077008
+(`0x3762f50`), status success, sent by `0x0cf406ec…382b` to
+`0x091607c3355f5875400851efc6347a839d3b25f6` (a contract: `eth_getCode` returns code). Its
+receipt has 256 logs, among them
+fourteen AERO `Transfer`s from the zero address: seven mints to `0x091607c3…25f6`, one per
+CL gauge claimed, each followed by the further 5% to `0x9beb95cc…1156`.
+
+| Log index | AERO minted to `0x091607c3…25f6` (raw) |
+|---|---:|
+| `0x1d` | 472646160276911224 |
+| `0x41` | 1605459784569903980 |
+| `0x65` | 1506849352525191393 |
+| `0x8a` | 523941515033061636 |
+| `0xaf` | 242379159878096194 |
+| `0xd4` | 1270601896224565304 |
+| `0xf9` | 443269540123302401 |
+| **Sum** | **6065147408631032132** (6.065147408631032132 AERO) |
+
+The same receipt pays that account USDC seven times from seven different pools (for
+example `0x0d8bfc3d` from `0xf668e219…c8ec` and `0x1c459d9a` from `0x2836e062…4e75`).
+
+The harvest ledger's unique key is `(tx_hash, token_address)`, so such a receipt cannot be
+stored as one row per `Transfer`: the second insert would conflict with the first and be
+dropped. `merge_harvest_transfers` sums every `Transfer` of one token to the wallet into
+one row before the insert (amounts added as integers; the first sender is kept). The
+operator's two gauges claimed in one transaction would be two AERO mints and one ledger
+row of their sum. The recipient here is a contract; whether the Aero app batches a plain
+wallet's claims into one transaction was not established.
 
 ### AERO/USD price source
 
@@ -672,7 +736,9 @@ Zero liquidity is "Stale AERO/USD price: price pool … has zero in-range liquid
   stated beside them (`positions[].unclaimed_aero`, `global_status.unclaimed_aero_amount`)
   and counts once claimed. The read is optional: a revert or a failed read is stated as
   "unclaimed AERO not read (…)" on that position and makes the total null, never 0 and
-  never a partial sum. An `aerodrome` position with no `gauge_address` says so.
+  never a partial sum. An `aerodrome` position with no `gauge_address` says so and makes
+  the total null as well. A gauge whose `rewardToken()` names another token is not read
+  as AERO (see "Legacy Aerodrome gauges" above).
 - **The price** is required only while the wallet holds AERO (its value is in the total,
   so a failed read fails the cycle). While the wallet holds none, a failed read leaves
   `aero_price_usd` null with the reason in `aero_note`, the amounts stay, and the cycle
@@ -680,6 +746,10 @@ Zero liquidity is "Stale AERO/USD price: price pool … has zero in-range liquid
 - **A claim** recorded with `POST /v1/execute/record-harvest` books the AERO `Transfer`
   to the wallet, valued from the price pool at the claim's block, or with no USD value
   when that read fails. The Koinly export describes the row as an AERO reward claim.
+  Several AERO `Transfer`s to the wallet in one transaction are summed into one ledger
+  row (see "A claim from several gauges in one transaction" below). A row recorded with
+  no USD value is filled from the same block's price when the transaction is recorded
+  again; a valued row is never changed.
 - **No advice.** NockNock builds no claim transaction for AERO, sets no target, and no
   directive reads an AERO figure.
 
@@ -697,9 +767,14 @@ Zero liquidity is "Stale AERO/USD price: price pool … has zero in-range liquid
   `Transfer` would come from that contract rather than the zero address. The ledger books
   any AERO `Transfer` to the wallet in a recorded transaction, whatever its sender, so it
   would still be booked; a recorded transaction that merely buys AERO would be booked too.
-- **Other gauges.** Only these two gauges were read. Another basic gauge must answer
-  `earned(address)` and another CL gauge `earned(address,uint256[])`; one that does not is
-  reported as "not read", never as 0.
+- **Other gauges.** Of the Aero app's gauges only these two were read. Another basic
+  gauge must answer `earned(address)` and another CL gauge `earned(address,uint256[])`;
+  one that does not is reported as "not read", never as 0. A gauge that names a reward
+  token other than AERO is not read either (the two legacy gauges above). A gauge with no
+  `rewardToken()` is taken to be an Aero-app gauge and to pay AERO, which was shown for
+  these two only: a contract of another kind that reverts on `rewardToken()` and answers
+  `earned(address)` with a word would be read as AERO. `gauge_address` is the operator's
+  to set.
 - **AERO inside a position.** AERO is not in the position token registry, so a pool with
   an AERO leg cannot be tracked (the cycle fails and names the token).
 - **The names** `EmissionsClaimed`, `claimEmissions` and the others above come from a
