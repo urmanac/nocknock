@@ -84,8 +84,15 @@ pub(crate) const QUOTE_VENUES: [&str; 2] = [VENUE_AERO, VENUE_UNISWAP];
 pub(crate) const QUOTE_REQUEST_TIMEOUT_SECONDS: u64 = 8;
 pub(crate) const QUOTE_REQUEST_ATTEMPTS: u32 = 3;
 const QUOTE_RETRY_BACKOFF_MS: u64 = 200;
+/// The block read that pins the quotes may take this long; without a block nothing is
+/// quoted.
+pub(crate) const QUOTE_BLOCK_READ_TIMEOUT_SECONDS: u64 = 3;
+/// All fee reads of the two best routes together may take this long, each tried once.
+/// A fee not read in time is shown as "not read"; the quotes themselves stand.
+pub(crate) const QUOTE_FEE_BUDGET_SECONDS: u64 = 2;
 /// All quotes for a tranche are abandoned after this long, so a stalled RPC cannot
-/// hold up the cycle.
+/// hold up the cycle. The three budgets above fit inside it (asserted below), so this
+/// is a backstop: quotes that were read are not thrown away for a slow fee read.
 pub(crate) const QUOTE_TIMEOUT_SECONDS: u64 = 30;
 
 /// The venue's own swap page. Neither app documents a way to prefill both the tokens
@@ -459,9 +466,13 @@ const MAX_SQRT_RATIO_MINUS_ONE: (u128, u128) = (0xfffd_8963, 0xefd1_fc6a_5064_88
 
 /// Whether a quoter answer of the shape (amountOut, uint160[] sqrtPriceX96After, …)
 /// shows a pool driven to the end of its price range: the swap ran out of liquidity
-/// there, and the amount is for only the part of the input that did swap. The Aero
-/// Metaquoter and Uniswap QuoterV2 report this no other way. Zero entries (a basic-pool
-/// hop) are skipped. None when the answer is not that shape. Pure.
+/// there, and the amount is for only the part of the input that did swap. Uniswap
+/// QuoterV2 was observed to answer exactly so: a partial amount, the price pinned at
+/// the bound, no error. The Aero Metaquoter answers in the same shape, but what it says
+/// when an Aero concentrated pool has no liquidity left was not observed (the Aero
+/// pools on these routes hold full-range liquidity and fill any size at a collapsing
+/// price); the same check is applied to it, and a revert is handled as a revert. Zero
+/// entries (a basic-pool hop) are skipped. None when the answer is not that shape. Pure.
 pub(crate) fn pool_exhausted(hex: &str) -> Option<bool> {
     let clean = hex.trim_start_matches("0x");
     if !clean.is_ascii() {
@@ -496,8 +507,10 @@ pub(crate) fn pool_exhausted(hex: &str) -> Option<bool> {
 pub(crate) fn outcome_from_call(spec: &RouteSpec, result: std::result::Result<String, QuoteCallFailure>) -> QuoteOutcome {
     match result {
         Ok(hex) => {
-            // The V4Quoter reverts when a pool cannot fill the amount. The other two
-            // answer with a partial amount, which must never be shown as the quote.
+            // The V4Quoter reverts when a pool cannot fill the amount. QuoterV2 answers
+            // with a partial amount and the price at its bound, which must never be
+            // shown as the quote; the Metaquoter's answer has the same shape and gets
+            // the same check (its behaviour on a dry pool was not observed).
             let reports_prices = !matches!(spec.call, QuoteCall::UniswapV4Single { .. } | QuoteCall::UniswapV4Path { .. });
             if reports_prices {
                 match pool_exhausted(&hex) {
@@ -779,8 +792,10 @@ pub(crate) fn assemble_route_quotes(
 }
 
 /// Both venues unavailable for one stated reason (no RPC key, no block, a timeout).
-/// No block and no numbers: nothing was read. Pure.
-pub(crate) fn route_quotes_unavailable(amount_usdc: &str, reason: &str) -> RouteQuotes {
+/// No block and no quoted number: nothing was read. `spot` is the cycle's own reference
+/// spot, carried at full precision so a later refresh measures against the same figure
+/// the cycle would have used. Pure.
+pub(crate) fn route_quotes_unavailable(amount_usdc: &str, reason: &str, spot: Option<f64>) -> RouteQuotes {
     let venues = QUOTE_VENUES
         .iter()
         .map(|v| VenueQuote {
@@ -791,7 +806,7 @@ pub(crate) fn route_quotes_unavailable(amount_usdc: &str, reason: &str) -> Route
             ..Default::default()
         })
         .collect();
-    let mut q = assemble_route_quotes(amount_usdc, None, None, venues);
+    let mut q = assemble_route_quotes(amount_usdc, None, spot, venues);
     q.detail = Some(reason.to_string());
     q
 }
@@ -805,13 +820,15 @@ pub(crate) fn tranche_to_quote(enabled: bool, plan: Option<&AccumulationPlanStat
     Some((plan.tranche_usdc.clone(), raw))
 }
 
-/// A sentence pointing from the due-tranche advice to the quotes. It carries no number,
-/// so it never changes between cycles. Added only to the plan's own due-tranche advice
-/// and only when at least one venue was quoted. Pure.
+/// A sentence pointing from the due-tranche advice to the quotes. Added only to the
+/// plan's own due-tranche advice, whenever quotes were asked for (`quotes` is Some). It
+/// carries no number and does not depend on what the quoters answered: the advice text
+/// is part of the state hash, and a quote coming or going must not move it. Pure.
 pub(crate) fn with_route_quote_pointer(action: &str, details: String, quotes: Option<&RouteQuotes>) -> String {
-    const POINTER: &str = "Read-only route quotes for this amount on Aero and on Uniswap are listed with the plan.";
-    let quoted = quotes.map_or(false, |q| q.venues.iter().any(|v| v.status == "quoted"));
-    if quoted && action.contains("DCA TRANCHE DUE") && !details.contains(POINTER) {
+    const POINTER: &str =
+        "Read-only route quotes for this amount on Aero and on Uniswap, or why a venue could not be quoted, are listed with the plan.";
+    let requested = quotes.is_some();
+    if requested && action.contains("DCA TRANCHE DUE") && !details.contains(POINTER) {
         format!("{details} {POINTER}")
     } else {
         details
@@ -829,9 +846,31 @@ pub(crate) fn parse_block_header(resp: &serde_json::Value) -> Option<(i64, DateT
 
 // ---------------- Reads ----------------
 
+/// How long each step of one check may take. The defaults are the constants above;
+/// tests shorten them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct QuoteBudgets {
+    pub(crate) block_read: std::time::Duration,
+    pub(crate) request: std::time::Duration,
+    pub(crate) attempts: u32,
+    pub(crate) fees: std::time::Duration,
+}
+
+impl Default for QuoteBudgets {
+    fn default() -> Self {
+        Self {
+            block_read: std::time::Duration::from_secs(QUOTE_BLOCK_READ_TIMEOUT_SECONDS),
+            request: std::time::Duration::from_secs(QUOTE_REQUEST_TIMEOUT_SECONDS),
+            attempts: QUOTE_REQUEST_ATTEMPTS,
+            fees: std::time::Duration::from_secs(QUOTE_FEE_BUDGET_SECONDS),
+        }
+    }
+}
+
 /// The longest one quoter call can take: every attempt timing out, plus the pauses.
-/// Kept inside `QUOTE_TIMEOUT_SECONDS` (asserted below) so a stalled endpoint is
-/// reported per route as "the quote request timed out", not as an abandoned check.
+/// With the block read before it and the fee reads after it, it is kept inside
+/// `QUOTE_TIMEOUT_SECONDS` (asserted below) so a stalled endpoint is reported per route
+/// as "the quote request timed out", not as an abandoned check.
 const fn quote_call_worst_case_ms() -> u64 {
     let mut total = 0;
     let mut attempt = 0;
@@ -844,25 +883,31 @@ const fn quote_call_worst_case_ms() -> u64 {
     }
     total
 }
-const _: () = assert!(quote_call_worst_case_ms() < QUOTE_TIMEOUT_SECONDS * 1000);
+const _: () = assert!(
+    QUOTE_BLOCK_READ_TIMEOUT_SECONDS * 1000 + quote_call_worst_case_ms() + QUOTE_FEE_BUDGET_SECONDS * 1000
+        < QUOTE_TIMEOUT_SECONDS * 1000
+);
 
-/// One `eth_call` at a stated block, with the reason when it fails.
+/// One `eth_call` at a stated block, with the reason when it fails. Each of `attempts`
+/// tries may take `request_timeout`.
 async fn quote_eth_call(
     client: &Client,
     rpc_url: &str,
     to: &str,
     data: &str,
     block_hex: &str,
+    request_timeout: std::time::Duration,
+    attempts: u32,
 ) -> std::result::Result<String, QuoteCallFailure> {
     let payload = json!({
         "jsonrpc": "2.0", "id": 46, "method": "eth_call",
         "params": [{ "to": to, "data": data }, block_hex]
     });
     let mut last = QuoteCallFailure::NoAnswer("the RPC did not answer".to_string());
-    for attempt in 0..QUOTE_REQUEST_ATTEMPTS {
+    for attempt in 0..attempts {
         let sent = client
             .post(rpc_url)
-            .timeout(std::time::Duration::from_secs(QUOTE_REQUEST_TIMEOUT_SECONDS))
+            .timeout(request_timeout)
             .json(&payload)
             .send()
             .await;
@@ -882,7 +927,7 @@ async fn quote_eth_call(
             Err(_) => QuoteCallFailure::NoAnswer("the quote request failed in transit".to_string()),
         };
         last = failure;
-        if attempt + 1 < QUOTE_REQUEST_ATTEMPTS {
+        if attempt + 1 < attempts {
             tokio::time::sleep(tokio::time::Duration::from_millis(QUOTE_RETRY_BACKOFF_MS << attempt)).await;
         }
     }
@@ -895,22 +940,72 @@ async fn latest_block(client: &Client, rpc_url: &str) -> Option<(i64, DateTime<U
     post_rpc_with_retry(client, rpc_url, &payload, 2).await.and_then(|res| parse_block_header(&res))
 }
 
-/// The fee of one hop in percent, read at the quote block where it is not fixed. None
-/// when a read fails: the hop is then shown without a fee, never with a default one.
-async fn read_hop_fee(client: &Client, rpc_url: &str, hop: &HopSpec, block_hex: &str) -> Option<String> {
+/// The fee of one hop in percent, read at the quote block where it is not fixed. Each
+/// read is tried once. None when a read fails: the hop is then shown without a fee,
+/// never with a default one.
+async fn read_hop_fee(
+    client: &Client,
+    rpc_url: &str,
+    hop: &HopSpec,
+    block_hex: &str,
+    request_timeout: std::time::Duration,
+) -> Option<String> {
     let word = |r: std::result::Result<String, QuoteCallFailure>| r.ok().and_then(|hex| decode_small_word(&hex));
     match hop.fee {
         HopFee::Fixed(millionths) => Some(fee_pct_from_millionths(millionths as u128)),
         HopFee::AeroConcentrated => {
-            word(quote_eth_call(client, rpc_url, hop.pool, POOL_FEE, block_hex).await).map(fee_pct_from_millionths)
+            word(quote_eth_call(client, rpc_url, hop.pool, POOL_FEE, block_hex, request_timeout, 1).await)
+                .map(fee_pct_from_millionths)
         }
         HopFee::AeroBasic => {
             let custom_data = format!("{AERO_CUSTOM_FEE}{}", abi_address(hop.pool));
-            let custom = word(quote_eth_call(client, rpc_url, AERO_VOLATILE_FEE_MODULE, &custom_data, block_hex).await)?;
-            let default = word(quote_eth_call(client, rpc_url, AERO_VOLATILE_POOL_FACTORY, AERO_DEFAULT_FEE, block_hex).await)?;
-            Some(fee_pct_from_bps(aero_basic_fee_bps(custom, default)))
+            let (custom, default) = tokio::join!(
+                quote_eth_call(client, rpc_url, AERO_VOLATILE_FEE_MODULE, &custom_data, block_hex, request_timeout, 1),
+                quote_eth_call(client, rpc_url, AERO_VOLATILE_POOL_FACTORY, AERO_DEFAULT_FEE, block_hex, request_timeout, 1),
+            );
+            Some(fee_pct_from_bps(aero_basic_fee_bps(word(custom)?, word(default)?)))
         }
     }
+}
+
+/// The fee of every hop of each venue's best route, all read at once inside
+/// `budgets.fees`. One entry per venue of `QUOTE_VENUES`, one fee per hop; a fee that
+/// was not read in time, or whose read failed, is None. This step cannot fail or hold
+/// back the quotes: they were already read.
+pub(crate) async fn read_best_route_fees(
+    client: &Client,
+    rpc_url: &str,
+    results: &[RouteResult],
+    block_hex: &str,
+    budgets: &QuoteBudgets,
+) -> Vec<Vec<Option<String>>> {
+    let mut fees: Vec<Vec<Option<String>>> = Vec::with_capacity(QUOTE_VENUES.len());
+    let mut reads = tokio::task::JoinSet::new();
+    let request_timeout = budgets.request.min(budgets.fees);
+    for (v, venue) in QUOTE_VENUES.iter().enumerate() {
+        let hops = best_route_index(results, venue).map(|best| results[best].spec.hops.clone()).unwrap_or_default();
+        fees.push(vec![None; hops.len()]);
+        for (h, hop) in hops.into_iter().enumerate() {
+            if let HopFee::Fixed(millionths) = hop.fee {
+                fees[v][h] = Some(fee_pct_from_millionths(millionths as u128));
+                continue;
+            }
+            let (client, rpc_url, block_hex) = (client.clone(), rpc_url.to_string(), block_hex.to_string());
+            reads.spawn(async move { (v, h, read_hop_fee(&client, &rpc_url, &hop, &block_hex, request_timeout).await) });
+        }
+    }
+    let deadline = tokio::time::Instant::now() + budgets.fees;
+    loop {
+        match tokio::time::timeout_at(deadline, reads.join_next()).await {
+            Ok(Some(Ok((v, h, fee)))) => fees[v][h] = fee,
+            Ok(Some(Err(e))) => tracing::warn!("Route fee read task failed: {e}"),
+            Ok(None) => break,
+            // Out of time: the reads still running are dropped with the set, and their
+            // hops say "fee not read".
+            Err(_) => break,
+        }
+    }
+    fees
 }
 
 /// Quote `amount_usdc` (the plan's own tranche) along every route of the table at the
@@ -923,8 +1018,25 @@ pub(crate) async fn fetch_route_quotes(
     amount_usdc_raw: u128,
     spot: Option<f64>,
 ) -> RouteQuotes {
-    let Some((block_number, block_time)) = latest_block(client, rpc_url).await else {
-        return route_quotes_unavailable(amount_usdc, "the latest block could not be read, so no quote was requested");
+    fetch_route_quotes_within(client, rpc_url, amount_usdc, amount_usdc_raw, spot, &QuoteBudgets::default()).await
+}
+
+/// `fetch_route_quotes` with stated time budgets.
+pub(crate) async fn fetch_route_quotes_within(
+    client: &Client,
+    rpc_url: &str,
+    amount_usdc: &str,
+    amount_usdc_raw: u128,
+    spot: Option<f64>,
+    budgets: &QuoteBudgets,
+) -> RouteQuotes {
+    let block = tokio::time::timeout(budgets.block_read, latest_block(client, rpc_url)).await.ok().flatten();
+    let Some((block_number, block_time)) = block else {
+        return route_quotes_unavailable(
+            amount_usdc,
+            "the latest block could not be read, so no quote was requested",
+            spot,
+        );
     };
     let block_hex = format!("0x{block_number:x}");
 
@@ -938,9 +1050,11 @@ pub(crate) async fn fetch_route_quotes(
     let mut calls = tokio::task::JoinSet::new();
     for (i, r) in results.iter().enumerate() {
         let (client, rpc_url, block_hex, spec) = (client.clone(), rpc_url.to_string(), block_hex.clone(), r.spec.clone());
+        let (request_timeout, attempts) = (budgets.request, budgets.attempts);
         calls.spawn(async move {
             let (to, data) = quote_request(&spec, amount_usdc_raw);
-            (i, outcome_from_call(&spec, quote_eth_call(&client, &rpc_url, to, &data, &block_hex).await))
+            let answer = quote_eth_call(&client, &rpc_url, to, &data, &block_hex, request_timeout, attempts).await;
+            (i, outcome_from_call(&spec, answer))
         });
     }
     while let Some(joined) = calls.join_next().await {
@@ -950,16 +1064,14 @@ pub(crate) async fn fetch_route_quotes(
         }
     }
 
-    let mut venues = Vec::with_capacity(QUOTE_VENUES.len());
-    for venue in QUOTE_VENUES {
-        let mut best_fees: Vec<Option<String>> = Vec::new();
-        if let Some(best) = best_route_index(&results, venue) {
-            for hop in &results[best].spec.hops {
-                best_fees.push(read_hop_fee(client, rpc_url, hop, &block_hex).await);
-            }
-        }
-        venues.push(build_venue_quote(venue, &results, &best_fees, amount_usdc_raw, spot));
-    }
+    // The quotes are in hand. The fees of the two best routes are read together, once
+    // each, inside their own short budget.
+    let fees = read_best_route_fees(client, rpc_url, &results, &block_hex, budgets).await;
+    let venues = QUOTE_VENUES
+        .iter()
+        .zip(&fees)
+        .map(|(venue, best_fees)| build_venue_quote(venue, &results, best_fees, amount_usdc_raw, spot))
+        .collect();
     assemble_route_quotes(amount_usdc, Some((block_number, block_time)), spot, venues)
 }
 
@@ -975,7 +1087,7 @@ pub(crate) async fn quote_due_tranche(
     let (amount_usdc, amount_raw) = tranche_to_quote(state.config.route_quotes.enabled, Some(plan))?;
     let alchemy_key = state.config.alchemy_api_keys.first().cloned().unwrap_or_default();
     if alchemy_key.is_empty() || alchemy_key == "YOUR_ALCHEMY_API_KEY" {
-        return Some(route_quotes_unavailable(&amount_usdc, "no Alchemy RPC key is configured"));
+        return Some(route_quotes_unavailable(&amount_usdc, "no Alchemy RPC key is configured", spot));
     }
     let rpc_url = format!("https://base-mainnet.g.alchemy.com/v2/{}", alchemy_key);
     let quotes = match tokio::time::timeout(
@@ -988,6 +1100,7 @@ pub(crate) async fn quote_due_tranche(
         Err(_) => route_quotes_unavailable(
             &amount_usdc,
             &format!("the quotes took longer than {QUOTE_TIMEOUT_SECONDS} seconds and were abandoned"),
+            spot,
         ),
     };
     if let Err(e) = store_route_quotes(&state.db, &plan.plan_id, plan.tranche_index, &quotes).await {
@@ -1058,6 +1171,9 @@ pub(crate) async fn store_route_quotes(
 /// The best quote of one stored row, as a fill's reference.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StoredQuote {
+    /// The tranche the plan said was due when the quotes were read: its recorded fills
+    /// at that moment, plus one.
+    pub(crate) tranche_index: i32,
     pub(crate) venue: String,
     pub(crate) route: String,
     pub(crate) amount_usdc: String,
@@ -1067,15 +1183,46 @@ pub(crate) struct StoredQuote {
     pub(crate) quoted_at: DateTime<Utc>,
 }
 
-/// Whether a stored quote is the reference for a fill: it was read strictly before the
-/// fill's block (a read AT the fill's block already includes the fill), and not before
-/// the plan's previous fill (it then belongs to an earlier tranche). Pure.
-pub(crate) fn quote_applies_to_fill(quote_block: i64, fill_block: i64, previous_fill_block: Option<i64>) -> bool {
-    quote_block < fill_block && previous_fill_block.map_or(true, |prev| quote_block >= prev)
+/// A stored quote older than this before a fill is not that fill's reference: over a
+/// longer gap the figure would be price movement, not the cost of the route. While a
+/// tranche is due the quotes are read every cycle, so a gap this long means quoting was
+/// off or failing. The same window as the stored reference spot of a fill (issue #118).
+pub(crate) const FILL_QUOTE_MAX_AGE_MINUTES: i64 = HARVEST_NOCK_PRICE_WINDOW_MINUTES;
+
+/// Where a fill sits in its plan, as far as the ledger knows.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FillPosition {
+    pub(crate) block: i64,
+    /// The fill's block time.
+    pub(crate) time: DateTime<Utc>,
+    /// Block of the buy before this one: the plan's latest earlier fill, or an earlier
+    /// detected swap still on offer. None when this is the first.
+    pub(crate) previous_buy_block: Option<i64>,
+    /// The plan's recorded fills at earlier blocks: this fill is tranche
+    /// `earlier_fills + 1`.
+    pub(crate) earlier_fills: i64,
+}
+
+/// Whether a stored quote is the reference for a fill. All four must hold:
+///   - it was read strictly before the fill's block (a read AT the fill's block already
+///     includes the fill);
+///   - it was not read before the buy before this one (it then belongs to an earlier
+///     tranche);
+///   - it was read for this fill's tranche. The plan keeps saying a tranche is due
+///     after its buy lands on-chain, until that buy is recorded, and keeps quoting it.
+///     Those rows carry the earlier tranche's index and never serve the next fill;
+///   - it is at most `FILL_QUOTE_MAX_AGE_MINUTES` older than the fill.
+/// Pure.
+pub(crate) fn quote_applies_to_fill(quote: &StoredQuote, fill: &FillPosition) -> bool {
+    quote.block_number < fill.block
+        && fill.previous_buy_block.map_or(true, |prev| quote.block_number >= prev)
+        && i64::from(quote.tranche_index) == fill.earlier_fills + 1
+        && fill.time - quote.quoted_at <= chrono::Duration::minutes(FILL_QUOTE_MAX_AGE_MINUTES)
 }
 
 /// A fill's cost over the quote that was current for its tranche. All fields are None
-/// together when there is no such quote: "no quote on record", never a later quote.
+/// together when there is no such quote: "no quote on record", never a later quote,
+/// another tranche's quote or one from more than an hour before the fill.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct FillQuoteReference {
     pub(crate) venue: Option<String>,
@@ -1112,29 +1259,45 @@ pub(crate) fn fill_quote_reference(effective_price_usd: &str, quote: Option<Stor
     }
 }
 
-/// The stored quote for a fill of `plan_id` at `fill_block`: the latest one read before
-/// that block, if it belongs to this fill's tranche. "The buy before this one" is the
-/// latest earlier fill of the plan or earlier detected swap still on offer (the rule
-/// fill detection uses for its early / on-schedule label), so confirming offers out of
-/// order does not hand a later buy an earlier tranche's quote. A database error is
-/// logged and reads as "no quote on record"; it never blocks or changes the recording.
-pub(crate) async fn quote_for_fill(db: &PgPool, plan_id: &str, wallet: &str, fill_block: i64) -> Option<StoredQuote> {
+/// The stored quote for a fill of `plan_id` at `fill_block` (block time `fill_time`):
+/// the latest one read before that block, if `quote_applies_to_fill` accepts it. Only
+/// the latest row is considered: when it was read for another tranche or is too old, an
+/// older row is older still, and the answer is "no quote on record". "The buy before
+/// this one" is the latest earlier fill of the plan or earlier detected swap still on
+/// offer (the rule fill detection uses for its early / on-schedule label), so
+/// confirming offers out of order does not hand a later buy an earlier tranche's quote.
+/// A database error is logged and reads as "no quote on record"; it never blocks or
+/// changes the recording.
+pub(crate) async fn quote_for_fill(
+    db: &PgPool,
+    plan_id: &str,
+    wallet: &str,
+    fill_block: i64,
+    fill_time: DateTime<Utc>,
+) -> Option<StoredQuote> {
     let lookup = async {
-        let previous_fill_block: Option<i64> = sqlx::query(
+        let before = sqlx::query(
             "SELECT GREATEST( \
                 (SELECT MAX(block_number) FROM accumulation_events WHERE plan_id = $1 AND block_number < $2), \
                 (SELECT MAX(block_number) FROM accumulation_candidates \
                   WHERE wallet = $3 AND state = 'offered' AND block_number < $2) \
-             ) AS prev",
+             ) AS prev, \
+             (SELECT COUNT(*) FROM accumulation_events WHERE plan_id = $1 AND block_number < $2) AS earlier_fills",
         )
         .bind(plan_id)
         .bind(fill_block)
         .bind(wallet.to_lowercase())
         .fetch_one(db)
-        .await?
-        .try_get::<Option<i64>, _>("prev")?;
+        .await?;
+        let fill = FillPosition {
+            block: fill_block,
+            time: fill_time,
+            previous_buy_block: before.try_get::<Option<i64>, _>("prev")?,
+            earlier_fills: before.try_get::<i64, _>("earlier_fills")?,
+        };
         let row = sqlx::query(
-            "SELECT best_venue, best_route, amount_usdc, best_nock_out, best_effective_price_usd, block_number, quoted_at \
+            "SELECT tranche_index, best_venue, best_route, amount_usdc, best_nock_out, best_effective_price_usd, \
+                    block_number, quoted_at \
              FROM accumulation_quotes WHERE plan_id = $1 AND block_number < $2 \
              ORDER BY block_number DESC LIMIT 1",
         )
@@ -1146,6 +1309,7 @@ pub(crate) async fn quote_for_fill(db: &PgPool, plan_id: &str, wallet: &str, fil
             return Ok::<Option<StoredQuote>, sqlx::Error>(None);
         };
         let quote = StoredQuote {
+            tranche_index: r.try_get("tranche_index")?,
             venue: r.try_get("best_venue")?,
             route: r.try_get("best_route")?,
             amount_usdc: r.try_get("amount_usdc")?,
@@ -1154,7 +1318,7 @@ pub(crate) async fn quote_for_fill(db: &PgPool, plan_id: &str, wallet: &str, fil
             block_number: r.try_get("block_number")?,
             quoted_at: r.try_get("quoted_at")?,
         };
-        Ok(quote_applies_to_fill(quote.block_number, fill_block, previous_fill_block).then_some(quote))
+        Ok(quote_applies_to_fill(&quote, &fill).then_some(quote))
     };
     match lookup.await {
         Ok(q) => q,
@@ -1165,7 +1329,57 @@ pub(crate) async fn quote_for_fill(db: &PgPool, plan_id: &str, wallet: &str, fil
     }
 }
 
-// ---------------- REST: refresh ----------------
+// ---------------- REST: latest and refresh ----------------
+
+/// What GET /v1/accumulation/quotes/latest answers, from the plan status the worker is
+/// serving. `route_quotes` is null unless a tranche is due and quoting is on. Pure.
+pub(crate) fn latest_route_quotes_body(plan: Option<&AccumulationPlanStatus>) -> serde_json::Value {
+    match plan {
+        Some(p) => json!({
+            "plan_id": p.plan_id,
+            "status": p.status,
+            "tranche_index": p.tranche_index,
+            "tranche_usdc": p.tranche_usdc,
+            "route_quotes": p.route_quotes,
+        }),
+        None => json!({ "plan_id": null, "status": null, "tranche_index": null, "tranche_usdc": null, "route_quotes": null }),
+    }
+}
+
+/// GET /v1/accumulation/quotes/latest — the quotes the worker currently holds for the
+/// due tranche, read from memory. It makes no call and quotes nothing. The quotes are
+/// left out of the snapshot's state hash, and the snapshot's ETag is that hash, so a
+/// conditional GET of the snapshot can answer 304 while the quotes have moved on; the
+/// dashboard reads them here instead. Never cached.
+pub(crate) async fn latest_route_quotes_handler(Extension(state): Extension<Arc<AppState>>) -> Response {
+    let body = {
+        let latest = state.latest_snapshot.lock().await;
+        latest_route_quotes_body(latest.as_ref().and_then(|s| s.data.derived_metrics.accumulation_plan.as_ref()))
+    };
+    let mut headers = HeaderMap::new();
+    headers.insert("cache-control", axum::http::HeaderValue::from_static("no-store"));
+    (StatusCode::OK, headers, Json(body)).into_response()
+}
+
+/// Drop the quotes from a snapshot read back from the database. The stored row keeps
+/// the quotes of the first cycle that produced its state hash, so after a restart they
+/// can be far older than anything the worker would show; until the first cycle reads
+/// new ones the plan carries none. Pure.
+pub(crate) fn forget_stored_route_quotes(data: &mut SnapshotData) {
+    if let Some(plan) = data.derived_metrics.accumulation_plan.as_mut() {
+        plan.route_quotes = None;
+    }
+}
+
+/// The reference spot for a refresh: the full-precision figure the cycle's own quotes
+/// carry. None when the plan has no quotes from a cycle yet. Pure.
+pub(crate) fn refresh_reference_spot(plan: &AccumulationPlanStatus) -> Option<f64> {
+    plan.route_quotes
+        .as_ref()
+        .and_then(|q| q.reference_spot_usd.as_deref())
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|s| s.is_finite() && *s > 0.0)
+}
 
 /// Why a refresh is refused, from the config and the latest snapshot. Pure.
 pub(crate) fn refresh_refusal(
@@ -1198,15 +1412,11 @@ pub(crate) fn refresh_refusal(
 /// the latest snapshot and nothing else, takes no parameters, and writes only the
 /// stored-quote row and the in-memory snapshot's `route_quotes`.
 pub(crate) async fn refresh_route_quotes_handler(Extension(state): Extension<Arc<AppState>>) -> Response {
-    let (has_snapshot, plan, snapshot_spot) = {
+    let (has_snapshot, plan) = {
         let latest = state.latest_snapshot.lock().await;
         match latest.as_ref() {
-            Some(s) => (
-                true,
-                s.data.derived_metrics.accumulation_plan.clone(),
-                s.data.derived_metrics.tick_bracket_hypervisor.current_price.parse::<f64>().ok(),
-            ),
-            None => (false, None, None),
+            Some(s) => (true, s.data.derived_metrics.accumulation_plan.clone()),
+            None => (false, None),
         }
     };
     if let Some((code, error, detail)) = refresh_refusal(
@@ -1220,14 +1430,11 @@ pub(crate) async fn refresh_route_quotes_handler(Extension(state): Extension<Arc
     let Some(plan) = plan else {
         return (StatusCode::CONFLICT, Json(json!({ "error": "NO_TRANCHE_DUE", "detail": "No tranche is due." }))).into_response();
     };
-    // The reference stays the snapshot's own spot: the figure the cycle used when it
-    // has one (eight decimals), otherwise the snapshot's displayed price.
-    let spot = plan
-        .route_quotes
-        .as_ref()
-        .and_then(|q| q.reference_spot_usd.as_deref())
-        .and_then(|s| s.parse::<f64>().ok())
-        .or(snapshot_spot);
+    // The reference stays the cycle's own spot, at the precision the cycle carried it
+    // (the cycle's quotes keep it even when no venue could be quoted). Without it no
+    // cost over spot is shown: the snapshot's displayed price is rounded to five
+    // decimals, which is as large as the costs being measured.
+    let spot = refresh_reference_spot(&plan);
     let Some(quotes) = quote_due_tranche(&state, &plan, spot).await else {
         return (StatusCode::CONFLICT, Json(json!({ "error": "NO_TRANCHE_DUE", "detail": "No tranche is due." }))).into_response();
     };

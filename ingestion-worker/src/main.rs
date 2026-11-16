@@ -1237,7 +1237,9 @@ async fn main() -> Result<()> {
         let state_hash: String = r.try_get("state_hash").ok()?;
         let version: String = r.try_get("version").ok()?;
         let data_val: serde_json::Value = r.try_get("data").ok()?;
-        let data: SnapshotData = serde_json::from_value(data_val).ok()?;
+        let mut data: SnapshotData = serde_json::from_value(data_val).ok()?;
+        // Stored quotes are not current ones (issue #115); the first cycle reads new ones.
+        forget_stored_route_quotes(&mut data);
         Some(SnapshotEnvelope {
             meta: SnapshotMeta {
                 generated_at,
@@ -1351,6 +1353,10 @@ async fn main() -> Result<()> {
         .route(
             "/v1/accumulation/candidates/restore",
             axum::routing::post(restore_candidate_handler),
+        )
+        .route(
+            "/v1/accumulation/quotes/latest",
+            axum::routing::get(latest_route_quotes_handler),
         )
         .route(
             "/v1/accumulation/quotes/refresh",

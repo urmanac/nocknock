@@ -84,7 +84,7 @@ pub(crate) async fn mcp_http_handler(
                     },
                     {
                         "name": "get_accumulation_plan",
-                        "description": "Returns the dollar-cost-averaging plan: whether a NOCK tranche is due, its size, progress from receipt-verified buys, average cost, swaps found on-chain that await the operator's confirmation (listed only; this tool confirms nothing), and the LP-rebuild bias.",
+                        "description": "Returns the dollar-cost-averaging plan: whether a NOCK tranche is due, its size, progress from receipt-verified buys, average cost, swaps found on-chain that await the operator's confirmation (listed only; this tool confirms nothing), the LP-rebuild bias and, while a tranche is due, read-only route quotes for that amount on Aero and Uniswap (a comparison, not a recommendation).",
                         "inputSchema": {
                             "type": "object",
                             "properties": {},

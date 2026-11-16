@@ -366,7 +366,7 @@ fn test_swap_links_go_to_each_venues_own_swap_page_and_prefill_nothing() {
         assert!(!v.swap_url.contains('?') && !v.swap_url.contains("0x"), "nothing is prefilled: {}", v.swap_url);
     }
     // Unavailable venues keep their link; the retired app is never linked.
-    let down = route_quotes_unavailable("20.00", "no Alchemy RPC key is configured");
+    let down = route_quotes_unavailable("20.00", "no Alchemy RPC key is configured", None);
     assert_eq!(down.venues[0].swap_url, "https://app.aero.xyz/swap");
     assert!(!serde_json::to_string(&(q, down)).unwrap().contains("aerodrome.finance"));
 }
@@ -389,7 +389,7 @@ fn test_one_quote_or_none_marks_no_venue() {
     // The one quote is still the stored reference for a later fill.
     assert_eq!(best_venue_quote(&one).map(|v| v.venue.as_str()), Some("Aero"));
 
-    let none = route_quotes_unavailable("20.00", "the latest block could not be read, so no quote was requested");
+    let none = route_quotes_unavailable("20.00", "the latest block could not be read, so no quote was requested", None);
     assert_eq!(none.status, "unavailable");
     assert_eq!(none.detail.as_deref(), Some("the latest block could not be read, so no quote was requested"));
     assert_eq!((none.block_number, none.quoted_at.clone(), none.reference_spot_usd.clone()), (None, None, None));
@@ -783,23 +783,29 @@ fn test_quotes_never_force_a_new_snapshot_row() {
 
 #[test]
 fn test_advice_points_to_the_quotes_without_a_number() {
+    const POINTER: &str =
+        " Read-only route quotes for this amount on Aero and on Uniswap, or why a venue could not be quoted, are listed with the plan.";
     let q = real_quotes();
     let details = "Buy $20.00 of NOCK on Aero (spot $0.01129).".to_string();
     let pointed = with_route_quote_pointer("DCA TRANCHE DUE (3 of 5)", details.clone(), Some(&q));
-    assert_eq!(
-        pointed,
-        "Buy $20.00 of NOCK on Aero (spot $0.01129). Read-only route quotes for this amount on Aero and on Uniswap are listed with the plan."
-    );
+    assert_eq!(pointed, format!("{details}{POINTER}"));
     // Idempotent, and prefixed actions (a floor breach) still match.
     assert_eq!(with_route_quote_pointer("DEFENSIVE LOCK · DCA TRANCHE DUE (3 of 5)", pointed.clone(), Some(&q)), pointed);
-    // No quotes, nothing quoted, or another directive in charge: the text is untouched.
+    // The advice text is part of the state hash, so it must not depend on what the
+    // quoters answered: one venue, none, or both give the same sentence. A quote
+    // coming or going then never stores a snapshot row.
+    let down = route_quotes_unavailable("20.00", "no Alchemy RPC key is configured", None);
+    assert_eq!(with_route_quote_pointer("DCA TRANCHE DUE (3 of 5)", details.clone(), Some(&down)), pointed);
+    let mut one = real_quotes();
+    one.venues[1].status = "unavailable".to_string();
+    assert_eq!(with_route_quote_pointer("DCA TRANCHE DUE (3 of 5)", details.clone(), Some(&one)), pointed);
+    // Quotes not asked for (nothing due, or switched off), or another directive in
+    // charge: the text is untouched.
     assert_eq!(with_route_quote_pointer("DCA TRANCHE DUE (3 of 5)", details.clone(), None), details);
-    let down = route_quotes_unavailable("20.00", "no Alchemy RPC key is configured");
-    assert_eq!(with_route_quote_pointer("DCA TRANCHE DUE (3 of 5)", details.clone(), Some(&down)), details);
     assert_eq!(with_route_quote_pointer("BATCH HARVEST", details.clone(), Some(&q)), details);
-    // The sentence added is the same whatever the quotes say.
-    let added = pointed.trim_start_matches(&details).to_string();
-    assert!(!added.chars().any(|c| c.is_ascii_digit()), "{added}");
+    // The sentence carries no number and is true when a venue could not be quoted.
+    assert!(!POINTER.chars().any(|c| c.is_ascii_digit()));
+    assert!(POINTER.contains("or why a venue could not be quoted"));
 }
 
 #[test]
@@ -820,31 +826,65 @@ fn test_route_quotes_payload_is_pinned() {
 
 // ---------------- A fill's cost over its tranche's quote ----------------
 
+/// The block time of the pinned quotes: 2026-11-16T05:25:57Z.
+fn quote_time() -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339("2026-11-16T05:25:57Z").unwrap().with_timezone(&Utc)
+}
+
+/// A stored quote read for the plan's first tranche at the pinned quote time.
 fn stored(block: i64, price: &str) -> StoredQuote {
     StoredQuote {
+        tranche_index: 1,
         venue: "Aero".to_string(),
         route: "USDC → USDT → WETH → NOCK".to_string(),
         amount_usdc: "20.00".to_string(),
         nock_out: "1773.0768618618146014".to_string(),
         effective_price_usd: price.to_string(),
         block_number: block,
-        quoted_at: DateTime::parse_from_rfc3339("2026-11-16T05:25:57Z").unwrap().with_timezone(&Utc),
+        quoted_at: quote_time(),
     }
+}
+
+/// A fill `minutes` after the pinned quote time.
+fn fill_at(block: i64, minutes: i64, previous_buy_block: Option<i64>, earlier_fills: i64) -> FillPosition {
+    FillPosition { block, time: quote_time() + chrono::Duration::minutes(minutes), previous_buy_block, earlier_fills }
 }
 
 #[test]
 fn test_a_fill_is_measured_only_against_a_quote_from_before_it_in_its_own_tranche() {
-    // Read before the fill's block: applies.
-    assert!(quote_applies_to_fill(100, 101, None));
-    assert!(quote_applies_to_fill(100, 5000, Some(50)));
+    let quote = |block: i64, tranche_index: i32| StoredQuote { tranche_index, ..stored(block, "0.01127983") };
+    // Read before the fill's block, for its tranche: applies.
+    assert!(quote_applies_to_fill(&quote(100, 1), &fill_at(101, 0, None, 0)));
+    assert!(quote_applies_to_fill(&quote(100, 2), &fill_at(5000, 5, Some(50), 1)));
     // Read at the fill's own block: that state already includes the fill.
-    assert!(!quote_applies_to_fill(101, 101, None));
+    assert!(!quote_applies_to_fill(&quote(101, 1), &fill_at(101, 0, None, 0)));
     // A later quote is never used.
-    assert!(!quote_applies_to_fill(102, 101, None));
+    assert!(!quote_applies_to_fill(&quote(102, 1), &fill_at(101, 0, None, 0)));
     // Read before the plan's previous fill: it belonged to the tranche before.
-    assert!(!quote_applies_to_fill(100, 5000, Some(200)));
-    // Read at the previous fill's block: the state after that fill, so this tranche's.
-    assert!(quote_applies_to_fill(200, 5000, Some(200)));
+    assert!(!quote_applies_to_fill(&quote(100, 1), &fill_at(5000, 5, Some(200), 1)));
+    assert!(!quote_applies_to_fill(&quote(100, 2), &fill_at(5000, 5, Some(200), 1)));
+
+    // The plan keeps saying tranche 1 is due after buy 1 lands at block 200, until
+    // that buy is recorded, and keeps storing tranche-1 quotes (here at blocks 200 and
+    // 260). Once buy 1 is recorded they never serve buy 2, however recent they are.
+    for leftover in [200, 260] {
+        assert!(!quote_applies_to_fill(&quote(leftover, 1), &fill_at(5000, 5, Some(200), 1)), "{leftover}");
+    }
+    // A quote the plan read for tranche 2, after it knew of buy 1, does.
+    assert!(quote_applies_to_fill(&quote(260, 2), &fill_at(5000, 5, Some(200), 1)));
+    // A tranche the ledger has not reached is not this fill's either.
+    assert!(!quote_applies_to_fill(&quote(260, 3), &fill_at(5000, 5, Some(200), 1)));
+    // An earlier swap still on offer is a buy before this one, but not a recorded
+    // fill: a quote read between the two, while the plan still said tranche 1, is the
+    // one that was on screen before this buy.
+    assert!(quote_applies_to_fill(&quote(260, 1), &fill_at(5000, 5, Some(200), 0)));
+    assert!(!quote_applies_to_fill(&quote(100, 1), &fill_at(5000, 5, Some(200), 0)));
+
+    // Age: a quote more than an hour older than the fill is price movement, not cost.
+    assert_eq!(FILL_QUOTE_MAX_AGE_MINUTES, 60);
+    assert!(quote_applies_to_fill(&quote(100, 1), &fill_at(5000, 60, None, 0)));
+    assert!(!quote_applies_to_fill(&quote(100, 1), &fill_at(5000, 61, None, 0)));
+    assert!(!quote_applies_to_fill(&quote(100, 1), &fill_at(5000, 3 * 24 * 60, None, 0)));
 }
 
 #[test]
@@ -908,7 +948,7 @@ fn test_plan_text_shows_both_venues_and_says_what_a_quote_is() {
 
 #[test]
 fn test_plan_text_says_unavailable_with_the_reason_and_nothing_when_not_due() {
-    let down = snapshot_with_quotes(Some(route_quotes_unavailable("20.00", "no Alchemy RPC key is configured")));
+    let down = snapshot_with_quotes(Some(route_quotes_unavailable("20.00", "no Alchemy RPC key is configured", None)));
     let lines = route_quote_lines(&down["derived_metrics"]["accumulation_plan"]);
     assert!(lines.contains("at no block (nothing was read), no reference spot:"), "{lines}");
     assert!(lines.contains("   Aero: unavailable (no Alchemy RPC key is configured)\n"), "{lines}");
@@ -975,11 +1015,24 @@ async fn test_route_quote_sql_against_a_scratch_database() {
     };
     cleanup(db.clone()).await;
 
+    // The pinned quotes re-dated: `blocks` after the quote block, `minutes` after its time.
+    let quotes_at = |blocks: i64, minutes: i64| {
+        let mut q = real_quotes();
+        q.block_number = Some(QUOTE_BLOCK + blocks);
+        q.quoted_at = Some((quote_time() + chrono::Duration::minutes(minutes)).to_rfc3339());
+        q
+    };
+    let at = |minutes: i64| quote_time() + chrono::Duration::minutes(minutes);
+    let lookup = |blocks: i64, minutes: i64| {
+        let db = db.clone();
+        async move { quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK + blocks, at(minutes)).await }
+    };
+
     // Nothing stored: no quote on record.
-    assert_eq!(quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK + 10).await, None);
+    assert_eq!(lookup(10, 1).await, None);
 
     // A failed comparison stores nothing; a real one stores one row, once.
-    let down = route_quotes_unavailable("20.00", "no Alchemy RPC key is configured");
+    let down = route_quotes_unavailable("20.00", "no Alchemy RPC key is configured", Some(real_spot()));
     assert!(!store_route_quotes(&db, plan_id, 1, &down).await.unwrap());
     let q = real_quotes();
     assert!(store_route_quotes(&db, plan_id, 1, &q).await.unwrap());
@@ -989,15 +1042,18 @@ async fn test_route_quote_sql_against_a_scratch_database() {
     assert_eq!(serde_json::from_value::<RouteQuotes>(kept).unwrap(), q, "the whole comparison is kept as shown");
 
     // A fill after the quote finds it; a fill at or before the quote's block does not.
-    let found = quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK + 10).await.expect("quote before the fill");
-    assert_eq!((found.venue.as_str(), found.block_number), ("Aero", QUOTE_BLOCK));
+    let found = lookup(10, 1).await.expect("quote before the fill");
+    assert_eq!((found.venue.as_str(), found.block_number, found.tranche_index), ("Aero", QUOTE_BLOCK, 1));
     assert_eq!(found.route, "USDC → USDT → WETH → NOCK");
     assert_eq!((found.amount_usdc.as_str(), found.nock_out.as_str()), ("20.00", "1773.0768618618146014"));
     assert_eq!(found.effective_price_usd, "0.01127983");
     assert_eq!(found.quoted_at.to_rfc3339(), "2026-11-16T05:25:57+00:00");
-    assert_eq!(quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK).await, None);
-    assert_eq!(quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK - 1).await, None);
-    assert_eq!(quote_for_fill(&db, "another-plan", SCRATCH_WALLET, QUOTE_BLOCK + 10).await, None);
+    assert_eq!(lookup(0, 1).await, None);
+    assert_eq!(lookup(-1, 0).await, None);
+    assert_eq!(quote_for_fill(&db, "another-plan", SCRATCH_WALLET, QUOTE_BLOCK + 10, at(1)).await, None);
+    // A quote more than an hour older than the fill is not its reference.
+    assert!(lookup(10, 60).await.is_some());
+    assert_eq!(lookup(10, 61).await, None);
 
     // Record a fill with its quote columns, as the record endpoint writes them.
     let insert_fill = |tx: &'static str, block: i64, r: FillQuoteReference| {
@@ -1027,8 +1083,13 @@ async fn test_route_quote_sql_against_a_scratch_database() {
             .unwrap();
         }
     };
-    let first = fill_quote_reference("0.01133623", quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK + 10).await);
-    assert_eq!(first.cost_bps, Some(50));
+
+    // Buy 1 lands at +10. Until it is recorded the plan still says tranche 1 is due
+    // and the cycle keeps storing tranche-1 quotes, here at +300 (ten minutes on).
+    assert!(store_route_quotes(&db, plan_id, 1, &quotes_at(300, 10)).await.unwrap());
+    // Buy 1 itself is measured against the quote read before it, not the later one.
+    let first = fill_quote_reference("0.01133623", lookup(10, 1).await);
+    assert_eq!((first.cost_bps, first.block_number), (Some(50), Some(QUOTE_BLOCK)));
     insert_fill("0xscratchquotefill1", QUOTE_BLOCK + 10, first).await;
     let row = sqlx::query(
         "SELECT quote_venue, quote_route, quote_usdc, quote_nock_out, quote_effective_price_usd, quote_block_number, \
@@ -1042,9 +1103,13 @@ async fn test_route_quote_sql_against_a_scratch_database() {
     assert_eq!(row.get::<Option<i32>, _>("quote_cost_bps"), Some(50));
     assert!(row.get::<Option<DateTime<Utc>>, _>("quoted_at").is_some());
 
-    // The next tranche's fill has no quote of its own yet: the old one belongs to the
-    // tranche before, so it is "no quote on record", never the stale figure.
-    assert_eq!(quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK + 500_000).await, None);
+    // Buy 2 is made early at +600, twenty minutes after the first quote: the plan was
+    // waiting, so nothing was quoted for tranche 2. The latest stored quote (+300) is
+    // recent and was read after buy 1, but it was read for tranche 1. It is not buy
+    // 2's reference: "no quote on record", never the leftover figure.
+    assert_eq!(lookup(600, 20).await, None);
+    // The same buy days later (the old row is also far too old).
+    assert_eq!(lookup(500_000, 3 * 24 * 60).await, None);
     let none = fill_quote_reference("0.01133623", None);
     insert_fill("0xscratchquotefill2", QUOTE_BLOCK + 500_000, none).await;
     let row = sqlx::query("SELECT quote_venue, quote_cost_bps FROM accumulation_events WHERE tx_hash = '0xscratchquotefill2'")
@@ -1052,11 +1117,23 @@ async fn test_route_quote_sql_against_a_scratch_database() {
         .await
         .unwrap();
     assert_eq!((row.get::<Option<String>, _>("quote_venue"), row.get::<Option<i32>, _>("quote_cost_bps")), (None, None));
+    sqlx::query("DELETE FROM accumulation_events WHERE tx_hash = '0xscratchquotefill2'").execute(&db).await.unwrap();
+    // Had tranche 2 come due and been quoted (+550, fifteen minutes on), buy 2 at +600
+    // takes that quote.
+    assert!(store_route_quotes(&db, plan_id, 2, &quotes_at(550, 15)).await.unwrap());
+    let second = lookup(600, 20).await.expect("the quote read for tranche 2");
+    assert_eq!((second.block_number, second.tranche_index), (QUOTE_BLOCK + 550, 2));
 
     // An earlier swap still on offer is a buy before this one too: a fill recorded
     // ahead of it does not take the quote that belonged to the offered swap's tranche.
     sqlx::query("DELETE FROM accumulation_events WHERE plan_id = $1").bind(plan_id).execute(&db).await.unwrap();
-    assert!(quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK + 900).await.is_some());
+    sqlx::query("DELETE FROM accumulation_quotes WHERE plan_id = $1 AND block_number > $2")
+        .bind(plan_id)
+        .bind(QUOTE_BLOCK)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert!(lookup(900, 5).await.is_some());
     sqlx::query(
         "INSERT INTO accumulation_candidates (wallet, tx_hash, state, block_number, confirmed_at) \
          VALUES ($1, '0xscratchquoteoffer', 'offered', $2, NOW())",
@@ -1066,10 +1143,10 @@ async fn test_route_quote_sql_against_a_scratch_database() {
     .execute(&db)
     .await
     .unwrap();
-    assert_eq!(quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK + 900).await, None);
+    assert_eq!(lookup(900, 5).await, None);
     // The offered swap itself still finds its quote, and another wallet's offers do not count.
-    assert!(quote_for_fill(&db, plan_id, SCRATCH_WALLET, QUOTE_BLOCK + 10).await.is_some());
-    assert!(quote_for_fill(&db, plan_id, "0x00000000000000000000000000000000000115bb", QUOTE_BLOCK + 900).await.is_some());
+    assert!(lookup(10, 1).await.is_some());
+    assert!(quote_for_fill(&db, plan_id, "0x00000000000000000000000000000000000115bb", QUOTE_BLOCK + 900, at(5)).await.is_some());
 
     // The events endpoint's own query reads the new columns.
     sqlx::query(
@@ -1114,4 +1191,303 @@ async fn test_live_route_quotes_against_a_real_rpc() {
             assert!(v.reason.is_some() && v.nock_out.is_none());
         }
     }
+}
+
+// ---------------- The read path, against the captured answers ----------------
+// A local JSON-RPC server that answers each request with the response captured on Base
+// at block 58081910 (the same fixture the pure tests use), optionally slowly. Nothing
+// leaves the machine. Unknown calls get an RPC error, never an invented answer.
+
+#[derive(Clone, Copy, Default)]
+struct MockDelays {
+    block: std::time::Duration,
+    fees: std::time::Duration,
+}
+
+type SeenCalls = Arc<std::sync::Mutex<Vec<(String, String)>>>;
+
+/// Start the server; returns its URL and the (method, block-or-selector) of each request.
+async fn captured_rpc(delays: MockDelays) -> (String, SeenCalls) {
+    let fx = Arc::new(quotes_fixture());
+    let seen: SeenCalls = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("a local port");
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let handler = {
+        let seen = seen.clone();
+        move |Json(req): Json<serde_json::Value>| {
+            let (fx, seen) = (fx.clone(), seen.clone());
+            async move {
+                let method = req["method"].as_str().unwrap_or_default().to_string();
+                if method == "eth_getBlockByNumber" {
+                    seen.lock().unwrap().push((method, req["params"][0].as_str().unwrap_or_default().to_string()));
+                    tokio::time::sleep(delays.block).await;
+                    return Json(fx["header"]["response"].clone());
+                }
+                let to = req["params"][0]["to"].as_str().unwrap_or_default().to_lowercase();
+                let data = req["params"][0]["data"].as_str().unwrap_or_default().to_lowercase();
+                seen.lock().unwrap().push((method, req["params"][1].as_str().unwrap_or_default().to_string()));
+                let is_fee_read = [POOL_FEE, AERO_CUSTOM_FEE, AERO_DEFAULT_FEE].iter().any(|s| data.starts_with(s));
+                if is_fee_read {
+                    tokio::time::sleep(delays.fees).await;
+                }
+                let captured = fx["calls"].as_object().unwrap().values().find(|c| {
+                    c["to"].as_str().map(|t| t.to_lowercase()) == Some(to.clone())
+                        && c["data"].as_str().map(|d| d.to_lowercase()) == Some(data.clone())
+                });
+                Json(match captured {
+                    Some(c) => c["response"].clone(),
+                    None => json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": -32000, "message": "no captured answer for this call" } }),
+                })
+            }
+        }
+    };
+    let app = axum::Router::new().route("/", axum::routing::post(handler));
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (url, seen)
+}
+
+#[tokio::test]
+async fn test_the_read_path_on_captured_answers_gives_the_pinned_comparison() {
+    let (url, seen) = captured_rpc(MockDelays::default()).await;
+    let q = fetch_route_quotes(&Client::new(), &url, "20.00", TRANCHE_RAW, Some(real_spot())).await;
+    // Block header, seven quoter calls, the fee reads: the same object the pure
+    // assembly gives, which is the pinned payload.
+    assert_eq!(q, real_quotes());
+    let seen = seen.lock().unwrap().clone();
+    assert_eq!(seen.iter().filter(|(m, _)| m == "eth_getBlockByNumber").count(), 1);
+    assert_eq!(seen[0], ("eth_getBlockByNumber".to_string(), "latest".to_string()));
+    // 7 routes + the 3 dynamic fees of Aero's best route (Uniswap's best has fixed
+    // fees), every one an eth_call pinned to the block that was read.
+    let calls: Vec<_> = seen.iter().filter(|(m, _)| m == "eth_call").collect();
+    assert_eq!(calls.len(), 10, "{seen:?}");
+    assert!(calls.iter().all(|(_, block)| block == "0x3764276"), "{seen:?}");
+    assert_eq!(seen.len(), 11, "nothing but the block read and eth_call: {seen:?}");
+}
+
+#[tokio::test]
+async fn test_slow_fee_reads_never_discard_quotes_that_were_read() {
+    // The fee reads answer after 3 s; their budget here is 200 ms.
+    let slow = MockDelays { fees: std::time::Duration::from_secs(3), ..Default::default() };
+    let (url, _) = captured_rpc(slow).await;
+    let budgets = QuoteBudgets { fees: std::time::Duration::from_millis(200), ..Default::default() };
+    let started = std::time::Instant::now();
+    let q = fetch_route_quotes_within(&Client::new(), &url, "20.00", TRANCHE_RAW, Some(real_spot()), &budgets).await;
+    assert!(started.elapsed() < slow.fees, "the fee reads were not waited for: {:?}", started.elapsed());
+
+    // Every quote stands, exactly as read; only the fees that were not read are missing.
+    let real = real_quotes();
+    assert_eq!((q.status.as_str(), q.block_number), ("ok", Some(QUOTE_BLOCK)));
+    assert_eq!(q.comparison, real.comparison);
+    assert_eq!(q.more_nock_venue.as_deref(), Some("Aero"));
+    for (got, want) in q.venues.iter().zip(&real.venues) {
+        assert_eq!((got.status.as_str(), &got.nock_out, &got.effective_price_usd), ("quoted", &want.nock_out, &want.effective_price_usd));
+        assert_eq!(got.cost_over_spot_pct, want.cost_over_spot_pct);
+        assert_eq!(got.routes_tried, want.routes_tried);
+        assert_eq!(got.hops.len(), want.hops.len());
+    }
+    // Aero's best route has three dynamic fees: none was read, none is invented.
+    assert!(q.venues[0].hops.iter().all(|h| h.fee_pct.is_none()), "{:?}", q.venues[0].hops);
+    // Uniswap's fees are fixed by the pools' identity and need no read.
+    assert_eq!(q.venues[1].hops, real.venues[1].hops);
+    assert!(route_quote_lines(&json!({ "route_quotes": q })).contains("fee not read"));
+
+    // The budgets fit inside the cap that abandons a check, with the block read before
+    // and the fee reads after the slowest possible quote call.
+    let d = QuoteBudgets::default();
+    assert_eq!(d.attempts, QUOTE_REQUEST_ATTEMPTS);
+    let quotes_worst_ms = (d.request.as_millis() as u64) * (d.attempts as u64) + 200 + 400;
+    assert!(d.block_read.as_millis() as u64 + quotes_worst_ms + (d.fees.as_millis() as u64) < QUOTE_TIMEOUT_SECONDS * 1000);
+}
+
+#[tokio::test]
+async fn test_fee_reads_cover_every_kind_of_hop_and_a_failed_one_is_not_a_default() {
+    let (url, seen) = captured_rpc(MockDelays::default()).await;
+    // Only the basic pool was quoted on Aero and only the v4 pool on Uniswap: the fees
+    // read are the basic pool's (fee module and factory, two reads) and a fixed one.
+    let mut results = real_results();
+    for r in results.iter_mut() {
+        if r.spec.id != "aero-basic-direct" && r.spec.id != "uniswap-v4-direct" {
+            r.outcome = QuoteOutcome::Unavailable("the quote request timed out".to_string());
+        }
+    }
+    let fees = read_best_route_fees(&Client::new(), &url, &results, "0x3764276", &QuoteBudgets::default()).await;
+    assert_eq!(fees, vec![real_fees("aero-basic-direct"), real_fees("uniswap-v4-direct")]);
+    assert_eq!(fees, vec![vec![Some("0.3".to_string())], vec![Some("3".to_string())]]);
+    assert_eq!(seen.lock().unwrap().len(), 2, "a fixed fee needs no read");
+
+    // Nothing quoted on a venue: no hops, no reads.
+    for r in results.iter_mut() {
+        r.outcome = QuoteOutcome::Unavailable("the quote request timed out".to_string());
+    }
+    let none = read_best_route_fees(&Client::new(), &url, &results, "0x3764276", &QuoteBudgets::default()).await;
+    assert_eq!(none, vec![Vec::<Option<String>>::new(), Vec::new()]);
+
+    // An endpoint that does not answer: the dynamic fees are None, tried once each,
+    // and the fixed ones are still stated.
+    let dead = "http://127.0.0.1:1";
+    let budgets = QuoteBudgets { fees: std::time::Duration::from_millis(500), ..Default::default() };
+    let fees = read_best_route_fees(&Client::new(), dead, &real_results(), "0x3764276", &budgets).await;
+    assert_eq!(fees[0], vec![None, None, None]);
+    assert_eq!(fees[1], real_fees("uniswap-v3-weth"));
+}
+
+#[tokio::test]
+async fn test_a_block_read_that_stalls_gives_no_quote_and_keeps_the_cycles_spot() {
+    let (url, seen) = captured_rpc(MockDelays { block: std::time::Duration::from_secs(3), ..Default::default() }).await;
+    let budgets = QuoteBudgets { block_read: std::time::Duration::from_millis(150), ..Default::default() };
+    let q = fetch_route_quotes_within(&Client::new(), &url, "20.00", TRANCHE_RAW, Some(real_spot()), &budgets).await;
+    assert_eq!(q.status, "unavailable");
+    assert_eq!(q.detail.as_deref(), Some("the latest block could not be read, so no quote was requested"));
+    assert_eq!((q.block_number, q.quoted_at.clone()), (None, None));
+    assert!(q.venues.iter().all(|v| v.status == "unavailable" && v.nock_out.is_none() && v.cost_over_spot_pct.is_none()));
+    // Without a block no quoter is asked.
+    assert!(seen.lock().unwrap().iter().all(|(m, _)| m == "eth_getBlockByNumber"));
+    // The cycle's own spot is carried at full precision for a later refresh.
+    assert_eq!(q.reference_spot_usd.as_deref(), Some("0.01128675"));
+}
+
+// ---------------- Refresh reference, the latest endpoint, a restart ----------------
+
+fn envelope_with(plan: Option<AccumulationPlanStatus>, displayed_price: &str) -> SnapshotEnvelope {
+    let mut derived_metrics = DerivedMetrics { accumulation_plan: plan, ..Default::default() };
+    derived_metrics.tick_bracket_hypervisor.current_price = displayed_price.to_string();
+    SnapshotEnvelope {
+        meta: SnapshotMeta {
+            generated_at: Utc::now(),
+            state_hash: "test".to_string(),
+            version: SNAPSHOT_SPEC_VERSION.to_string(),
+            snapshot_id: Uuid::new_v4(),
+        },
+        data: SnapshotData {
+            wallet_balances: vec![],
+            positions: vec![],
+            pool_mechanics: vec![],
+            concentrated_liquidity: vec![],
+            contract_fees: vec![],
+            derived_metrics,
+        },
+    }
+}
+
+/// A worker with a plan, no RPC key and a database that is never reached.
+fn keyless_state(snapshot: Option<SnapshotEnvelope>) -> Arc<AppState> {
+    let mut config: AppConfig = serde_yaml::from_str("alchemy_api_keys: [\"YOUR_ALCHEMY_API_KEY\"]\n").unwrap();
+    config.accumulation_plan = Some(plan_cfg());
+    Arc::new(AppState {
+        db: PgPool::connect_lazy("postgres://nobody@127.0.0.1:1/none").unwrap(),
+        http_client: Client::new(),
+        config: Arc::new(config),
+        latest_snapshot: Mutex::new(snapshot),
+        last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
+        last_ingest_error: std::sync::Mutex::new(None),
+    })
+}
+
+async fn response_json(resp: Response) -> (StatusCode, HeaderMap, serde_json::Value) {
+    let (status, headers) = (resp.status(), resp.headers().clone());
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    (status, headers, serde_json::from_slice(&bytes).unwrap())
+}
+
+#[tokio::test]
+async fn test_a_refresh_measures_against_the_cycles_spot_or_against_nothing() {
+    // The cycle's quotes carry its spot even when no venue could be quoted.
+    let timed_out = route_quotes_unavailable("20.00", "the quotes took longer than 30 seconds and were abandoned", Some(0.0112867512));
+    assert_eq!(timed_out.reference_spot_usd.as_deref(), Some("0.01128675"));
+    assert!(timed_out.venues.iter().all(|v| v.nock_out.is_none() && v.cost_over_spot_pct.is_none()));
+    let mut plan = due(20.0);
+    assert_eq!(refresh_reference_spot(&plan), None, "no quotes from a cycle, no reference");
+    plan.route_quotes = Some(timed_out);
+    assert_eq!(refresh_reference_spot(&plan), Some(0.01128675));
+    plan.route_quotes = Some(real_quotes());
+    assert_eq!(refresh_reference_spot(&plan), Some(0.01128675));
+    plan.route_quotes = Some(route_quotes_unavailable("20.00", "no Alchemy RPC key is configured", None));
+    assert_eq!(refresh_reference_spot(&plan), None);
+
+    // End to end: the snapshot displays $0.01129 (five decimals). A refresh keeps the
+    // cycle's eight-decimal figure and never falls back to the displayed one.
+    plan.route_quotes = Some(route_quotes_unavailable("20.00", "stalled", Some(0.0112867512)));
+    let state = keyless_state(Some(envelope_with(Some(plan), "0.01129")));
+    let (status, _, body) = response_json(refresh_route_quotes_handler(Extension(state)).await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["route_quotes"]["reference_spot_usd"].as_str(), Some("0.01128675"));
+    // With no quotes from a cycle (just after a restart) there is no reference at all.
+    let state = keyless_state(Some(envelope_with(Some(due(20.0)), "0.01129")));
+    let (status, _, body) = response_json(refresh_route_quotes_handler(Extension(state)).await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["route_quotes"]["reference_spot_usd"].is_null(), "{}", body["route_quotes"]);
+}
+
+#[tokio::test]
+async fn test_latest_quotes_are_read_from_memory_outside_the_state_hash() {
+    // No snapshot, or no plan: every field is null, and it is still a 200.
+    for state in [keyless_state(None), keyless_state(Some(envelope_with(None, "0.01129")))] {
+        let (status, _, body) = response_json(latest_route_quotes_handler(Extension(state)).await).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, json!({ "plan_id": null, "status": null, "tranche_index": null, "tranche_usdc": null, "route_quotes": null }));
+    }
+
+    let mut plan = due(20.0);
+    plan.route_quotes = Some(real_quotes());
+    let state = keyless_state(Some(envelope_with(Some(plan), "0.01129")));
+    let (status, headers, body) = response_json(latest_route_quotes_handler(Extension(state.clone())).await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get("cache-control").and_then(|v| v.to_str().ok()), Some("no-store"));
+    assert!(headers.get("etag").is_none(), "no conditional answer: the state hash does not cover the quotes");
+    assert_eq!((body["plan_id"].as_str(), body["status"].as_str()), (Some("2026-11-reentry"), Some("tranche_due")));
+    assert_eq!((body["tranche_index"].as_u64(), body["tranche_usdc"].as_str()), (Some(1), Some("20.00")));
+    assert_eq!(serde_json::from_value::<RouteQuotes>(body["route_quotes"].clone()).unwrap(), real_quotes());
+
+    // A refresh changes the quotes and not the state hash; the endpoint answers with
+    // the new ones at once (here "unavailable": this worker has no RPC key).
+    let hash_before = state.latest_snapshot.lock().await.as_ref().unwrap().meta.state_hash.clone();
+    let (status, _, _) = response_json(refresh_route_quotes_handler(Extension(state.clone())).await).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, _, body) = response_json(latest_route_quotes_handler(Extension(state.clone())).await).await;
+    assert_eq!(body["route_quotes"]["status"].as_str(), Some("unavailable"));
+    assert_eq!(body["route_quotes"]["detail"].as_str(), Some("no Alchemy RPC key is configured"));
+    assert_eq!(state.latest_snapshot.lock().await.as_ref().unwrap().meta.state_hash, hash_before);
+
+    // The pure body: nothing due means no quotes, whatever the plan is.
+    let waiting = plan_status(&PlanDirective::Waiting { next_due_at: Utc::now() });
+    let body = latest_route_quotes_body(Some(&waiting));
+    assert_eq!(body["status"].as_str(), Some("waiting"));
+    assert!(body["route_quotes"].is_null());
+}
+
+#[test]
+fn test_a_snapshot_read_back_from_the_database_carries_no_quotes() {
+    let mut plan = due(20.0);
+    plan.route_quotes = Some(real_quotes());
+    let mut data = envelope_with(Some(plan), "0.01129").data;
+    let hash = compute_state_hash(&data);
+    forget_stored_route_quotes(&mut data);
+    let plan = data.derived_metrics.accumulation_plan.as_ref().unwrap();
+    assert_eq!(plan.route_quotes, None);
+    // The plan itself is untouched, and so is the state hash the row was stored under.
+    assert_eq!((plan.status.as_str(), plan.tranche_usdc.as_str()), ("tranche_due", "20.00"));
+    assert_eq!(compute_state_hash(&data), hash);
+    // No plan: nothing to do.
+    let mut none = envelope_with(None, "0.01129").data;
+    forget_stored_route_quotes(&mut none);
+    assert!(none.derived_metrics.accumulation_plan.is_none());
+}
+
+#[test]
+fn test_both_mcp_transports_describe_the_quotes_in_the_plan_tool() {
+    // The stdio binary cannot share code with the worker, so the two tool lists are
+    // separate literals. The plan tool must say the same on both, quotes included.
+    let clause = "while a tranche is due, read-only route quotes for that amount on Aero and Uniswap (a comparison, not a recommendation)";
+    let plan_tool_line = |src: &str| {
+        let at = src.find("\"name\": \"get_accumulation_plan\"").expect("the plan tool is listed");
+        let rest = &src[at..];
+        let line = rest.lines().find(|l| l.contains("\"description\"")).expect("it has a description");
+        line.trim().to_string()
+    };
+    let http = plan_tool_line(include_str!("mcp_http.rs"));
+    let stdio = plan_tool_line(include_str!("bin/mcp.rs"));
+    assert!(http.contains(clause), "{http}");
+    assert_eq!(http, stdio);
 }
