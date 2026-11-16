@@ -215,6 +215,12 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
         let current_total: f64 = gs.total_portfolio_usd.parse().unwrap_or(f64::INFINITY);
         gs.high_water_mark_date = resolve_high_water_mark_date(prev_peak, current_total, &gs.high_water_mark_date);
     }
+    // Cost basis (issue #98): plan buys from the accumulation ledger, and the whole stack
+    // only when the operator configured an opening basis. A failed ledger read is stated
+    // in the block (`unavailable`); it does not fail the cycle.
+    let held_nock = derived_metrics.global_status.total_nock_amount.trim().parse::<f64>().ok();
+    derived_metrics.cost_basis =
+        Some(cost_basis_for_cycle(state, raw_data.spot_price_nock_usd, held_nock).await);
     // Capture directive strings before the metrics move into the snapshot envelope
     let next_directive_action = derived_metrics.global_status.shot_advice_action.clone();
     let next_directive_details = derived_metrics.global_status.shot_advice_details.clone();

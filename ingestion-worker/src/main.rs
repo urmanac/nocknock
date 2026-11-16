@@ -52,6 +52,10 @@ mod claims;
 use claims::*;
 mod mcp_http;
 use mcp_http::*;
+mod cost_basis;
+use cost_basis::*;
+mod cost_basis_text;
+use cost_basis_text::*;
 
 // ============================================================
 // Configuration
@@ -224,6 +228,39 @@ fn default_plan_venue() -> String {
     "Aero".to_string()
 }
 
+/// Cost-basis inputs only the operator can supply (issue #98). Optional: without this
+/// section NockNock reports the average cost of the plan's receipt-verified buys and
+/// nothing else. It never fills these in and never derives them from the chain.
+#[derive(Deserialize, Serialize, Debug, Clone, Default, PartialEq)]
+pub struct CostBasisConfig {
+    /// The operator's own figures for the NOCK held at one instant, read from wherever
+    /// they keep their records. Unset = the whole-stack basis is "not configured".
+    #[serde(default)]
+    pub opening: Option<OpeningBasisConfig>,
+}
+
+/// An operator-entered opening basis. Every field is read loosely (any scalar) and then
+/// checked by `resolve_opening_basis`, so a half-filled block or a placeholder word is
+/// reported as a configuration error in the snapshot instead of stopping the worker or
+/// being replaced by a default.
+#[derive(Deserialize, Serialize, Debug, Clone, Default, PartialEq)]
+pub struct OpeningBasisConfig {
+    /// NOCK held at `as_of`. Must be greater than zero.
+    #[serde(default)]
+    pub nock_amount: Option<serde_json::Value>,
+    /// What that NOCK cost in total, in USD. Must be greater than zero.
+    #[serde(default)]
+    pub cost_usd: Option<serde_json::Value>,
+    /// The instant the figures were read: a full timestamp with a UTC offset, not in the
+    /// future. Buys confirmed at or before it are taken to be inside the figures.
+    #[serde(default)]
+    pub as_of: Option<serde_json::Value>,
+    /// Where the figures came from, in the operator's words. Shown beside every number
+    /// that uses them.
+    #[serde(default)]
+    pub source: Option<serde_json::Value>,
+}
+
 fn default_true() -> bool {
     true
 }
@@ -268,6 +305,9 @@ struct AppConfig {
     /// Optional dollar-cost-averaging plan (issue #79).
     #[serde(default)]
     accumulation_plan: Option<AccumulationPlanConfig>,
+    /// Optional operator-supplied cost-basis inputs (issue #98).
+    #[serde(default)]
+    cost_basis: CostBasisConfig,
     #[serde(default)]
     notifications: NotificationConfig,
     #[serde(default)]
@@ -593,6 +633,99 @@ struct DerivedMetrics {
     /// Standing LP-rebuild bias (snapshot 2.1.0).
     #[serde(default)]
     lp_rebuild: LpRebuild,
+    /// NOCK cost basis (v0.6.0, issue #98). Null in a snapshot stored before the field
+    /// existed: unknown, never a zero basis.
+    #[serde(default)]
+    cost_basis: Option<CostBasis>,
+}
+
+/// NOCK cost basis in two layers (v0.6.0, issue #98). `plan_buys` is exact: it comes only
+/// from receipt-verified rows in the accumulation ledger. `whole_stack` exists only when
+/// the operator enters an opening basis in config; NockNock cannot derive it from the
+/// chain and never invents it.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct CostBasis {
+    /// NOCK/USD spot the differences below are measured at; null when there is no price.
+    spot_price_usd: Option<String>,
+    plan_buys: PlanBuysBasis,
+    whole_stack: WholeStackBasis,
+}
+
+/// Average cost of the receipt-verified buys, across every plan in the ledger.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct PlanBuysBasis {
+    /// ok | no_fills | unavailable
+    status: String,
+    /// Why the figures are unavailable; null otherwise.
+    reason: Option<String>,
+    fills: i64,
+    spent_usdc: Option<String>,
+    acquired_nock: Option<String>,
+    /// Σ USDC spent / Σ NOCK received; null without a verified buy.
+    avg_cost_usd: Option<String>,
+    first_fill_at: Option<String>,
+    last_fill_at: Option<String>,
+    /// `acquired_nock` at the current spot; null when there is no price.
+    value_at_spot_usd: Option<String>,
+    /// `value_at_spot_usd` less `spent_usdc`, signed. A measurement, not advice.
+    unrealized_usd: Option<String>,
+    /// The same difference as a percentage of `spent_usdc`, signed.
+    unrealized_pct: Option<String>,
+    /// The same figures for each plan id, oldest plan first.
+    #[serde(default)]
+    plans: Vec<PlanBasis>,
+    /// Exactly what these figures count, and what they leave out.
+    #[serde(default)]
+    includes: Vec<String>,
+    #[serde(default)]
+    excludes: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct PlanBasis {
+    plan_id: String,
+    fills: i64,
+    spent_usdc: String,
+    acquired_nock: String,
+    avg_cost_usd: String,
+    first_fill_at: String,
+    last_fill_at: String,
+}
+
+/// Blended average of the operator-entered opening basis and the verified buys made
+/// after it: (opening cost + USDC spent since) / (opening NOCK + NOCK bought since).
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct WholeStackBasis {
+    /// not_configured | ok | invalid | unavailable
+    status: String,
+    /// The configuration error (invalid) or the failed read (unavailable); null otherwise.
+    reason: Option<String>,
+    /// The operator's own note on where the opening figures came from.
+    source: Option<String>,
+    /// The instant the opening figures were read (RFC 3339, UTC).
+    as_of: Option<String>,
+    opening_nock: Option<String>,
+    opening_cost_usd: Option<String>,
+    opening_avg_cost_usd: Option<String>,
+    /// Verified buys confirmed after `as_of`, and their totals.
+    fills_since: Option<i64>,
+    bought_since_usdc: Option<String>,
+    bought_since_nock: Option<String>,
+    /// Opening plus bought since: the NOCK and the cost this average covers.
+    basis_nock: Option<String>,
+    basis_cost_usd: Option<String>,
+    avg_cost_usd: Option<String>,
+    /// `basis_nock` at the current spot, and its difference from `basis_cost_usd`.
+    value_at_spot_usd: Option<String>,
+    unrealized_usd: Option<String>,
+    unrealized_pct: Option<String>,
+    /// NOCK NockNock reads now (wallet plus tracked LP), for comparison with
+    /// `basis_nock`: the two differ by everything the basis does not track.
+    held_nock: Option<String>,
+    #[serde(default)]
+    includes: Vec<String>,
+    #[serde(default)]
+    excludes: Vec<String>,
 }
 
 /// Plan progress as emitted in snapshots. Everything here derives from the plan
@@ -1003,6 +1136,11 @@ async fn main() -> Result<()> {
     // Load config: config.yaml.example is the base layer, config.yaml overrides it,
     // environment variables override both.
     let config = load_app_config("config.yaml.example", None, true)?;
+    // A half-filled cost_basis.opening does not stop the worker: every cycle reports it
+    // as `whole_stack.status = invalid` with this reason. Say it once in the log too.
+    if let OpeningBasisState::Invalid(reason) = resolve_opening_basis(config.cost_basis.opening.as_ref(), Utc::now()) {
+        tracing::error!("Configuration error: {reason}");
+    }
 
     // Initialize database
     let db = PgPool::connect(&config.database_url)
@@ -1141,6 +1279,10 @@ async fn main() -> Result<()> {
         .route(
             "/v1/tax/export",
             axum::routing::get(tax_export_handler),
+        )
+        .route(
+            "/v1/cost-basis/series",
+            axum::routing::get(cost_basis_series_handler),
         )
         .layer(Extension(state.clone()));
 
@@ -1320,3 +1462,5 @@ struct V3PositionDecoded {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_cost_basis;

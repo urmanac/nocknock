@@ -436,6 +436,198 @@ components:
           description: Dollar-cost-averaging plan status (2.1.0); null when no plan is configured
         lp_rebuild:
           $ref: '#/components/schemas/LpRebuild'
+        cost_basis:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/CostBasis'
+          nullable: true
+          description: |
+            NOCK cost basis (v0.6.0, issue #98). Null or absent in a snapshot stored
+            before the field existed: unknown, never a zero basis.
+
+    CostBasis:
+      type: object
+      description: |
+        What the NOCK cost, against what it is worth at spot (v0.6.0), in two layers kept
+        apart. `plan_buys` is exact: it comes only from receipt-verified rows in the
+        accumulation ledger. `whole_stack` exists only when the operator enters an
+        opening basis in config (`cost_basis.opening`); NockNock cannot derive the
+        stack's history from the chain and never invents it. Every figure is a
+        measurement. Nothing here is advice to buy or sell.
+      required: [plan_buys, whole_stack]
+      properties:
+        spot_price_usd:
+          type: string
+          nullable: true
+          description: NOCK/USD spot the differences are measured at; null when there is no price
+          example: "0.011530"
+        plan_buys:
+          $ref: '#/components/schemas/PlanBuysBasis'
+        whole_stack:
+          $ref: '#/components/schemas/WholeStackBasis'
+
+    PlanBuysBasis:
+      type: object
+      description: |
+        Average cost of the receipt-verified buys in the accumulation ledger, across
+        every plan (v0.6.0). Needs no operator input.
+      required: [status, fills]
+      properties:
+        status:
+          type: string
+          enum: [ok, no_fills, unavailable]
+          description: |
+            `no_fills`: the ledger holds no verified buy. `unavailable`: the ledger could
+            not be read this cycle (see `reason`); never reported as "no buys".
+        reason:
+          type: string
+          nullable: true
+        fills:
+          type: integer
+        spent_usdc:
+          type: string
+          nullable: true
+          description: USDC that left the wallet across the verified buys
+        acquired_nock:
+          type: string
+          nullable: true
+        avg_cost_usd:
+          type: string
+          nullable: true
+          description: spent_usdc / acquired_nock; null without a verified buy
+          example: "0.011768"
+        first_fill_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_fill_at:
+          type: string
+          format: date-time
+          nullable: true
+        value_at_spot_usd:
+          type: string
+          nullable: true
+          description: acquired_nock at spot_price_usd; null when there is no price
+        unrealized_usd:
+          type: string
+          nullable: true
+          description: value_at_spot_usd less spent_usdc, signed (negative = worth less than it cost)
+          example: "-1.21"
+        unrealized_pct:
+          type: string
+          nullable: true
+          description: The same difference as a percentage of spent_usdc, signed
+          example: "-2.02"
+        plans:
+          type: array
+          description: The same figures per plan id, oldest plan first
+          items:
+            type: object
+            required: [plan_id, fills, spent_usdc, acquired_nock, avg_cost_usd, first_fill_at, last_fill_at]
+            properties:
+              plan_id: { type: string }
+              fills: { type: integer }
+              spent_usdc: { type: string }
+              acquired_nock: { type: string }
+              avg_cost_usd: { type: string }
+              first_fill_at: { type: string, format: date-time }
+              last_fill_at: { type: string, format: date-time }
+        includes:
+          type: array
+          items: { type: string }
+          description: |
+            Plain-words statements of exactly what the figures count. Emptied in
+            `/snapshot/historical` rows (fixed prose; the figures stay).
+        excludes:
+          type: array
+          items: { type: string }
+          description: Plain-words statements of what the figures leave out
+
+    WholeStackBasis:
+      type: object
+      description: |
+        Blended average of the operator-entered opening basis and the verified buys
+        confirmed after it (v0.6.0):
+        (opening_cost_usd + bought_since_usdc) / (opening_nock + bought_since_nock).
+        The opening figures are the operator's own, labelled with their `source`; NockNock
+        neither reads nor checks them. Sells, LP rebalancing, fees and unrecorded buys
+        after `as_of` are not tracked (`excludes` says so).
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [not_configured, ok, invalid, unavailable]
+          description: |
+            `not_configured`: no `cost_basis.opening` in config, so there is no
+            whole-stack figure. `invalid`: the block is present but unusable (half-filled,
+            a zero or negative amount, an as_of that is not a full past timestamp);
+            `reason` says what to fix and no number is reported. `unavailable`: the
+            accumulation ledger could not be read this cycle.
+        reason:
+          type: string
+          nullable: true
+        source:
+          type: string
+          nullable: true
+          description: The operator's note on where the opening figures came from
+        as_of:
+          type: string
+          format: date-time
+          nullable: true
+          description: The instant the opening figures were read; buys at or before it are not added again
+        opening_nock:
+          type: string
+          nullable: true
+        opening_cost_usd:
+          type: string
+          nullable: true
+        opening_avg_cost_usd:
+          type: string
+          nullable: true
+        fills_since:
+          type: integer
+          nullable: true
+          description: Verified buys confirmed after as_of
+        bought_since_usdc:
+          type: string
+          nullable: true
+        bought_since_nock:
+          type: string
+          nullable: true
+        basis_nock:
+          type: string
+          nullable: true
+          description: opening_nock + bought_since_nock, the NOCK this average covers
+        basis_cost_usd:
+          type: string
+          nullable: true
+        avg_cost_usd:
+          type: string
+          nullable: true
+          description: basis_cost_usd / basis_nock
+        value_at_spot_usd:
+          type: string
+          nullable: true
+          description: basis_nock at spot_price_usd (not the NOCK held now; see held_nock)
+        unrealized_usd:
+          type: string
+          nullable: true
+          description: value_at_spot_usd less basis_cost_usd, signed
+        unrealized_pct:
+          type: string
+          nullable: true
+        held_nock:
+          type: string
+          nullable: true
+          description: |
+            NOCK read this cycle (wallet plus tracked LP), for comparison with basis_nock.
+            The two differ by everything the basis does not track.
+        includes:
+          type: array
+          items: { type: string }
+        excludes:
+          type: array
+          items: { type: string }
 
     SovereignLedger:
       type: object

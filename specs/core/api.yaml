@@ -257,6 +257,108 @@ paths:
                         block_number: { type: integer }
                         confirmed_at: { type: string, format: date-time }
 
+  /cost-basis/series:
+    get:
+      tags: [Execution]
+      summary: Average cost against spot over time (v0.6.0)
+      operationId: getCostBasisSeries
+      description: |
+        The data behind the "Average cost vs spot" chart (issue #98). Every
+        receipt-verified fill, oldest first, with the average cost as it stood once that
+        fill was confirmed, and the stored NOCK/USD spot over the range.
+
+        Nothing is interpolated. `spot` holds stored observations only, thinned to at
+        most one per `bucket_seconds` (the last stored row in each bucket, with its own
+        timestamp and price); a bucket with no observation has no point, and clients
+        must draw that as a gap. `spot_at_fill` is the stored observation nearest the
+        fill's block time, or null when none lies within `spot_match_window_minutes`.
+        The averages are exact between fills: an average cost changes only when a buy
+        is recorded.
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 365 }
+          description: |
+            Range ending now. Default: back to the earlier of the first fill and the
+            opening basis plus a day, at least 2 and at most 365; 30 when there is
+            neither.
+      responses:
+        '200':
+          description: Series
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [generated_at, from, to, bucket_seconds, spot_match_window_minutes, fills, whole_stack]
+                properties:
+                  generated_at: { type: string, format: date-time }
+                  from: { type: string, format: date-time }
+                  to: { type: string, format: date-time }
+                  bucket_seconds:
+                    type: integer
+                    description: Width of the thinning bucket; two spot points further apart than a few buckets have a gap between them
+                  spot_match_window_minutes: { type: integer }
+                  spot:
+                    type: array
+                    nullable: true
+                    description: Stored spot observations in range, oldest first; null when the price history could not be read (see spot_error)
+                    items:
+                      $ref: '#/components/schemas/CostBasisSpotPoint'
+                  spot_error:
+                    type: string
+                    nullable: true
+                  fills:
+                    type: array
+                    description: Every verified fill in the ledger (not only those in range), oldest first
+                    items:
+                      type: object
+                      required: [plan_id, tx_hash, block_number, confirmed_at, usdc_spent, nock_received, effective_price_usd, plan_avg_cost_usd, avg_cost_usd]
+                      properties:
+                        plan_id: { type: string }
+                        tx_hash: { type: string }
+                        block_number: { type: integer }
+                        confirmed_at: { type: string, format: date-time }
+                        usdc_spent: { type: string }
+                        nock_received: { type: string }
+                        effective_price_usd: { type: string }
+                        plan_avg_cost_usd:
+                          type: string
+                          description: Running average inside this fill's own plan, after this fill
+                        avg_cost_usd:
+                          type: string
+                          description: Running average across every plan in the ledger, after this fill
+                        whole_stack_avg_cost_usd:
+                          type: string
+                          nullable: true
+                          description: Blended average after this fill; null without a valid opening basis, or for a fill at or before its as_of
+                        spot_at_fill:
+                          allOf:
+                            - $ref: '#/components/schemas/CostBasisSpotPoint'
+                          nullable: true
+                  whole_stack:
+                    type: object
+                    required: [status]
+                    properties:
+                      status:
+                        type: string
+                        enum: [not_configured, ok, invalid]
+                      reason: { type: string, nullable: true }
+                      opening:
+                        type: object
+                        nullable: true
+                        description: The operator-entered opening basis, where the blended line starts
+                        properties:
+                          as_of: { type: string, format: date-time }
+                          nock: { type: string }
+                          cost_usd: { type: string }
+                          avg_cost_usd: { type: string }
+                          source: { type: string }
+        '400':
+          description: days is not a whole number from 1 to 365
+        '503':
+          description: The accumulation ledger could not be read (LEDGER_UNAVAILABLE); no series is returned
+
   /execute/record-harvest:
     post:
       tags: [Execution]
@@ -425,6 +527,20 @@ components:
           items:
             type: string
           description: Recent error messages (if degraded/down)
+
+    CostBasisSpotPoint:
+      type: object
+      description: One stored NOCK/USD observation from the price history (v0.6.0). Never interpolated.
+      required: [at, price_usd, source, is_backfilled]
+      properties:
+        at: { type: string, format: date-time }
+        price_usd: { type: string }
+        source:
+          type: string
+          description: Provenance of the row (the worker's own pool read, or a third-party feed)
+        is_backfilled:
+          type: boolean
+          description: True for a third-party candle filled in after the fact, false for the worker's own contemporaneous read
 
     HistoricalResponse:
       type: object
