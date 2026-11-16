@@ -191,7 +191,7 @@
 Before pushing any PR or proposing a release tag, always execute the full verification battery:
 ```bash
 make test-brain       # 3 tests passing (WASM invariants & hashing)
-make test-worker      # 205 tests as of #93 (192 worker + 13 MCP)
+make test-worker      # 207 tests as of #93 (194 worker + 13 MCP)
 make test-frontend    # 137 tests as of #93
 make dist             # Verifies packaging of dist/ binaries and tarballs
 ```
