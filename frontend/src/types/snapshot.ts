@@ -145,7 +145,9 @@ export interface GlobalStatus {
   /** wallet_aero_amount in USD: the AERO pillar (v0.6.0, #93) */
   wallet_aero_usd?: string | null;
   /** AERO earned in the gauges of tracked staked positions and not claimed (v0.6.0, #93).
-   *  NOT in total_portfolio_usd. Null when a gauge could not be read; never a partial sum */
+   *  NOT in total_portfolio_usd. Null when any Aero position's gauge was not read (a
+   *  failed read, a gauge that pays another token, or no gauge_address): never a partial
+   *  sum, never 0 for something not read */
   unclaimed_aero_amount?: string | null;
   unclaimed_aero_usd?: string | null;
   /** The worker's stated reason whenever an AERO figure above is null (v0.6.0, #93) */
@@ -237,8 +239,8 @@ export interface FeeCollectionIndex {
    *  or (v0.6.0) an Aero CL position staked in its gauge (see note). */
   recommended_action: 'claim_now' | 'claim_recommended' | 'accumulate' | 'not_claimable';
   /** With 'not_claimable': the position's own reason, when it has one (v0.6.0),
-   *  followed by its unclaimed AERO or why that was not read (#93). On a claimable row
-   *  it is the AERO statement alone. */
+   *  followed by its unclaimed AERO or why that was not read (#93). A claimable row
+   *  carries no AERO statement: its action is about LP fees only. */
   note?: string;
 }
 

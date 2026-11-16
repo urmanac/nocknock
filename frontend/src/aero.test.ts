@@ -7,6 +7,8 @@ import {
   aeroPriceLine,
   aeroRewardsSentence,
   aeroStatSubtitle,
+  compositionAeroText,
+  compositionResidualLabel,
   positionAeroText,
   unclaimedAeroLine,
   unclaimedAeroText,
@@ -185,10 +187,14 @@ describe('AERO on the other surfaces (#93)', () => {
     expect(row('Aero CL WETH/NOCK 0.97% #2914490', 'not LP-claimable (staked: swap fees on staked liquidity go to the gauge); unclaimed AERO 11.922078 ($4.98)')).toContain(
       'unclaimed AERO 11.922078 ($4.98)',
     );
-    // A claimable row that also earns AERO keeps its gas economics and adds the amount.
-    expect(
-      velocityRowText({ name: 'Aero USDC/NOCK', claimable: 0.12, gasBreakEven: 0.0041, ratio: 29.3, action: 'claim_now', note: 'unclaimed AERO 0.5 ($0.21)' }),
-    ).toBe('Aero USDC/NOCK: CLAIM_NOW ($0.12 earned / gas $0.0041 — 29x ROI) · unclaimed AERO 0.5 ($0.21)');
+    // A claimable row states its fee action only. An AERO amount beside CLAIM_NOW or
+    // ACCUMULATE would read as advice about AERO, so even if a note arrives (the worker
+    // sends none on such a row) it is not printed there.
+    for (const action of ['claim_now', 'claim_recommended', 'accumulate']) {
+      const text = velocityRowText({ name: 'Aero USDC/NOCK', claimable: 0.12, gasBreakEven: 0.0041, ratio: 29.3, action, note: 'unclaimed AERO 0.5 ($0.21)' });
+      expect(text).toBe(`Aero USDC/NOCK: ${action.toUpperCase()} ($0.12 earned / gas $0.0041 — 29x ROI)`);
+      expect(text).not.toContain('AERO');
+    }
     // Nothing on any surface still says the rewards are not read (#93).
     expect(row('x', '')).not.toContain('#93');
   });
@@ -199,6 +205,30 @@ describe('AERO on the other surfaces (#93)', () => {
     // An older snapshot has no AERO field and reads exactly as before.
     const old = { total_portfolio_usd: '2413.57', total_native_usd: '1312.88', total_stable_usd: '1033.71', total_eth_usd: '66.98' };
     expect(compositionReadout(old).otherUsd).toBe(0);
+  });
+
+  it('the composition readout states wallet AERO, so the Total equals the parts shown', () => {
+    // Held: the panel's Total includes $0.57 of AERO, and the readout says so.
+    expect(compositionAeroText(HELD)).toBe('AERO $0.57 (wallet; not cash)');
+    const ro = compositionReadout(HELD);
+    const parts = ro.nativeUsd! + ro.stableUsd! + ro.ethUsd! + 0.57 + ro.otherUsd!;
+    expect(Math.abs(ro.totalUsd! - parts)).toBeLessThan(0.005);
+    // None held, under a cent, or not reported: nothing to state (never "AERO $0.00"
+    // for a snapshot that does not carry the field).
+    expect(compositionAeroText(GLOBAL)).toBeNull();
+    expect(compositionAeroText({ ...GLOBAL, wallet_aero_usd: '0.004' })).toBeNull();
+    expect(compositionAeroText({ total_portfolio_usd: '2413.57' })).toBeNull();
+    expect(compositionAeroText({ ...GLOBAL, wallet_aero_usd: null })).toBeNull();
+    expect(compositionAeroText(undefined)).toBeNull();
+    // The residual's label names AERO whenever AERO was subtracted from it.
+    expect(compositionResidualLabel(HELD, true)).toBe('Total − NOCK − USDC − ETH − AERO');
+    expect(compositionResidualLabel(GLOBAL, true)).toBe('Total − NOCK − USDC − ETH − AERO');
+    // An older snapshot keeps its wording.
+    expect(compositionResidualLabel({ total_eth_usd: '66.98' }, true)).toBe('Total − NOCK − USDC − ETH');
+    expect(compositionResidualLabel({}, false)).toBe('Total − NOCK − USDC, e.g. LP WETH');
+    expect(compositionResidualLabel(undefined, false)).toBe('Total − NOCK − USDC, e.g. LP WETH');
+    // It states an amount and gives no advice.
+    expect(compositionAeroText(HELD)!.toLowerCase()).not.toMatch(/sell|accumulate|buy|swap|convert|harvest|should|recommend|advis|claim|compound/);
   });
 
   it('states amounts only: no advice about AERO in any line', () => {

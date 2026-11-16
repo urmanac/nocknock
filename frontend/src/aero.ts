@@ -119,3 +119,30 @@ export function aeroRewardsSentence(global: any, positions: any[] | undefined | 
   if (text === 'no gauge was read') return 'Unclaimed AERO on staked Aero LP: no gauge was read (see each position).';
   return `Unclaimed AERO on staked Aero LP: ${text}.`;
 }
+
+/**
+ * Wallet AERO for the Portfolio Composition readout: "AERO $0.57 (wallet; not cash)".
+ * The panel's Total includes wallet AERO, and its "other legs" residual has AERO taken
+ * out (timeline.ts compositionReadout), so the readout states it; otherwise the Total
+ * would exceed the parts shown with no explanation. Null when the snapshot does not
+ * report it or it rounds to nothing (under $0.01).
+ */
+export function compositionAeroText(global: any): string | null {
+  const usd = field(global, 'wallet_aero_usd');
+  if (usd === null) return null;
+  const n = Number(usd);
+  if (!Number.isFinite(n) || n < 0.01) return null;
+  return `AERO $${usd} (wallet; not cash)`;
+}
+
+/**
+ * What the composition readout's "other legs" residual is the Total minus. It names
+ * AERO whenever the snapshot reports wallet AERO, because the residual then has it
+ * subtracted; an older snapshot keeps the wording it had.
+ */
+export function compositionResidualLabel(global: any, ethReported: boolean): string {
+  const aero = field(global, 'wallet_aero_usd');
+  const aeroReported = aero !== null && Number.isFinite(Number(aero));
+  const base = `Total − NOCK − USDC${ethReported ? ' − ETH' : ''}${aeroReported ? ' − AERO' : ''}`;
+  return ethReported ? base : `${base}, e.g. LP WETH`;
+}

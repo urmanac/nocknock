@@ -38,7 +38,7 @@ import { floorState, floorDeltaText, floorSummaryText, regimeLabel, regimeTone }
 import { buildChartRows, compositionReadout, syncWindowOrDefault, type ChartSeries, type GapRow } from './timeline.ts';
 import { ethUsdPrice, gasLine, hwmSubtitle, pillarLine } from './pillars.ts';
 import { LEDGER_TITLE, ledgerView } from './ledger.ts';
-import { aeroRewardsSentence, aeroStatSubtitle } from './aero.ts';
+import { aeroRewardsSentence, aeroStatSubtitle, compositionAeroText, compositionResidualLabel } from './aero.ts';
 import { AeroPillarLines, PositionAeroLine } from './components/AeroPillar.tsx';
 
 function Dashboard() {
@@ -664,8 +664,11 @@ function Dashboard() {
                 {ro.ethUsd !== null && (
                   <span style={{ color: '#a855f7' }}> · ETH {usd(ro.ethUsd)} (wallet gas + LP WETH; not cash)</span>
                 )}
+                {compositionAeroText(global) !== null && (
+                  <span style={{ color: '#fdba74' }}> · {compositionAeroText(global)}</span>
+                )}
                 {ro.otherUsd !== null && Math.abs(ro.otherUsd) >= 0.01 && (
-                  <span style={{ color: '#8b949e' }}> · {usd(ro.otherUsd)} in other legs ({ro.ethUsd === null ? 'Total − NOCK − USDC, e.g. LP WETH' : 'Total − NOCK − USDC − ETH'})</span>
+                  <span style={{ color: '#8b949e' }}> · {usd(ro.otherUsd)} in other legs ({compositionResidualLabel(global, ro.ethUsd !== null)})</span>
                 )}
               </div>
             );
