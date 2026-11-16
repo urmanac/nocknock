@@ -1096,3 +1096,33 @@ fn test_golden_snapshot_aero_cl_is_byte_identical() {
         "snapshot bytes changed; compare {path} with a fresh NOCKNOCK_BLESS_GOLDEN=1 run and `git diff` it"
     );
 }
+
+/// Both spec files must parse as YAML. A plain scalar containing ": " (as a description
+/// added with this feature once did) is rejected by a strict parser, so the spec could
+/// not be loaded by tooling even though every substring check passed.
+#[test]
+fn test_spec_files_parse_as_yaml() {
+    for (name, text) in [
+        ("specs/core/snapshot.yaml", include_str!("../../specs/core/snapshot.yaml")),
+        ("specs/core/api.yaml", include_str!("../../specs/core/api.yaml")),
+    ] {
+        let parsed: Result<serde_yaml::Value, _> = serde_yaml::from_str(text);
+        assert!(parsed.is_ok(), "{name} is not valid YAML: {:?}", parsed.err());
+    }
+}
+
+/// A failed RPC request must not carry its URL into the error text: the URL holds the
+/// Alchemy key, and this text is published (/health `last_error`, snapshot notes, MCP).
+/// reqwest appends "for url (...)" to a send error unless it is stripped. Port 1 on
+/// loopback refuses the connection, so no network is needed.
+#[tokio::test]
+async fn test_rpc_network_error_text_never_contains_the_url_or_key() {
+    let url = "http://127.0.0.1:1/v2/SECRETKEY-do-not-print";
+    let payload = json!({ "jsonrpc": "2.0", "id": 1, "method": "eth_call", "params": [] });
+    let err = eth_call_allow_revert(&Client::new(), url, &payload).await.expect_err("nothing listens on port 1");
+    let text = format!("{err} | {err:?} | {err:#}");
+    assert!(text.contains("network error"), "{text}");
+    for banned in ["SECRETKEY", "/v2/", "127.0.0.1:1", "for url"] {
+        assert!(!text.contains(banned), "RPC error text leaks {banned:?}: {text}");
+    }
+}

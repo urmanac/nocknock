@@ -466,15 +466,26 @@ pub(crate) fn harvest_usd_value(amount_human: &str, unit_price: Option<f64>) -> 
     Some(format!("{:.4}", amount * price))
 }
 
-/// The stored NOCK/USD price nearest `at`, within HARVEST_NOCK_PRICE_WINDOW_MINUTES, with
-/// its provenance. None when no stored price is close enough or the query fails.
+/// The statement behind `nock_price_near` (#129). The table holds two kinds of row. An
+/// observation (the worker's own read, or a seeded point) is stamped when it was taken
+/// and has no OHLC columns: its `price_usd` is the price at `timestamp`. A third-party
+/// candle is stored at its OPEN time with `price_usd` set to its CLOSE, which is the
+/// price one candle period later (an hour, or a day). So a candle counts as its open,
+/// never its close, and a candle with no positive open gives no price. Inside the window
+/// the worker's own read nearest `at` wins; a backfilled point is used only when there
+/// is none. This is the same rule the cost-basis series applies (`nearest_spot`).
+pub(crate) const NOCK_PRICE_NEAR_SQL: &str =
+    "SELECT timestamp, COALESCE(open_usd, price_usd) AS price_usd, source FROM market_price_history \
+     WHERE timestamp BETWEEN $2 AND $3 AND COALESCE(open_usd, price_usd) > 0 \
+     ORDER BY is_backfilled ASC, ABS(EXTRACT(EPOCH FROM (timestamp - $1))) ASC LIMIT 1";
+
+/// The stored NOCK/USD price that stands for `at`, within
+/// HARVEST_NOCK_PRICE_WINDOW_MINUTES, with its provenance: the price at the row's own
+/// timestamp (see NOCK_PRICE_NEAR_SQL). None when no stored price is close enough or the
+/// query fails.
 pub(crate) async fn nock_price_near(db: &PgPool, at: DateTime<Utc>) -> Option<(f64, String)> {
     let window = chrono::Duration::minutes(HARVEST_NOCK_PRICE_WINDOW_MINUTES);
-    let row = sqlx::query(
-        "SELECT timestamp, price_usd, source FROM market_price_history \
-         WHERE timestamp BETWEEN $2 AND $3 \
-         ORDER BY ABS(EXTRACT(EPOCH FROM (timestamp - $1))) ASC LIMIT 1",
-    )
+    let row = sqlx::query(NOCK_PRICE_NEAR_SQL)
     .bind(at)
     .bind(at - window)
     .bind(at + window)

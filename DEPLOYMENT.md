@@ -154,7 +154,7 @@ at boot and survive logout.
    The script ships the working tree minus gitignored files, builds both images on the
    host, stores `config.yaml` and a generated database password as Podman secrets,
    installs the quadlets into `~/.config/containers/systemd/` and restarts the stack.
-   Re-run it to upgrade; the database volume and password are kept.
+   Re-run it to upgrade; the database volume and password are kept. Upgrades are forward-only: a build older than the newest migration already applied will not start (see AGENTS.md section 13).
 
 3. **Endpoints**: dashboard on `http://<host>:3000`, API and HTTP MCP on
    `http://<host>:8081` (host port 8080 is left free). PostgreSQL is reachable only

@@ -7,6 +7,11 @@
 # config.yaml / .env.local secrets end up in an image), builds both images on the
 # host, installs the quadlets and (re)starts the stack. Idempotent.
 #
+# The file list comes from git, one file per entry. A nested git worktree or repository
+# (for example .claude/worktrees/*) is listed by git as a single directory, so tar is
+# told not to recurse: otherwise it would ship that whole directory, build output and
+# gitignored files included (#128).
+#
 # Host prerequisites (one-time):  sudo apt install podman
 set -euo pipefail
 
@@ -22,7 +27,7 @@ WC_ID="${VITE_WALLETCONNECT_PROJECT_ID:-$(sed -n 's/^VITE_WALLETCONNECT_PROJECT_
 
 echo "==> syncing source to $HOST:~/nocknock/src"
 ssh "$HOST" 'rm -rf ~/nocknock/src && mkdir -p ~/nocknock/src ~/.config/containers/systemd'
-git ls-files -co --exclude-standard -z | COPYFILE_DISABLE=1 tar --null -T - -cf - | ssh "$HOST" 'tar -xf - -C ~/nocknock/src'
+git ls-files -co --exclude-standard -z | COPYFILE_DISABLE=1 tar --null --no-recursion -T - -cf - | ssh "$HOST" 'tar -xf - -C ~/nocknock/src'
 
 echo "==> creating secrets (existing database password is kept)"
 ssh "$HOST" 'podman secret rm nocknock-config >/dev/null 2>&1 || true; podman secret create nocknock-config - >/dev/null' < "$CONFIG"
