@@ -689,6 +689,66 @@ async fn test_no_call_is_made_without_a_due_tranche_or_an_rpc_key() {
     assert_eq!(resp.status(), StatusCode::CONFLICT);
 }
 
+#[tokio::test]
+async fn test_refresh_quotes_the_snapshots_tranche_and_attaches_the_answer() {
+    async fn body_json(resp: Response) -> (StatusCode, serde_json::Value) {
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+    let snapshot_with = |plan: AccumulationPlanStatus| SnapshotEnvelope {
+        meta: SnapshotMeta {
+            generated_at: Utc::now(),
+            state_hash: "test".to_string(),
+            version: SNAPSHOT_SPEC_VERSION.to_string(),
+            snapshot_id: Uuid::new_v4(),
+        },
+        data: SnapshotData {
+            wallet_balances: vec![],
+            positions: vec![],
+            pool_mechanics: vec![],
+            concentrated_liquidity: vec![],
+            contract_fees: vec![],
+            derived_metrics: DerivedMetrics { accumulation_plan: Some(plan), ..Default::default() },
+        },
+    };
+    // No RPC key and a lazy pool: the handler runs end to end without a network or a
+    // database, and the answer is "unavailable", which is still an answer.
+    let mut config: AppConfig = serde_yaml::from_str("alchemy_api_keys: [\"YOUR_ALCHEMY_API_KEY\"]\n").unwrap();
+    config.accumulation_plan = Some(plan_cfg());
+    let mut stale = due(20.0);
+    stale.route_quotes = Some(real_quotes());
+    let state = Arc::new(AppState {
+        db: PgPool::connect_lazy("postgres://nobody@127.0.0.1:1/none").unwrap(),
+        http_client: Client::new(),
+        config: Arc::new(config),
+        latest_snapshot: Mutex::new(Some(snapshot_with(stale))),
+        last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
+        last_ingest_error: std::sync::Mutex::new(None),
+    });
+
+    let (status, body) = body_json(refresh_route_quotes_handler(Extension(state.clone())).await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["plan_id"].as_str(), Some("2026-11-reentry"));
+    assert_eq!(body["tranche_index"].as_u64(), Some(1));
+    assert_eq!(body["route_quotes"]["amount_usdc"].as_str(), Some("20.00"));
+    assert_eq!(body["route_quotes"]["status"].as_str(), Some("unavailable"));
+    assert_eq!(body["route_quotes"]["detail"].as_str(), Some("no Alchemy RPC key is configured"));
+    // The snapshot being served now says so too: the earlier quotes are not left
+    // standing as if they were current.
+    let attached = state.latest_snapshot.lock().await.as_ref().unwrap().data.derived_metrics.accumulation_plan.clone().unwrap();
+    let q = attached.route_quotes.expect("the refresh's answer is attached");
+    assert_eq!((q.status.as_str(), q.block_number), ("unavailable", None));
+    assert!(q.venues.iter().all(|v| v.nock_out.is_none()));
+
+    // Once the plan is no longer due there is nothing to quote, whatever was attached.
+    let mut waiting = plan_status(&PlanDirective::Waiting { next_due_at: Utc::now() });
+    waiting.route_quotes = Some(real_quotes());
+    *state.latest_snapshot.lock().await = Some(snapshot_with(waiting));
+    let (status, body) = body_json(refresh_route_quotes_handler(Extension(state.clone())).await).await;
+    assert_eq!((status, body["error"].as_str()), (StatusCode::CONFLICT, Some("NO_TRANCHE_DUE")));
+}
+
 // ---------------- Snapshot behaviour ----------------
 
 #[test]
