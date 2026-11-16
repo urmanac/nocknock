@@ -208,9 +208,10 @@ pub(crate) fn fill_reference(effective_price_usd: &str, reference: Option<(f64, 
     }
 }
 
-/// Reference spot at a fill's block time: the stored NOCK/USD price nearest to it (the
-/// v0.5.3 lookup the harvest ledger uses, within 60 minutes). No stored price in that
-/// window means no reference and no cost figure.
+/// Reference spot at a fill's block time: the stored NOCK/USD price that stands for it
+/// (the lookup the harvest ledger uses, within 60 minutes: the worker's own read first, a
+/// backfilled candle as its open, #129). No stored price in that window means no
+/// reference and no cost figure.
 pub(crate) async fn reference_for_fill(db: &PgPool, effective_price_usd: &str, confirmed_at: DateTime<Utc>) -> FillReference {
     fill_reference(effective_price_usd, nock_price_near(db, confirmed_at).await)
 }

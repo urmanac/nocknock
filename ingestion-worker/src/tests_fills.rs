@@ -1411,3 +1411,70 @@ async fn test_fill_detection_sql_against_a_scratch_database() {
 
     cleanup(db.clone()).await;
 }
+
+// ---------------- the stored price that stands for a time (#129) ----------------
+
+/// Always runs: the statement must read a candle as its open and prefer the worker's own
+/// read. The scratch-database test below runs it for real.
+#[test]
+fn test_stored_price_statement_reads_a_candle_as_its_open_and_prefers_the_workers_read() {
+    let sql = NOCK_PRICE_NEAR_SQL;
+    assert!(sql.contains("COALESCE(open_usd, price_usd) AS price_usd"), "{sql}");
+    assert!(sql.contains("COALESCE(open_usd, price_usd) > 0"), "{sql}");
+    let order = sql.split("ORDER BY").nth(1).expect("an ORDER BY");
+    assert!(order.trim_start().starts_with("is_backfilled ASC,"), "the worker's own read must come first: {order}");
+    assert!(!sql.contains("close_usd"), "{sql}");
+}
+
+#[tokio::test]
+#[ignore = "needs NOCKNOCK_SCRATCH_DATABASE_URL (an empty, migrated scratch PostgreSQL)"]
+async fn test_stored_price_lookup_against_a_scratch_database() {
+    let url = std::env::var("NOCKNOCK_SCRATCH_DATABASE_URL").expect("NOCKNOCK_SCRATCH_DATABASE_URL is set");
+    let db = PgPool::connect(&url).await.expect("scratch database reachable");
+    let name: String = sqlx::query("SELECT current_database() AS n").fetch_one(&db).await.unwrap().get("n");
+    assert!(name.ends_with("_scratch"), "refusing to run against database {name:?}: its name must end in _scratch");
+
+    // Far from any real price row: a day in 2001.
+    let open_at = t("2001-03-04T03:00:00Z");
+    let own_read_at = t("2001-03-04T03:40:00Z");
+    let swap_at = t("2001-03-04T02:58:46Z");
+    let cleanup = |db: PgPool| async move {
+        sqlx::query("DELETE FROM market_price_history WHERE timestamp BETWEEN $1 AND $2")
+            .bind(t("2001-03-04T00:00:00Z"))
+            .bind(t("2001-03-05T00:00:00Z"))
+            .execute(&db)
+            .await
+            .unwrap();
+    };
+    cleanup(db.clone()).await;
+
+    // An hourly candle opening 74 seconds after the swap: open 0.0100, close 0.0200.
+    let candle = PriceCandle { timestamp: open_at, open: 0.0100, high: 0.0210, low: 0.0095, close: 0.0200, volume: None };
+    let added = upsert_price_candles(&db, &[candle], "geckoterminal", chrono::Duration::hours(1), t("2001-03-05T00:00:00Z")).await.unwrap();
+    assert_eq!(added, 1);
+
+    // The candle stands for its open time with its OPEN, never its close.
+    let (price, source) = nock_price_near(&db, swap_at).await.expect("a stored price within the window");
+    assert_eq!(price, 0.0100, "{source}");
+    assert!(source.contains("geckoterminal at 2001-03-04T03:00:00"), "{source}");
+
+    // The same rule reaches a fill's reference spot and execution cost.
+    let reference = reference_for_fill(&db, "0.0101", swap_at).await;
+    assert_eq!(reference.spot_usd.as_deref(), Some("0.01000000"));
+    assert_eq!(reference.cost_bps, Some(100));
+    assert!(reference.source.unwrap().contains("03:00:00"));
+
+    // The worker's own read inside the window wins, even though the candle is nearer.
+    insert_price_point(&db, own_read_at, 0.0150, PRICE_SOURCE_RPC, false).await.unwrap();
+    let (price, source) = nock_price_near(&db, swap_at).await.unwrap();
+    assert_eq!(price, 0.0150, "{source}");
+    assert!(source.contains("2001-03-04T03:40:00"), "{source}");
+
+    // A candle with no positive open gives no price rather than its close.
+    cleanup(db.clone()).await;
+    let bad = PriceCandle { timestamp: open_at, open: 0.0, high: 0.02, low: 0.0, close: 0.0200, volume: None };
+    upsert_price_candles(&db, &[bad], "geckoterminal", chrono::Duration::hours(1), t("2001-03-05T00:00:00Z")).await.unwrap();
+    assert!(nock_price_near(&db, swap_at).await.is_none());
+
+    cleanup(db).await;
+}
