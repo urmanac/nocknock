@@ -195,8 +195,10 @@ pub fn format_claim_simulation_text(data: &serde_json::Value) -> String {
             let amount = fee.get("amount").and_then(|a| a.as_str()).unwrap_or("0");
             let amount_usd = fee.get("amount_usd").and_then(|a| a.as_str()).unwrap_or("0.00");
             let gas_str = fee.get("gas_break_even_usd").and_then(|g| g.as_str()).unwrap_or_default();
-            if amount.starts_with("not LP-claimable") {
-                // An Aero pool whose claimFees() reverts: nothing to claim, no gas to count.
+            if amount.starts_with("not LP-claimable") || amount.starts_with("fees unavailable") {
+                // No fee figure to print: an Aero pool whose claimFees() reverts, an Aero CL
+                // position staked in its gauge, or one whose fees could not be read. The
+                // worker's own reason is shown; nothing to claim, no gas to count.
                 details.push_str(&format!("  - {symbol}: {amount}\n"));
                 continue;
             }

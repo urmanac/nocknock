@@ -122,8 +122,8 @@ pub(crate) async fn fetch_v4_position(
         V4_STATE_VIEW_GET_POSITION_INFO,
         pool_id,
         word_addr(UNISWAP_V4_POSM_BASE),
-        format!("{:064x}", tick_lower as u32),
-        format!("{:064x}", tick_upper as u32),
+        int24_calldata_word(tick_lower),
+        int24_calldata_word(tick_upper),
         pos.nft_id
     );
     let pos_info_payload = json!({
@@ -139,8 +139,8 @@ pub(crate) async fn fetch_v4_position(
         "{}{}{}{}",
         V4_STATE_VIEW_GET_FEE_GROWTH_INSIDE,
         pool_id,
-        format!("{:064x}", tick_lower as u32),
-        format!("{:064x}", tick_upper as u32)
+        int24_calldata_word(tick_lower),
+        int24_calldata_word(tick_upper)
     );
     let fg_payload = json!({
         "jsonrpc": "2.0",

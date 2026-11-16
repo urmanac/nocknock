@@ -130,6 +130,31 @@ pub(crate) async fn finish_claim_action(
     }
 }
 
+/// Aero CL claim action, from the snapshot's own statement about the position. Pure.
+/// Returns true when the action is settled without a simulation:
+/// - staked in its gauge: "not_claimable" with the reason (nothing to dispatch);
+/// - not in the latest snapshot: left "unavailable" with the reason, never simulated
+///   blind (staked or not is unknown).
+/// Returns false for an unstaked position, which is simulated like a Uniswap v3 collect.
+pub(crate) fn aero_cl_mark_not_claimable(action: &mut ClaimFeeAction, snapshot_position: Option<&Position>) -> bool {
+    match snapshot_position {
+        None => {
+            action.simulation = "unavailable".to_string();
+            action.simulation_detail =
+                Some("Position is not in the latest snapshot yet; whether it is staked is unknown".to_string());
+            true
+        }
+        Some(p) if p.staked_in_gauge.is_some() => {
+            action.simulation = "not_claimable".to_string();
+            action.simulation_detail =
+                Some(fees_note_text(p.fees_note.as_deref().or(Some(AERO_CL_STAKED_FEES_NOTE))));
+            action.expected_usd = None;
+            true
+        }
+        Some(_) => false,
+    }
+}
+
 /// GET /v1/execute/claim-fees/payload — unsigned fee-claim transactions for the
 /// sovereign wallet, derived from live on-chain state. Clients (Android app, web
 /// cockpit) dispatch these to the paired wallet for signing; they never build
@@ -189,7 +214,21 @@ pub(crate) async fn get_claim_fees_payload_handler(Extension(state): Extension<A
         .iter()
         .filter(|p| p.protocol == "aerodrome")
         .collect();
-    if v4_configs.is_empty() && v3_configs.is_empty() && aero_configs.is_empty() {
+    let aero_cl_configs: Vec<&PositionConfig> = state
+        .config
+        .positions
+        .iter()
+        .filter(|p| p.protocol == AERO_CL_PROTOCOL)
+        .collect();
+    // A position with an unknown protocol gets no claim action built for some other
+    // protocol, and is not silently left out either (issue #91).
+    if let Err(e) = validate_positions_config(&state.config.positions) {
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+            "error": "INVALID_POSITION_CONFIG",
+            "detail": e.to_string()
+        }))).into_response();
+    }
+    if v4_configs.is_empty() && v3_configs.is_empty() && aero_configs.is_empty() && aero_cl_configs.is_empty() {
         return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
             "error": "NO_CLAIMABLE_POSITIONS",
             "detail": "No LP positions configured; cannot build claim transactions"
@@ -283,6 +322,39 @@ pub(crate) async fn get_claim_fees_payload_handler(Extension(state): Extension<A
         let pos_id = position_key(pos);
         finish_claim_action(&state.http_client, &alchemy_url, &wallet, &snapshot,
             &mut action, &pos_id, 40 + idx as i32, nock_spot, eth_price, true).await;
+        actions.push(action);
+    }
+
+    // --- Aero CL positions (issue #91) ---
+    // An unstaked NFT's fees are collected from the Aero CL position manager with the
+    // same collect((uint256,address,uint128,uint128)) call as Uniswap v3 (verified on
+    // that contract, ONCHAIN_INTEGRATION.md §7). A STAKED NFT has nothing to collect:
+    // swap fees on staked liquidity go to the gauge, and collect() from the wallet
+    // reverts because the gauge holds the NFT. The snapshot says which it is.
+    for (idx, pos) in aero_cl_configs.iter().enumerate() {
+        let Some(npm) = pos.npm_address.as_deref() else {
+            continue;
+        };
+        let pos_id = position_key(pos);
+        let mut action = ClaimFeeAction {
+            platform: AERO_CL_PROTOCOL.to_string(),
+            label: format!("Collect Aero CL LP fees ({} #{})", pos.id, pos.nft_id),
+            to: npm.to_string(),
+            data: build_v3_collect_calldata(pos.nft_id, &wallet),
+            value: "0x0".to_string(),
+            expected_amount_0: None,
+            expected_amount_1: None,
+            expected_usd: None,
+            gas_estimate: None,
+            gas_usd: None,
+            simulation: "unavailable".to_string(),
+            simulation_detail: None,
+        };
+        let snap_pos = snapshot.data.positions.iter().find(|p| p.position_id == pos_id);
+        if !aero_cl_mark_not_claimable(&mut action, snap_pos) {
+            finish_claim_action(&state.http_client, &alchemy_url, &wallet, &snapshot,
+                &mut action, &pos_id, 60 + idx as i32, nock_spot, eth_price, false).await;
+        }
         actions.push(action);
     }
 

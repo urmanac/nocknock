@@ -378,8 +378,10 @@ fn format_claim_simulation(data: &Value) -> String {
             let amount = fee.get("amount").and_then(|a| a.as_str()).unwrap_or("0");
             let amount_usd = fee.get("amount_usd").and_then(|a| a.as_str()).unwrap_or("0.00");
             let gas_str = fee.get("gas_break_even_usd").and_then(|g| g.as_str()).unwrap_or_default();
-            if amount.starts_with("not LP-claimable") {
-                // An Aero pool whose claimFees() reverts: nothing to claim, no gas to count.
+            if amount.starts_with("not LP-claimable") || amount.starts_with("fees unavailable") {
+                // No fee figure to print: an Aero pool whose claimFees() reverts, an Aero CL
+                // position staked in its gauge, or one whose fees could not be read. The
+                // worker's own reason is shown; nothing to claim, no gas to count.
                 details.push_str(&format!("  - {symbol}: {amount}\n"));
                 continue;
             }
@@ -440,6 +442,11 @@ fn zero_db_fallback_text(tool_name: &str, api_base: &str) -> String {
          • Nothing is reported that the worker has not read: no balances, prices, positions or directive."
     )
 }
+
+// Aero CL fee rows (issue #91); kept in its own file beside the worker's tests.
+#[cfg(test)]
+#[path = "../mcp_tests_aero_cl.rs"]
+mod tests_aero_cl;
 
 #[cfg(test)]
 mod tests {

@@ -435,10 +435,11 @@ pub(crate) async fn record_harvest_handler(
     Extension(state): Extension<Arc<AppState>>,
     Json(req): Json<RecordHarvestRequest>,
 ) -> impl IntoResponse {
-    if !matches!(req.platform.as_str(), "aerodrome" | "uniswap-v4" | "uniswap-v3") {
+    // The same four values a position's `protocol` may carry (adapters::Protocol).
+    if Protocol::parse(&req.platform).is_none() {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({ "error": "INVALID_PLATFORM", "detail": "platform must be 'aerodrome' (historical), 'uniswap-v4' or 'uniswap-v3'" })),
+            Json(json!({ "error": "INVALID_PLATFORM", "detail": "platform must be 'aerodrome', 'aerodrome-cl', 'uniswap-v4' or 'uniswap-v3'" })),
         )
             .into_response();
     }

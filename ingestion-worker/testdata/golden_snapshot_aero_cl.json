@@ -1,0 +1,273 @@
+{
+  "aero_cl_staked_block_58061668": {
+    "mcp_text": {
+      "get_accumulation_plan": "🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n• LP rebuild bias: under_target (holds $180.20 of a $323.18 target, $142.98 short). Rebuilding ranges is a reposition: no net cash change.\n   ✗ Aero CL WETH/NOCK 0.97% #2914490: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions",
+      "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $2154.54 USD\n• Pillars: NOCK $1137.05 · USDC $891.38 · ETH $126.11\n• Sovereign NOCK Stack: 100742 NOCK (+742 above the 100000 NOCK floor)\n• Stable Stack: 891.38 USDC\n• Gas held (wallet ETH+WETH): 0.013347 ETH ($24.30), counted in the total; not cash, not deployable\n• High-Water Mark: $2154.54 USD\n• Tactical Directive: DIP ZONE (No Buy Plan Configured)",
+      "get_shot_advice": "🎯 Tactical Shot Advice Engine\n===============================\n• Recommended Action: DIP ZONE (No Buy Plan Configured)\n• Decision Matrix Details: Spot $0.01129 is below the $0.020 accumulation line and the wallet holds $891.38 of liquid USDC. Liquid dry powder: $783.66 (wallet USDC $891.38 less the larger of the $107.73 cash target and the $0.00 virtual tax reserve). NockNock does not size buys outside a plan: add an accumulation_plan with your own budget_usdc, tranches and interval_hours and it will pace them. Standing bias: LP holds $180.20 against a $323.18 target (15% of portfolio), $142.98 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. No tracked position is eligible for a deposit right now.\n• Uncollected Claimable Fees: $0.00 USD\n• Net of two claims' gas: -$0.01 USD\n• Harvest rule: BATCH HARVEST is advised once uncollected LP fees reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).",
+      "simulate_claim_fees": "⚡ Fee Claim Simulation\n=======================\n• Total Gross Claimable: $0.0000 USD\n• Estimated Gas: unavailable\n• Net Accretion if Harvested: unknown (live gas estimate unavailable)\nPool Breakdown:\n  - WETH+NOCK (Aero CL #2914490): not LP-claimable (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)\n"
+    },
+    "snapshot": {
+      "concentrated_liquidity": [],
+      "contract_fees": [
+        {
+          "amount": "not LP-claimable (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)",
+          "amount_usd": "0.000000",
+          "claimable": false,
+          "contract_address": "0x3bf70c880adc8370917994ab0df68e763b7a60fd",
+          "fee_token_address": "0x4200000000000000000000000000000000000006",
+          "fee_token_symbol": "WETH+NOCK (Aero CL #2914490)",
+          "gas_break_even_usd": "0.0041"
+        }
+      ],
+      "derived_metrics": {
+        "accumulation_plan": null,
+        "asset_aggregation_series": {
+          "active_protocol_series": [
+            "180.20"
+          ],
+          "positions_nock": [
+            {
+              "position_id": "aerodrome-cl:base:2914490",
+              "series": [
+                "6945.83"
+              ]
+            }
+          ],
+          "safe_haven_series": [
+            "1058.66"
+          ],
+          "wallet_nock_series": [
+            "93796.4586"
+          ]
+        },
+        "global_status": {
+          "eth_price_usd": "1820.91",
+          "gas_to_fee_delta_usd": "-0.01",
+          "high_water_mark_usd": "2154.54",
+          "nock_floor_delta": "742",
+          "nock_floor_target": "100000",
+          "regime": "unknown",
+          "rsi_14": null,
+          "rsi_14_1d": null,
+          "shot_advice_action": "DIP ZONE (No Buy Plan Configured)",
+          "shot_advice_details": "Spot $0.01129 is below the $0.020 accumulation line and the wallet holds $891.38 of liquid USDC. Liquid dry powder: $783.66 (wallet USDC $891.38 less the larger of the $107.73 cash target and the $0.00 virtual tax reserve). NockNock does not size buys outside a plan: add an accumulation_plan with your own budget_usdc, tranches and interval_hours and it will pace them. Standing bias: LP holds $180.20 against a $323.18 target (15% of portfolio), $142.98 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. No tracked position is eligible for a deposit right now.",
+          "total_eth_amount": "0.069255",
+          "total_eth_usd": "126.11",
+          "total_fees_accrued_usd": "0.00",
+          "total_fees_claimable_usd": "0.00",
+          "total_native_usd": "1137.05",
+          "total_nock_amount": "100742",
+          "total_portfolio_usd": "2154.54",
+          "total_stable_usd": "891.38",
+          "total_usdc_amount": "891.38",
+          "wallet_gas_eth": "0.013347",
+          "wallet_gas_usd": "24.30"
+        },
+        "lp_rebuild": {
+          "actual_usd": "180.20",
+          "excluded": [
+            {
+              "label": "Aero CL WETH/NOCK 0.97% #2914490",
+              "nft_id": 2914490,
+              "position_id": "aerodrome-cl:base:2914490",
+              "reason": "needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions"
+            }
+          ],
+          "floor_tolerance_nock": "0",
+          "gap_usd": "142.98",
+          "status": "under_target",
+          "suggestions": [],
+          "target_usd": "323.18",
+          "target_weight_bps": 1500,
+          "worst_case_nock": "93796"
+        },
+        "portfolio_deviation_matrix": {
+          "allocations": [
+            {
+              "actual_weight_bps": 4913,
+              "bucket_name": "Sovereign Treasury",
+              "deviation_bps": -3087,
+              "status": "under_funded",
+              "target_weight_bps": 8000
+            },
+            {
+              "actual_weight_bps": 836,
+              "bucket_name": "LP (all tracked positions)",
+              "deviation_bps": -664,
+              "status": "under_funded",
+              "target_weight_bps": 1500
+            },
+            {
+              "actual_weight_bps": 4137,
+              "bucket_name": "Liquid USDC (Escrow/Vault)",
+              "deviation_bps": 3637,
+              "status": "over_funded",
+              "target_weight_bps": 500
+            },
+            {
+              "actual_weight_bps": 112,
+              "bucket_name": "Gas (wallet ETH+WETH)",
+              "deviation_bps": 112,
+              "status": "no_target",
+              "target_weight_bps": 0
+            }
+          ]
+        },
+        "sovereign_ledger": {
+          "cumulative_harvested_usd": "0.00",
+          "growth_dry_powder_usd": "0.00",
+          "harvest_count": 0,
+          "last_harvest_at": null,
+          "tax_reserve_ratio": "0.40",
+          "tax_reserve_usd": "0.00",
+          "unpriced_count": 0
+        },
+        "strategy_counterfactual": {
+          "active_portfolio_series": [
+            "2154.54"
+          ],
+          "passive_baseline_series": [
+            "1137.05"
+          ]
+        },
+        "structural_channels": {
+          "channels": []
+        },
+        "tick_bracket_hypervisor": {
+          "brackets": [
+            {
+              "distance_bps": null,
+              "full_range": false,
+              "in_range": true,
+              "liquidity_usd": "180.20",
+              "lower_price": "0.00000564",
+              "upper_price": "0.00000649"
+            }
+          ],
+          "current_price": "0.01129"
+        },
+        "total_value_vs_baseline": {
+          "high_water_mark_series": [
+            "2154.54"
+          ],
+          "portfolio_value_series": [
+            "2154.54"
+          ],
+          "token_price_series": [
+            "0.01129"
+          ]
+        },
+        "velocity_gas_sandbox": {
+          "contracts": [
+            {
+              "claimable_usd": "0.00",
+              "contract_address": "0x3bf70c880adc8370917994ab0df68e763b7a60fd",
+              "contract_name": "Aero CL WETH/NOCK 0.97% #2914490",
+              "efficiency_ratio": 0.0,
+              "gas_break_even_usd": "0.0041",
+              "note": "not LP-claimable (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)",
+              "recommended_action": "not_claimable"
+            }
+          ]
+        }
+      },
+      "pool_mechanics": [
+        {
+          "fee_accrued_usd": "0.000000",
+          "fee_tier_bps": 97,
+          "liquidity_usd": "180.20",
+          "platform": "Aerodrome",
+          "pool_id": "0x957256c98d61a714081de2ee70ae3a96c9b40874",
+          "pool_type": "concentrated",
+          "sqrt_price_x96": "000000000000000000000000000000000000002871f7214287269e35ad48582c",
+          "tick_current": 74002,
+          "volatile_assets": [
+            {
+              "reserve_amount": "0.055908",
+              "reserve_usd": "101.80",
+              "token_address": "0x4200000000000000000000000000000000000006",
+              "token_symbol": "WETH"
+            },
+            {
+              "reserve_amount": "6945.829656",
+              "reserve_usd": "78.40",
+              "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+              "token_symbol": "NOCK"
+            }
+          ]
+        }
+      ],
+      "positions": [
+        {
+          "amount0": "0.055908",
+          "amount1": "6945.829656",
+          "amount_usd": "180.20",
+          "fee_tier_bps": 97,
+          "fees_note": "not LP-claimable (staked: swap fees on staked liquidity go to the gauge); AERO rewards not read (#93)",
+          "fees_usd": "0.000000",
+          "full_range": false,
+          "in_range": true,
+          "is_price_source": false,
+          "liquidity_amount": "57859113596792372851",
+          "lower_price": "0.00000564",
+          "lower_tick": 73400,
+          "network": "base",
+          "nft_id": 2914490,
+          "npm_address": "0x4857db576ee0e45f10525ec59527bfd10beec60b",
+          "pool_active": true,
+          "pool_id": "0x957256c98d61a714081de2ee70ae3a96c9b40874",
+          "position_id": "aerodrome-cl:base:2914490",
+          "protocol": "aerodrome-cl",
+          "staked_in_gauge": "0x3bf70c880adc8370917994ab0df68e763b7a60fd",
+          "tick_spacing": 200,
+          "token0": {
+            "address": "0x4200000000000000000000000000000000000006",
+            "decimals": 18,
+            "symbol": "WETH"
+          },
+          "token1": {
+            "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+            "decimals": 16,
+            "symbol": "NOCK"
+          },
+          "tokens_owed_0": "0.000000",
+          "tokens_owed_1": "0.000000",
+          "upper_price": "0.00000649",
+          "upper_tick": 74800,
+          "wallet": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+        }
+      ],
+      "wallet_balances": [
+        {
+          "amount": "93796.4586",
+          "amount_usd": "1058.66",
+          "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+          "token_symbol": "NOCK",
+          "wallet_address": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+        },
+        {
+          "amount": "891.3822",
+          "amount_usd": "891.38",
+          "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "token_symbol": "USDC",
+          "wallet_address": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+        },
+        {
+          "amount": "0.012457",
+          "amount_usd": "22.68",
+          "token_address": "0x0000000000000000000000000000000000000000",
+          "token_symbol": "ETH",
+          "wallet_address": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+        },
+        {
+          "amount": "0.000890",
+          "amount_usd": "1.62",
+          "token_address": "0x4200000000000000000000000000000000000006",
+          "token_symbol": "WETH",
+          "wallet_address": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+        }
+      ]
+    },
+    "state_hash": "53fbdb1e517a73f7a9679d59761f7c76c3af75dd15e32aa79d1ad1302e5132ff"
+  }
+}
