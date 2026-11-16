@@ -2,7 +2,7 @@
 //!
 //! The three fills below are the operator's real plan buys, read from Base with
 //! eth_getTransactionReceipt and eth_getBlockByNumber on 2026-11-16 (see
-//! ONCHAIN_INTEGRATION.md §8): each receipt shows exactly 20000000 raw USDC leaving the
+//! ONCHAIN_INTEGRATION.md §12): each receipt shows exactly 20000000 raw USDC leaving the
 //! wallet and the raw NOCK amount below entering it. The opening-basis figures used in
 //! the whole-stack tests (10,000 NOCK for $200) are made up for the tests: round numbers
 //! that are nobody's records.

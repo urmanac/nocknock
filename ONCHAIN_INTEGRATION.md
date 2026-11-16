@@ -183,14 +183,19 @@ Aero LP, so this affects only **where NOCK buys are executed** (the accumulation
 and one third-party history feed.
 
 > **Superseded in v0.5.0 (noted 2026-11-14):** the operator holds staked Aero LP, and
-> NockNock tracks Aero positions again (see §7). AERO rewards on staked LP are not read
-> yet (#93).
+> NockNock tracks Aero positions again (see §7). The AERO that staked LP earns is read
+> since v0.6.0 (#93, §9).
 
 > **Verification status.** Everything below was read from Base mainnet. No official
 > Aero contract list was found, so the *identity* of these contracts is inferred:
 > `0x0fef9e88…` is labelled the registered Aero router by a third-party analytics
 > repository only. Treat the addresses as observed, not endorsed, and re-verify
 > before building any transaction against them.
+
+> **Confirmed in v0.7.0 (noted 2026-11-16):** Aero now publishes a contract list
+> (`app.aero.xyz/docs/security/`) that names `0x0fef9e88…` "Metarouter" and the factory
+> below "CLFactory", and the `fee()` unit of these pools was measured: millionths, so
+> the three percentages at the end of this section are right. See §9.
 
 ### Evidence transaction
 
@@ -218,6 +223,9 @@ that factory's convention and not independently confirmed):
 If `fee()` is in hundredths of a basis point (the Uniswap-v3 convention these pools
 otherwise follow), the hops charge 0.0008%, 0.0435% and 0.97%: the WETH/NOCK hop
 accounts for most of the 1.8% paid over spot.
+
+*Confirmed 2026-11-16 for the WETH/NOCK pool (§8, "Swap fee units"): `fee()` is in
+millionths, so 9700 is 0.97%. The other two hops were not re-measured.*
 
 ### Legacy Aerodrome pool
 
@@ -294,7 +302,8 @@ For comparison, the new Aero volatile NOCK/USDC pool `0x770fe8fc…` held about 
   but reward emissions stopped at the merger and current fee distribution was not
   confirmed. (aero.xyz states that new-Aero pool revenue goes to AERO stakers; its pool
   page lists separate AERO and fee reward rates for depositors.)
-- Rewards earned by staked LP (AERO emissions) are not read or valued (issue #93).
+- Rewards earned by staked LP (AERO emissions) were not read until v0.6.0. They are now
+  read from the gauge with `earned(address)` and valued (issue #93, §9).
 
 ### First live deposits (2026-11-14, operator, via app.aero.xyz)
 
@@ -305,7 +314,7 @@ For comparison, the new Aero volatile NOCK/USDC pool `0x770fe8fc…` held about 
 | Pool | `0x770fE8Fc9248c6382950A86E39a9391B41D59e0A` | `0x957256c98d61A714081DE2EE70ae3A96c9b40874` |
 | Receipt | 29684955447174 LP tokens | NFT #2914490 on `0x4857db576ee0e45f10525ec59527bfd10beec60b` |
 | Staked in | gauge `0xc82782ee66d82c4d19db0429652091a085083526` | gauge `0x3bf70c880adc8370917994ab0df68e763b7a60fd` |
-| NockNock | tracked (`gauge_address`) | **not tracked** (issue #91) |
+| NockNock | tracked (`gauge_address`) | tracked since v0.6.0 with `protocol: aerodrome-cl` (issue #91, §8); not tracked before |
 
 Both went through the Aero router `0x0fef9e88…ee98` (`execute`, §6), which staked the
 receipt automatically. For the volatile pool `gauge.balanceOf(wallet)` returned the
@@ -314,7 +323,757 @@ minted amount exactly and `gauge.stakingToken()` is the pool; the wallet's share
 
 ---
 
-## 8. Accumulation Fills Behind the Cost-Basis Fixtures (#98) — Read 2026-11-16
+## 8. Aero Concentrated-Liquidity (Slipstream) Positions (v0.6.0, issue #91) — Verified Record
+
+The worker tracks an Aero CL position with `protocol: aerodrome-cl`
+(`ingestion-worker/src/adapters/aero_cl.rs`). Everything below was read with `eth_call`
+through `https://base-rpc.publicnode.com` on 2026-11-16 (workstation date 2026-11-15),
+pinned to **block 58061668** (`0x375f364`, 2026-11-16T04:18:29Z, hash `0xb3cb8ebf…4a92f9`)
+unless another block is named. Selectors were computed from the signatures shown and each
+was checked against the response it produces. The raw responses are the fixtures in
+`ingestion-worker/src/tests_aero_cl.rs`.
+
+### Contracts
+
+| Role | Address | How it was tied to the others |
+|---|---|---|
+| Position manager (NFT "Slipstream V3 Deposit") | `0x4857db576ee0e45f10525ec59527bfd10beec60b` | `pool.nft()` and `gauge.nft()` both return it |
+| Pool, WETH/NOCK CL200 | `0x957256c98d61A714081DE2EE70ae3A96c9b40874` | `factory.getPool(WETH, NOCK, 200)` and `gauge.pool()` return it |
+| Pool factory | `0x9cb220581b91b0c83223012fe69688b92ad07a76` | `pool.factory()` and position manager `factory()`; the factory of §6's route |
+| Gauge of that pool | `0x3bf70c880adc8370917994ab0df68e763b7a60fd` | `pool.gauge()` returns it |
+| Gauge implementation | `0x89e91a960154b1ed6c093039a8f0725ab67d14e0` | the gauge's code is a 45-byte EIP-1167 proxy to it |
+| Gauge factory / voter | `0xf437f62053acb121665b8fdbfea8f214fb8e589d` / `0x382409fad8503fbcdbb27a4211551fa03e884078` | `gauge.gaugeFactory()` / `gauge.voter()` |
+
+### Selectors used by the adapter
+
+| Call | Selector | On | Used for |
+|---|---|---|---|
+| `positions(uint256)` | `0x99fbab88` | position manager | tokens, tick spacing, ticks, liquidity |
+| `ownerOf(uint256)` | `0x6352211e` | position manager | who holds the NFT |
+| `collect((uint256,address,uint128,uint128))` | `0xfc6f7865` | position manager | fees of an UNSTAKED position (simulated from the wallet) |
+| `slot0()` | `0x3850c7bd` | pool | sqrt price and tick |
+| `liquidity()` | `0x1a686502` | pool | in-range liquidity (pool liveness) |
+| `nft()` | `0x47ccca02` | pool | the configured pool belongs to the NFT's position manager (may revert: see "Whose pool it is") |
+| `token0()` / `token1()` | `0x0dfe1681` / `0xd21220a7` | pool | the configured pool is the NFT's pool |
+| `tickSpacing()` | `0xd0c93a7c` | pool | same check |
+| `fee()` | `0xddca3f43` | pool | current swap fee (dynamic) |
+| `gauge()` | `0xa6f19c84` | pool | the only contract the NFT may be staked in |
+| `stakedContains(address,uint256)` | `0xc69deec5` | gauge | proof that the wallet staked the NFT |
+
+### Layouts (they differ from Uniswap v3)
+
+`positions(2914490)` returns 12 words. Word 4 is the pool's **tick spacing**, where
+Uniswap v3 has the fee tier:
+
+| Word | Field | Value |
+|---:|---|---|
+| 0, 1 | nonce, operator | 0, zero address |
+| 2 | token0 | `0x4200…0006` (WETH) |
+| 3 | token1 | `0x9b5e…1722` (NOCK) |
+| 4 | tickSpacing | 200 |
+| 5 | tickLower | 73400 |
+| 6 | tickUpper | 74800 |
+| 7 | liquidity | 57859113596792372851 (`0x322f4dd43fbc87e73`) |
+| 8, 9 | feeGrowthInside0/1LastX128 | `0x574a55555810582e165fb0bd53ef`, `0x212d3d750e1bdf94505a584b88be1f5` |
+| 10, 11 | tokensOwed0, tokensOwed1 | 0, 0 |
+
+Pool `slot0()` returns **6 words** (Uniswap v3 returns 7; there is no `feeProtocol`):
+sqrtPriceX96 `0x2871f7214287269e35ad48582c`, tick 74002, observationIndex 207,
+observationCardinality 900, observationCardinalityNext 900, unlocked 1.
+
+Pool `ticks(int24)` (`0xf30dba93`) returns **10 words**: liquidityGross, liquidityNet,
+stakedLiquidityNet, feeGrowthOutside0X128, feeGrowthOutside1X128, rewardGrowthOutsideX128,
+tickCumulativeOutside, secondsPerLiquidityOutsideX128, secondsOutside, initialized. Fee
+growth is at words 3 and 4, not 2 and 3 as in Uniswap v3, so the v3 fee-growth maths must
+not be pointed at this pool. The adapter does not read `ticks()` at all.
+
+Negative ticks arrive sign-extended over the whole word (`ff…fe98` is -360; seen on NFT
+#3117536 below and on the ETH/USD price pool's own `slot0`, tick -201250 at this block).
+`parse_hex_word_i32` used to reject such a word; it and the calldata encoder
+(`int24_calldata_word`) were corrected in the same change.
+
+### Whose pool it is (block 58074373)
+
+`pool_address` comes from config, so the adapter proves it is the NFT's pool before it
+values anything at that pool's price. Read at **block 58074373** (`0x3762505`,
+2026-11-16T05:00:50Z, hash `0x381fd9a2…ee2150`):
+
+| Pool | `token0` / `token1` | `tickSpacing()` | `nft()` |
+|---|---|---:|---|
+| Aero CL200 WETH/NOCK `0x957256c9…0874` | WETH / NOCK | 200 | `0x4857db57…c60b` (the position manager) |
+| Uniswap v3 WETH/NOCK 1% `0x71a4a6f6…ad9a` | WETH / NOCK | 200 | **reverts** (error code 3, "execution reverted") |
+| Aero CL100 WETH/USDC, current deployment `0x2a430beb…bc24` | WETH / USDC | 100 | `0x4857db57…c60b` |
+| Aero CL100 WETH/USDC, legacy deployment `0xb2cc224c…dc59` | WETH / USDC | 100 | `0x82792268…5b72` (the legacy position manager) |
+
+- The Uniswap v3 pool of the same pair has the same tokens **and the same tick spacing**
+  as the CL200 pool, so tokens and spacing alone would accept it as `pool_address`.
+- `getPool(address,address,int24)` (`0x28af8d0b`) for (WETH, USDC, 100) returns
+  `0x2a430beb…bc24` on the current factory `0x9cb22058…7a76` and `0xb2cc224c…dc59` on the
+  legacy factory `0x5e7bb104…809a` (that pool's `factory()` returns it): two live pools
+  with one identity, each with its own position manager. No NOCK pair has a legacy pool
+  at this block: the legacy factory's `getPool` returns the zero address for WETH/NOCK
+  and USDC/NOCK at tick spacings 100, 200 and 2000, while the current factory returns
+  `0x957256c9…0874` for (WETH, NOCK, 200).
+
+So the adapter reads `pool.nft()` first and requires it to equal `npm_address`. A revert
+(a Uniswap v3 pool, or an address that is not a pool) and a different position manager are
+both "Configuration error: position …: pool_address … is not …", raised before any amount
+is computed. A node that does not answer is a failed read, not a configuration error.
+Then the pool's tokens and tick spacing must be the NFT's.
+
+### Amounts at block 58061668
+
+From liquidity, ticks 73400..74800 and the pool's sqrt price, with the maths shared with
+the Uniswap v3 adapter (`evm::concentrated_amounts_raw`):
+
+- **0.055908 WETH + 6,945.83 NOCK**, in range (tick 74002).
+- Valued at the snapshot's own prices at that block (ETH/USD $1,820.91 from the
+  `eth_price_pool` slot0, NOCK/USD $0.0112868 from the v4 3% pool): **$180.20**.
+- The deposit (block 57425824, 2026-11-14T16:59:00Z; `gauge.depositBlock(2914490)` returns
+  that block) was 0.081995 ETH + 2,755 NOCK. The liquidity read today reproduces both
+  deposit amounts at a pool tick of 73641 (0.0819946 WETH and 2,755 NOCK), so the
+  liquidity is unchanged since the deposit; NOCK has since fallen against ETH, so the
+  range holds more NOCK and less WETH.
+- The position is 20.1% of the pool's in-range liquidity (`liquidity()` =
+  287515221646699784807).
+
+### Ownership: the NFT is staked, and how the wallet is proved to be the staker
+
+- `ownerOf(2914490)` = the gauge `0x3bf70c88…60fd`, not the wallet.
+  `positionManager.balanceOf(wallet)` = 0.
+- `gauge.stakedContains(wallet, 2914490)` = **true**. `stakedLength(wallet)` (`0xae775c32`)
+  = 1, `stakedByIndex(wallet, 0)` (`0x38463937`) = 2914490, `stakedValues(wallet)`
+  (`0x4b937763`) = `[2914490]`.
+- The same question about an account that did not stake it
+  (`stakedContains(0x4857db57…, 2914490)`) and about another id
+  (`stakedContains(wallet, 2914491)`) = false.
+- `gauge.withdraw(2914490)` (`0x2e1a7d4d`) simulated **from the wallet** succeeds; simulated
+  from another account it reverts with `NA`. So the per-depositor stake set is what gives
+  the right to take the NFT back, and `stakedContains` is the read that proves it.
+
+The adapter counts the position only when `ownerOf` is the wallet, or `ownerOf` is
+`pool.gauge()` **and** `stakedContains(wallet, tokenId)` is true. Otherwise the cycle fails
+and says who holds the NFT. A `gauge_address` in config is optional and must equal
+`pool.gauge()`.
+
+This gauge is not the older Slipstream `CLGauge`: `earned(address,uint256)`
+(`0x3e491d47`), `rewards(uint256)` and `rewardToken()` revert on it. Its selectors, read
+from the implementation's bytecode, include `earned(address,uint256[])` `0xd942be03`,
+`claimEmissions(address,address,uint256[])` `0x09902477`, `deferredEmissions(address)`
+`0xba135be9`, `depositBlock(uint256)` `0x32590654`, `pendingFees()` `0x224438d1`,
+`collectFees()` `0xc8796572`, `depositFor(uint256,address)` `0x36efd16f` and
+`withdrawFrom(uint256,address)` `0xb1cbf888` (names resolved through the public signature
+database; only the ones called above were exercised).
+
+### Fees: what a staked LP can and cannot claim
+
+Measured, not assumed:
+
+- **Swap fees on staked liquidity go to the gauge.** At this block `pool.stakedLiquidity()`
+  (`0x3ab04b20`) equals `pool.liquidity()`: all in-range liquidity is staked. Across the
+  swap in block 58060732 (tx `0xd42d28d1…518137`, 9765162112164125 wei WETH in),
+  `pool.gaugeFees()` (`0x293833ba`) token0 rose from `0xdf2a2eb83ab2` to `0x135506233e2eb`:
+  94722072487993 wei, which is exactly `ceil(amountIn × 9700 / 1e6)`. The whole fee went to
+  the gauge's account. `gauge.pendingFees()` reports the same balance.
+- **Nothing is collectable for the position.** `collect` for NFT #2914490 simulated from
+  the wallet reverts (the gauge holds the NFT); simulated from the gauge, its owner, it
+  returns (0, 0). `positions().tokensOwed0/1` are 0. Five other contract-held NFTs on the
+  same position manager (#3116708, #2890904, #3089776, #3096968, #3110680; three of the
+  holders are 45-byte proxies like this gauge, none was confirmed to be a gauge) also
+  returned (0, 0) when `collect` was simulated from the holder.
+- **The staker earns AERO instead.** `gauge.earned(wallet, [2914490])` returned
+  `0xa08e3e2faa16f716` (11.569 at 18 decimals) at this block. When #91 shipped NockNock
+  did not read this value; since #93 it does, every cycle (§9).
+
+So a staked position reports no fee figure. Its fee fields say
+"not LP-claimable (staked: swap fees on staked liquidity go to the gauge)" in
+`positions[].fees_note`, the claim payload (`not_claimable`) and, followed by the
+position's unclaimed AERO (§9), in `contract_fees[].amount`, the velocity row's `note`
+and the MCP text. It is never shown as $0 earned, and it adds nothing to the claimable
+total.
+
+**An unstaked position** (the wallet holds the NFT) can collect. Verified on NFT #3117536
+at **block 58063800** (`0x375fbb8`), then held by the EOA `0xe3c74593…a88a` (USDC / an
+unregistered token, tick spacing 10, ticks -360..-270; burned a few hundred blocks later):
+`positions()` showed tokensOwed 0/0, while `collect` simulated from the owner returned
+(129192, 599) raw, and from another account reverted. The adapter therefore takes an
+unstaked position's fees from the `collect` simulation, not from `tokensOwed`. One other
+EOA-held NFT (#86038) reverted on the same simulation for a reason not investigated. The
+simulation is a required read, like the Uniswap adapters' fee reads: if it reverts for a
+tracked position the **cycle fails** with "collect() for NFT #… simulated from the tracked
+wallet … reverted; its claimable fees cannot be read", and nothing is published with that
+fee as 0. (The first version of the adapter carried such a position as "fees unavailable"
+with zero amounts; the zeros reached the claim payload and the fee totals, so it was
+removed. Whether to degrade instead is the operator's call; it would need a stated
+"unread" marker on every total that includes fees.)
+
+### Swap fee units
+
+`pool.fee()` = 9700 and the measurement above gives fee = amountIn × 9700 / 1,000,000, so
+the unit is millionths (the Uniswap v3 "pips"): 9700 is **0.97%**, reported as
+`fee_tier_bps` 97. The fee is dynamic on these pools; the worker reads it every cycle.
+`pool.unstakedFee()` (`0xb64cc67b`) = 50000; its meaning was not measured and it is not
+used.
+
+### What NockNock does with the position
+
+- Its NOCK counts toward the NOCK total and the floor; its WETH toward the ETH pillar
+  (never cash, never investable).
+- It is a ranged position: in/out of range comes from the pool tick against its ticks
+  (upper bound exclusive), and it appears in the tick bracket panel like the Uniswap ones.
+- It is never offered an LP rebuild deposit: its WETH leg would have to come from gas
+  (issue #94). No Aero CL position is sized for a rebuild, whatever its pair
+  (`lp_rebuild.excluded[]` gives the reason): the app's deposit link starts a new position
+  (see "Not verified"), a different NFT that NockNock would not track, so a suggestion to
+  "add to NFT #N" would send capital out of the totals and the floor reading.
+
+### Not verified
+
+- **Adding liquidity to an existing CL NFT.** `https://app.aero.xyz/deposit/8453-0x957256c9…0874`
+  does open the WETH/NOCK CL200 pool (observed 2026-11-16 in a browser with no wallet
+  connected: "DEPOSIT WETH / NOCK 0.97% Base CL200", then "Select deposit type: Custom:
+  set your own price range"). That is the start of a **new** deposit; nothing on the page
+  refers to an existing NFT. Whether the app, or the contracts (`increaseLiquidity` on
+  the position manager, `increaseStakedLiquidity` on the older gauges), can add to an
+  NFT that is staked in this gauge was not tested. Until it is, no rebuild suggestion is
+  made for an Aero CL position and no deposit link is shown for one.
+- **AERO**: read since #93; the token, the gauge reads, the price source and what is
+  still unverified about the claim path are in §9.
+- **Other CL pools.** Only the WETH/NOCK CL200 pool and its gauge were exercised. The
+  adapter reads the gauge from the pool, so another pool works only if its gauge answers
+  `stakedContains(address,uint256)`; one that does not fails the cycle rather than being
+  counted.
+- **`unstakedFee()`** and how fees are split when only part of the in-range liquidity is
+  staked.
+
+---
+
+## 9. AERO, the Fourth Pillar (v0.6.0, issue #93) — Verified Record
+
+The worker reads the wallet's AERO, the AERO each staked Aero position has earned and
+not claimed, and an AERO/USD price (`ingestion-worker/src/aero_rewards.rs`). Everything
+below was read with `eth_call`, `eth_getLogs` and `eth_getTransactionReceipt` through
+`https://base-rpc.publicnode.com` on 2026-11-16, pinned to **block 58077673**
+(`0x37631e9`, 2026-11-16T05:11:50Z, hash `0xcaef3e28…aecd40`) unless another block is
+named. Selectors and topics were computed from the signatures shown and each was checked
+against the response it produces. The raw responses are the fixtures in
+`ingestion-worker/src/tests_aero_rewards.rs`.
+
+### Which token is "AERO": there are two
+
+| | The token the Aero gauges pay | The older token |
+|---|---|---|
+| Address | `0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee` | `0x940181a94A35A4569E4529A3CDfB74e38FD98631` |
+| `symbol()` `0x95d89b41` | "AERO" | "AERO" |
+| `name()` `0x06fdde03` | "Aero" | "Aerodrome" |
+| `decimals()` `0x313ce567` | 18 | 18 |
+| `totalSupply()` `0x18160ddd` | 2,142,866,660 (raw `0x06ec89aa690b7aba6e31c247`) | 2,008,099,184 (raw `0x067d0f8ae7f0f34ed947e31e`) |
+| `balanceOf(wallet)` `0x70a08231` | 0 | 0 |
+| Paid by the two gauges below | **yes** (see "A claim pays what `earned` said") | no: no `Transfer` of it out of either gauge in blocks 57,000,000 to 58,077,673, and `balanceOf` of each gauge is 0 |
+
+Issue #93 and the work order named `0x940181a9…8631`. That is **not** what the
+operator's gauges pay, so NockNock's AERO is `0x3f5bF3Ed…a4Ee` (`AERO_BASE`). The older
+token is not read, priced or ledgered: a wallet that held it would not see it in
+NockNock. Whether the two are convertible was not investigated.
+
+### The gauges and how each reports unclaimed AERO
+
+| | Basic (volatile pool) gauge | CL gauge |
+|---|---|---|
+| Gauge | `0xc82782ee66d82c4d19db0429652091a085083526` | `0x3bf70c880adc8370917994ab0df68e763b7a60fd` |
+| Its pool | `stakingToken()` `0x72f702f3` = `0x770fE8Fc…9e0A` (USDC/NOCK) | `pool.gauge()` returns it (§8; WETH/NOCK CL200) |
+| Code | 45-byte EIP-1167 proxy to `0xbce3a68f9c22d18ddfff308eb77ce32c31853b03` | 45-byte proxy to `0x89e91a960154b1ed6c093039a8f0725ab67d14e0` |
+| `voter()` `0x46c96aac` | `0x382409fad8503fbcdbb27a4211551fa03e884078` | the same |
+| `gaugeFactory()` `0x0d52333c` | `0x9fbcf2df0dc553ce40ef63963bff465b76792b7e` | `0xf437f62053acb121665b8fdbfea8f214fb8e589d` |
+| `rewardToken()` `0xf7c618c1` | **reverts** | **reverts** |
+| The read NockNock uses | `earned(address)` `0x008cc262` | `earned(address,uint256[])` `0xd942be03` |
+| For the wallet | `0x01adf89b6483d30d` = 0.121026111298851597 AERO | with `[2914490]`: `0xa573ba928fdaf5d2` = 11.922077777221318098 AERO |
+| A zero answer | `earned(0x…dead)` (no stake) = 0 | `earned(wallet, [])` = 0 |
+| What reverts | — | `earned(wallet, [2914491])` (an id the wallet has not staked): "execution reverted: NA". `earned(address,uint256)` `0x3e491d47`, the older Slipstream gauge's form: reverts |
+| Staked | `balanceOf(wallet)` = 29684955447174 LP (the wallet's own `pool.balanceOf` is 0) | `stakedContains(wallet, 2914490)` = true |
+
+Neither gauge names its reward token, so the token was established from what a claim
+pays (next section). The CL calldata is the account word, the array offset `0x40`, the
+length 1 and the token id:
+`0xd942be03 ‖ wallet ‖ 0x40 ‖ 1 ‖ 0x2c78ba`.
+
+The wallet's unclaimed AERO at this block was therefore **12.043104 AERO**, worth
+**$5.03** at the price below. Its wallet AERO was 0: it has not claimed.
+
+### Legacy Aerodrome gauges answer the same call in the other token
+
+Read at **block 58093329** (`0x3766f11`, 2026-11-16T06:04:01Z, hash `0x0e07395b…2ebdf4`).
+
+| | Legacy basic gauge | Legacy CL gauge |
+|---|---|---|
+| Gauge | `0x4cbb6188c6101cacd4eb1126cc14882bd93dc3db` | `0xf33a96b5932d9e9b9a0eda447abd8c9d48d2e0c8` |
+| How it was found | Voter `0x16613524e02ad97eDfeF371bC883F2F5d6C480A5` `gauges(address)` `0xb9a09fd5` for the legacy vAMM USDC/NOCK pool `0x85f1aa3a…d626` | `gauge()` `0xa6f19c84` on the legacy Slipstream CL100 WETH/USDC pool `0xb2cc224c…dc59` (§8) |
+| `stakingToken()` `0x72f702f3` | `0x85f1aa3a70fedd1c52705c15baed143e675cd626` (that pool) | not read |
+| `rewardToken()` `0xf7c618c1` | `0x000…940181a94a35a4569e4529a3cdfb74e38fd98631`: the **older** token | the same older token |
+| `earned(address)` `0x008cc262` for the wallet | **answers**: one word, 0 | — |
+| `earned(address,uint256[])` `0xd942be03` for the wallet with `[]` | — | reverts |
+| `rewardRate()` `0x7b0a47ee` | `0x13b343813f9f3e` (still emitting) | not read |
+
+At the same block `rewardToken()` on the two Aero-app gauges above still reverts
+(`{"code":3,"message":"execution reverted"}`).
+
+A legacy basic gauge therefore answers the read NockNock uses, in a token that is not
+NockNock's AERO. An `aerodrome` position on the legacy pool with that gauge as its
+`gauge_address` would otherwise have its figure published as "unclaimed AERO" and priced
+from the AERO pool. So each cycle calls `rewardToken()` on the gauge before `earned`
+(`gauge_pays_aero`):
+
+- it reverts: the Aero app's gauge, shown below to pay `0x3f5bF3Ed…a4Ee`. `earned` is read;
+- it returns `0x3f5bF3Ed…a4Ee`: `earned` is read (no such gauge was found; allowed for);
+- it returns any other token: nothing is read as AERO. The position says "unclaimed AERO
+  not read (gauge … pays 0x9401…8631 (its rewardToken()), not AERO 0x3f5b…a4ee)", with
+  no amount and no USD value, and the unclaimed total is null;
+- the read fails or is not an address: not read, with that reason.
+
+The legacy CL gauge could not be misread in any case, since the array form of `earned`
+reverts there; the same check runs for it.
+
+### A claim pays what `earned` said (two real claims by other accounts)
+
+| | Basic gauge | CL gauge |
+|---|---|---|
+| Tx | `0x189f6ddfbb0e278ed37b2049d8eb5deeeb78f618a1b20c213c47f42511f9b8f8` | `0x7216bc7edd6d0a98bfbb57d6c8fb817eb328bf0f34556c75b1c5717472c79760` |
+| Block | 57635701 (`0x36f7375`, 2026-11-15T04:38:35Z) | 57427872 |
+| Claimer | `0x7c12cd5b…386d`, calling the gauge directly | `0xa8373266…dbdb` (a contract), NFT #2895206, in a larger transaction |
+| `earned` one block before | `0x12df9e0749351725` | `0x1ae6d93dff2d0957` |
+| AERO `Transfer` to the claimer | from the **zero address**, `0x12df9e0749351725` (1.359979366619354917) | from the zero address, `0x1ae6d93dff2d0957` (1.938475549926951255) |
+| `earned` in the claim's block | 0 | reverts "NA" (the NFT was withdrawn in the same transaction) |
+| Gauge event | `EmissionsClaimed(address,address,uint256)`, topic `0x41a8f9b7…7a968` | `EmissionsClaimed(address,uint256,address,uint256)`, topic `0x7b6bd720…27bb1` |
+
+So in both gauge types `earned` is exactly what a claim then mints, and the AERO arrives
+as a **mint**: an ERC-20 `Transfer` of `0x3f5bF3Ed…a4Ee` from `0x0000…0000` to the
+recipient. The same receipts also show, and NockNock ignores:
+
+- a token `0x6cdda0e730744dc6ff67654b35350adad05ecee7` (symbol "xAERO") minted to and
+  burned from `0x8c37f30f…22c3` for the same amount;
+- a further mint of AERO to `0x9beb95cc…1156`, 5% of the claim (`0x00f194b39075dac1`
+  beside `0x12df9e07…1725`). It is in addition to the claimer's amount, not taken from it.
+
+The claim functions, by selector lookup only and never called by NockNock, are
+`claimEmissions(address,address)` `0x8ed86282` on the basic gauge and
+`claimEmissions(address,address,uint256[])` `0x09902477` on the CL gauge. Simulated from
+the wallet at the pinned block both return empty data without reverting.
+
+### A claim from several gauges in one transaction
+
+Tx `0xe32b6e476ceff9040c1e22b5a23e9ba2a8c4e5cff8221939e871e9ec84bb3a67`, block 58077008
+(`0x3762f50`), status success, sent by `0x0cf406ec…382b` to
+`0x091607c3355f5875400851efc6347a839d3b25f6` (a contract: `eth_getCode` returns code). Its
+receipt has 256 logs, among them
+fourteen AERO `Transfer`s from the zero address: seven mints to `0x091607c3…25f6`, one per
+CL gauge claimed, each followed by the further 5% to `0x9beb95cc…1156`.
+
+| Log index | AERO minted to `0x091607c3…25f6` (raw) |
+|---|---:|
+| `0x1d` | 472646160276911224 |
+| `0x41` | 1605459784569903980 |
+| `0x65` | 1506849352525191393 |
+| `0x8a` | 523941515033061636 |
+| `0xaf` | 242379159878096194 |
+| `0xd4` | 1270601896224565304 |
+| `0xf9` | 443269540123302401 |
+| **Sum** | **6065147408631032132** (6.065147408631032132 AERO) |
+
+The same receipt pays that account USDC seven times from seven different pools (for
+example `0x0d8bfc3d` from `0xf668e219…c8ec` and `0x1c459d9a` from `0x2836e062…4e75`).
+
+The harvest ledger's unique key is `(tx_hash, token_address)`, so such a receipt cannot be
+stored as one row per `Transfer`: the second insert would conflict with the first and be
+dropped. `merge_harvest_transfers` sums every `Transfer` of one token to the wallet into
+one row before the insert (amounts added as integers; the first sender is kept). The
+operator's two gauges claimed in one transaction would be two AERO mints and one ledger
+row of their sum. The recipient here is a contract; whether the Aero app batches a plain
+wallet's claims into one transaction was not established.
+
+### AERO/USD price source
+
+AERO/USDC pools found through the factories at the pinned block (`getPool` on the Aero
+CL factory `0x9cb22058…7a76` with `0x28af8d0b`, and on the Uniswap v3 factory
+`0x33128a8f…fdfd` with `0x1698ee82`):
+
+| Pool | `slot0` price (USDC per AERO) | `liquidity()` | USDC / AERO held |
+|---|---:|---:|---|
+| **Aero CL200 `0xd0acf293547457fb4fe9ee32ca93e89497626816`** | **0.417608** | 718149000491862264365 | 3,330,360 / 4,172,956 |
+| Aero CL100 `0x422df9aa…a1cf` | 0.415519 | 16573887176669224717 | 94,336 / 981,725 |
+| Uniswap v3 0.30% `0x229cfa9f…eb3d` | 0.416275 | 150128334157482 | 1.84 / 383.72 |
+| Aero CL1 `0xb27460d0…f863` | 0.704442 | **0** | dust |
+| Uniswap v3 0.01% `0xed66bcda…5473` | 0.639400 | **0** | dust |
+| Uniswap v3 0.05% `0x32ed1579…6c9e` | 0.803276 | **0** | dust |
+| Uniswap v3 1% `0xcc500ceb…7367` | 0.750975 | **0** | dust |
+
+Four of the seven have no in-range liquidity and show a frozen price 53% to 92% above the
+market. This is the stale-pool case the NOCK and ETH price guards exist for, so the same
+guard applies: a pool whose `liquidity()` is 0 gives no price.
+
+- **Default `aero_price_pool`**: the Aero CL200 pool `0xd0acf293…6816`, the deepest.
+  `token0()` = AERO `0x3f5bf3ed…a4ee`, `token1()` = USDC, `tickSpacing()` = 200, `nft()` =
+  the position manager of §8, `factory()` = `0x9cb22058…7a76`, `fee()` = 10500 pips.
+  `slot0()` returns six words (a Slipstream pool); word 0 is sqrtPriceX96
+  `0xad784fbb267f75a7626`, tick -285057. Price = (sqrtPriceX96 / 2^96)² × 10^(18−6) =
+  **$0.417608**.
+- **Cross-check at the same block**: the Aero CL200 AERO/WETH pool `0xc85d5cb7…c9b3`
+  (sqrtPriceX96 `0x03e0fd7ad1a3064d1658cef5`, 0.000229578 WETH per AERO) times ETH/USD
+  from `eth_price_pool` ($1,811.33) gives $0.415842, within 0.5% of the pool above.
+- **At a past block**: the same pool at block 57635701 read sqrtPriceX96
+  `0xb1d397eb6115a61877a`, $0.438847. That is the read the harvest ledger makes for a
+  claim in that block, and it needs an archive node (Alchemy serves one).
+
+Every cycle the worker reads the pool's `token0()`, `token1()`, `slot0()` and
+`liquidity()`. The tokens must be AERO and USDC, in either order; otherwise it is
+"Configuration error: aero_price_pool … is not an AERO/USDC pool" and no price is used.
+Zero liquidity is "Stale AERO/USD price: price pool … has zero in-range liquidity".
+
+### What NockNock does with it
+
+- **Wallet AERO** is a required read (`AERO.balanceOf(wallet)`), like NOCK, USDC and gas:
+  a failed read fails the cycle. It is counted in `total_portfolio_usd` at the price
+  above, appears as the last `wallet_balances` row and as the "AERO (wallet)" row of the
+  deviation matrix (status `no_target`), and is never cash, never dry powder and never
+  the source of a suggested deposit.
+- **Unclaimed AERO** is read for every tracked Aero position that has a gauge: an
+  `aerodrome` position with `gauge_address`, and an `aerodrome-cl` position the cycle
+  proved staked. It is **not** in the total, exactly as uncollected LP fees are not; it is
+  stated beside them (`positions[].unclaimed_aero`, `global_status.unclaimed_aero_amount`)
+  and counts once claimed. The read is optional: a revert or a failed read is stated as
+  "unclaimed AERO not read (…)" on that position and makes the total null, never 0 and
+  never a partial sum. An `aerodrome` position with no `gauge_address` says so and makes
+  the total null as well. A gauge whose `rewardToken()` names another token is not read
+  as AERO (see "Legacy Aerodrome gauges" above).
+- **The price** is required only while the wallet holds AERO (its value is in the total,
+  so a failed read fails the cycle). While the wallet holds none, a failed read leaves
+  `aero_price_usd` null with the reason in `aero_note`, the amounts stay, and the cycle
+  goes on.
+- **A claim** recorded with `POST /v1/execute/record-harvest` books the AERO `Transfer`
+  to the wallet, valued from the price pool at the claim's block, or with no USD value
+  when that read fails. The Koinly export describes the row as an AERO reward claim.
+  Several AERO `Transfer`s to the wallet in one transaction are summed into one ledger
+  row (see "A claim from several gauges in one transaction" below). A row recorded with
+  no USD value is filled from the same block's price when the transaction is recorded
+  again; a valued row is never changed.
+- **No advice.** NockNock builds no claim transaction for AERO, sets no target, and no
+  directive reads an AERO figure.
+
+### Not verified
+
+- **Penalties and deferral.** The basic gauge has `isPenaltyActive(address)` `0x9af3a17c`
+  (false for the wallet), `depositBlock(address)` `0x202019a6` (57425187, the deposit) and
+  both gauges have `deferredEmissions(address)` `0xba135be9` and
+  `deferredReferralEmissions(address)` `0xa9d4ee99` (0 for the wallet); the CL gauge has
+  `forfeitRollover()`. What these do to a claim was not investigated. In the two claims
+  observed, `earned` was paid in full. If a penalty can apply, `earned` would overstate
+  what a claim pays; NockNock labels the figure "unclaimed AERO" and does not promise it.
+- **How the Aero app claims.** Both observed claims paid the claimer directly. If the app
+  routes a claim through a contract that receives the AERO and forwards it, the wallet's
+  `Transfer` would come from that contract rather than the zero address. The ledger books
+  any AERO `Transfer` to the wallet in a recorded transaction, whatever its sender, so it
+  would still be booked; a recorded transaction that merely buys AERO would be booked too.
+- **Other gauges.** Of the Aero app's gauges only these two were read. Another basic
+  gauge must answer `earned(address)` and another CL gauge `earned(address,uint256[])`;
+  one that does not is reported as "not read", never as 0. A gauge that names a reward
+  token other than AERO is not read either (the two legacy gauges above). A gauge with no
+  `rewardToken()` is taken to be an Aero-app gauge and to pay AERO, which was shown for
+  these two only: a contract of another kind that reverts on `rewardToken()` and answers
+  `earned(address)` with a word would be read as AERO. `gauge_address` is the operator's
+  to set.
+- **AERO inside a position.** AERO is not in the position token registry, so a pool with
+  an AERO leg cannot be tracked (the cycle fails and names the token).
+- **The names** `EmissionsClaimed`, `claimEmissions` and the others above come from a
+  public signature database; the topic hashes were recomputed from those signatures and
+  match the logs. No verified source for these contracts was read.
+
+
+---
+
+## 10. Fill Detection for the Accumulation Plan (v0.6.0, issue #118) — Verified Record
+
+The worker looks for the plan's buys itself: each cycle it lists the NOCK transfers into
+the tracked wallet back to the plan anchor, fetches the receipt of every transaction it
+has not seen before, and applies the checks of `record-accumulation` (one shared function,
+`fill_verify.rs`). What passes is offered for confirmation; nothing is recorded until the
+operator confirms, and confirming verifies the receipt again.
+
+Detection adds **no contract address, no function selector and no event topic**. It
+reuses the NOCK and USDC token addresses (§1) and the ERC-20 `Transfer` topic already in
+`ledger.rs`. It adds one RPC method, `alchemy_getAssetTransfers`, and calls
+`eth_getTransactionReceipt` and `eth_getBlockByNumber`, which the worker already used.
+
+### What was read, and by whom
+
+Read on 2026-11-15/16 (the evening of 2026-11-15 in the operator's timezone), Base mainnet.
+
+| What | Call | Block | Raw result |
+|---|---|---|---|
+| `Transfer` topic | `keccak256("Transfer(address,address,uint256)")`, recomputed | n/a | `0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef`; it is `topics[0]` of every log below |
+| Transfer history (Alchemy, the operator's plan, read-only) | `alchemy_getAssetTransfers`: ERC-20, `toAddress` = wallet, `contractAddresses` = [NOCK], `withMetadata`, `order: desc`, `maxCount`, `pageKey` paging | newest 58043697, oldest 53006877 | 20 transfers and a `pageKey` (`e73927e8-c0bf-4c78-a0eb-5279ce640947`); saved verbatim as `ingestion-worker/testdata/fills/alchemy_getAssetTransfers_nock_in.json` |
+| The same transfers from logs (public RPC `base-rpc.publicnode.com`) | `eth_getLogs` address = NOCK, topics `[Transfer, null, 0x…ee114cc9…7a45]`, blocks `0x374eef8`..`0x375b248` (57,995,000..58,045,000) | head was 58062703 (`0x375f76f`) | 3 logs: tx `0x78376f3c…` block 58040708 logIndex 10 `data` `0xf713117c2d57cfbb` (1780.359297696005 NOCK); tx `0x929cb3e5…` block 58043556 logIndex 11 `data` `0x59970c4b41c2685` (40.34776317640147 NOCK); tx `0x3127a1f4…` block 58043697 logIndex 13 `data` `0xfd114621e11ee71` (113.97145923452884 NOCK). Same hashes, blocks, log indexes and amounts as the first three Alchemy entries. Saved as `eth_getLogs_nock_in_57995000_58045000.json` |
+| `eth_getLogs` range limits | same call over 200,000 blocks | n/a | publicnode: error `-32701 exceed maximum block range: 50000`. On the operator's Alchemy plan the 200,000-block span succeeded (read by the orchestrating session; not repeated here, no key) |
+| Receipts | `eth_getTransactionReceipt` for all 20 hashes (public RPC) | see table | For the six receipts also read through Alchemy, `status`, `blockNumber` and every log (`address`, `topics`, `data`, `logIndex`) are identical between the two providers |
+| Block times | `eth_getBlockByNumber(n, false)` (public RPC) | 58040708, 57605753, 57228848, 53725121, 57425187 | `timestamp` `0x6afa73b5`, `0x6af91fe6`, `0x6af7f971`, `0x6aed4827`, `0x6af892d5` = 2026-11-16T03:08:37Z, 2026-11-15T02:58:46Z, 2026-11-14T06:02:25Z, 2026-11-06T03:23:19Z, 2026-11-14T16:56:53Z: equal to Alchemy's `metadata.blockTimestamp` for the same transfers |
+
+### The 20 most recent NOCK transfers into the wallet, classified
+
+Net flows are the sum of the USDC and NOCK `Transfer` logs touching the wallet in each
+receipt (what `parse_accumulation_swap` computes). A purchase is net USDC out and net NOCK in.
+
+| Transaction | Block | Block time | Receipt `to` | Net USDC | Net NOCK | Verdict |
+|---|---:|---|---|---:|---:|---|
+| `0x3127a1f4…e49c9e` | 58043697 | 2026-11-16T03:18:35Z | `0x03a520b3…` (v3 NPM) | +0.000000 | +113.9715 | not a purchase (v3 fee claim; also +0.000678 WETH) |
+| `0x929cb3e5…cc4fd0` | 58043556 | 2026-11-16T03:18:06Z | `0x7c5f5a4b…` (v4 POSM) | +0.573656 | +40.3478 | not a purchase (v4 fee claim) |
+| `0x78376f3c…6e31b9` | 58040708 | 2026-11-16T03:08:37Z | `0xcaf22ce3…7c67` | −20.000000 | +1780.3593 | **purchase** (plan buy 3, $0.01123369) |
+| `0x4644edd9…4c61e8` | 57605753 | 2026-11-15T02:58:46Z | `0x0fef9e88…` (Aero router) | −20.000000 | +1720.2181 | **purchase** (plan buy 2, $0.01162643) |
+| `0x1d566001…a374b1` | 57504113 | 2026-11-14T21:19:58Z | `0x03a520b3…` | +0.000000 | +33.7768 | not a purchase (v3 fee claim) |
+| `0x8f0b3cbb…c78228` | 57503975 | 2026-11-14T21:19:30Z | `0x7c5f5a4b…` | +0.025169 | +18.8069 | not a purchase (v4 fee claim) |
+| `0x80277e2b…c93ddb` | 57425824 | 2026-11-14T16:59:00Z | `0x0fef9e88…` | +0.000000 | −2755.0000 | not a purchase (CL200 deposit, §7) |
+| `0x127c4f4f…f185f0` | 57425187 | 2026-11-14T16:56:53Z | `0x0fef9e88…` | −31.986644 | −2755.0000 | not a purchase (volatile-pool deposit, §7) |
+| `0x5d0c02d9…2a3f0e` | 57228848 | 2026-11-14T06:02:25Z | `0x0fef9e88…` | −20.000000 | +1597.9340 | **purchase** (plan buy 1, $0.01251616, §6) |
+| `0xa8cd4501…9ce4dc` | 53725121 | 2026-11-06T03:23:19Z | `0x0fef9e88…` | −105.471820 | +7370.1998 | **purchase**, before the plan ($0.01431058) |
+| `0x56efde30…4f893b` | 53223698 | 2026-10-29T01:19:03Z | `0x7c5f5a4b…` | +0.000000 | +33415.7370 | not a purchase |
+| `0x7f0daf07…c32124` | 53223681 | 2026-10-29T01:18:29Z | `0x7c5f5a4b…` | +0.328365 | +7693.1080 | not a purchase |
+| `0x5673582f…7b4cac` | 53223656 | 2026-10-29T01:17:39Z | `0x7c5f5a4b…` | +103.253128 | +5257.3122 | not a purchase |
+| `0xea9680ac…ea57ed` | 53223635 | 2026-10-29T01:16:57Z | `0x03a520b3…` | +0.000000 | +1444.3263 | not a purchase |
+| `0x889c865f…52191c` | 53008782 | 2026-10-24T01:55:11Z | `0x7c5f5a4b…` | +0.000000 | +191.1711 | not a purchase |
+| `0xfdbcebc2…d55c5b` | 53008778 | 2026-10-24T01:55:03Z | `0x7c5f5a4b…` | +5.376593 | +156.1783 | not a purchase |
+| `0x6fc8f541…0c91da` | 53006987 | 2026-10-24T00:55:21Z | `0xcf77a3ba…` | +78.788719 | +3822.4952 | not a purchase |
+| `0x8132c691…97f44d` | 53006951 | 2026-10-24T00:54:09Z | `0x7c5f5a4b…` | +60.372284 | +11600.9806 | not a purchase |
+| `0x2a7b564a…02eae1` | 53006900 | 2026-10-24T00:52:27Z | `0x7c5f5a4b…` | +0.013038 | +5.4668 | not a purchase |
+| `0xb27b6f44…5de3f9` | 53006877 | 2026-10-24T00:51:41Z | `0x85f1aa3a…` | +0.024665 | +1.4752 | not a purchase |
+
+With the plan anchored on 2026-11-14 the worker examines the first nine rows and offers
+exactly the three plan buys. Ten of these receipts are checked in under
+`ingestion-worker/testdata/fills/` and drive `src/tests_fills.rs`: the three plan buys, the
+four fee claims after the anchor, the two deposits and the pre-plan purchase.
+
+### What the real data showed
+
+- **The two Aero deposits appear in the transfer list.** The router `0x0fef9e88…` sent
+  the wallet a NOCK refund in each (0.0000459601 NOCK and 0.0000000000000152 NOCK). #118
+  named this as the possible false positive: a deposit that pays USDC and receives some
+  NOCK. Neither qualifies, because the wallet's net NOCK flow is outward (−2,755). A
+  deposit that paid USDC and returned more NOCK than it took would qualify; none has been
+  observed. This is the reason a detected swap is offered and not recorded.
+- **A purchase from before the plan exists** (`0xa8cd4501…`, 2026-11-06, $105.47182 for
+  7,370.2 NOCK). The scan stops at the plan anchor, so it is never fetched or offered. Set
+  `accumulation_plan.starts_at` earlier to reach it.
+- **Plan buy 2 came 20 h 56 min after buy 1.** Against a 24-hour interval that is before
+  its tranche was due, so the offer is labelled `early` (judged against the buy before it,
+  whether that buy is recorded or still on offer). Buy 3 came 24 h 10 min after buy 2.
+- **Plan buy 3 did not go through the Aero router of §6.** Its receipt's `to` is
+  `0xcaf22ce31298cf2bf1d152862f80216478ad7c67`, and both the USDC and the NOCK moved
+  directly between the wallet and the legacy vAMM `0x85f1aa3a…d626`. Which app sent it was
+  not established. Verification is contract-agnostic, so it qualifies like the others, and
+  NockNock stores nothing about the router.
+
+### Cost over the reference spot
+
+Each recorded fill and each offer carries `execution_cost_bps` =
+(effective price / reference spot − 1) × 10,000. The reference is the stored NOCK/USD price
+nearest the fill's block time, within 60 minutes (`nock_price_near`, the v0.5.3 lookup the
+harvest ledger uses), kept with its source and its own timestamp. While the worker is
+running that is a price-source pool read at most a few minutes from the fill; after
+downtime it may be a backfilled hourly candle, and the source says so. No stored price in
+the window means no reference and no figure. The reference is not the price in the fill's
+own block, and it is not a quote: cost against a quote belongs to #115.
+
+For scale, plan buy 1 at $0.01251616 against the engine spot noted at the time ($0.01229,
+§6) is +184 bps.
+
+### Not verified
+
+- **The worker's own `alchemy_getAssetTransfers` request.** This branch had no Alchemy
+  key. The method and its parameters were exercised on the operator's plan by the
+  orchestrating session and the response saved, but the request that produced it was not
+  saved. The worker sends `fromBlock: "0x0"`, `toBlock: "latest"`, `excludeZeroValue: true`
+  and `maxCount: "0x64"` with the parameters in the table above; the first deployed cycle
+  is the first time that exact request runs. If Alchemy rejects it, the plan status reads
+  `unavailable` with the reason and recording by hash is unaffected.
+- **Following a `pageKey`.** The saved response has one; the second page was not fetched.
+  The paging test splits the real response in two.
+- **Compute-unit cost** of one transfer-history call per cycle on the operator's plan.
+
+
+---
+
+## 11. Route Quotes for a Due Tranche (v0.7.0, issue #115) — Verified Record
+
+When the accumulation plan says a tranche is due, the worker asks each venue's own
+quoter contract what that exact USDC amount returns in NOCK, along a fixed table of
+routes, all at one block (`route_quotes.rs`). Every call is an `eth_call`; nothing is
+signed, built or sent. This section records what was read to choose the quoters, pools
+and selectors. Each address below answered a live call with a sane result before the
+code relied on it; none is taken from memory or from a web page alone.
+
+Read on 2026-11-16 between 05:17 and 05:41 UTC, Base mainnet, through the public RPC
+`https://base-rpc.publicnode.com` (no key). Selectors were computed with
+`python3 -I /tmp/nn-97/keccak.py '<signature>'`. The requests and their verbatim answers
+are checked in under `ingestion-worker/testdata/quotes/` and drive `src/tests_quotes.rs`.
+
+Base now produces a block every 200 ms (811,860 blocks between plan buys 1 and 3,
+162,372 seconds apart), so "the quote block" is a much finer instant than the 2-second
+blocks earlier sections assumed.
+
+### Quoters
+
+| Venue | Contract | Address | Identity check (at block 58081910) | Quote call |
+|---|---|---|---|---|
+| Aero | Metaquoter | `0x1dDfeC5058180C207F55BB77D95AcDd0d8227868` | `factoryRegistry()` `0x3bf0c9fb` → `0x7b2a2c12dc5ea2a31455952a05031c3e4bb28f3e` | `quoteExactInput(address[],address,uint256)` `0x76278b93` |
+| Uniswap v3 | QuoterV2 | `0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a` | `factory()` `0xc45a0155` → `0x33128a8f…FDfD` (the v3 factory of §1); `WETH9()` `0x4aa4a4fc` → WETH | `quoteExactInput(bytes,uint256)` `0xcdca1753` |
+| Uniswap v4 | V4Quoter | `0x0d5e0f971ed27fbff6c2837bf31316121532048d` | `poolManager()` `0xdc4c90d3` → `0x498581ff…2b2b` (the PoolManager of §1) | `quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))` `0xaa9d21cb`; `quoteExactInput((address,(address,uint24,int24,address,bytes)[],uint128))` `0xca253dc9` |
+
+Where the Aero address came from: Aero's own contract list
+(`https://app.aero.xyz/docs/security/`, "Metaquoter (All chains)") and the file
+`deployment-addresses/cl-base.json` of `Dromos-Labs/metadex-slipstream-public`
+(`metaquoter`), whose `IMetaquoter.sol` gives the signature. The same list names
+`0x0fEf9e88A7b76BCDBF451780C6774FE32965Ee98` "Metarouter", `0x9CB220581b91b0C83223012FE69688b92aD07a76`
+"CLFactory", `0x8E6a9FCd1d638CC760Ffba397605Fe3355dE76D2` "VolatilePoolFactory" and
+`0x7949DE8d67E4F6b8509Bdbb43FF0503aF1247a7A` "CustomFeeModule (volatile pools)". That
+settles what §6 could only infer: the router of the plan's buys is Aero's. The
+legacy Slipstream quoter `0x254cF9E1…15b0` answers `factory()` with `0x5e7bb104…809a`,
+a different factory, so it cannot quote these pools and is not used.
+
+The Metaquoter takes the pools of a route in order and the input token; it handles
+concentrated and basic pools in one call. All three quoters return the amount out as
+their first word.
+
+**Replay check (the proof that the Aero quoter matches execution).** The Metaquoter was
+asked for 20 USDC along the route of plan buy 1 (§6: `0xd448…aaf7`, `0x2dbe…cf7b`,
+`0x9572…0874`) at block **57228847**, the block before that buy (57228848). It returned
+`0x…ddc205801b5ceaca` = 15,979,340,475,636,968,138 raw = 1,597.9340475636968138 NOCK.
+The buy's receipt shows the wallet received 15,979,340,475,636,968,138 raw NOCK: the
+same number, to the wei. The public RPC served that block (about two days old), so no
+approximation was needed. Fixture: `replay_fill1_block_57228847.json`.
+
+### Pools on the routes
+
+| Pool | Address or pool id | Resolved by | Read (blocks 58079466 to 58081910) |
+|---|---|---|---|
+| Aero basic volatile USDC/NOCK | `0x770fE8Fc9248c6382950A86E39a9391B41D59e0A` | VolatilePoolFactory `getPool(address,address)` `0x531aa03e` (this factory has no stable flag); `isPool` `0x5b16ebb7` → true | `token0` USDC, `token1` NOCK; `getReserves()` 911.552758 USDC / 81,388.8687 NOCK |
+| Aero concentrated WETH/NOCK (tick spacing 200) | `0x957256c98d61A714081DE2EE70ae3A96c9b40874` | CLFactory `getPool(address,address,int24)` `0x28af8d0b` | `fee()` 9700; holds 0.2335 WETH and 131,330 NOCK |
+| Aero concentrated WETH/USDC (50) | `0x4a7af46bc8abc00048c6c7920a1488daf568366c` | same | `fee()` 799 at block 58081910 (1282 a few minutes earlier: it moves); holds 1,396,977 USDC and 4,048.4 WETH |
+| Aero concentrated WETH/USDC (100) | `0x2a430bebd2082d8e05d56d64dede8944279bbc24` | same | `fee()` 885; holds 893,364 USDC and 1,897.3 WETH |
+| Aero concentrated USDC/USDT (1) | `0xd448990883e3bf9cdd8ebca368a3ecf9d629aaf7` | `factory()` is the CLFactory; `tickSpacing()` 1 | `fee()` 8 |
+| Aero concentrated WETH/USDT (100) | `0x2dbe0e264c7c246e05c6614794899937f264cf7b` | `factory()` is the CLFactory; `tickSpacing()` 100 | `fee()` 468 |
+| Uniswap v3 WETH/USDC 0.05% | `0xd0b53d9277642d899df5c87a3966a349a798f224` | v3 factory `getPool(WETH, USDC, 500)` (§1; also the worker's ETH price pool) | |
+| Uniswap v3 WETH/NOCK 1% | `0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a` | v3 factory `getPool(WETH, NOCK, 10000)` | holds 0.4996 WETH and 388,929 NOCK |
+| Uniswap v4 USDC/NOCK 3% | `0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13` | keccak256 of the pool key (USDC, NOCK, 30000, 300, no hooks) | StateView `getLiquidity` 127,997,653,824,339,161; tick 275113 |
+| Uniswap v4 ETH/NOCK 2% | `0xd316152008e12105594c32686b9d0401fd2c60ca4805c84f280069d218b771a8` | keccak256 of (native ETH, NOCK, 20000, 400, no hooks) | `getLiquidity` 11,491,937,738,508,897,075 |
+| Uniswap v4 ETH/USDC 0.05% | `0x96d4b53a38337a5733179751781178a2613306063c511b78cd02684739288c0a` | keccak256 of (native ETH, USDC, 500, 10, no hooks) | `getLiquidity` 40,914,903,574,237,929 |
+
+The three v4 pool ids were recomputed from the keys the worker sends and then read
+through StateView; two of them are the ids §5 already recorded for positions D and A.
+
+**USDT** `0xfde4c96c8593536e31f229ea8f37b2ada2699bb2`: `token1()` of both USDT pools,
+`decimals()` 6, `symbol()` "USDT". It is used only as a hop inside one Metaquoter call.
+It is not added to the position-token registry, so a tracked position holding USDT is
+still refused.
+
+**Fee units.**
+- Aero concentrated pools: `fee()` is in millionths. Checked with
+  `quoteExactInputSingleV3(address,address,uint256,uint160)` `0x0a674142` for 1e12 wei
+  WETH on the WETH/NOCK pool: the answer equals amount × slot0 price × (1 − 9700/1e6) to
+  1.5 parts in 10 million (and is 33 times too large if the unit were basis points). So
+  9700 is 0.97%, as §6 guessed. These fees are dynamic; the worker reads `fee()` at the
+  quote block.
+- Aero basic pool: the pool's own `fee()` and `stable()` revert. The factory's
+  `defaultFee()` `0x5a6c72d0` returns 30 and the fee module's `customFee(address)`
+  `0x4d419abc` returns 0 for this pool; `ZERO_FEE_INDICATOR()` `0x38c55d46` is 420 and
+  `MAX_FEE()` 300. The pool's `getAmountOut(uint256,address)` `0xf140a35a` for 20 USDC is
+  17,422,508,413,591,799,568 raw, exactly x·y=k on the reserves above with 30 basis
+  points taken from the input, and exactly what the Metaquoter returns for that pool. So
+  the fee in force is 0.30%. The rule for a non-zero custom fee (it replaces the default;
+  420 means none) is the legacy Aerodrome factory's and was not exercised here.
+
+### The comparison at block 58081910 (2026-11-16T05:25:57Z), 20 USDC in
+
+| Route | Quoter | NOCK out | USDC per NOCK |
+|---|---|---:|---:|
+| Aero: USDC → NOCK (basic pool) | Metaquoter | 1,742.2508413591799568 | 0.01147940 |
+| Aero: USDC → WETH (50) → NOCK | Metaquoter | 1,772.5259725360589554 | 0.01128333 |
+| Aero: USDC → WETH (100) → NOCK | Metaquoter | 1,772.2004408122825130 | 0.01128541 |
+| **Aero: USDC → USDT → WETH → NOCK** | Metaquoter | **1,773.0768618618146014** | 0.01127983 |
+| Uniswap: USDC → NOCK (v4 3%) | V4Quoter | 1,716.8660568388805278 | 0.01164913 |
+| **Uniswap: USDC → WETH → NOCK (v3)** | QuoterV2 | **1,772.2085413951150619** | 0.01128535 |
+| Uniswap: USDC → ETH → NOCK (v4) | V4Quoter | 1,692.7635343644656443 | 0.01181500 |
+
+Aero's best route returned 0.05% more NOCK than Uniswap's. The reference spot at that
+block (the v4 3% pool's own price, the worker's `is_price_source`) was $0.01128675, so
+both best routes were slightly *below* it (−0.06% and −0.01%), while the direct swap in
+that 3% pool cost +3.21%. A cost over spot can be negative: the reference is one pool's
+mid price, not the market. The Aero app's choice for buy 1 (through USDT) is still the
+best Aero route.
+
+The worker's own code, run against the same public RPC, produced the same shape at
+block 58086356 (Aero 1,779.3262 NOCK, Uniswap 1,778.5967, Aero ahead by 0.04%).
+
+### What a failing quote looks like
+
+| Case | Call | Answer |
+|---|---|---|
+| A pool with no liquidity | QuoterV2 on the v3 USDC/NOCK 1% pool `0x7e096e98c5653bacf5352a2a3c7019757f6cf68d` (`liquidity()` = 0) | error 3 `execution reverted: Unexpected error` |
+| A pool key never initialized | V4Quoter, USDC/NOCK fee 100 spacing 1 | error 3 `execution reverted`, data `0x6190b2b0…` |
+| Input token not in the pool | Metaquoter, USDC into the WETH/NOCK pool | error 3 `execution reverted: TI` |
+| A pool run dry part-way (5,000,000 USDC) | QuoterV2, USDC → WETH → NOCK | **a result**: 379,723 NOCK for the part that swapped, with the second pool's post-swap sqrt price at `0x1000276a4` (the minimum plus one) |
+| The same, v4 | V4Quoter, USDC/NOCK 3% | error 3 `execution reverted`, data wrapping `0x7a5ed734` and the pool id |
+| The same, Aero | Metaquoter, USDC → WETH (50) → NOCK | a result: 131,005.94 NOCK, post-swap price far down but not at the bound (the pool holds full-range liquidity, so it fills any size at a collapsing price) |
+
+The fourth row matters: QuoterV2 does not signal a partial fill. It was observed to
+return a partial amount with the post-swap price pinned at the range's bound, and no
+error. The worker therefore reads the post-swap prices in the answer and treats one
+pinned at the range's end as "unavailable", never as a quote. The Aero pools on these
+routes hold full-range liquidity and fill any size at a collapsing price (last row), so
+the Metaquoter was never seen to answer for a pool with no liquidity left; its answer
+has the same shape and the same price-bound check is applied to it.
+
+The retired v4 USDC/NOCK 0.75% pool (`0x91a9ef0a…f99c`, zero in-range liquidity) answers
+1,035.83 NOCK for 20 USDC by crossing empty ticks to reach some liquidity: a real quote
+40% worse than the others. It is not in the route table.
+
+### Swap links
+
+- **Aero**: `https://app.aero.xyz/swap`. The path is the app's own "Trade" entry
+  (read from the app's route table in its public bundle). Aero's documentation
+  (`app.aero.xyz/docs`, Trading) documents no query parameters, so nothing is prefilled.
+- **Uniswap**: `https://app.uniswap.org/swap`. Uniswap's documentation
+  (`developers.uniswap.org/docs/trading/custom-interface-links`) documents
+  `inputCurrency`, `outputCurrency`, `value` and `field`, but no chain parameter.
+  Without one a link cannot say the addresses are on Base, so nothing is prefilled
+  here either.
+
+### Not verified
+
+- **The Aero Metaquoter on a concentrated pool with no liquidity left.** No such pool
+  exists on these routes to test against: the CLFactory resolves one USDC/NOCK or
+  WETH/NOCK concentrated pool (`0x9572…0874`), and it and the hop pools fill any size.
+  Whether the Metaquoter then reverts or returns a partial amount with the price at the
+  bound was not observed. The worker handles both: a revert reads "unavailable", and so
+  does a post-swap price at the bound.
+- **The worker's calls through Alchemy.** This branch had no key. The whole read path
+  ran against the public RPC only. Each quote is pinned to the latest block number; if
+  a node behind Alchemy's balancer has not seen that block yet the call is an RPC error
+  (not a revert) and is retried twice before the route reads "unavailable".
+- **Compute-unit cost** on the operator's plan: one block header, seven quoter calls and
+  up to three fee reads per cycle while a tranche is due, and per refresh. The fee
+  reads run together, once each, inside two seconds; one that does not answer in time
+  leaves that hop's fee "not read" and the quotes stand.
+- **Wallet-specific fees on Aero.** The Metaquoter is called without a `from`. Its
+  interface speaks of a pool's "total contextual fee" and Aero deploys a
+  DiscountRegistry; if the operator's wallet has a discount the real swap returns
+  slightly more than the quote. The replay above matched exactly, so none applied then.
+- **The newer V4Quoter.** Uniswap's SDK is moving to a later V4Quoter deployment on
+  Base; the one used here is the original, and `msgSender()` reverts on it. It answers
+  the quote calls correctly today.
+- **What the apps' routers will do.** A route table is not the router. The Uniswap app
+  can mix v3 and v4 pools or split an order; the Aero app can pick any path. The quotes
+  are for the named routes only.
+- **Gas.** No quote includes the swap's gas (the V4Quoter and QuoterV2 return an
+  estimate; it is not shown). Gas is ETH, a different pillar.
+- **The legacy Aerodrome vAMM** `0x85f1aa3a…d626` (plan buy 3 went through it, §10) is
+  deep, but `app.aero.xyz` does not list it. It is not quoted.
+## 12. Accumulation Fills Behind the Cost-Basis Fixtures (#98) — Read 2026-11-16
 
 The cost basis (issue #98) adds **no contract address, function selector or event topic**.
 It reads the `accumulation_events` table, whose rows the record handler already wrote

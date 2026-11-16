@@ -934,7 +934,9 @@ database_url: "postgresql://localhost/test"
         let (sim, detail) = aero_claim_simulation(&Ok(None));
         assert_eq!(sim, "not_claimable");
         let d = detail.unwrap();
-        assert!(d.contains("claimFees() reverts") && d.contains("AERO rewards not read (#93)"), "{d}");
+        // The reason only. Since #93 the AERO earned instead is read from the gauge and
+        // stated after it on the fee row; the claim payload builds no AERO claim.
+        assert_eq!(d, "not LP-claimable (claimFees() reverts)");
         assert!(!d.contains("RPC unavailable"));
         assert_eq!(aero_claim_simulation(&Ok(Some("00".to_string()))), ("success", None));
         let (sim, detail) = aero_claim_simulation(&Err(anyhow::anyhow!("network error")));
@@ -1006,8 +1008,10 @@ database_url: "postgresql://localhost/test"
         assert_eq!(fees[0].amount, AERO_NOT_LP_CLAIMABLE);
         assert!(!fees[0].claimable);
         let text = format_claim_simulation_text(&json!({ "contract_fees": fees }));
-        assert!(text.contains("not LP-claimable (claimFees() reverts); AERO rewards not read (#93)"), "{text}");
-        assert!(text.contains("Estimated Gas: unavailable"), "{text}");
+        assert!(text.contains("USDC+NOCK (Aerodrome): not LP-claimable (claimFees() reverts)\n"), "{text}");
+        // Nothing is claimable, so there is no claim to cost: said as such since v0.6.0
+        // (#91), no longer as "live gas estimate unavailable" (gas was read: 0.0037).
+        assert!(text.contains("Estimated Gas: n/a (nothing LP-claimable)"), "{text}");
         // Without the flag the same position reads as ordinary fees.
         let plain = build_contract_fees(&snaps, 0.0037, &[]);
         assert_ne!(plain[0].amount, AERO_NOT_LP_CLAIMABLE);
@@ -2827,9 +2831,10 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
         assert_eq!(m.lp_rebuild.status, "no_positions");
         assert!(m.lp_rebuild.suggestions.is_empty() && m.lp_rebuild.excluded.is_empty());
         let w: Vec<i32> = m.portfolio_deviation_matrix.allocations.iter().map(|a| a.actual_weight_bps).collect();
-        // The fourth row is gas: a measured share with no target.
-        assert_eq!(w, vec![0, 0, 10000, 0]);
+        // The fourth row is gas and the fifth AERO (#93): measured shares with no target.
+        assert_eq!(w, vec![0, 0, 10000, 0, 0]);
         assert_eq!(m.portfolio_deviation_matrix.allocations[3].status, "no_target");
+        assert_eq!(m.portfolio_deviation_matrix.allocations[4].status, "no_target");
         assert!(m.tick_bracket_hypervisor.brackets.is_empty());
         assert!(m.asset_aggregation_series.positions_nock.is_empty());
         assert!(m.velocity_gas_sandbox.contracts.is_empty());
@@ -2849,7 +2854,7 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
         assert_eq!(m.global_status.total_portfolio_usd, "0.00");
         assert_eq!(m.global_status.high_water_mark_usd, "0.00");
         let w: Vec<i32> = m.portfolio_deviation_matrix.allocations.iter().map(|a| a.actual_weight_bps).collect();
-        assert_eq!(w, vec![0, 0, 0, 0]);
+        assert_eq!(w, vec![0, 0, 0, 0, 0]);
         assert_eq!(m.lp_rebuild.status, "no_positions");
         // Gas held: the gas fact is not stated.
         let mut gas = from_zero_raw(0.0, 0.0);
@@ -2863,7 +2868,7 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
         assert_eq!(m.global_status.wallet_gas_usd.as_deref(), Some("30.00"));
         assert!(m.global_status.shot_advice_details.contains("never deployed"));
         let w: Vec<i32> = m.portfolio_deviation_matrix.allocations.iter().map(|a| a.actual_weight_bps).collect();
-        assert_eq!(w, vec![0, 0, 0, 10000]);
+        assert_eq!(w, vec![0, 0, 0, 10000, 0]);
     }
 
     #[test]

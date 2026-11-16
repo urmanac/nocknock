@@ -15,7 +15,7 @@ import { isGapRow } from './timeline';
 
 /**
  * The plan-buys figures are the worker's output for the operator's three real fills
- * (ingestion-worker/src/tests_cost_basis.rs; receipts in ONCHAIN_INTEGRATION.md §8).
+ * (ingestion-worker/src/tests_cost_basis.rs; receipts in ONCHAIN_INTEGRATION.md §12).
  * The opening-basis figures (10,000 NOCK for $200) are made up for the tests: round
  * numbers that are nobody's records.
  */

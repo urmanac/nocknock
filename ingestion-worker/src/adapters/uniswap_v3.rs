@@ -67,8 +67,8 @@ pub(crate) async fn fetch_v3_position(
     let fg0_g = post_rpc_word(http_client, alchemy_url, pool.as_str(), V3_FEE_GROWTH_GLOBAL0, 0, 62).await?;
     let fg1_g = post_rpc_word(http_client, alchemy_url, pool.as_str(), V3_FEE_GROWTH_GLOBAL1, 0, 63).await?;
     // TickInfo words: [2] feeGrowthOutside0, [3] feeGrowthOutside1 — BOTH bounds, BOTH legs.
-    let tl_lower_tick_data = format!("{}{:064x}", V3_TICKS, decoded.tick_lower as u32);
-    let tu_upper_tick_data = format!("{}{:064x}", V3_TICKS, decoded.tick_upper as u32);
+    let tl_lower_tick_data = format!("{}{}", V3_TICKS, int24_calldata_word(decoded.tick_lower));
+    let tu_upper_tick_data = format!("{}{}", V3_TICKS, int24_calldata_word(decoded.tick_upper));
     let fgo0_l = post_rpc_word(http_client, alchemy_url, pool.as_str(), &tl_lower_tick_data, 2, 64).await?;
     let fgo1_l = post_rpc_word(http_client, alchemy_url, pool.as_str(), &tl_lower_tick_data, 3, 66).await?;
     let fgo0_u = post_rpc_word(http_client, alchemy_url, pool.as_str(), &tu_upper_tick_data, 2, 67).await?;
@@ -136,9 +136,9 @@ pub(crate) fn decode_v3_positions_return(hex_str: &str) -> Result<V3PositionDeco
     }
     let word = |i: usize| -> &str { &clean[i * 64..(i + 1) * 64] };
     let addr = |i: usize| -> String { format!("0x{}", &word(i)[24..]) };
+    // Sign-extended int24 words (a negative tick is `ff…`): the shared decoder in evm.rs.
     let signed_tick = |i: usize| -> Result<i32> {
-        let v = u32::from_str_radix(word(i), 16).map_err(|e| anyhow::anyhow!("bad tick word: {e}"))?;
-        Ok(v as i32)
+        parse_hex_word_i32(word(i)).map_err(|e| anyhow::anyhow!("bad tick word: {e}"))
     };
     Ok(V3PositionDecoded {
         token0: addr(2),

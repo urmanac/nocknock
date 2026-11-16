@@ -169,8 +169,9 @@ at boot and survive logout.
 5. **The database is disposable.** Nothing here is a backup, and none is installed. The
    wallet and the chain are the record: after losing the database, start fresh with the
    latest release and your `config.yaml`. To restore an accumulation plan's progress, set
-   `accumulation_plan.starts_at` to its real start and record each buy's transaction hash
-   again (receipts are re-verified on-chain).
+   `accumulation_plan.starts_at` to its real start. From v0.6.0 the worker then finds each
+   buy since that time and offers it for confirmation on the dashboard; recording each
+   buy's transaction hash again works too. Receipts are re-verified on-chain either way.
 
 6. **Point a local MCP client at the deployment** by setting `NOCKNOCK_API_URL` for the
    stdio server (it defaults to `http://127.0.0.1:8080`):

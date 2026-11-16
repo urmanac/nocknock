@@ -47,6 +47,10 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
         ));
     };
 
+    // A position with an unknown protocol is a configuration error, stated before any
+    // chain read (issue #91): it is never read as another protocol.
+    validate_positions_config(&state.config.positions)?;
+
     // 0. Fetch live ETH/USD spot price from the canonical Uniswap v3 WETH/USDC pool slot0.
     //    (The former Aerodrome vAMM-WETH/USDC source is retired along with the liquidated
     //    Aerodrome tranche.) Zero-mock invariant: a failed query fails the cycle.
@@ -143,15 +147,16 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
     }
     let mut raw_positions: Vec<RawPosition> = Vec::new();
     let mut fees_not_lp_claimable: Vec<String> = Vec::new();
+    let mut position_facts: HashMap<String, PositionFacts> = HashMap::new();
     for pos in &state.config.positions {
-        let raw = match pos.protocol.as_str() {
-            "uniswap-v4" => {
+        let raw = match Protocol::parse(&pos.protocol) {
+            Some(Protocol::UniswapV4) => {
                 fetch_v4_position(&state.http_client, &alchemy_url, pos, wallet_addr).await?
             }
-            "uniswap-v3" => {
+            Some(Protocol::UniswapV3) => {
                 fetch_v3_position(&state.http_client, &alchemy_url, pos, wallet_addr).await?
             }
-            "aerodrome" => {
+            Some(Protocol::AeroBasic) => {
                 let (raw, fees_claimable) =
                     fetch_aerodrome_position(&state.http_client, &alchemy_url, pos, wallet_addr).await?;
                 if !fees_claimable {
@@ -159,11 +164,25 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
                 }
                 raw
             }
-            other => {
+            Some(Protocol::AeroCl) => {
+                // Ownership is checked inside: an NFT the wallet neither holds nor staked
+                // in the pool's gauge fails the cycle here (issue #91).
+                let (raw, facts) =
+                    fetch_aero_cl_position(&state.http_client, &alchemy_url, pos, wallet_addr).await?;
+                if facts.fees_note.is_some() {
+                    fees_not_lp_claimable.push(raw.position_id.clone());
+                }
+                position_facts.insert(raw.position_id.clone(), facts);
+                raw
+            }
+            None => {
+                // Unreachable after validate_positions_config; kept so that an unknown
+                // protocol can never reach an adapter.
                 return Err(anyhow::anyhow!(
-                    "Position {} has unsupported protocol '{}' (expected uniswap-v4, uniswap-v3 or aerodrome)",
+                    "Configuration error: position '{}' has unknown protocol '{}'. Supported: {}",
                     pos.id,
-                    other
+                    pos.protocol,
+                    SUPPORTED_PROTOCOLS
                 ));
             }
         };
@@ -249,6 +268,21 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
         .and_then(|h| u128::from_str_radix(h.trim_start_matches("0x"), 16).ok())
         .map(|wei| wei as f64 / 1e18);
     let (gas_eth, gas_weth) = require_gas_balances(wallet_eth, wallet_weth)?;
+    // 5b'. AERO, the fourth pillar (issue #93): wallet AERO (required, counted in the
+    //      total), unclaimed AERO per staked Aero position (a failed gauge read is stated
+    //      on that position, never 0) and the AERO/USD price (required only while the
+    //      wallet holds AERO; otherwise a failed read degrades with its reason).
+    let aero_price_pool =
+        state.config.aero_price_pool.clone().unwrap_or_else(|| DEFAULT_AERO_PRICE_POOL.to_string());
+    let aero = fetch_aero_reads(
+        &state.http_client,
+        &alchemy_url,
+        wallet_addr,
+        &aero_price_pool,
+        &state.config.positions,
+        &position_facts,
+    )
+    .await?;
     // 5c. Per-position rebuild rules from config, keyed like RawPosition.position_id.
     let rebuild_rules: HashMap<String, RebuildRule> = state
         .config
@@ -266,16 +300,17 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
         })
         .collect();
 
-    let mut positions = build_position_snapshots(&raw_positions, spot_price, live_eth_price_usd);
-    apply_pool_activity(&mut positions, &pool_liquidity);
+    let positions =
+        snapshot_positions_from(&raw_positions, spot_price, live_eth_price_usd, &pool_liquidity, &position_facts, &aero);
     let pool_mechanics = build_pool_mechanics(&raw_positions, spot_price, live_eth_price_usd);
     let contract_fees = build_contract_fees(&positions, live_gas_cost_usd, &fees_not_lp_claimable);
 
     tracing::info!(
-        "Live position reads: {} position(s), NOCK spot ${:.6}, ETH/USD ${:.2}",
+        "Live position reads: {} position(s), NOCK spot ${:.6}, ETH/USD ${:.2}, AERO/USD {}",
         positions.len(),
         spot_price,
-        live_eth_price_usd
+        live_eth_price_usd,
+        aero.price_usd.map(|p| format!("${:.4}", p)).unwrap_or_else(|| "unavailable".to_string())
     );
 
     Ok(RawOnChainData {
@@ -313,6 +348,8 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
                 amount_usd: format!("{:.2}", gas_weth * live_eth_price_usd),
                 updated_at: now_str.clone(),
             },
+            // AERO (v0.6.0, #93) comes last: earlier rows keep their indexes.
+            aero_wallet_balance(wallet_addr, aero.wallet_aero.unwrap_or(0.0), aero.price_usd, &now_str),
         ],
         pool_mechanics,
         concentrated_liquidity: vec![], // DEPRECATED since v2.0.0 — see `positions`
@@ -326,6 +363,8 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
         wallet_weth: Some(gas_weth),
         rebuild_rules,
         fees_not_lp_claimable,
+        position_facts,
+        aero,
     })
 }
 

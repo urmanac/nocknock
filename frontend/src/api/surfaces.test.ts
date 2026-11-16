@@ -62,8 +62,10 @@ describe('velocity row', () => {
       ratio: 0,
       action: 'not_claimable',
     });
+    // A snapshot from before #93 carries no note for this row: its AERO is "not
+    // reported", never 0. (aero.test.ts covers the note a current worker sends.)
     expect(text).toBe(
-      'Aero USDC/NOCK 0.30% (full range): not LP-claimable (claimFees() reverts); AERO rewards not read (#93)',
+      'Aero USDC/NOCK 0.30% (full range): not LP-claimable (claimFees() reverts); unclaimed AERO not reported',
     );
     expect(text).not.toContain('earned');
   });

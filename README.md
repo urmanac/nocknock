@@ -20,6 +20,9 @@ In short:
 - **Four pillars, not a pyramid.** The wallet holds NOCK, cash (USDC), gas (ETH) and AERO.
   NockNock neither minimizes nor maximizes any of them. LP positions are where the pillars
   work together, not a fifth pillar.
+- **AERO is read, never steered.** Since v0.6.0 NockNock reads the wallet's AERO and the
+  AERO each staked Aero position has earned and not claimed, and states the amounts. It
+  sets no target for AERO and gives no advice to claim, sell, hold or accumulate it.
 - **Gas is not cash.** ETH pays for transactions. It is never counted toward a cash
   reserve, and NockNock suggests no amount of it to hold
   ([`OPERATOR_GUIDANCE.md`](OPERATOR_GUIDANCE.md) §7.12).
@@ -35,14 +38,35 @@ In short:
 Everything comes from `ingestion-worker/config.yaml`:
 
 - `tracked_wallets`: the wallet to read.
-- `positions`: the LP positions to track (Uniswap v4, Uniswap v3, Aero volatile pools),
-  one of which is the NOCK/USD price source (`is_price_source: true`). Discovery-verified
-  identifiers for the original operator's positions are in
-  [`ONCHAIN_INTEGRATION.md`](ONCHAIN_INTEGRATION.md) §5.
+- `positions`: the LP positions to track (Uniswap v4, Uniswap v3, Aero volatile pools and,
+  since v0.6.0, Aero concentrated "CL" positions with `protocol: aerodrome-cl`, staked or
+  not), one of which is the NOCK/USD price source (`is_price_source: true`). A position
+  whose `protocol` is none of these is a configuration error, never a guess.
+  Discovery-verified identifiers for the original operator's positions are in
+  [`ONCHAIN_INTEGRATION.md`](ONCHAIN_INTEGRATION.md) §5; Aero CL is §8. An Aero CL position
+  is counted only after you add it to `positions:` (example in `config.yaml.example`):
+  until then it is not tracked and the totals leave it out.
+- AERO, the fourth pillar (since v0.6.0, [`ONCHAIN_INTEGRATION.md`](ONCHAIN_INTEGRATION.md)
+  §9), needs no switch. Every cycle reads the wallet's AERO (counted in the total, like
+  gas), the unclaimed AERO of each staked Aero position (an `aerodrome` position needs
+  its `gauge_address`; an `aerodrome-cl` position's gauge is read from its pool) and
+  AERO/USD from `aero_price_pool` (an AERO/USDC pool; the shipped default is verified and
+  refused if it has no in-range liquidity). Unclaimed AERO is shown beside uncollected LP
+  fees and is not in the total until you claim it. Anything that cannot be read says so
+  with the reason; it is never shown as 0. AERO is the token the Aero gauges pay
+  (`0x3f5bF3Ed…a4Ee`), not the older "Aerodrome" token with the same symbol: a legacy
+  gauge that pays the older token is stated as not read, never shown as AERO.
 - `operator_profile`: an optional NOCK floor, target weights, tax-reserve ratio and LP
   floor tolerance.
 - `accumulation_plan`: an optional dollar-cost-averaging plan that paces NOCK buys you
-  make yourself.
+  make yourself. After a buy, NockNock finds the swap in the wallet's on-chain history and
+  offers it on the dashboard: CONFIRM counts it (its receipt is verified again first),
+  NOT PART OF THE PLAN leaves it out. A detected swap is never counted on its own, and
+  recording a buy by its transaction hash works whether or not detection ran.
+- `route_quotes.enabled` (default `true`): while a tranche of the plan is due, NockNock
+  asks Aero's and Uniswap's quoter contracts what that exact amount returns in NOCK and
+  shows both. Read-only, a comparison and not a recommendation; set it to `false` to
+  stop the quoter calls.
 - `cost_basis.opening`: optional, and yours alone to fill in: what the NOCK you already
   held cost you, as of an instant you name, with a note on where the figures came from.
   Without it NockNock reports the average cost of your plan's verified buys and nothing
@@ -62,7 +86,7 @@ Each ingestion cycle produces one directive. The first rule that applies wins:
 |:--|:---|:---|:---|
 | 1 | **DEFENSIVE LOCK (Floor Recovery)** | You set `treasury_floor_nock` and total NOCK (wallet plus LP) is below it | How far below, and your plan's next step if you have one. Nothing is "locked"; NockNock does not size recovery buys. |
 | 2 | **OVEREXTENDED** | Daily RSI(14) is 70 or more (and the plan pauses when overextended) | No buy and no sale is advised while it stays there. A range exit or a due harvest still outranks it. |
-| 3 | **DCA TRANCHE DUE** | Your accumulation plan has a tranche due | Buy that tranche's size of NOCK yourself, then record the transaction; NockNock verifies it on-chain. |
+| 3 | **DCA TRANCHE DUE** | Your accumulation plan has a tranche due | Buy that tranche's size of NOCK yourself. NockNock then finds the swap on-chain and offers it for you to confirm (or record its transaction hash); either way the receipt is verified on-chain before it counts. |
 | 4 | **RANGE EXIT / BATCH HARVEST** | The price-source range has been exited, or uncollected LP fees reach the fixed $5.00 threshold | Facts about the exited range, or that fees are worth collecting. Harvest is advised only when no tranche is due. |
 | 5 | **Waiting plan** (DCA ON SCHEDULE, pending, paused, blocked) | A plan exists but nothing is due | When the next tranche is due and its size. |
 | 6 | **Planless arms** (nothing to track yet, build from zero, tax reserve short, dip zone) | No plan is configured | Facts only: what the wallet holds and where the price is. No buy is sized; the numbers are yours to set. |
@@ -161,7 +185,8 @@ minutes of it, otherwise to the nearest backfilled point in that window.
   - Generates deterministic SHA-256 state hashes.
   - Implements snapshot deduplication to prevent database bloat.
 * **React Frontend Dashboard** (`frontend/`):
-  - 6 KPI Stat Cards: Sovereign NOCK Stack, USDC Stack, Net Portfolio, Claimable Yield, Floor Health, High-Water Mark.
+  - 7 KPI Stat Cards: Sovereign NOCK Stack, USDC Stack, Net Portfolio, Claimable Yield, Floor Health, High-Water Mark, AERO (wallet).
+  - Pillar line: NOCK · USDC · ETH · AERO, which add up to the total, with what is held as gas and as AERO and what AERO is unclaimed in each tracked gauge.
   - Tactical Shot Advice Cockpit Banner.
   - 7 Recharts panels with historical time-series curves and 100,000 NOCK Reference Line.
   - Client-side freshness validation (5-minute sync window, zero urgency).
@@ -303,10 +328,10 @@ To connect NockNock to Claude Desktop, Gemini Antigravity, Cursor, or Mecris, ad
 ```
 
 **Exposed MCP Tools:**
-- `get_portfolio_state`: Balances, the NOCK floor buffer (if you set a floor), the average cost of your plan's verified buys against spot (and the whole-stack average if you configured an opening basis), and the directive.
+- `get_portfolio_state`: Balances, the four pillars (NOCK, USDC, ETH, AERO), gas held, AERO held and unclaimed, the NOCK floor buffer (if you set a floor), the average cost of your plan's verified buys against spot (and the whole-stack average if you configured an opening basis), and the directive.
 - `get_shot_advice`: The current directive, its details, and the harvest rule.
-- `simulate_claim_fees`: Gas versus uncollected LP fees across the tracked LP positions.
-- `get_accumulation_plan`: Your DCA plan's status, next tranche, verified buys, and the LP rebuild bias.
+- `simulate_claim_fees`: Gas versus uncollected LP fees across the tracked LP positions. A position whose fees are not LP-claimable says why, followed by its unclaimed AERO (an amount, not a suggestion to claim).
+- `get_accumulation_plan`: Your DCA plan's status, next tranche, verified buys, swaps found on-chain that await your confirmation (listed only: MCP has no write tool), the LP rebuild bias and, while a tranche is due, read-only route quotes for that amount on Aero and Uniswap (a comparison, not a recommendation).
 
 Every answer ends with the snapshot's generation time and the worker's health.
 
