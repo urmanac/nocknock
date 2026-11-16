@@ -221,7 +221,7 @@ export interface FeeCollectionIndex {
   gas_break_even_usd: string;
   efficiency_ratio: number;
   /** What the worker emits; 'not_claimable' is an Aero pool whose claimFees() reverts,
-   *  or (v0.6.0) an Aero CL position with no readable LP claim (see note). */
+   *  or (v0.6.0) an Aero CL position staked in its gauge (see note). */
   recommended_action: 'claim_now' | 'claim_recommended' | 'accumulate' | 'not_claimable';
   /** With 'not_claimable': the position's own reason, when it has one (v0.6.0). */
   note?: string;

@@ -67,6 +67,14 @@ it('the tick bracket panel lists every ranged position with its side', () => {
   expect(html).toContain(
     'USDC/NOCK v4 · 3%: out of range below: NOCK is priced under this range, which now holds only NOCK',
   );
+  // An emptied ranged position is listed as empty, in the neutral colour, with no holdings claimed.
+  const emptied = { ...cl, position_id: 'aerodrome-cl:base:7', amount0: '0.000000', amount1: '0.000000' };
+  const emptyHtml = renderToStaticMarkup(
+    <RangeSideList positions={[emptied]} poolMechanics={[{ tick_current: 74002 }]} />,
+  );
+  expect(emptyHtml).toContain('WETH/NOCK Aero CL200 · 0.97%: empty: holds no WETH and no NOCK');
+  expect(emptyHtml).toContain('color:#94a3b8');
+  expect(emptyHtml).not.toContain('holding WETH and NOCK');
   // A full-range pool has no side and is not listed; nothing is called Uniswap by mistake.
   expect(html).not.toContain('Aero · 0.3%');
   expect(html).not.toContain('Uniswap');

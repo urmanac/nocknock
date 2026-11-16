@@ -110,11 +110,39 @@ describe('range side (#91)', () => {
     expect(rangeSide(allNock, null)).toBe('all_token1');
     const allWeth = { ...cl, in_range: false, amount0: '0.107', amount1: '0.000000' };
     expect(rangeSide(allWeth, undefined)).toBe('all_token0');
-    // An emptied out-of-range position, or unparsable amounts: the side is not known.
-    const empty = { ...cl, in_range: false, amount0: '0.000000', amount1: '0.000000' };
-    expect(rangeSide(empty)).toBe('out_unknown');
-    expect(rangeSideText(empty)).toBe('out of range');
+    // Missing or unparsable amounts: the side is not known, and nothing is called empty.
     expect(rangeSide({ in_range: false })).toBe('out_unknown');
+    expect(rangeSideText({ in_range: false })).toBe('out of range');
+    expect(rangeSide({ ...cl, in_range: false, amount0: 'n/a', amount1: '' })).toBe('out_unknown');
+  });
+
+  it('says a position that holds nothing is empty, never in range or out of range', () => {
+    // The worker's in_range compares ticks only, so an emptied position can still carry
+    // in_range: true. It holds neither token: no holdings are claimed for it.
+    const emptied = { ...cl, amount0: '0.000000', amount1: '0.000000' };
+    expect(rangeSide(emptied, 74002)).toBe('empty');
+    expect(rangeSideText(emptied, 74002)).toBe(
+      'empty: holds no WETH and no NOCK, so it is neither in nor out of range',
+    );
+    expect(rangeSideTone(emptied, 74002)).toBe('neutral');
+    // Out of range by tick, on either side: still empty, not "holds only NOCK".
+    for (const tick of [73000, 75200, undefined]) {
+      const out = { ...emptied, in_range: false };
+      expect(rangeSide(out, tick)).toBe('empty');
+      expect(rangeSideText(out, tick)).not.toContain('holds only');
+      expect(rangeSideTone(out, tick)).toBe('neutral');
+    }
+    // The worker's own rule is liquidity 0; it decides when it is given.
+    expect(rangeSide({ ...cl, liquidity_amount: '0' }, 74002)).toBe('empty');
+    expect(rangeSide({ ...cl, liquidity_amount: '57859113596792372851' }, 74002)).toBe('in_range');
+    // Dust that prints as 0.000000 on both legs but still has liquidity is not empty.
+    expect(rangeSide({ ...emptied, liquidity_amount: '12' }, 74002)).toBe('in_range');
+    // Every ranged protocol, not only Aero CL; a full-range position has no such state.
+    const v3 = { ...emptied, protocol: 'uniswap-v3', token0: { symbol: 'USDC' } };
+    expect(rangeSideText(v3, 74002)).toBe('empty: holds no USDC and no NOCK, so it is neither in nor out of range');
+    expect(rangeSide({ in_range: true, full_range: true, amount0: '0', amount1: '0' })).toBe('full_range');
+    // A stale pool is said first: its tick is frozen whatever the position holds.
+    expect(rangeSideText({ ...emptied, pool_active: false }, 74002)).toContain('stale pool');
   });
 
   it('handles NOCK as token0 and pairs without NOCK', () => {

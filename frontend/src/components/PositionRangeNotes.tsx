@@ -11,10 +11,11 @@ import type { CSSProperties } from 'react';
 import { positionLabel } from '../positions';
 import { rangeSideText, rangeSideTone, stakingText } from '../aeroCl';
 
-const TONE_COLOR: Record<'good' | 'warn' | 'stale', string> = {
+const TONE_COLOR: Record<'good' | 'warn' | 'stale' | 'neutral', string> = {
   good: '#10b981',
   warn: '#f59e0b',
   stale: '#fca5a5',
+  neutral: '#94a3b8',
 };
 
 export function PositionStakingLine({ position, style }: { position: any; style?: CSSProperties }) {

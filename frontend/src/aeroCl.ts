@@ -46,6 +46,8 @@ export function stakingText(p: { staked_in_gauge?: string | null }): string | nu
 export type RangeSide =
   /** Spans every price; there is no side to be on. */
   | 'full_range'
+  /** A ranged position that holds nothing: neither in nor out of range. */
+  | 'empty'
   /** The pool's price is inside the range: the position holds both tokens. */
   | 'in_range'
   /** Pool tick below the range: the position holds only token0. */
@@ -65,6 +67,21 @@ interface RangedPosition {
   token0?: { symbol: string };
   token1?: { symbol: string };
   pool_active?: boolean | null;
+  liquidity_amount?: string;
+}
+
+/**
+ * A ranged position that holds nothing: its liquidity is 0 (the worker's own rule,
+ * lp_rebuild.rs: "neither in nor out of range") or, when the liquidity is not given,
+ * both of its amounts read 0. Unparsable or missing amounts are not "empty".
+ */
+export function isEmptyRangedPosition(p: RangedPosition): boolean {
+  if (p.full_range) return false;
+  const liquidity = (p.liquidity_amount ?? '').trim();
+  if (/^\d+$/.test(liquidity)) return /^0+$/.test(liquidity);
+  const a0 = parseFloat(p.amount0 ?? '');
+  const a1 = parseFloat(p.amount1 ?? '');
+  return Number.isFinite(a0) && Number.isFinite(a1) && a0 === 0 && a1 === 0;
 }
 
 /**
@@ -75,6 +92,9 @@ interface RangedPosition {
  */
 export function rangeSide(p: RangedPosition, tickCurrent?: number | null): RangeSide {
   if (p.full_range) return 'full_range';
+  // Before the side: the worker's in_range flag compares ticks only, so an emptied
+  // position can still read "in range" while holding neither token.
+  if (isEmptyRangedPosition(p)) return 'empty';
   if (p.in_range) return 'in_range';
   if (
     typeof tickCurrent === 'number' &&
@@ -107,6 +127,7 @@ export function rangeSideText(p: RangedPosition, tickCurrent?: number | null): s
   const s0 = p.token0?.symbol ?? 'token0';
   const s1 = p.token1?.symbol ?? 'token1';
   if (side === 'full_range') return 'full range (cannot go out of range)';
+  if (side === 'empty') return `empty: holds no ${s0} and no ${s1}, so it is neither in nor out of range`;
   if (side === 'in_range') return `in range, holding ${s0} and ${s1}`;
   if (side === 'out_unknown') return 'out of range';
   const [held, other] = side === 'all_token0' ? [s0, s1] : [s1, s0];
@@ -119,9 +140,16 @@ export function rangeSideText(p: RangedPosition, tickCurrent?: number | null): s
   return `out of range: holds only ${held}`;
 }
 
-/** Whether the range line should be drawn as good (in range / full range) or as a warning. */
-export function rangeSideTone(p: RangedPosition, tickCurrent?: number | null): 'good' | 'warn' | 'stale' {
+/**
+ * Whether the range line should be drawn as good (in range / full range), as a warning
+ * (out of range), or neutral (an empty position: nothing is at stake either way).
+ */
+export function rangeSideTone(
+  p: RangedPosition,
+  tickCurrent?: number | null,
+): 'good' | 'warn' | 'stale' | 'neutral' {
   if (p.pool_active === false) return 'stale';
   const side = rangeSide(p, tickCurrent);
+  if (side === 'empty') return 'neutral';
   return side === 'in_range' || side === 'full_range' ? 'good' : 'warn';
 }

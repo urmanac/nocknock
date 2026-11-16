@@ -169,7 +169,8 @@ describe('Freshness Contract', () => {
     for (const p of data.positions) {
       expect(typeof p.position_id).toBe('string');
       expect(p.network).toBe('base');
-      expect(['uniswap-v4', 'uniswap-v3', 'aerodrome']).toContain(p.protocol);
+      // 'aerodrome-cl': Aero concentrated-liquidity positions (v0.6.0, issue #91).
+      expect(['uniswap-v4', 'uniswap-v3', 'aerodrome', 'aerodrome-cl']).toContain(p.protocol);
       expect(typeof p.nft_id).toBe('number');
       expect(typeof p.pool_id).toBe('string');
       expect(typeof p.fee_tier_bps).toBe('number');
