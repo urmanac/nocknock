@@ -1094,3 +1094,17 @@ fn test_golden_snapshot_aero_cl_is_byte_identical() {
         "snapshot bytes changed; compare {path} with a fresh NOCKNOCK_BLESS_GOLDEN=1 run and `git diff` it"
     );
 }
+
+/// Both spec files must parse as YAML. A plain scalar containing ": " (as a description
+/// added with this feature once did) is rejected by a strict parser, so the spec could
+/// not be loaded by tooling even though every substring check passed.
+#[test]
+fn test_spec_files_parse_as_yaml() {
+    for (name, text) in [
+        ("specs/core/snapshot.yaml", include_str!("../../specs/core/snapshot.yaml")),
+        ("specs/core/api.yaml", include_str!("../../specs/core/api.yaml")),
+    ] {
+        let parsed: Result<serde_yaml::Value, _> = serde_yaml::from_str(text);
+        assert!(parsed.is_ok(), "{name} is not valid YAML: {:?}", parsed.err());
+    }
+}

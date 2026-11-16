@@ -596,7 +596,7 @@ components:
             $ref: '#/components/schemas/LpSuggestion'
         excluded:
           type: array
-          description: Tracked positions deliberately left out, with the reason (2.2.0). Since 2.3.0 a position with an ETH or WETH leg is always excluded (wallet ETH is gas, not investable capital) and its share goes to the eligible positions. Since v0.6.0 an aerodrome-cl position is always excluded, whatever its pair: no verified way to add to its NFT exists (the Aero app's deposit link starts a new position).
+          description: Tracked positions deliberately left out, with the reason (2.2.0). Since 2.3.0 a position with an ETH or WETH leg is always excluded (wallet ETH is gas, not investable capital) and its share goes to the eligible positions. Since v0.6.0 an aerodrome-cl position is always excluded, whatever its pair, because no verified way to add to its NFT exists (the Aero app's deposit link starts a new position).
           items:
             type: object
             properties:
