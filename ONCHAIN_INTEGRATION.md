@@ -192,6 +192,11 @@ and one third-party history feed.
 > repository only. Treat the addresses as observed, not endorsed, and re-verify
 > before building any transaction against them.
 
+> **Confirmed in v0.7.0 (noted 2026-11-16):** Aero now publishes a contract list
+> (`app.aero.xyz/docs/security/`) that names `0x0fef9e88…` "Metarouter" and the factory
+> below "CLFactory", and the `fee()` unit of these pools was measured: millionths, so
+> the three percentages at the end of this section are right. See §9.
+
 ### Evidence transaction
 
 `0x5d0c02d9929f49f71526e0c8d91d1bd99ec19f116befc285d67f6bf9412a3f0e` — block 57228848,
@@ -892,3 +897,182 @@ For scale, plan buy 1 at $0.01251616 against the engine spot noted at the time (
 - **Following a `pageKey`.** The saved response has one; the second page was not fetched.
   The paging test splits the real response in two.
 - **Compute-unit cost** of one transfer-history call per cycle on the operator's plan.
+
+
+---
+
+## 11. Route Quotes for a Due Tranche (v0.7.0, issue #115) — Verified Record
+
+When the accumulation plan says a tranche is due, the worker asks each venue's own
+quoter contract what that exact USDC amount returns in NOCK, along a fixed table of
+routes, all at one block (`route_quotes.rs`). Every call is an `eth_call`; nothing is
+signed, built or sent. This section records what was read to choose the quoters, pools
+and selectors. Each address below answered a live call with a sane result before the
+code relied on it; none is taken from memory or from a web page alone.
+
+Read on 2026-11-16 between 05:17 and 05:41 UTC, Base mainnet, through the public RPC
+`https://base-rpc.publicnode.com` (no key). Selectors were computed with
+`python3 -I /tmp/nn-97/keccak.py '<signature>'`. The requests and their verbatim answers
+are checked in under `ingestion-worker/testdata/quotes/` and drive `src/tests_quotes.rs`.
+
+Base now produces a block every 200 ms (811,860 blocks between plan buys 1 and 3,
+162,372 seconds apart), so "the quote block" is a much finer instant than the 2-second
+blocks earlier sections assumed.
+
+### Quoters
+
+| Venue | Contract | Address | Identity check (at block 58081910) | Quote call |
+|---|---|---|---|---|
+| Aero | Metaquoter | `0x1dDfeC5058180C207F55BB77D95AcDd0d8227868` | `factoryRegistry()` `0x3bf0c9fb` → `0x7b2a2c12dc5ea2a31455952a05031c3e4bb28f3e` | `quoteExactInput(address[],address,uint256)` `0x76278b93` |
+| Uniswap v3 | QuoterV2 | `0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a` | `factory()` `0xc45a0155` → `0x33128a8f…FDfD` (the v3 factory of §1); `WETH9()` `0x4aa4a4fc` → WETH | `quoteExactInput(bytes,uint256)` `0xcdca1753` |
+| Uniswap v4 | V4Quoter | `0x0d5e0f971ed27fbff6c2837bf31316121532048d` | `poolManager()` `0xdc4c90d3` → `0x498581ff…2b2b` (the PoolManager of §1) | `quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes))` `0xaa9d21cb`; `quoteExactInput((address,(address,uint24,int24,address,bytes)[],uint128))` `0xca253dc9` |
+
+Where the Aero address came from: Aero's own contract list
+(`https://app.aero.xyz/docs/security/`, "Metaquoter (All chains)") and the file
+`deployment-addresses/cl-base.json` of `Dromos-Labs/metadex-slipstream-public`
+(`metaquoter`), whose `IMetaquoter.sol` gives the signature. The same list names
+`0x0fEf9e88A7b76BCDBF451780C6774FE32965Ee98` "Metarouter", `0x9CB220581b91b0C83223012FE69688b92aD07a76`
+"CLFactory", `0x8E6a9FCd1d638CC760Ffba397605Fe3355dE76D2` "VolatilePoolFactory" and
+`0x7949DE8d67E4F6b8509Bdbb43FF0503aF1247a7A` "CustomFeeModule (volatile pools)". That
+settles what §6 could only infer: the router of the plan's buys is Aero's. The
+legacy Slipstream quoter `0x254cF9E1…15b0` answers `factory()` with `0x5e7bb104…809a`,
+a different factory, so it cannot quote these pools and is not used.
+
+The Metaquoter takes the pools of a route in order and the input token; it handles
+concentrated and basic pools in one call. All three quoters return the amount out as
+their first word.
+
+**Replay check (the proof that the Aero quoter matches execution).** The Metaquoter was
+asked for 20 USDC along the route of plan buy 1 (§6: `0xd448…aaf7`, `0x2dbe…cf7b`,
+`0x9572…0874`) at block **57228847**, the block before that buy (57228848). It returned
+`0x…ddc205801b5ceaca` = 15,979,340,475,636,968,138 raw = 1,597.9340475636968138 NOCK.
+The buy's receipt shows the wallet received 15,979,340,475,636,968,138 raw NOCK: the
+same number, to the wei. The public RPC served that block (about two days old), so no
+approximation was needed. Fixture: `replay_fill1_block_57228847.json`.
+
+### Pools on the routes
+
+| Pool | Address or pool id | Resolved by | Read (blocks 58079466 to 58081910) |
+|---|---|---|---|
+| Aero basic volatile USDC/NOCK | `0x770fE8Fc9248c6382950A86E39a9391B41D59e0A` | VolatilePoolFactory `getPool(address,address)` `0x531aa03e` (this factory has no stable flag); `isPool` `0x5b16ebb7` → true | `token0` USDC, `token1` NOCK; `getReserves()` 911.552758 USDC / 81,388.8687 NOCK |
+| Aero concentrated WETH/NOCK (tick spacing 200) | `0x957256c98d61A714081DE2EE70ae3A96c9b40874` | CLFactory `getPool(address,address,int24)` `0x28af8d0b` | `fee()` 9700; holds 0.2335 WETH and 131,330 NOCK |
+| Aero concentrated WETH/USDC (50) | `0x4a7af46bc8abc00048c6c7920a1488daf568366c` | same | `fee()` 799 at block 58081910 (1282 a few minutes earlier: it moves); holds 1,396,977 USDC and 4,048.4 WETH |
+| Aero concentrated WETH/USDC (100) | `0x2a430bebd2082d8e05d56d64dede8944279bbc24` | same | `fee()` 885; holds 893,364 USDC and 1,897.3 WETH |
+| Aero concentrated USDC/USDT (1) | `0xd448990883e3bf9cdd8ebca368a3ecf9d629aaf7` | `factory()` is the CLFactory; `tickSpacing()` 1 | `fee()` 8 |
+| Aero concentrated WETH/USDT (100) | `0x2dbe0e264c7c246e05c6614794899937f264cf7b` | `factory()` is the CLFactory; `tickSpacing()` 100 | `fee()` 468 |
+| Uniswap v3 WETH/USDC 0.05% | `0xd0b53d9277642d899df5c87a3966a349a798f224` | v3 factory `getPool(WETH, USDC, 500)` (§1; also the worker's ETH price pool) | |
+| Uniswap v3 WETH/NOCK 1% | `0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a` | v3 factory `getPool(WETH, NOCK, 10000)` | holds 0.4996 WETH and 388,929 NOCK |
+| Uniswap v4 USDC/NOCK 3% | `0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13` | keccak256 of the pool key (USDC, NOCK, 30000, 300, no hooks) | StateView `getLiquidity` 127,997,653,824,339,161; tick 275113 |
+| Uniswap v4 ETH/NOCK 2% | `0xd316152008e12105594c32686b9d0401fd2c60ca4805c84f280069d218b771a8` | keccak256 of (native ETH, NOCK, 20000, 400, no hooks) | `getLiquidity` 11,491,937,738,508,897,075 |
+| Uniswap v4 ETH/USDC 0.05% | `0x96d4b53a38337a5733179751781178a2613306063c511b78cd02684739288c0a` | keccak256 of (native ETH, USDC, 500, 10, no hooks) | `getLiquidity` 40,914,903,574,237,929 |
+
+The three v4 pool ids were recomputed from the keys the worker sends and then read
+through StateView; two of them are the ids §5 already recorded for positions D and A.
+
+**USDT** `0xfde4c96c8593536e31f229ea8f37b2ada2699bb2`: `token1()` of both USDT pools,
+`decimals()` 6, `symbol()` "USDT". It is used only as a hop inside one Metaquoter call.
+It is not added to the position-token registry, so a tracked position holding USDT is
+still refused.
+
+**Fee units.**
+- Aero concentrated pools: `fee()` is in millionths. Checked with
+  `quoteExactInputSingleV3(address,address,uint256,uint160)` `0x0a674142` for 1e12 wei
+  WETH on the WETH/NOCK pool: the answer equals amount × slot0 price × (1 − 9700/1e6) to
+  1.5 parts in 10 million (and is 33 times too large if the unit were basis points). So
+  9700 is 0.97%, as §6 guessed. These fees are dynamic; the worker reads `fee()` at the
+  quote block.
+- Aero basic pool: the pool's own `fee()` and `stable()` revert. The factory's
+  `defaultFee()` `0x5a6c72d0` returns 30 and the fee module's `customFee(address)`
+  `0x4d419abc` returns 0 for this pool; `ZERO_FEE_INDICATOR()` `0x38c55d46` is 420 and
+  `MAX_FEE()` 300. The pool's `getAmountOut(uint256,address)` `0xf140a35a` for 20 USDC is
+  17,422,508,413,591,799,568 raw, exactly x·y=k on the reserves above with 30 basis
+  points taken from the input, and exactly what the Metaquoter returns for that pool. So
+  the fee in force is 0.30%. The rule for a non-zero custom fee (it replaces the default;
+  420 means none) is the legacy Aerodrome factory's and was not exercised here.
+
+### The comparison at block 58081910 (2026-11-16T05:25:57Z), 20 USDC in
+
+| Route | Quoter | NOCK out | USDC per NOCK |
+|---|---|---:|---:|
+| Aero: USDC → NOCK (basic pool) | Metaquoter | 1,742.2508413591799568 | 0.01147940 |
+| Aero: USDC → WETH (50) → NOCK | Metaquoter | 1,772.5259725360589554 | 0.01128333 |
+| Aero: USDC → WETH (100) → NOCK | Metaquoter | 1,772.2004408122825130 | 0.01128541 |
+| **Aero: USDC → USDT → WETH → NOCK** | Metaquoter | **1,773.0768618618146014** | 0.01127983 |
+| Uniswap: USDC → NOCK (v4 3%) | V4Quoter | 1,716.8660568388805278 | 0.01164913 |
+| **Uniswap: USDC → WETH → NOCK (v3)** | QuoterV2 | **1,772.2085413951150619** | 0.01128535 |
+| Uniswap: USDC → ETH → NOCK (v4) | V4Quoter | 1,692.7635343644656443 | 0.01181500 |
+
+Aero's best route returned 0.05% more NOCK than Uniswap's. The reference spot at that
+block (the v4 3% pool's own price, the worker's `is_price_source`) was $0.01128675, so
+both best routes were slightly *below* it (−0.06% and −0.01%), while the direct swap in
+that 3% pool cost +3.21%. A cost over spot can be negative: the reference is one pool's
+mid price, not the market. The Aero app's choice for buy 1 (through USDT) is still the
+best Aero route.
+
+The worker's own code, run against the same public RPC, produced the same shape at
+block 58086356 (Aero 1,779.3262 NOCK, Uniswap 1,778.5967, Aero ahead by 0.04%).
+
+### What a failing quote looks like
+
+| Case | Call | Answer |
+|---|---|---|
+| A pool with no liquidity | QuoterV2 on the v3 USDC/NOCK 1% pool `0x7e096e98c5653bacf5352a2a3c7019757f6cf68d` (`liquidity()` = 0) | error 3 `execution reverted: Unexpected error` |
+| A pool key never initialized | V4Quoter, USDC/NOCK fee 100 spacing 1 | error 3 `execution reverted`, data `0x6190b2b0…` |
+| Input token not in the pool | Metaquoter, USDC into the WETH/NOCK pool | error 3 `execution reverted: TI` |
+| A pool run dry part-way (5,000,000 USDC) | QuoterV2, USDC → WETH → NOCK | **a result**: 379,723 NOCK for the part that swapped, with the second pool's post-swap sqrt price at `0x1000276a4` (the minimum plus one) |
+| The same, v4 | V4Quoter, USDC/NOCK 3% | error 3 `execution reverted`, data wrapping `0x7a5ed734` and the pool id |
+| The same, Aero | Metaquoter, USDC → WETH (50) → NOCK | a result: 131,005.94 NOCK, post-swap price far down but not at the bound (the pool holds full-range liquidity, so it fills any size at a collapsing price) |
+
+The fourth row matters: QuoterV2 does not signal a partial fill. It was observed to
+return a partial amount with the post-swap price pinned at the range's bound, and no
+error. The worker therefore reads the post-swap prices in the answer and treats one
+pinned at the range's end as "unavailable", never as a quote. The Aero pools on these
+routes hold full-range liquidity and fill any size at a collapsing price (last row), so
+the Metaquoter was never seen to answer for a pool with no liquidity left; its answer
+has the same shape and the same price-bound check is applied to it.
+
+The retired v4 USDC/NOCK 0.75% pool (`0x91a9ef0a…f99c`, zero in-range liquidity) answers
+1,035.83 NOCK for 20 USDC by crossing empty ticks to reach some liquidity: a real quote
+40% worse than the others. It is not in the route table.
+
+### Swap links
+
+- **Aero**: `https://app.aero.xyz/swap`. The path is the app's own "Trade" entry
+  (read from the app's route table in its public bundle). Aero's documentation
+  (`app.aero.xyz/docs`, Trading) documents no query parameters, so nothing is prefilled.
+- **Uniswap**: `https://app.uniswap.org/swap`. Uniswap's documentation
+  (`developers.uniswap.org/docs/trading/custom-interface-links`) documents
+  `inputCurrency`, `outputCurrency`, `value` and `field`, but no chain parameter.
+  Without one a link cannot say the addresses are on Base, so nothing is prefilled
+  here either.
+
+### Not verified
+
+- **The Aero Metaquoter on a concentrated pool with no liquidity left.** No such pool
+  exists on these routes to test against: the CLFactory resolves one USDC/NOCK or
+  WETH/NOCK concentrated pool (`0x9572…0874`), and it and the hop pools fill any size.
+  Whether the Metaquoter then reverts or returns a partial amount with the price at the
+  bound was not observed. The worker handles both: a revert reads "unavailable", and so
+  does a post-swap price at the bound.
+- **The worker's calls through Alchemy.** This branch had no key. The whole read path
+  ran against the public RPC only. Each quote is pinned to the latest block number; if
+  a node behind Alchemy's balancer has not seen that block yet the call is an RPC error
+  (not a revert) and is retried twice before the route reads "unavailable".
+- **Compute-unit cost** on the operator's plan: one block header, seven quoter calls and
+  up to three fee reads per cycle while a tranche is due, and per refresh. The fee
+  reads run together, once each, inside two seconds; one that does not answer in time
+  leaves that hop's fee "not read" and the quotes stand.
+- **Wallet-specific fees on Aero.** The Metaquoter is called without a `from`. Its
+  interface speaks of a pool's "total contextual fee" and Aero deploys a
+  DiscountRegistry; if the operator's wallet has a discount the real swap returns
+  slightly more than the quote. The replay above matched exactly, so none applied then.
+- **The newer V4Quoter.** Uniswap's SDK is moving to a later V4Quoter deployment on
+  Base; the one used here is the original, and `msgSender()` reverts on it. It answers
+  the quote calls correctly today.
+- **What the apps' routers will do.** A route table is not the router. The Uniswap app
+  can mix v3 and v4 pools or split an order; the Aero app can pick any path. The quotes
+  are for the named routes only.
+- **Gas.** No quote includes the swap's gas (the V4Quoter and QuoterV2 return an
+  estimate; it is not shown). Gas is ETH, a different pillar.
+- **The legacy Aerodrome vAMM** `0x85f1aa3a…d626` (plan buy 3 went through it, §10) is
+  deep, but `app.aero.xyz` does not list it. It is not quoted.

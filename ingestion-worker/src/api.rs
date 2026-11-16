@@ -72,7 +72,9 @@ pub(crate) async fn get_latest_snapshot_handler(
                 r.try_get::<String, _>("version"),
                 r.try_get::<serde_json::Value, _>("data"),
             ) {
-                if let Ok(data) = serde_json::from_value::<SnapshotData>(dv) {
+                if let Ok(mut data) = serde_json::from_value::<SnapshotData>(dv) {
+                    // Stored quotes are not current ones (issue #115).
+                    forget_stored_route_quotes(&mut data);
                     *latest = Some(SnapshotEnvelope {
                         meta: SnapshotMeta {
                             generated_at: gen,

@@ -62,6 +62,10 @@ mod fill_detection;
 use fill_detection::*;
 mod fill_text;
 use fill_text::*;
+mod route_quotes;
+use route_quotes::*;
+mod quote_text;
+use quote_text::*;
 
 // ============================================================
 // Configuration
@@ -250,6 +254,24 @@ impl Default for FillDetectionConfig {
     }
 }
 
+/// Route quotes for a due tranche (issue #115). Read-only quoter calls for the plan's own
+/// tranche amount; nothing is signed, sized or sent. There are no numbers here: the
+/// amount quoted is the tranche the plan produced, and the candidate routes are the
+/// verified table in route_quotes.rs (ONCHAIN_INTEGRATION.md §11).
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct RouteQuotesConfig {
+    /// On by default while an accumulation_plan is configured. Set false to stop the
+    /// worker calling the quoters; the due tranche is advised exactly as before.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for RouteQuotesConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 fn default_plan_venue() -> String {
     // Aerodrome and Velodrome merged into Aero (aero.xyz) on 2026-10-21; see
     // ONCHAIN_INTEGRATION.md §6. The label is informational: receipt verification
@@ -313,6 +335,9 @@ struct AppConfig {
     /// Fill detection for the plan (issue #118); on unless switched off.
     #[serde(default)]
     fill_detection: FillDetectionConfig,
+    /// Route quotes for a due tranche (issue #115); on unless switched off.
+    #[serde(default)]
+    route_quotes: RouteQuotesConfig,
     #[serde(default)]
     notifications: NotificationConfig,
     #[serde(default)]
@@ -764,6 +789,102 @@ struct AccumulationPlanStatus {
     /// before v0.6.0.
     #[serde(default)]
     fill_detection: Option<FillDetection>,
+    /// Read-only quotes for this exact tranche on Aero and on Uniswap (v0.7.0, issue
+    /// #115). Present only while `status` is `tranche_due` and quoting is on; null
+    /// otherwise and in older snapshots. A quote is a contract read at a stated block:
+    /// the whole object is left out of the state hash, so it never forces a new
+    /// snapshot row.
+    #[serde(default)]
+    route_quotes: Option<RouteQuotes>,
+}
+
+/// Quotes for one due tranche, both venues read at the same block (v0.7.0, issue #115).
+/// It compares execution routes for a buy the operator's plan already sized. It is not
+/// a recommendation to buy, and nothing here is an estimate: a venue that could not be
+/// quoted is `unavailable` with the reason.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct RouteQuotes {
+    /// ok (both venues quoted) | partial (one) | unavailable (none).
+    status: String,
+    /// Plain-words reason for partial and unavailable.
+    #[serde(default)]
+    detail: Option<String>,
+    /// The plan's own tranche amount that was quoted, in USDC. Never another size.
+    amount_usdc: String,
+    /// Block every quote was read at, and that block's time. Null when no block was read.
+    #[serde(default)]
+    block_number: Option<i64>,
+    #[serde(default)]
+    quoted_at: Option<String>,
+    /// The snapshot's NOCK/USD reference spot the costs are measured against.
+    #[serde(default)]
+    reference_spot_usd: Option<String>,
+    #[serde(default)]
+    venues: Vec<VenueQuote>,
+    /// The venue that returns more NOCK at that block. Null unless both venues were
+    /// quoted and their amounts differ.
+    #[serde(default)]
+    more_nock_venue: Option<String>,
+    /// How much more, in percent of the other venue's amount.
+    #[serde(default)]
+    more_nock_by_pct: Option<String>,
+    /// The comparison as one sentence of fact.
+    #[serde(default)]
+    comparison: String,
+}
+
+/// One venue's best verified route for the tranche, or why it could not be quoted.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct VenueQuote {
+    /// "Aero" | "Uniswap"
+    venue: String,
+    /// quoted | unavailable
+    status: String,
+    /// Why, when unavailable.
+    #[serde(default)]
+    reason: Option<String>,
+    /// The venue's own swap page. No token or amount is prefilled.
+    swap_url: String,
+    #[serde(default)]
+    nock_out: Option<String>,
+    /// USDC per NOCK for this amount along this route, eight decimals.
+    #[serde(default)]
+    effective_price_usd: Option<String>,
+    /// (effective price / reference spot − 1) × 100. Null without a reference spot.
+    #[serde(default)]
+    cost_over_spot_pct: Option<String>,
+    /// The best route's tokens, e.g. "USDC → WETH → NOCK".
+    #[serde(default)]
+    route: Option<String>,
+    #[serde(default)]
+    hops: Vec<RouteHop>,
+    /// Every candidate route tried for this venue with its own result.
+    #[serde(default)]
+    routes_tried: Vec<RouteAttempt>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct RouteHop {
+    /// Pool address, or the pool id for a Uniswap v4 pool.
+    pool: String,
+    /// "Aero basic volatile" | "Aero concentrated" | "Uniswap v3" | "Uniswap v4"
+    pool_kind: String,
+    token_in: String,
+    token_out: String,
+    /// Swap fee in percent. Null when the fee read failed (the quote itself stands).
+    #[serde(default)]
+    fee_pct: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct RouteAttempt {
+    route_id: String,
+    route: String,
+    #[serde(default)]
+    nock_out: Option<String>,
+    /// Why this route gave no quote.
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 /// One cycle's fill-detection result (v0.6.0, issue #118).
@@ -1251,7 +1372,9 @@ async fn main() -> Result<()> {
         let state_hash: String = r.try_get("state_hash").ok()?;
         let version: String = r.try_get("version").ok()?;
         let data_val: serde_json::Value = r.try_get("data").ok()?;
-        let data: SnapshotData = serde_json::from_value(data_val).ok()?;
+        let mut data: SnapshotData = serde_json::from_value(data_val).ok()?;
+        // Stored quotes are not current ones (issue #115); the first cycle reads new ones.
+        forget_stored_route_quotes(&mut data);
         Some(SnapshotEnvelope {
             meta: SnapshotMeta {
                 generated_at,
@@ -1365,6 +1488,14 @@ async fn main() -> Result<()> {
         .route(
             "/v1/accumulation/candidates/restore",
             axum::routing::post(restore_candidate_handler),
+        )
+        .route(
+            "/v1/accumulation/quotes/latest",
+            axum::routing::get(latest_route_quotes_handler),
+        )
+        .route(
+            "/v1/accumulation/quotes/refresh",
+            axum::routing::post(refresh_route_quotes_handler),
         )
         .route(
             "/v1/tax/export",
@@ -1554,3 +1685,5 @@ mod tests_aero_cl;
 mod tests_aero_rewards;
 #[cfg(test)]
 mod tests_fills;
+#[cfg(test)]
+mod tests_quotes;

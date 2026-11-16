@@ -8,6 +8,10 @@ use std::time::Duration;
 #[path = "../fill_text.rs"]
 mod fill_text;
 use fill_text::fill_detection_lines;
+// Shared the same way (src/quote_text.rs): route quotes for a due tranche (issue #115).
+#[path = "../quote_text.rs"]
+mod quote_text;
+use quote_text::route_quote_lines;
 
 /// Worker base URL when NOCKNOCK_API_URL is unset. Point the variable at a remote
 /// deployment (e.g. `http://chudmax:8081`) to read it instead of a local worker.
@@ -115,7 +119,7 @@ async fn main() -> Result<()> {
                             },
                             {
                                 "name": "get_accumulation_plan",
-                                "description": "Returns the dollar-cost-averaging plan: whether a NOCK tranche is due, its size, progress from receipt-verified buys, average cost, swaps found on-chain that await the operator's confirmation (listed only; this tool confirms nothing), and the LP-rebuild bias.",
+                                "description": "Returns the dollar-cost-averaging plan: whether a NOCK tranche is due, its size, progress from receipt-verified buys, average cost, swaps found on-chain that await the operator's confirmation (listed only; this tool confirms nothing), the LP-rebuild bias and, while a tranche is due, read-only route quotes for that amount on Aero and Uniswap (a comparison, not a recommendation).",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {},
@@ -285,10 +289,11 @@ fn format_accumulation_plan(data: &Value) -> String {
                  • Next tranche: {}\n\
                  • Next due at: {}\n\
                  • Progress: ${} of ${} spent; average ${}\n\
-                 {detection}{lp_line}",
+                 {detection}{quotes}{lp_line}",
                 s("plan_id"), s("status"), next,
                 s("next_due_at"), s("spent_usdc"), s("budget_usdc"), s("avg_price_usd"),
                 detection = fill_detection_lines(plan),
+                quotes = route_quote_lines(plan),
             )
         }
     }
@@ -638,3 +643,8 @@ mod tests {
 #[cfg(test)]
 #[path = "../mcp_bin_tests_fills.rs"]
 mod tests_fills;
+
+// Route-quote text for the snapshot-API fallback (issue #115).
+#[cfg(test)]
+#[path = "../mcp_bin_tests_quotes.rs"]
+mod tests_quotes;

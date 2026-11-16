@@ -79,7 +79,7 @@ This guide captures the operational rules, environment quirks, toolchain configu
   startup. Functions live in modules: `adapters/` (one file per protocol; `adapters/mod.rs`
   holds every function that branches on the protocol string), `onchain` (one cycle's reads),
   `valuation`, `advice`, `lp_rebuild`, `plan`, `ledger`, `claims`, `market`, `ingest`, `api`,
-  `aero_rewards`, `aero_text`, `fill_verify`, `fill_detection`, `fill_text`, `rpc`, `evm`, `calldata`, `contracts`, `notify`, `mcp_text`, `mcp_http`, and `tests` (each feature since #91 adds its own `tests_<topic>.rs`).
+  `aero_rewards`, `aero_text`, `fill_verify`, `fill_detection`, `fill_text`, `route_quotes`, `quote_text`, `rpc`, `evm`, `calldata`, `contracts`, `notify`, `mcp_text`, `mcp_http`, and `tests` (each feature since #91 adds its own `tests_<topic>.rs`).
   Moved items are `pub(crate)`. `testdata/golden_snapshot.json` pins the snapshot bytes: a
   refactor must leave it untouched; an intended behaviour change regenerates it with
   `NOCKNOCK_BLESS_GOLDEN=1 cargo test test_golden_snapshot` and the diff is reviewed.
@@ -154,8 +154,8 @@ This guide captures the operational rules, environment quirks, toolchain configu
 Before pushing any PR or tag:
 ```bash
 make test-brain       # 3 tests (WASM invariants)
-make test-worker      # 241 tests as of #118: 225 worker + 16 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger)
-make test-frontend    # 170 tests as of #118 (staleness, contract, display helpers, charts, surfaces, ledger)
+make test-worker      # 278 tests as of #115: 260 worker + 18 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger)
+make test-frontend    # 201 tests as of #115 (staleness, contract, display helpers, charts, surfaces, ledger)
 make dist             # Verifies packaging of dist/ binaries and tarballs
 NOCKNOCK_API_URL=http://chudmax:8081 make test-mcp   # both MCP transports against the deployment
 ```

@@ -63,6 +63,10 @@ Everything comes from `ingestion-worker/config.yaml`:
   offers it on the dashboard: CONFIRM counts it (its receipt is verified again first),
   NOT PART OF THE PLAN leaves it out. A detected swap is never counted on its own, and
   recording a buy by its transaction hash works whether or not detection ran.
+- `route_quotes.enabled` (default `true`): while a tranche of the plan is due, NockNock
+  asks Aero's and Uniswap's quoter contracts what that exact amount returns in NOCK and
+  shows both. Read-only, a comparison and not a recommendation; set it to `false` to
+  stop the quoter calls.
 
 The shipped `config.yaml.example` is loaded as the base layer and still carries the
 original operator's wallet, positions and limits. Set or clear every one of those in your
@@ -270,7 +274,7 @@ To connect NockNock to Claude Desktop, Gemini Antigravity, Cursor, or Mecris, ad
 - `get_portfolio_state`: Balances, the four pillars (NOCK, USDC, ETH, AERO), gas held, AERO held and unclaimed, the NOCK floor buffer (if you set a floor), and the directive.
 - `get_shot_advice`: The current directive, its details, and the harvest rule.
 - `simulate_claim_fees`: Gas versus uncollected LP fees across the tracked LP positions. A position whose fees are not LP-claimable says why, followed by its unclaimed AERO (an amount, not a suggestion to claim).
-- `get_accumulation_plan`: Your DCA plan's status, next tranche, verified buys, swaps found on-chain that await your confirmation (listed only: MCP has no write tool), and the LP rebuild bias.
+- `get_accumulation_plan`: Your DCA plan's status, next tranche, verified buys, swaps found on-chain that await your confirmation (listed only: MCP has no write tool), the LP rebuild bias and, while a tranche is due, read-only route quotes for that amount on Aero and Uniswap (a comparison, not a recommendation).
 
 Every answer ends with the snapshot's generation time and the worker's health.
 
