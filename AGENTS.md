@@ -75,6 +75,14 @@ This guide captures the operational rules, environment quirks, toolchain configu
     ```bash
     cd ingestion-worker && SQLX_OFFLINE=true cargo build --release
     ```
+- **Module layout (since #97)**: `src/main.rs` holds the config schema, every shared type and
+  startup. Functions live in modules: `adapters/` (one file per protocol; `adapters/mod.rs`
+  holds every function that branches on the protocol string), `onchain` (one cycle's reads),
+  `valuation`, `advice`, `lp_rebuild`, `plan`, `ledger`, `claims`, `market`, `ingest`, `api`,
+  `rpc`, `evm`, `calldata`, `contracts`, `notify`, `mcp_text`, `mcp_http`, and `tests`.
+  Moved items are `pub(crate)`. `testdata/golden_snapshot.json` pins the snapshot bytes: a
+  refactor must leave it untouched; an intended behaviour change regenerates it with
+  `NOCKNOCK_BLESS_GOLDEN=1 cargo test test_golden_snapshot` and the diff is reviewed.
 - **Binaries Produced**:
   - `nocknock-ingestion-worker`: Background ingestion daemon and Axum REST API (port 8080).
   - `nocknock-mcp`: Stdio Model Context Protocol (MCP) server for Claude Desktop, Gemini Antigravity, and AI agents.
@@ -146,7 +154,7 @@ This guide captures the operational rules, environment quirks, toolchain configu
 Before pushing any PR or tag:
 ```bash
 make test-brain       # 3 tests (WASM invariants)
-make test-worker      # 144 tests as of v0.5.3: 136 worker + 8 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger)
+make test-worker      # 145 tests as of #97: 137 worker + 8 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger)
 make test-frontend    # 107 tests as of v0.5.3 (staleness, contract, display helpers, charts, surfaces, ledger)
 make dist             # Verifies packaging of dist/ binaries and tarballs
 NOCKNOCK_API_URL=http://chudmax:8081 make test-mcp   # both MCP transports against the deployment
