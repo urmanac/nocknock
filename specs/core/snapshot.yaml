@@ -720,8 +720,9 @@ components:
         tax_reserve_usd = cumulative_harvested_usd * operator_profile.tax_reserve_ratio
         (default 0, no reserve); growth_dry_powder_usd is the remainder. Each harvest row
         (USDC, NOCK, WETH, or ETH unwrapped by a Uniswap position manager) is valued at
-        its claim's block (2.4.0): NOCK at the stored price nearest the block time (within
-        60 minutes), ETH/WETH at the ETH price pool's slot0 at that block. A row with no
+        its claim's block (2.4.0): NOCK at the stored price that stands for the block time
+        (within 60 minutes; the worker's own read first, a backfilled candle as its open,
+        #129), ETH/WETH at the ETH price pool's slot0 at that block. A row with no
         price found has no USD value and is left out of cumulative_harvested_usd.
       properties:
         cumulative_harvested_usd:
@@ -1044,7 +1045,7 @@ components:
         reference_spot_usd:
           type: string
           nullable: true
-          description: The stored NOCK/USD price nearest the swap's block time (within 60 minutes); null when none was near
+          description: The stored NOCK/USD price that stands for the swap's block time (within 60 minutes); the worker's own read nearest that time is preferred, and a backfilled candle counts as its open, never its close (#129); null when none was near
         reference_spot_source:
           type: string
           nullable: true
@@ -1083,7 +1084,7 @@ components:
             $ref: '#/components/schemas/LpSuggestion'
         excluded:
           type: array
-          description: Tracked positions deliberately left out, with the reason (2.2.0). Since 2.3.0 a position with an ETH or WETH leg is always excluded (wallet ETH is gas, not investable capital) and its share goes to the eligible positions. Since v0.6.0 an aerodrome-cl position is always excluded, whatever its pair: no verified way to add to its NFT exists (the Aero app's deposit link starts a new position).
+          description: Tracked positions deliberately left out, with the reason (2.2.0). Since 2.3.0 a position with an ETH or WETH leg is always excluded (wallet ETH is gas, not investable capital) and its share goes to the eligible positions. Since v0.6.0 an aerodrome-cl position is always excluded, whatever its pair, because no verified way to add to its NFT exists (the Aero app's deposit link starts a new position).
           items:
             type: object
             properties:

@@ -873,7 +873,10 @@ four fee claims after the anchor, the two deposits and the pre-plan purchase.
 Each recorded fill and each offer carries `execution_cost_bps` =
 (effective price / reference spot − 1) × 10,000. The reference is the stored NOCK/USD price
 nearest the fill's block time, within 60 minutes (`nock_price_near`, the v0.5.3 lookup the
-harvest ledger uses), kept with its source and its own timestamp. While the worker is
+harvest ledger uses), kept with its source and its own timestamp. Inside the window the
+worker's own read nearest the fill is used; a backfilled candle is used only when there is
+none, and it counts as its **open** (the table stores a candle at its open time with its
+close in `price_usd`, which is the price one candle period later; issue #129). While the worker is
 running that is a price-source pool read at most a few minutes from the fill; after
 downtime it may be a backfilled hourly candle, and the source says so. No stored price in
 the window means no reference and no figure. The reference is not the price in the fill's

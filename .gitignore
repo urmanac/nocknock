@@ -9,3 +9,6 @@ build/
 *.wasm
 backups/
 *.dump
+
+# Agent worktrees and local agent settings: never part of the repo or a deploy (#128)
+.claude/
