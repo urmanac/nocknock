@@ -932,6 +932,10 @@ components:
           nullable: true
         actions:
           type: array
+          description: >
+            One action per configured position that is live. A position the latest
+            snapshot lists in closed_positions (its NFT does not exist) gets no
+            action: there is nothing to collect from it. (#144)
           items:
             $ref: '#/components/schemas/ClaimFeeAction'
         collectible_lp_fees_usd:
@@ -1105,7 +1109,9 @@ components:
           description: A known mistake in cockpit_url, in words (for example a /lite path), or null.
         fires_on:
           type: string
-          description: When the worker notifies, in words.
+          description: >
+            When the worker notifies, in words. Since #144 that includes a tracked
+            position closing (its NFT no longer exists), once, at the transition.
         test_cooldown_seconds:
           type: integer
 

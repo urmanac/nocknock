@@ -5,7 +5,7 @@ pub(crate) async fn fetch_v3_position(
     alchemy_url: &str,
     pos: &PositionConfig,
     wallet: &str,
-) -> Result<RawPosition> {
+) -> Result<PositionRead<RawPosition>> {
     let npm = pos
         .npm_address
         .clone()
@@ -18,20 +18,41 @@ pub(crate) async fn fetch_v3_position(
             pos.id
         ))?;
 
-    // 1. positions(uint256) -> 12-word decode (self-describing: tokens/fee/ticks/liquidity)
-    let positions_payload = json!({
-        "jsonrpc": "2.0",
-        "method": "eth_call",
-        "params": [{
-            "to": npm,
-            "data": format!("{}{:064x}", V3_POSITIONS, pos.nft_id)
-        }, "latest"],
-        "id": 60
-    });
-    let res_hex = post_rpc_with_retry(http_client, alchemy_url, &positions_payload, 2)
-        .await
-        .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
-        .ok_or_else(|| anyhow::anyhow!("position {}: NPM positions() query failed", pos.id))?;
+    // 1. positions(uint256) -> 12-word decode (self-describing: tokens/fee/ticks/liquidity).
+    //    A burned or unknown id reverts. The revert is read with its reason (#144):
+    //    when positions() AND ownerOf() both give the position manager's own "no such
+    //    token" answer, the position is closed and the cycle goes on. Any other outcome
+    //    fails the cycle.
+    let outcome = |selector: &'static str, id: u64, what: &'static str| {
+        let (cfg_id, npm) = (pos.id.clone(), npm.clone());
+        let data = format!("{}{:064x}", selector, pos.nft_id);
+        async move {
+            let payload = json!({
+                "jsonrpc": "2.0", "method": "eth_call", "id": id,
+                "params": [{ "to": npm, "data": data }, "latest"]
+            });
+            eth_call_outcome(http_client, alchemy_url, &payload)
+                .await
+                .map_err(|e| anyhow::anyhow!("position {}: NPM {} query failed: {e}", cfg_id, what))
+        }
+    };
+    let res_hex = match outcome(V3_POSITIONS, 60, "positions()").await? {
+        CallOutcome::Returned(hex) => hex,
+        reverted => {
+            let owner_of = outcome(ERC721_OWNER_OF, 69, "ownerOf()").await?;
+            match nft_closure_verdict(&pos.protocol, &npm, &reverted, &owner_of) {
+                ClosureVerdict::Closed(evidence) => {
+                    return Ok(PositionRead::Closed(ClosedProof { position_manager: npm, evidence }));
+                }
+                ClosureVerdict::NotProven(why) => {
+                    return Err(anyhow::anyhow!(
+                        "position {}: NPM positions() query failed (NFT #{} on position manager {}: {why})",
+                        pos.id, pos.nft_id, npm
+                    ));
+                }
+            }
+        }
+    };
     let decoded = decode_v3_positions_return(&res_hex)
         .map_err(|e| anyhow::anyhow!("position {}: {}", pos.id, e))?;
     if decoded.token0 == NATIVE_ETH || decoded.token1 == NATIVE_ETH {
@@ -98,7 +119,7 @@ pub(crate) async fn fetch_v3_position(
         decoded.tick_lower <= tick && tick <= decoded.tick_upper, fee0_raw, fee1_raw
     );
 
-    Ok(RawPosition {
+    Ok(PositionRead::Live(RawPosition {
         position_id: format!("uniswap-v3:{}:{}", pos.network, pos.nft_id),
         network: pos.network.clone(),
         protocol: "uniswap-v3".to_string(),
@@ -120,7 +141,7 @@ pub(crate) async fn fetch_v3_position(
         fee1: fee1_raw as f64 / dec1,
         in_range: decoded.tick_lower <= tick && tick <= decoded.tick_upper,
         is_price_source: pos.is_price_source,
-    })
+    }))
 }
 
 /// Parse the 384-byte `positions(uint256)` return:

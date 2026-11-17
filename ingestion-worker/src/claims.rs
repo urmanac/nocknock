@@ -211,30 +211,17 @@ pub(crate) async fn get_claim_fees_payload_handler(Extension(state): Extension<A
     let mut actions: Vec<ClaimFeeAction> = Vec::new();
 
     // --- Per-position Uniswap v4 collect actions ---
-    let v4_configs: Vec<&PositionConfig> = state
-        .config
-        .positions
-        .iter()
-        .filter(|p| p.protocol == "uniswap-v4")
-        .collect();
-    let v3_configs: Vec<&PositionConfig> = state
-        .config
-        .positions
-        .iter()
-        .filter(|p| p.protocol == "uniswap-v3")
-        .collect();
-    let aero_configs: Vec<&PositionConfig> = state
-        .config
-        .positions
-        .iter()
-        .filter(|p| p.protocol == "aerodrome")
-        .collect();
-    let aero_cl_configs: Vec<&PositionConfig> = state
-        .config
-        .positions
-        .iter()
-        .filter(|p| p.protocol == AERO_CL_PROTOCOL)
-        .collect();
+    // Closed positions (#144) get no action: the snapshot lists them as closed, their
+    // NFT does not exist and there is nothing to collect from it.
+    let live_configs = live_position_configs(&state.config.positions, &snapshot.data.closed_positions);
+    let v4_configs: Vec<&PositionConfig> =
+        live_configs.iter().copied().filter(|p| p.protocol == "uniswap-v4").collect();
+    let v3_configs: Vec<&PositionConfig> =
+        live_configs.iter().copied().filter(|p| p.protocol == "uniswap-v3").collect();
+    let aero_configs: Vec<&PositionConfig> =
+        live_configs.iter().copied().filter(|p| p.protocol == "aerodrome").collect();
+    let aero_cl_configs: Vec<&PositionConfig> =
+        live_configs.iter().copied().filter(|p| p.protocol == AERO_CL_PROTOCOL).collect();
     // A position with an unknown protocol gets no claim action built for some other
     // protocol, and is not silently left out either (issue #91).
     if let Err(e) = validate_positions_config(&state.config.positions) {

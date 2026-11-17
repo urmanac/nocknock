@@ -192,6 +192,7 @@ fn snapshot_of(mut raw: RawOnChainData, profile: &OperatorProfile) -> SnapshotDa
         &plan,
     );
     SnapshotData {
+        closed_positions: vec![],
         wallet_balances: raw.wallet_balances,
         positions,
         pool_mechanics: raw.pool_mechanics,

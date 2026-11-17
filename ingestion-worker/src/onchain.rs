@@ -41,7 +41,14 @@ pub(crate) async fn fetch_eth_price_usd_at(http_client: &Client, alchemy_url: &s
 pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let alchemy_key = state.config.alchemy_api_keys.first().cloned().unwrap_or_default();
     let alchemy_url = format!("https://base-mainnet.g.alchemy.com/v2/{}", alchemy_key);
-    let Some(wallet_addr) = state.config.tracked_wallets.first() else {
+    fetch_raw_data_from(&state.http_client, &alchemy_url, &state.config).await
+}
+
+/// One cycle's reads against a given RPC URL. `fetch_raw_data` builds the URL from the
+/// configured key; the tests of #144 point this at a local node that answers with real
+/// captured responses. It reads only `http_client` and `config`.
+pub(crate) async fn fetch_raw_data_from(http_client: &Client, alchemy_url: &str, config: &AppConfig) -> Result<RawOnChainData> {
+    let Some(wallet_addr) = config.tracked_wallets.first() else {
         return Err(anyhow::anyhow!(
             "No tracked wallet configured: set tracked_wallets in config.yaml to the address NockNock should read"
         ));
@@ -49,12 +56,12 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
 
     // A position with an unknown protocol is a configuration error, stated before any
     // chain read (issue #91): it is never read as another protocol.
-    validate_positions_config(&state.config.positions)?;
+    validate_positions_config(&config.positions)?;
 
     // 0. Fetch live ETH/USD spot price from the canonical Uniswap v3 WETH/USDC pool slot0.
     //    (The former Aerodrome vAMM-WETH/USDC source is retired along with the liquidated
     //    Aerodrome tranche.) Zero-mock invariant: a failed query fails the cycle.
-    let eth_price_pool = state.config.eth_price_pool.clone().unwrap_or_else(|| DEFAULT_ETH_PRICE_POOL.to_string());
+    let eth_price_pool = config.eth_price_pool.clone().unwrap_or_else(|| DEFAULT_ETH_PRICE_POOL.to_string());
     let eth_slot0_payload = json!({
         "jsonrpc": "2.0",
         "method": "eth_call",
@@ -66,7 +73,7 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
     });
     let mut live_eth_price_usd = 0.0f64;
     let mut eth_price_found = false;
-    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &eth_slot0_payload, 2).await {
+    if let Some(res_json) = post_rpc_with_retry(http_client, alchemy_url, &eth_slot0_payload, 2).await {
         if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
             let clean = hex_str.trim_start_matches("0x");
             if clean.len() >= 64 {
@@ -96,7 +103,7 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
         "params": [{ "to": eth_price_pool, "data": V3_LIQUIDITY }, "latest"],
         "id": 98
     });
-    let eth_pool_liquidity = post_rpc_with_retry(&state.http_client, &alchemy_url, &eth_liq_payload, 2)
+    let eth_pool_liquidity = post_rpc_with_retry(http_client, alchemy_url, &eth_liq_payload, 2)
         .await
         .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
         .and_then(|s| {
@@ -120,7 +127,7 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
     });
     let mut live_gas_cost_usd = 0.0f64;
     let mut gas_price_found = false;
-    if let Some(res_json) = post_rpc_with_retry(&state.http_client, &alchemy_url, &gas_payload, 2).await {
+    if let Some(res_json) = post_rpc_with_retry(http_client, alchemy_url, &gas_payload, 2).await {
         if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
             let clean = hex_str.trim_start_matches("0x");
             if let Ok(wei) = u128::from_str_radix(clean, 16) {
@@ -140,7 +147,7 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
 
     // 2. Per-position reads (v2.0.0): every configured Uniswap position is read live;
     //    there are no Aerodrome LP-share reads anymore (tranche liquidated 2026-10-23).
-    if state.config.positions.is_empty() {
+    if config.positions.is_empty() {
         return Err(anyhow::anyhow!(
             "No positions configured; add entries under `positions:` in config.yaml (see ONCHAIN_INTEGRATION.md §5)"
         ));
@@ -148,32 +155,42 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
     let mut raw_positions: Vec<RawPosition> = Vec::new();
     let mut fees_not_lp_claimable: Vec<String> = Vec::new();
     let mut position_facts: HashMap<String, PositionFacts> = HashMap::new();
-    for pos in &state.config.positions {
-        let raw = match Protocol::parse(&pos.protocol) {
+    // Positions proven closed this cycle (#144): their NFT does not exist. They are
+    // never pushed to `raw_positions`, so nothing downstream counts or reads them.
+    let mut closed_positions: Vec<ClosedPosition> = Vec::new();
+    // The config entries that are still live, in config order: the only ones whose
+    // gauges are read and whose rebuild rules apply.
+    let mut live_configs: Vec<PositionConfig> = Vec::new();
+    for pos in &config.positions {
+        let read: PositionRead<RawPosition> = match Protocol::parse(&pos.protocol) {
             Some(Protocol::UniswapV4) => {
-                fetch_v4_position(&state.http_client, &alchemy_url, pos, wallet_addr).await?
+                fetch_v4_position(http_client, alchemy_url, pos, wallet_addr).await?
             }
             Some(Protocol::UniswapV3) => {
-                fetch_v3_position(&state.http_client, &alchemy_url, pos, wallet_addr).await?
+                fetch_v3_position(http_client, alchemy_url, pos, wallet_addr).await?
             }
             Some(Protocol::AeroBasic) => {
+                // No NFT, so never closed: an LP-token balance of zero is a live read.
                 let (raw, fees_claimable) =
-                    fetch_aerodrome_position(&state.http_client, &alchemy_url, pos, wallet_addr).await?;
+                    fetch_aerodrome_position(http_client, alchemy_url, pos, wallet_addr).await?;
                 if !fees_claimable {
                     fees_not_lp_claimable.push(raw.position_id.clone());
                 }
-                raw
+                PositionRead::Live(raw)
             }
             Some(Protocol::AeroCl) => {
                 // Ownership is checked inside: an NFT the wallet neither holds nor staked
                 // in the pool's gauge fails the cycle here (issue #91).
-                let (raw, facts) =
-                    fetch_aero_cl_position(&state.http_client, &alchemy_url, pos, wallet_addr).await?;
-                if facts.fees_note.is_some() {
-                    fees_not_lp_claimable.push(raw.position_id.clone());
+                match fetch_aero_cl_position(http_client, alchemy_url, pos, wallet_addr).await? {
+                    PositionRead::Live((raw, facts)) => {
+                        if facts.fees_note.is_some() {
+                            fees_not_lp_claimable.push(raw.position_id.clone());
+                        }
+                        position_facts.insert(raw.position_id.clone(), facts);
+                        PositionRead::Live(raw)
+                    }
+                    PositionRead::Closed(proof) => PositionRead::Closed(proof),
                 }
-                position_facts.insert(raw.position_id.clone(), facts);
-                raw
             }
             None => {
                 // Unreachable after validate_positions_config; kept so that an unknown
@@ -186,24 +203,68 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
                 ));
             }
         };
-        raw_positions.push(raw);
+        match read {
+            PositionRead::Live(raw) => {
+                raw_positions.push(raw);
+                live_configs.push(pos.clone());
+            }
+            PositionRead::Closed(proof) => {
+                tracing::info!(
+                    "position {}: closed ({}); it is not counted and its config entry can be removed",
+                    pos.id,
+                    closed_reason(pos.nft_id, &proof.position_manager)
+                );
+                closed_positions.push(closed_position_entry(pos, proof, false));
+            }
+        }
+    }
+    // Every configured position is closed: there is nothing to report positions from,
+    // as with no positions configured at all (issue #119 is not papered over here).
+    if raw_positions.is_empty() {
+        return Err(all_positions_closed_error(&closed_positions));
     }
 
     // 3. NOCK/USD spot from the designated price-source position pool (zero-mock:
     //    fail the cycle when missing or unparseable).
-    let spot_price = nock_spot_from_positions(&raw_positions).ok_or_else(|| {
-        anyhow::anyhow!(
-            "No NOCK/USD spot: exactly one configured position must have is_price_source: true \
-             and quote NOCK against USDC"
-        )
-    })?;
+    //    When the flagged position is CLOSED (#144) no price is guessed. A Uniswap v4
+    //    entry's pool goes on supplying it through the same two reads as before
+    //    (poolKeys and getSlot0 need no NFT). A v3 or Aero CL entry fails the cycle
+    //    with a configuration message, because its pool was identified through the NFT.
+    //    A live flagged position always comes first.
+    let mut closed_price_pool: Option<ClosedPricePool> = None;
+    if !raw_positions.iter().any(|p| p.is_price_source) {
+        // The first flagged config entry that is closed, with its index in the list.
+        let closed_source = config.positions.iter().filter(|c| c.is_price_source).find_map(|c| {
+            let key = position_key(c);
+            closed_positions.iter().position(|x| x.position_id == key).map(|i| (c, i))
+        });
+        if let Some((cfg, i)) = closed_source {
+            if !closed_price_source_keeps_pricing(&cfg.protocol) {
+                return Err(closed_price_source_error(cfg, &closed_positions[i].position_manager));
+            }
+            closed_price_pool = Some(fetch_v4_closed_price_pool(http_client, alchemy_url, cfg, wallet_addr).await?);
+            closed_positions[i].supplies_spot_price = true;
+        }
+    }
+    let price_source: Option<&RawPosition> = raw_positions
+        .iter()
+        .find(|p| p.is_price_source)
+        .or(closed_price_pool.as_ref().map(|pool| &pool.0));
+    let spot_price = price_source
+        .and_then(|src| nock_spot_from_positions(std::slice::from_ref(src)))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "No NOCK/USD spot: exactly one configured position must have is_price_source: true \
+                 and quote NOCK against USDC"
+            )
+        })?;
 
     // 3b. Stale-price guard (zero-mock): a pool with no in-range liquidity cannot
     //     trade, so its sqrtPrice stays frozen wherever the last liquidity was pulled.
     //     Publishing that as "live" spot is a data-integrity bug — fail the cycle.
-    if let Some(src) = raw_positions.iter().find(|p| p.is_price_source) {
+    if let Some(src) = price_source {
         let pool_liquidity =
-            fetch_pool_in_range_liquidity(&state.http_client, &alchemy_url, src).await?;
+            fetch_pool_in_range_liquidity(http_client, alchemy_url, src).await?;
         check_price_source_liquidity(&src.position_id, &src.pool_id, pool_liquidity)?;
     }
 
@@ -223,7 +284,7 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
         "id": 2
     });
 
-    let balances_json = post_rpc_with_retry(&state.http_client, &alchemy_url, &balances_payload, 2)
+    let balances_json = post_rpc_with_retry(http_client, alchemy_url, &balances_payload, 2)
         .await
         .ok_or_else(|| anyhow::anyhow!("Failed to query live token balances from Alchemy RPC"))?;
     let (nock_balance, usdc_balance) = parse_wallet_token_balances(&balances_json)?;
@@ -237,7 +298,7 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
     //     key absent: unknown, never assumed live or dead.
     let mut pool_liquidity: HashMap<String, String> = HashMap::new();
     for p in &raw_positions {
-        match fetch_pool_in_range_liquidity(&state.http_client, &alchemy_url, p).await {
+        match fetch_pool_in_range_liquidity(http_client, alchemy_url, p).await {
             Ok(l) => {
                 pool_liquidity.insert(p.position_id.clone(), l.to_string());
             }
@@ -249,7 +310,7 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
     let eth_balance_payload = json!({
         "jsonrpc": "2.0", "method": "eth_getBalance", "params": [wallet_addr, "latest"], "id": 60
     });
-    let wallet_eth = post_rpc_with_retry(&state.http_client, &alchemy_url, &eth_balance_payload, 2)
+    let wallet_eth = post_rpc_with_retry(http_client, alchemy_url, &eth_balance_payload, 2)
         .await
         .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
         .and_then(|h| u128::from_str_radix(h.trim_start_matches("0x"), 16).ok())
@@ -261,7 +322,7 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
             "data": format!("0x70a08231000000000000000000000000{}", wallet_addr.trim_start_matches("0x").to_lowercase())
         }, "latest"]
     });
-    let wallet_weth = post_rpc_with_retry(&state.http_client, &alchemy_url, &weth_balance_payload, 2)
+    let wallet_weth = post_rpc_with_retry(http_client, alchemy_url, &weth_balance_payload, 2)
         .await
         .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
         .filter(|h| h.len() > 2)
@@ -273,20 +334,21 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
     //      on that position, never 0) and the AERO/USD price (required only while the
     //      wallet holds AERO; otherwise a failed read degrades with its reason).
     let aero_price_pool =
-        state.config.aero_price_pool.clone().unwrap_or_else(|| DEFAULT_AERO_PRICE_POOL.to_string());
+        config.aero_price_pool.clone().unwrap_or_else(|| DEFAULT_AERO_PRICE_POOL.to_string());
     let aero = fetch_aero_reads(
-        &state.http_client,
-        &alchemy_url,
+        http_client,
+        alchemy_url,
         wallet_addr,
         &aero_price_pool,
-        &state.config.positions,
+        // Live entries only (#144): a closed position's gauge is not read. A CL gauge's
+        // earned() reverts with "NA" for a token id the wallet no longer has staked.
+        &live_configs,
         &position_facts,
     )
     .await?;
     // 5c. Per-position rebuild rules from config, keyed like RawPosition.position_id.
-    let rebuild_rules: HashMap<String, RebuildRule> = state
-        .config
-        .positions
+    //     Live entries only: a closed position takes no share of the LP target.
+    let rebuild_rules: HashMap<String, RebuildRule> = live_configs
         .iter()
         .map(|c| {
             (
@@ -365,6 +427,7 @@ pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainDa
         fees_not_lp_claimable,
         position_facts,
         aero,
+        closed_positions,
     })
 }
 

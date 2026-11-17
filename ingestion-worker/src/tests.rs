@@ -1754,6 +1754,7 @@ database_url: "postgresql://localhost/test"
 
     fn sample_snapshot_data() -> SnapshotData {
         SnapshotData {
+            closed_positions: vec![],
             wallet_balances: vec![WalletBalance {
                 wallet_address: "0x123".to_string(),
                 token_symbol: "NOCK".to_string(),
@@ -3631,6 +3632,7 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
             &raw, prev_hwm, profile, compute_structural_channels_sync(history), counterfactual, ledger, regime, plan,
         );
         SnapshotData {
+            closed_positions: vec![],
             wallet_balances: raw.wallet_balances,
             positions,
             pool_mechanics: raw.pool_mechanics,

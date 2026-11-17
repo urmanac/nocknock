@@ -349,6 +349,8 @@ fn format_portfolio_state(data: &Value) -> String {
     };
     // Cost basis (issue #98): the worker's own lines, compiled from the same source file.
     let cost_basis = cost_basis_text::cost_basis_lines(data);
+    // Closed positions (issue #144): the worker's own lines, from the same source file.
+    let closed = closed_positions_lines(data);
 
     format!(
         "📈 NockNock Sovereign Portfolio State\n\
@@ -360,6 +362,7 @@ fn format_portfolio_state(data: &Value) -> String {
          • Gas held (wallet ETH+WETH): {gas}\n\
          {aero}\n\
          {collectible}\
+         {closed}\
          • High-Water Mark: {hwm}\n\
          {cost_basis}\n\
          • Tactical Directive: {advice}"
@@ -427,6 +430,11 @@ use aero_text::*;
 #[path = "../reward_text.rs"]
 mod reward_text;
 use reward_text::*;
+
+// Closed positions (issue #144): the same source file the worker uses.
+#[path = "../closed_text.rs"]
+mod closed_text;
+use closed_text::*;
 
 // Aero CL fee rows (issue #91); kept in its own file beside the worker's tests.
 #[cfg(test)]
@@ -635,3 +643,8 @@ mod tests_quotes;
 #[cfg(test)]
 #[path = "../mcp_bin_tests_rewards.rs"]
 mod tests_rewards;
+
+// Closed positions in the fallback text (issue #144).
+#[cfg(test)]
+#[path = "../mcp_bin_tests_closed.rs"]
+mod tests_closed;

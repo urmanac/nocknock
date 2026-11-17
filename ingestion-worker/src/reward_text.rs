@@ -2,7 +2,8 @@
 //!
 //! One source file for both MCP transports: the worker's HTTP endpoint (`mod reward_text`
 //! in main.rs) and the stdio binary, which cannot import from main.rs and includes this
-//! file by path (src/bin/mcp.rs). It depends on nothing but serde_json.
+//! file by path (src/bin/mcp.rs). It depends on nothing but serde_json and closed_text.rs,
+//! which both binaries compile at their crate root.
 //!
 //! The text states what is collectible and where it is collected. It never says to
 //! claim, sell, hold or accumulate AERO, and it never prints a figure the snapshot does
@@ -275,11 +276,13 @@ pub fn claim_simulation_text(data: &Value, reward_gas: &[RewardGas]) -> String {
          • Estimated Gas: {}\n\
          • Net Accretion if Harvested: {}\n\
          {}\
-         Pool Breakdown:\n{}",
+         Pool Breakdown:\n{}{}",
         total_claimable_usd,
         gas_line,
         net_line,
         rewards_and_total_lines(data, "Total collectible (LP fees + AERO rewards, before gas)"),
-        details
+        details,
+        // Closed positions (#144): no row above, no figure here; the fact alone.
+        crate::closed_text::closed_positions_lines(data)
     )
 }

@@ -68,6 +68,8 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
     };
     // Cost basis (issue #98): the same lines in both MCP transports (cost_basis_text.rs).
     let cost_basis = cost_basis_lines(data);
+    // Closed positions (issue #144): stated, never counted. Empty when there are none.
+    let closed = closed_positions_lines(data);
 
     format!(
         "📈 NockNock Sovereign Portfolio State\n\
@@ -79,6 +81,7 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
          • Gas held (wallet ETH+WETH): {gas}\n\
          {aero}\n\
          {collectible}\
+         {closed}\
          • High-Water Mark: {hwm}\n\
          {cost_basis}\n\
          • Tactical Directive: {advice}"

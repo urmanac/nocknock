@@ -4,12 +4,9 @@ use crate::*;
 // Async per-position readers
 // ------------------------------------------------------------------
 
-pub(crate) async fn fetch_v4_position(
-    http_client: &Client,
-    alchemy_url: &str,
-    pos: &PositionConfig,
-    wallet: &str,
-) -> Result<RawPosition> {
+/// The v4 config fields every read needs: the bytes32 pool id (64 hex chars, no 0x)
+/// and the two currencies (40 hex chars each, no 0x), lowercase. Pure.
+fn v4_pool_config(pos: &PositionConfig) -> Result<(String, String, String)> {
     let pool_id = pos
         .pool_id
         .as_deref()
@@ -26,15 +23,20 @@ pub(crate) async fn fetch_v4_position(
         .as_deref()
         .map(|s| s.trim_start_matches("0x").to_lowercase())
         .ok_or_else(|| anyhow::anyhow!("position {} missing currency1 in config", pos.id))?;
-    let tick_lower = pos
-        .tick_lower
-        .ok_or_else(|| anyhow::anyhow!("position {} missing tick_lower in config", pos.id))?;
-    let tick_upper = pos
-        .tick_upper
-        .ok_or_else(|| anyhow::anyhow!("position {} missing tick_upper in config", pos.id))?;
+    Ok((pool_id, currency0, currency1))
+}
 
-    // 0. poolKeys(bytes25) -> (currency0, currency1, fee, tickSpacing, hooks);
-    //    validates the config's declared currency ordering and supplies the fee tier.
+/// poolKeys(bytes25) -> (currency0, currency1, fee, tickSpacing, hooks): validates the
+/// config's declared currency ordering and supplies the fee tier in basis points. It is
+/// a read of the pool key, not of the NFT.
+async fn fetch_v4_pool_fee_bps(
+    http_client: &Client,
+    alchemy_url: &str,
+    pos: &PositionConfig,
+    pool_id: &str,
+    currency0: &str,
+    currency1: &str,
+) -> Result<u32> {
     let pk_payload = json!({
         "jsonrpc": "2.0",
         "method": "eth_call",
@@ -72,6 +74,92 @@ pub(crate) async fn fetch_v4_position(
             pos.id
         ));
     }
+    Ok(fee_tier_bps)
+}
+
+/// StateView getSlot0(bytes32) -> (sqrtPriceX96, tick, ...). A read of the pool.
+async fn fetch_v4_slot0(http_client: &Client, alchemy_url: &str, pos_id: &str, pool_id: &str) -> Result<(U256, i32)> {
+    let slot0_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{
+            "to": UNISWAP_V4_STATE_VIEW_BASE,
+            "data": format!("{}{}", V4_STATE_VIEW_GET_SLOT0, pool_id)
+        }, "latest"],
+        "id": 52
+    });
+    let slot0_hex = post_rpc_with_retry(http_client, alchemy_url, &slot0_payload, 2)
+        .await
+        .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .ok_or_else(|| anyhow::anyhow!("position {}: StateView getSlot0 query failed", pos_id))?;
+    let clean = slot0_hex.trim_start_matches("0x");
+    if clean.len() < 128 {
+        return Err(anyhow::anyhow!("position {}: StateView getSlot0 returned short output", pos_id));
+    }
+    Ok((U256::from_hex_be(&clean[..64])?, parse_hex_word_i32(&clean[64..128])?))
+}
+
+/// The pool of a CLOSED Uniswap v4 price-source entry, read for its price alone (#144).
+/// Never a position: it holds nothing and is never added to the cycle's positions.
+#[derive(Debug, Clone)]
+pub(crate) struct ClosedPricePool(pub(crate) RawPosition);
+
+/// The NOCK/USD price reads of a v4 config entry whose NFT is gone. They are the same
+/// two reads a live v4 position's price comes from, and neither needs the NFT: poolKeys
+/// (the pool key is the config's pair, in order) and StateView getSlot0. The caller
+/// applies the same stale-pool guard as for a live price source.
+pub(crate) async fn fetch_v4_closed_price_pool(
+    http_client: &Client,
+    alchemy_url: &str,
+    pos: &PositionConfig,
+    wallet: &str,
+) -> Result<ClosedPricePool> {
+    let (pool_id, currency0, currency1) = v4_pool_config(pos)?;
+    let fee_tier_bps = fetch_v4_pool_fee_bps(http_client, alchemy_url, pos, &pool_id, &currency0, &currency1).await?;
+    let (sqrt_price_x96, tick) = fetch_v4_slot0(http_client, alchemy_url, &pos.id, &pool_id).await?;
+    Ok(ClosedPricePool(RawPosition {
+        position_id: position_key(pos),
+        network: pos.network.clone(),
+        protocol: "uniswap-v4".to_string(),
+        wallet: wallet.to_string(),
+        nft_id: pos.nft_id,
+        pool_id: format!("0x{}", pool_id),
+        npm_address: None,
+        fee_tier_bps,
+        token0: token_info(&format!("0x{}", currency0))?,
+        token1: token_info(&format!("0x{}", currency1))?,
+        // Nothing is held: the NFT does not exist. Only the pool's price is used.
+        liquidity: 0,
+        sqrt_price_x96,
+        tick,
+        tick_lower: pos.tick_lower.unwrap_or(0),
+        tick_upper: pos.tick_upper.unwrap_or(0),
+        amount0: 0.0,
+        amount1: 0.0,
+        fee0: 0.0,
+        fee1: 0.0,
+        in_range: false,
+        is_price_source: true,
+    }))
+}
+
+pub(crate) async fn fetch_v4_position(
+    http_client: &Client,
+    alchemy_url: &str,
+    pos: &PositionConfig,
+    wallet: &str,
+) -> Result<PositionRead<RawPosition>> {
+    let (pool_id, currency0, currency1) = v4_pool_config(pos)?;
+    let tick_lower = pos
+        .tick_lower
+        .ok_or_else(|| anyhow::anyhow!("position {} missing tick_lower in config", pos.id))?;
+    let tick_upper = pos
+        .tick_upper
+        .ok_or_else(|| anyhow::anyhow!("position {} missing tick_upper in config", pos.id))?;
+
+    // 0. poolKeys(bytes25) -> (currency0, currency1, fee, tickSpacing, hooks);
+    //    validates the config's declared currency ordering and supplies the fee tier.
+    let fee_tier_bps = fetch_v4_pool_fee_bps(http_client, alchemy_url, pos, &pool_id, &currency0, &currency1).await?;
 
     // 1. getPositionLiquidity(uint256)
     let liq_payload = json!({
@@ -94,26 +182,52 @@ pub(crate) async fn fetch_v4_position(
             )
         })?;
 
-    // 2. StateView getSlot0(bytes32) -> (sqrtPriceX96, tick, ...)
-    let slot0_payload = json!({
-        "jsonrpc": "2.0",
-        "method": "eth_call",
-        "params": [{
-            "to": UNISWAP_V4_STATE_VIEW_BASE,
-            "data": format!("{}{}", V4_STATE_VIEW_GET_SLOT0, pool_id)
-        }, "latest"],
-        "id": 52
-    });
-    let slot0_hex = post_rpc_with_retry(http_client, alchemy_url, &slot0_payload, 2)
-        .await
-        .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
-        .ok_or_else(|| anyhow::anyhow!("position {}: StateView getSlot0 query failed", pos.id))?;
-    let clean = slot0_hex.trim_start_matches("0x");
-    if clean.len() < 128 {
-        return Err(anyhow::anyhow!("position {}: StateView getSlot0 returned short output", pos.id));
+    // 1b. Does the NFT exist? (#144) getPositionLiquidity answers 0 for a burned or
+    //     never-minted id exactly as it does for an NFT that exists and is empty, so
+    //     before #144 a burned v4 NFT read as a live position holding nothing. Zero
+    //     liquidity is therefore followed by ownerOf: an owner means the NFT exists
+    //     (empty, still a live position); Error("NOT_MINTED") together with an empty
+    //     getPoolAndPositionInfo means it does not, and the position is closed. Any
+    //     other outcome fails the cycle. Liquidity above zero is itself proof that the
+    //     NFT exists (a burn clears it), so that path makes no extra read.
+    if liquidity == 0 {
+        let outcome = |selector: &'static str, id: u64, what: &'static str| {
+            let cfg_id = pos.id.clone();
+            let data = format!("{}{:064x}", selector, pos.nft_id);
+            async move {
+                let payload = json!({
+                    "jsonrpc": "2.0", "method": "eth_call", "id": id,
+                    "params": [{ "to": UNISWAP_V4_POSM_BASE, "data": data }, "latest"]
+                });
+                eth_call_outcome(http_client, alchemy_url, &payload)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("position {}: POSM {} query failed: {e}", cfg_id, what))
+            }
+        };
+        match outcome(ERC721_OWNER_OF, 55, "ownerOf()").await? {
+            CallOutcome::Returned(_) => {}
+            reverted => {
+                let info = outcome(V4_GET_POOL_AND_POSITION_INFO, 56, "getPoolAndPositionInfo()").await?;
+                match v4_closure_verdict(&reverted, &info) {
+                    ClosureVerdict::Closed(evidence) => {
+                        return Ok(PositionRead::Closed(ClosedProof {
+                            position_manager: UNISWAP_V4_POSM_BASE.to_string(),
+                            evidence,
+                        }));
+                    }
+                    ClosureVerdict::NotProven(why) => {
+                        return Err(anyhow::anyhow!(
+                            "position {}: NFT #{} reads zero liquidity and whether it exists on PositionManager {} could not be established ({why})",
+                            pos.id, pos.nft_id, UNISWAP_V4_POSM_BASE
+                        ));
+                    }
+                }
+            }
+        }
     }
-    let sqrt_price_x96 = U256::from_hex_be(&clean[..64])?;
-    let tick = parse_hex_word_i32(&clean[64..128])?;
+
+    // 2. StateView getSlot0(bytes32) -> (sqrtPriceX96, tick, ...)
+    let (sqrt_price_x96, tick) = fetch_v4_slot0(http_client, alchemy_url, &pos.id, &pool_id).await?;
 
     // 3. Uncollected fees: getPositionInfo(poolId, posm, tickLower, tickUpper, tokenId)
     //    + getFeeGrowthInside(poolId, tickLower, tickUpper), existing verified selectors.
@@ -194,7 +308,7 @@ pub(crate) async fn fetch_v4_position(
         pos.id, pos.nft_id, liquidity, tick, tick_lower <= tick && tick <= tick_upper, fee0_raw, fee1_raw
     );
 
-    Ok(RawPosition {
+    Ok(PositionRead::Live(RawPosition {
         position_id: format!("uniswap-v4:{}:{}", pos.network, pos.nft_id),
         network: pos.network.clone(),
         protocol: "uniswap-v4".to_string(),
@@ -216,5 +330,5 @@ pub(crate) async fn fetch_v4_position(
         fee1: fee1_raw as f64 / dec1,
         in_range: tick_lower <= tick && tick <= tick_upper,
         is_price_source: pos.is_price_source,
-    })
+    }))
 }
