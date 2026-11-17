@@ -362,12 +362,14 @@ pub(crate) fn aero_cl_position_from_reads(
 /// cycle, as does a position the wallet neither holds nor staked, a pool that is not
 /// the NFT's pool, and an unstaked position whose `collect` simulation reverts (its
 /// fees cannot be read, and an unread fee is never published as zero).
+/// Since #144 an NFT proven not to exist is `PositionRead::Closed` instead of an error.
 pub(crate) async fn fetch_aero_cl_position(
     http_client: &Client,
     alchemy_url: &str,
     cfg: &PositionConfig,
     wallet: &str,
-) -> Result<(RawPosition, PositionFacts)> {
+    clock: ProofClock,
+) -> Result<PositionRead<(RawPosition, PositionFacts)>> {
     let npm = cfg.npm_address.clone().filter(|a| !a.trim().is_empty()).ok_or_else(|| {
         anyhow::anyhow!("Configuration error: position {}: {AERO_CL_PROTOCOL} positions need npm_address (the Aero CL position manager)", cfg.id)
     })?;
@@ -397,15 +399,48 @@ pub(crate) async fn fetch_aero_cl_position(
     let id_word = format!("{:064x}", cfg.nft_id);
     let wallet_word = format!("{:0>64}", wallet.trim_start_matches("0x").to_lowercase());
 
-    // 1. The NFT: tokens, tick spacing, ticks, liquidity. A burned or unknown id reverts.
-    let positions_hex = read(npm.clone(), format!("{V3_POSITIONS}{id_word}"), 80, "positions()")
-        .await
-        .map_err(|e| {
-            anyhow::anyhow!(
-                "{e} (NFT #{} on position manager {}: the call reverts for an id that does not exist, such as a withdrawn-and-burned position or a mistyped nft_id)",
-                cfg.nft_id, npm
-            )
-        })?;
+    // 1. The NFT: tokens, tick spacing, ticks, liquidity. A burned or unknown id
+    //    reverts. That revert is read with its reason (#144). When it is this position
+    //    manager's own "no such token" answer, the proof is read: positions() AND
+    //    ownerOf(), both at one current block (closed::fetch_proof_block). When both
+    //    give that answer there, the position is closed and the cycle goes on. Any
+    //    other outcome fails the cycle.
+    let outcome = |data: String, id: u64, what: &'static str, block: String| {
+        let (cfg_id, npm) = (cfg.id.clone(), npm.clone());
+        async move {
+            let payload = json!({
+                "jsonrpc": "2.0", "method": "eth_call", "id": id,
+                "params": [{ "to": npm, "data": data }, block]
+            });
+            eth_call_outcome(http_client, alchemy_url, &payload)
+                .await
+                .map_err(|e| anyhow::anyhow!("position {}: Aero CL {} read failed: {e}", cfg_id, what))
+        }
+    };
+    let not_proven = |why: String| {
+        anyhow::anyhow!(
+            "position {}: Aero CL positions() read failed (NFT #{} on position manager {}: {why})",
+            cfg.id, cfg.nft_id, npm
+        )
+    };
+    let positions_hex = match outcome(format!("{V3_POSITIONS}{id_word}"), 80, "positions()", "latest".to_string()).await? {
+        CallOutcome::Returned(hex) => hex,
+        reverted => {
+            positions_says_nonexistent(&cfg.protocol, &npm, &reverted).map_err(&not_proven)?;
+            let block = fetch_proof_block(http_client, alchemy_url, clock)
+                .await
+                .map_err(|e| not_proven(format!("positions() {}, and {e}", describe_outcome(&reverted))))?;
+            let positions = outcome(format!("{V3_POSITIONS}{id_word}"), 87, "positions()", block.tag()).await?;
+            let owner_of = outcome(format!("{ERC721_OWNER_OF}{id_word}"), 86, "ownerOf()", block.tag()).await?;
+            match nft_closure_verdict(&cfg.protocol, &npm, &positions, &owner_of) {
+                ClosureVerdict::Closed(evidence) => {
+                    tracing::info!("position {}: NFT #{} proven nonexistent at block {}", cfg.id, cfg.nft_id, block.number);
+                    return Ok(PositionRead::Closed(ClosedProof { position_manager: npm, evidence }));
+                }
+                ClosureVerdict::NotProven(why) => return Err(not_proven(format!("at block {}: {why}", block.number))),
+            }
+        }
+    };
     let decoded = decode_slipstream_positions_return(&positions_hex).map_err(|e| ctx(e, "positions()"))?;
 
     // 2. The pool: identity (position manager, tokens, tick spacing), price, tick and
@@ -495,5 +530,5 @@ pub(crate) async fn fetch_aero_cl_position(
         cfg.id, cfg.nft_id, decoded.tick_spacing, raw.fee_tier_bps, raw.liquidity, raw.tick, raw.in_range,
         facts.staked_in_gauge, raw.amount0, raw.token0.symbol, raw.amount1, raw.token1.symbol
     );
-    Ok((raw, facts))
+    Ok(PositionRead::Live((raw, facts)))
 }

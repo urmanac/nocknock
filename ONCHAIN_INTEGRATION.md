@@ -1241,3 +1241,189 @@ they match what the deployment's `GET /v1/accumulation/events` returned on the s
 - **The SQL.** The two new queries (the ledger read and the price-history read) are
   plain named-column SELECTs. They were not run against a PostgreSQL instance in this
   session: no local server was available and the deployment's database was not touched.
+
+---
+
+## 13. Closed Positions: How a Position Manager Answers for a Token Id That Does Not Exist (issue #144) — Verified Record
+
+A configured position whose NFT no longer exists is reported as **closed** instead of
+failing the cycle (`ingestion-worker/src/closed.rs`; the allow-list is in
+`adapters/mod.rs`). "Closed" is stated only on proof, so this section records exactly
+what each contract answers. Everything below was read with `eth_call` on 2026-11-17
+through `https://base-rpc.publicnode.com`, and again through `https://mainnet.base.org`,
+which returned the same bytes for every call (code, message and `data`). Reads marked
+"fixture block" are pinned to **block 58646285** (`0x37edf0d`, timestamp 1794919632 =
+2026-11-17T12:47:12Z, hash `0xc6a1d6c5…5cf1b1`); they are the contents of
+`ingestion-worker/testdata/closed/cycle_fixture.json`, recorded by running the worker's
+own cycle reads through a recording proxy (`test_record_closed_cycle_fixture`). All 48
+`eth_call` answers in that file, and the block's header, were re-read on
+`mainnet.base.org` at the same block and were identical.
+
+### What happened on 2026-11-17
+
+The operator withdrew the Aero CL position NFT #2914490 (§8) in the Aero app:
+
+| Fact | Value |
+|---|---|
+| Transaction | `0x09223b2a78bf925d591f10a04687200ab7cd657c63b74313b9582bcc976d801a`, status 1 |
+| Block | 58637717 (`0x37ebd95`), timestamp 1794917919 = 2026-11-17T12:18:39Z |
+| From / to | the tracked wallet `0xeE114cC9…7a45` / `0x0fef9e88a7b76bcdbf451780c6774fe32965ee98` |
+| NFT `Transfer` logs on the position manager | gauge `0x3bf70c88…60fd` → `0x0fef9e88…ee98`, then `0x0fef9e88…ee98` → the zero address (burn), token id `0x2c78ba` = 2914490 |
+| WETH paid out | `Transfer` pool → wallet of `0x0162179a5493fdb7` = 0.099668093366959 WETH |
+| `ownerOf(2914490)` at block 58637716 | `0x…3bf70c880adc8370917994ab0df68e763b7a60fd` (the gauge: a live, staked position) |
+| `ownerOf(2914490)` at block 58637717 | reverts (below) |
+
+From the next ingestion cycle on, every cycle failed with `Aero CL positions() read
+failed (NFT #2914490 …)` until the config entry was commented out by hand.
+
+### Aero CL (Slipstream) position manager `0x4857db576ee0e45f10525ec59527bfd10beec60b`
+
+| Call | Token id | Answer | Raw revert data |
+|---|---|---|---|
+| `ownerOf(uint256)` `0x6352211e` | 2914490 (burned) | JSON-RPC error code 3, `Error("ERC721: owner query for nonexistent token")` | `0x08c379a0` + offset `0x20` + length `0x29` + `4552433732313a206f776e657220717565727920666f72206e6f6e6578697374656e7420746f6b656e` (zero-padded to 64 bytes) |
+| `positions(uint256)` `0x99fbab88` | 2914490 (burned) | JSON-RPC error code 3, `Error("ID")` | `0x08c379a0` + offset `0x20` + length `0x02` + `4944` (zero-padded to 32 bytes) |
+| both | 99999999999 and 0 (never minted) | the same two answers, byte for byte | the same |
+
+### Uniswap v3 NonfungiblePositionManager `0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1`
+
+A burned id was found from the manager's `Transfer` logs to the zero address: #6604113,
+burned in block 58632803 (tx `0x64e76755359e2d478ed5ca5b76f996fcc8d8e59911024352dca0b83b72cf68f3`,
+another account's). One block earlier `ownerOf(6604113)` returned an owner and
+`positions(6604113)` returned 12 words.
+
+| Call | Token id | Answer | Raw revert data |
+|---|---|---|---|
+| `ownerOf(uint256)` | 6604113 (burned) | error code 3, `Error("ERC721: owner query for nonexistent token")` | as for the Aero CL manager |
+| `positions(uint256)` | 6604113 (burned) | error code 3, `Error("Invalid token ID")` | `0x08c379a0` + offset `0x20` + length `0x10` + `496e76616c696420746f6b656e204944` (zero-padded to 32 bytes) |
+| both | 99999999999 (never minted) | the same two answers | the same |
+
+### Uniswap v4 PositionManager `0x7c5f5a4bbd8fd63184577525326123b519429bdc`
+
+A burned id: #3229273, burned in block 58641149 (tx
+`0x7af0d60ce11c1ee02dc0f764a5e1ec402f1f9dd378c849c088aef6576bc63819`, another account's).
+**This contract does not revert on its own position reads for an id that does not
+exist**, so the worker cannot tell a burned NFT from an empty one by the reads it made
+before #144:
+
+| Call | #3229273 one block before its burn | #3229273 after (burned), 99999999999 and 0 (never minted) | #3163431 and #3163432 (the wallet's own, empty, still held) | #3163450 (the wallet's live position) |
+|---|---|---|---|---|
+| `ownerOf(uint256)` `0x6352211e` | an owner | error code 3, `Error("NOT_MINTED")`: `0x08c379a0` + offset `0x20` + length `0x0a` + `4e4f545f4d494e544544` | the tracked wallet | the tracked wallet |
+| `getPoolAndPositionInfo(uint256)` `0x7ba03aad` | pool key and packed info | **six zero words (192 zero bytes), a successful call** | pool key and packed info (non-zero) | pool key and packed info |
+| `getPositionLiquidity(uint256)` `0x1efeed33` | `0xc1de40e675` | **0, a successful call** | **0** | `0xe3402a72bc7b` |
+
+So before #144 a burned v4 NFT did not stall ingestion: it read as a live position
+holding nothing. The StateView reads the adapter makes next (`getSlot0`, `getPositionInfo`,
+`getFeeGrowthInside`) are keyed by the configured pool id and ticks, not by whether the
+NFT exists.
+
+The pool id of #3163431 used by the fixture, `0x91a9ef0a…f9f99c`, is keccak256 of the
+pool key its `getPoolAndPositionInfo` returns (USDC, NOCK, fee 7500, tick spacing 75, no
+hooks); its first 25 bytes are the pool id packed in the position info word, whose
+ticks are 267825 and 271050. The same derivation reproduces the known pool id of
+#3163450.
+
+### What counts as proof
+
+| Protocol | Position manager (the only one on the allow-list) | Closed when BOTH, in the same cycle, at the proof block |
+|---|---|---|
+| `aerodrome-cl` | `0x4857db576ee0e45f10525ec59527bfd10beec60b` | `positions(id)` reverts with exactly `Error("ID")` AND `ownerOf(id)` reverts with exactly `Error("ERC721: owner query for nonexistent token")` |
+| `uniswap-v3` | `0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1` | `positions(id)` reverts with exactly `Error("Invalid token ID")` AND `ownerOf(id)` reverts with exactly `Error("ERC721: owner query for nonexistent token")` |
+| `uniswap-v4` | `0x7c5f5a4bbd8fd63184577525326123b519429bdc` (fixed in the worker) | `getPositionLiquidity(id)` is 0 and `ownerOf(id)` reverts with `Error("NOT_MINTED")` at `latest`, THEN at the proof block `ownerOf(id)` reverts with exactly `Error("NOT_MINTED")` AND `getPoolAndPositionInfo(id)` returns exactly six zero words. Liquidity above 0 is itself proof the NFT exists (a burn clears it), so that path makes no extra read; an owner at `latest` means the NFT exists and is empty, and no proof is read. |
+| `aerodrome` | none: the position is an LP-token balance, there is no NFT | never closed. A balance of zero in the pool and in the gauge is a live read of an empty position, and the gauge's `earned` is still read (AERO earned before an unstake stays claimable). |
+
+**The proof block.** A token id that was never minted answers exactly like a burned
+one (below), so a node whose state is older than an NFT's mint gives both "nonexistent"
+answers for a position that is live. The proof is therefore not read at `latest`. When
+the first read at `latest` gives the manager's "nonexistent" answer, the worker reads
+the node's latest block header once (`eth_getBlockByNumber("latest", false)`) and makes
+BOTH proving reads at that block's number (`closed::fetch_proof_block`). The block must
+be current: its timestamp must be within 120 seconds of the worker's clock, or within
+`sync_window_seconds` if that is shorter (`closed::ProofClock`), in either direction.
+A node that is further behind fails the cycle ("the node's latest block N is S seconds
+old … a node that is behind the chain cannot prove that a token id does not exist"), as
+does a header that cannot be read, and a proving read answered by a backend that does
+not hold that block (a JSON-RPC error, not a revert). Because the limit is never longer
+than the cycle interval, a proof block is newer than every earlier cycle: a position
+that an earlier cycle read as live cannot be reported closed by a node that has not yet
+seen its mint. This rests on the host's clock being right to within the limit; a clock
+that is off by more fails the cycle for a closed entry, in both directions.
+
+The reason is decoded strictly from the revert `data` of the JSON-RPC error
+(`rpc::decode_revert_reason`): selector `0x08c379a0`, offset `0x20`, a length that fits
+the data exactly, zero padding, valid UTF-8. A length word larger than the data is
+refused before any arithmetic on it. The node's `message` text is not used.
+Everything else fails the cycle as before: a transport failure, an HTTP error status
+(whatever its body carries), an unparseable body, a JSON-RPC error that is not an
+execution revert (each retried three times first), a revert with any other reason, with
+empty data, with no `data` field, with a custom error or a panic, a position manager
+that is not on the list, and one read saying "nonexistent" while the other does not.
+
+A token id that was never minted answers exactly like a burned one on all three
+managers, so the worker cannot tell a withdrawn position from a mistyped `nft_id`, and
+every text says both: "withdrawn and burned, or a mistyped nft_id".
+
+A `uniswap-v4` or `uniswap-v3` entry with no `nft_id` reads as token id 0, which was
+never minted on either manager (the v4 answers for id 0 at the fixture block are in the
+fixture: liquidity 0, `Error("NOT_MINTED")`, six zero words). It is therefore closed
+like any other id that does not exist. Before #144 a v4 entry without `nft_id` read as
+a live position holding nothing and could carry `is_price_source`; as the only
+configured entry it now fails the cycle with "No live positions: every configured
+position is closed". A setup that only watches a price uses an `aerodrome` entry, which
+has no NFT and is never closed.
+
+### The price source, when its position is closed
+
+- **Uniswap v4**: the pool goes on supplying the NOCK/USD spot. The price of a v4
+  position was always two reads that never involved the NFT: `poolKeys(bytes25)` on the
+  PositionManager (the pool key must be the config's `currency0`/`currency1`, in order)
+  and StateView `getSlot0(poolId)`; the stale-pool guard `getLiquidity(poolId)` still
+  runs. Verified at the fixture block: with the configured price-source entry pointed
+  at the nonexistent id #3229273, the spot is the same number as with the live NFT
+  (0.014934577766643168 USD per NOCK).
+- **Uniswap v3 and Aero CL**: the cycle fails with a configuration error naming the fix
+  (flag another position as `is_price_source`). The tokens of the pool, and for Aero CL
+  that `pool_address` is the NFT's pool at all, are read from the NFT, which is gone.
+
+### The gauge of the withdrawn Aero CL position
+
+At block 58637716 (before the withdrawal) `earned(wallet, [2914490])` on gauge
+`0x3bf70c88…60fd` returned 0 (why it was zero was not looked into; the operator had
+collected this gauge's reward earlier that day, §9). After the withdrawal it reverts with `Error("NA")` (`0x08c379a0` … `4e41`) and
+`stakedContains(wallet, 2914490)` returns false. The wallet's AERO balance is the same
+at blocks 58637716 and 58637717 (`0xf4ffa950a248bebf`). So there is nothing to read for
+a closed Aero CL position, and the worker does not call its gauge.
+
+### Not verified
+
+- **Alchemy's response for a reverting `eth_call`.** The deployment reads through
+  Alchemy; this record was read through two public nodes, which both send JSON-RPC
+  error code 3 with the revert bytes in `error.data`. The worker requires that `data`
+  field. If a provider reports the revert without it, the position is not reported as
+  closed and the cycle fails with "reverted with no revert data from the node", which
+  is the behaviour before #144 with a more precise message. The first withdrawal on the
+  deployment after this change will show which it is.
+- **The legacy Slipstream position manager** `0x827922686190790b37229fd06084350E74485b72`.
+  A never-minted id (99999999999) reverts there with the same two reasons as on the
+  current manager (fixture block). A burned id was not read on it, so it is not on the
+  allow-list: a missing NFT there fails the cycle and says the manager is not verified.
+- **Any other chain, and any other deployment of these contracts.**
+- **The burn itself.** The worker proves that the id does not exist now; it does not
+  look for the `Transfer` to the zero address, so it does not know when, in which
+  transaction, or whether the id ever existed. `first_seen_closed_at` is the time of the
+  first cycle that recorded it as closed.
+- **That a token id is never minted again.** All three managers mint increasing ids, so
+  a burned id should stay nonexistent; this was not checked in their code. If an id did
+  exist again the position would simply read as live again.
+- **A node that is behind the chain by less than the proof-block limit.** The proof
+  block must be at most 120 seconds old (above), so what remains is an NFT added to the
+  config and deployed within that limit of its own mint, read through a node that has
+  not seen the mint yet: it would be listed as closed for that cycle and as live on the
+  next, with no notification (one is sent only for a position the previous snapshot
+  held as live). The limit itself was not tuned against the deployment's provider: if
+  its `latest` is routinely older than that, a closed entry fails the cycle and the
+  message says how old the block was.
+- **The host's clock.** The freshness of the proof block is judged against it. A clock
+  that is wrong by more than the limit fails the cycle while a closed entry is
+  configured; one that is slow by less than the limit loosens the check by that much.
+- **StateView reads for a burned v4 id in its own pool.** The adapter never reaches
+  them for a closed NFT, and they were not read for #3229273.

@@ -240,16 +240,11 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     let next_plan_status = derived_metrics.accumulation_plan.clone();
     let next_range_top = range_top_reading(&raw_data);
 
-    // Build snapshot data. The positions carry every stamp the cycle's fee rows were
-    // built from (pool activity and, since #91, staking and the fees note).
-    let positions = snapshot_positions(&raw_data);
-    let snapshot_data = SnapshotData {
-        wallet_balances: raw_data.wallet_balances,
-        positions,
-        pool_mechanics: raw_data.pool_mechanics,
-        concentrated_liquidity: raw_data.concentrated_liquidity,
-        contract_fees: raw_data.contract_fees,
-        derived_metrics,
+    // Build snapshot data (cycle_snapshot_data). What the previous snapshot held
+    // decides a closed position's first-seen time and whether its closing is pushed.
+    let (snapshot_data, closed_notes) = {
+        let prev = state.latest_snapshot.lock().await;
+        cycle_snapshot_data(raw_data, derived_metrics, prev.as_ref().map(|s| &s.data), &Utc::now().to_rfc3339())
     };
 
     // Compute deterministic state hash
@@ -259,8 +254,8 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     let now = Utc::now();
     // Notifications (issues #28, #89): decided here against the previous snapshot, sent
     // only after this one is stored. A directive change notifies, and so do a plan
-    // completing and the price-source range being exited. A first cycle with no previous
-    // snapshot stays silent.
+    // completing, the price-source range being exited and a tracked position closing
+    // (#144). A first cycle with no previous snapshot stays silent.
     let (prev_directive, prev_plan_status) = match state.latest_snapshot.lock().await.as_ref() {
         Some(s) => (
             Some(s.data.derived_metrics.global_status.shot_advice_action.clone()),
@@ -269,13 +264,14 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
         None => (None, None),
     };
     let range_exit = range_exit_note(last_range_top_reading().as_ref(), next_range_top.as_ref());
-    let notification = cycle_notification(
+    let notification = cycle_notification_with_closed(
         prev_directive.as_deref(),
         &next_directive_action,
         &next_directive_details,
         prev_plan_status.as_ref(),
         next_plan_status.as_ref(),
         range_exit.as_deref(),
+        &closed_notes,
         state.config.notifications.cockpit_url.as_deref(),
     );
 
@@ -318,6 +314,37 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     );
 
     Ok(())
+}
+
+/// The snapshot payload of one cycle, from its reads and metrics. Pure.
+///
+/// The positions carry every stamp the cycle's fee rows were built from (pool activity
+/// and, since #91, staking and the fees note). Closed positions (#144) are listed
+/// beside the live ones, never among them: `prev` (the previous snapshot) supplies the
+/// time each was first recorded as closed, and decides which closings are news. The
+/// second value is one sentence per position that was live in `prev` and is closed now.
+pub(crate) fn cycle_snapshot_data(
+    mut raw_data: RawOnChainData,
+    derived_metrics: DerivedMetrics,
+    prev: Option<&SnapshotData>,
+    now: &str,
+) -> (SnapshotData, Vec<String>) {
+    let positions = snapshot_positions(&raw_data);
+    let mut closed_positions = std::mem::take(&mut raw_data.closed_positions);
+    stamp_first_seen_closed(&mut closed_positions, prev.map(|p| p.closed_positions.as_slice()), now);
+    let prev_live_ids: Option<Vec<String>> =
+        prev.map(|p| p.positions.iter().map(|x| x.position_id.clone()).collect());
+    let closed_notes = closed_position_notes(prev_live_ids.as_deref(), &closed_positions);
+    let snapshot_data = SnapshotData {
+        wallet_balances: raw_data.wallet_balances,
+        positions,
+        pool_mechanics: raw_data.pool_mechanics,
+        concentrated_liquidity: raw_data.concentrated_liquidity,
+        contract_fees: raw_data.contract_fees,
+        closed_positions,
+        derived_metrics,
+    };
+    (snapshot_data, closed_notes)
 }
 
 pub(crate) fn compute_state_hash(data: &SnapshotData) -> String {

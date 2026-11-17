@@ -52,6 +52,103 @@ pub(crate) fn validate_positions_config(positions: &[PositionConfig]) -> Result<
     Ok(())
 }
 
+// ------------------------------------------------------------------
+// Closed positions (#144): which contract answers prove an NFT does not exist
+// ------------------------------------------------------------------
+
+/// The Aero CL (Slipstream) position manager of the Aero app on Base (ONCHAIN_INTEGRATION.md §8).
+pub(crate) const AERO_CL_POSITION_MANAGER_BASE: &str = "0x4857db576ee0e45f10525ec59527bfd10beec60b";
+/// The Uniswap v3 NonfungiblePositionManager on Base (ONCHAIN_INTEGRATION.md §5).
+pub(crate) const UNISWAP_V3_NPM_BASE: &str = "0x03a520b32c04bf3beef7beb72e919cf822ed34f1";
+
+/// OpenZeppelin ERC721 `ownerOf` on both NFT position managers, for an id that does not exist.
+pub(crate) const ERC721_OWNER_QUERY_NONEXISTENT: &str = "ERC721: owner query for nonexistent token";
+/// Slipstream `positions(uint256)` for an id that does not exist.
+pub(crate) const SLIPSTREAM_POSITIONS_NONEXISTENT: &str = "ID";
+/// Uniswap v3 `positions(uint256)` for an id that does not exist.
+pub(crate) const UNISWAP_V3_POSITIONS_NONEXISTENT: &str = "Invalid token ID";
+/// Uniswap v4 PositionManager (solmate ERC721) `ownerOf` for an id that does not exist.
+pub(crate) const V4_OWNER_OF_NONEXISTENT: &str = "NOT_MINTED";
+
+/// One position manager's own answers for a token id that does not exist, as
+/// `Error(string)` reasons. Each was read on Base on 2026-11-17 for a burned id and for
+/// a never-minted one (ONCHAIN_INTEGRATION.md §13).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct NftNonexistenceRule {
+    pub(crate) manager: &'static str,
+    pub(crate) positions_reason: &'static str,
+    pub(crate) owner_of_reason: &'static str,
+}
+
+/// The allow-list for the `positions()` + `ownerOf()` proof. A manager that is not
+/// listed has no rule, so a missing NFT on it fails the cycle as before: a fork of the
+/// same contract may answer alike, but that was not read. Uniswap v4 has its own proof
+/// (closed::v4_closure_verdict) and an Aero basic pool has no NFT. Pure.
+pub(crate) fn nft_nonexistence_rule(protocol: &str, manager: &str) -> Option<NftNonexistenceRule> {
+    let rule = match Protocol::parse(protocol) {
+        Some(Protocol::AeroCl) => NftNonexistenceRule {
+            manager: AERO_CL_POSITION_MANAGER_BASE,
+            positions_reason: SLIPSTREAM_POSITIONS_NONEXISTENT,
+            owner_of_reason: ERC721_OWNER_QUERY_NONEXISTENT,
+        },
+        Some(Protocol::UniswapV3) => NftNonexistenceRule {
+            manager: UNISWAP_V3_NPM_BASE,
+            positions_reason: UNISWAP_V3_POSITIONS_NONEXISTENT,
+            owner_of_reason: ERC721_OWNER_QUERY_NONEXISTENT,
+        },
+        Some(Protocol::UniswapV4) | Some(Protocol::AeroBasic) | None => return None,
+    };
+    manager
+        .trim()
+        .trim_start_matches("0x")
+        .eq_ignore_ascii_case(rule.manager.trim_start_matches("0x"))
+        .then_some(rule)
+}
+
+/// Can a CLOSED position that is flagged `is_price_source` go on supplying the NOCK/USD
+/// spot from its pool? Only where the price reads never needed the NFT. Pure.
+/// - Uniswap v4: yes. The price is StateView `getSlot0(poolId)` and the pair is the
+///   config's own currencies, checked against `poolKeys`: the same reads as for a live
+///   position (uniswap_v4::fetch_v4_closed_price_pool).
+/// - Uniswap v3 and Aero CL: no. The pool's tokens (and, for Aero CL, that the pool is
+///   the NFT's pool at all) are read from the NFT, which no longer exists. The cycle
+///   fails with a configuration message instead of pricing from an unchecked pool.
+/// - Aero basic has no NFT and is never closed.
+pub(crate) fn closed_price_source_keeps_pricing(protocol: &str) -> bool {
+    match Protocol::parse(protocol) {
+        Some(Protocol::UniswapV4) => true,
+        Some(Protocol::UniswapV3) | Some(Protocol::AeroCl) | Some(Protocol::AeroBasic) | None => false,
+    }
+}
+
+/// A closed position's label, from its config entry alone: the venue as a live label
+/// names it, the pair when config states it (Uniswap v4 lists its currencies), the NFT
+/// id and the config id. No fee tier and no amounts: those were reads of the live
+/// position. Pure.
+pub(crate) fn closed_position_label(cfg: &PositionConfig) -> String {
+    let venue = match Protocol::parse(&cfg.protocol) {
+        Some(Protocol::UniswapV4) => "v4",
+        Some(Protocol::UniswapV3) => "v3",
+        Some(Protocol::AeroCl) => "Aero CL",
+        Some(Protocol::AeroBasic) => "Aero",
+        None => cfg.protocol.as_str(),
+    };
+    let pair = match (cfg.currency0.as_deref().map(token_info), cfg.currency1.as_deref().map(token_info)) {
+        (Some(Ok(t0)), Some(Ok(t1))) => format!(" {}/{}", t0.symbol, t1.symbol),
+        _ => String::new(),
+    };
+    format!("{venue}{pair} #{} ({})", cfg.nft_id, cfg.id)
+}
+
+/// The pool a closed position's config entry names, lowercase. Pure.
+pub(crate) fn closed_position_pool(cfg: &PositionConfig) -> Option<String> {
+    let named = match Protocol::parse(&cfg.protocol) {
+        Some(Protocol::UniswapV4) => cfg.pool_id.as_deref(),
+        Some(Protocol::UniswapV3) | Some(Protocol::AeroCl) | Some(Protocol::AeroBasic) | None => cfg.pool_address.as_deref(),
+    };
+    named.map(str::trim).filter(|p| !p.is_empty()).map(str::to_lowercase)
+}
+
 /// Stable identifier shared by config rules and RawPosition.position_id.
 pub(crate) fn position_key(c: &PositionConfig) -> String {
     match Protocol::parse(&c.protocol) {

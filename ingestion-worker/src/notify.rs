@@ -363,6 +363,9 @@ pub(crate) fn remember_range_top_reading(reading: Option<RangeTopReading>) {
 ///   say it, so the sentence is not repeated.
 /// These sentences go before the directive's details: Pushover cuts a message at 1024
 /// characters, and LP rebuild details alone can be longer than that.
+/// The cycle calls `cycle_notification_with_closed` (#144); this is the same decision
+/// with no position closing, which is what the tests of #89 pin.
+#[cfg(test)]
 pub(crate) fn cycle_notification(
     prev_action: Option<&str>,
     next_action: &str,
@@ -372,8 +375,28 @@ pub(crate) fn cycle_notification(
     range_exit: Option<&str>,
     cockpit_url: Option<&str>,
 ) -> Option<String> {
+    cycle_notification_with_closed(prev_action, next_action, next_details, prev_plan, next_plan, range_exit, &[], cockpit_url)
+}
+
+/// `cycle_notification` plus the positions that closed between the two cycles (#144):
+/// `closed` holds one sentence per position that was live in the previous snapshot and
+/// is closed in this one (closed::closed_position_notes). Each is a fact of its own and
+/// notifies on its own, like a plan completing: once, at the transition. With no closed
+/// sentence the text is exactly `cycle_notification`'s.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn cycle_notification_with_closed(
+    prev_action: Option<&str>,
+    next_action: &str,
+    next_details: &str,
+    prev_plan: Option<&AccumulationPlanStatus>,
+    next_plan: Option<&AccumulationPlanStatus>,
+    range_exit: Option<&str>,
+    closed: &[String],
+    cockpit_url: Option<&str>,
+) -> Option<String> {
     let changed = directive_changed(prev_action, next_action);
     let mut notes: Vec<String> = Vec::new();
+    notes.extend(closed.iter().cloned());
     notes.extend(plan_completion_note(prev_plan, next_plan));
     if !next_action.starts_with("RANGE EXIT FLASHPOINT") {
         notes.extend(range_exit.map(str::to_string));
@@ -434,7 +457,7 @@ pub(crate) fn notification_status_body(cfg: &NotificationConfig) -> serde_json::
         "channels": channels,
         "cockpit_url": cockpit_url,
         "cockpit_url_note": cockpit_url_note(cockpit_url),
-        "fires_on": "A change of the directive between two cycles, an accumulation plan completing, and spot reaching the top of the price-source range (a range exit). Never on a repeat, and never between HOLD variants.",
+        "fires_on": "A change of the directive between two cycles, an accumulation plan completing, spot reaching the top of the price-source range (a range exit), and a tracked position closing (its NFT no longer exists). Never on a repeat, and never between HOLD variants.",
         "test_cooldown_seconds": TEST_SEND_COOLDOWN_SECONDS,
     })
 }

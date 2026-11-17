@@ -46,6 +46,17 @@ Everything comes from `ingestion-worker/config.yaml`:
   [`ONCHAIN_INTEGRATION.md`](ONCHAIN_INTEGRATION.md) §5; Aero CL is §8. An Aero CL position
   is counted only after you add it to `positions:` (example in `config.yaml.example`):
   until then it is not tracked and the totals leave it out.
+  When you withdraw a tracked NFT position in the wallet app its NFT is burned. NockNock
+  then reports the entry as **closed** (#144): listed apart from the live positions,
+  counted in no total, with one notification, while ingestion goes on. Remove the entry
+  when you like. Only proof counts (two reads at one current block that both give the
+  position manager's own "no such token" answer,
+  [`ONCHAIN_INTEGRATION.md`](ONCHAIN_INTEGRATION.md) §13); a node that does not answer,
+  or one that is more than two minutes behind the chain, still fails the cycle, and a
+  mistyped or missing `nft_id` reads as closed too.
+  If the closed entry is the price source, a Uniswap v4 entry's pool keeps supplying the
+  price until you flag another position; a Uniswap v3 or Aero CL one fails the cycle and
+  asks you to flag another.
 - AERO, the fourth pillar (since v0.6.0, [`ONCHAIN_INTEGRATION.md`](ONCHAIN_INTEGRATION.md)
   §9), needs no switch. Every cycle reads the wallet's AERO (counted in the total, like
   gas), the unclaimed AERO of each staked Aero position (an `aerodrome` position needs
@@ -230,7 +241,12 @@ http://localhost:8080/health
 ```
 
 If the first ingestion cycle fails (a placeholder key, no price source, an NFT the wallet
-does not own), the dashboard and `/v1/snapshot/latest` show the last ingestion error.
+does not own), the dashboard and `/v1/snapshot/latest` show the last ingestion error. An
+NFT that does not exist at all (withdrawn and burned, or a mistyped `nft_id`) is listed
+under "Closed positions" and does not fail the cycle (#144), with three exceptions that
+still do: the entry is a Uniswap v3 or Aero CL price source (`is_price_source: true`),
+every configured position is closed (for example, it is your only entry), or its
+position manager is not one of the three whose answers were verified.
 
 ### Running in Persistent Background with Tmux (Recommended)
 

@@ -44,6 +44,8 @@ import { LEDGER_TITLE, ledgerView } from './ledger.ts';
 import { aeroRewardsSentence, aeroStatSubtitle, compositionAeroText, compositionResidualLabel } from './aero.ts';
 import { AeroPillarLines, PositionAeroLine } from './components/AeroPillar.tsx';
 import { PositionEarningsLines, hasPositionEarnings } from './components/CollectibleEarnings.tsx';
+import { ClosedPositionsCard } from './components/ClosedPositions.tsx';
+import { priceSourceIsClosedText } from './closedPositions.ts';
 import {
   LP_FEE_COLOR,
   LP_FEE_SERIES_NAME,
@@ -454,6 +456,9 @@ function Dashboard() {
             <div style={styles.positionCardMeta}>No tracked positions configured.</div>
           )}
         </div>
+        {/* Closed positions (#144): configured positions whose NFT no longer exists.
+            Stated beside the live cards, never as one, and counted nowhere. */}
+        <ClosedPositionsCard data={rawData} />
       </section>
 
       {/* Storyboard Canvas — Real Charts (structural channel panel appears when band data exists) */}
@@ -591,6 +596,13 @@ function Dashboard() {
               // Brackets are index-aligned with positions; the price source is not
               // necessarily the first one.
               const src = positionsList.find((p: any) => p.is_price_source);
+              // #144: the spot can come from the pool of a closed Uniswap v4 entry.
+              // There is then no price-source position and no range to state, and
+              // another position's bracket must not stand in for it.
+              const closedSource = priceSourceIsClosedText(rawData, positionsList);
+              if (closedSource) {
+                return <span style={{ color: '#8b949e' }}>{closedSource}</span>;
+              }
               const srcIndex = src ? positionsList.indexOf(src) : 0;
               const bracket = metrics?.tick_bracket_hypervisor?.brackets?.[srcIndex];
               if (bracket?.full_range) {

@@ -1039,6 +1039,7 @@ fn test_after_buying_text_follows_the_detection_state() {
 fn test_check_time_does_not_enter_the_state_hash() {
     let ctx = PlanContext { cfg: Some(plan_cfg()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-16T04:00:00Z") };
     let data = |detection: &FillDetection| SnapshotData {
+        closed_positions: vec![],
         wallet_balances: vec![],
         positions: vec![],
         pool_mechanics: vec![],

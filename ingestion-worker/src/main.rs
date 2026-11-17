@@ -74,6 +74,10 @@ mod rewards;
 use rewards::*;
 mod reward_text;
 use reward_text::*;
+mod closed;
+use closed::*;
+mod closed_text;
+use closed_text::*;
 
 // ============================================================
 // Configuration
@@ -509,7 +513,68 @@ struct SnapshotData {
     pool_mechanics: Vec<PoolMechanic>,
     concentrated_liquidity: Vec<ConcentratedLiquidity>,
     contract_fees: Vec<ContractFee>,
+    /// Configured positions whose NFT provably no longer exists (2.8.0, #144). Never in
+    /// `positions`, and nothing of them is in any total. Absent when there are none, so
+    /// a snapshot without a closed position keeps the bytes it had.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    closed_positions: Vec<ClosedPosition>,
     derived_metrics: DerivedMetrics,
+}
+
+/// A configured position that is closed (2.8.0, #144): its NFT does not exist on its
+/// position manager, proven by two reads of the same cycle, made at one current block,
+/// that both gave the contract's own "no such token" answer. It carries no amount, no value and no fee
+/// figure: nothing was read from it, and its last known value is not a current one.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+struct ClosedPosition {
+    /// The entry's `id` in config.yaml: the entry that can be removed.
+    config_id: String,
+    /// The same key a live position carries in `positions[].position_id`.
+    position_id: String,
+    protocol: String,
+    network: String,
+    nft_id: u64,
+    /// The pool the config entry names (pool_address, or the v4 pool_id). Null when it names none.
+    #[serde(default)]
+    pool_id: Option<String>,
+    /// The contract the NFT was read on.
+    position_manager: String,
+    /// Built from the config entry alone: the venue, the pair when config states it, the
+    /// NFT id and the config id. No fee tier: that was a read of the live position.
+    label: String,
+    /// Always "closed".
+    status: String,
+    /// The fact, in words: the NFT does not exist on the manager (withdrawn and burned,
+    /// or a mistyped nft_id; the two answer alike).
+    reason: String,
+    /// The reads that proved it, with the raw answers.
+    evidence: Vec<ClosedEvidence>,
+    /// When this worker first recorded the position as closed: the time of the first
+    /// cycle that listed it, carried forward from the previous snapshot. It is not the
+    /// time of the burn. Null when it cannot be stated.
+    #[serde(default)]
+    first_seen_closed_at: Option<String>,
+    /// True when this entry is flagged `is_price_source` and its pool still supplies the
+    /// NOCK/USD spot (Uniswap v4 only). Another position must be flagged before the
+    /// entry is removed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    supplies_spot_price: bool,
+}
+
+/// One read that proved a position closed (#144).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+struct ClosedEvidence {
+    /// The call's signature, e.g. `ownerOf(uint256)`.
+    call: String,
+    /// The contract it was sent to.
+    contract: String,
+    /// `reverted` or `returned`.
+    outcome: String,
+    /// The answer in words: `Error("ERC721: owner query for nonexistent token")`, or
+    /// what the returned data says.
+    answer: String,
+    /// The raw revert data or returned data, hex with `0x`.
+    raw: String,
 }
 
 /// One cycle's live reads. Built only by fetch_raw_data (and test fixtures); it is never
@@ -552,6 +617,9 @@ struct RawOnChainData {
     /// unclaimed AERO of each staked Aero position. The default (test fixtures that do
     /// not set it) is "nothing read": every AERO field is then null, never zero.
     aero: AeroReads,
+    /// Configured positions proven closed this cycle (#144). They are NOT in `positions`
+    /// and no other field of this struct knows them.
+    closed_positions: Vec<ClosedPosition>,
 }
 
 /// One cycle's AERO reads (v0.6.0, #93). Built by fetch_aero_reads and test fixtures.
@@ -1368,10 +1436,18 @@ struct GlobalStatus {
     /// A statement of what is collectible; NOT in total_portfolio_usd.
     #[serde(default)]
     total_collectible_usd: Option<String>,
+    /// How many configured positions are closed (2.8.0, #144): the length of
+    /// `data.closed_positions`. Absent when none is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    closed_positions_count: Option<u32>,
+    /// One sentence naming the closed positions, that they are in no total, and that
+    /// their config entries can be removed (2.8.0, #144). Absent when none is closed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    closed_positions_note: Option<String>,
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
-const SNAPSHOT_SPEC_VERSION: &str = "2.7.0";
+const SNAPSHOT_SPEC_VERSION: &str = "2.8.0";
 
 /// The gas (wallet ETH + WETH) and ETH pillar figures, each None when it cannot be
 /// measured: unread wallet balances or an unpriced ETH. Never a zero stand-in.
@@ -2014,3 +2090,5 @@ mod tests_cost_basis;
 mod tests_notify;
 #[cfg(test)]
 mod tests_rewards;
+#[cfg(test)]
+mod tests_closed;

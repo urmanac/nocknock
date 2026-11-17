@@ -68,6 +68,8 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
     };
     // Cost basis (issue #98): the same lines in both MCP transports (cost_basis_text.rs).
     let cost_basis = cost_basis_lines(data);
+    // Closed positions (issue #144): stated, never counted. Empty when there are none.
+    let closed = closed_positions_lines(data);
 
     format!(
         "📈 NockNock Sovereign Portfolio State\n\
@@ -79,6 +81,7 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
          • Gas held (wallet ETH+WETH): {gas}\n\
          {aero}\n\
          {collectible}\
+         {closed}\
          • High-Water Mark: {hwm}\n\
          {cost_basis}\n\
          • Tactical Directive: {advice}"
@@ -104,6 +107,9 @@ pub fn format_shot_advice_text(data: &serde_json::Value) -> String {
         .unwrap_or_else(|| "unavailable".to_string());
     // Gauge rewards and the total (issue #142). "Uncollected Claimable Fees" stays LP fees.
     let collectible = collectible_advice_lines(data);
+    // Closed positions (issue #144): stated beside the directive, which they do not
+    // change. Empty when there are none.
+    let closed = closed_positions_lines(data);
 
     format!(
         "🎯 Tactical Shot Advice Engine\n\
@@ -113,6 +119,7 @@ pub fn format_shot_advice_text(data: &serde_json::Value) -> String {
          • Uncollected Claimable Fees: {claimable_usd}\n\
          • Net of two claims' gas: {gas_delta}\n\
          {collectible}\
+         {closed}\
          • Harvest rule: {HARVEST_RULE_TEXT}"
     )
 }
@@ -152,10 +159,13 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
         let g = |k: &str| ex.get(k).and_then(|x| x.as_str()).unwrap_or("n/a");
         lp_line.push_str(&format!("\n   ✗ {}: {}", g("label"), g("reason")));
     }
+    // Closed positions (issue #144): after the rebuild lines, which list every tracked
+    // position and no closed one. Empty when there are none.
+    let closed = closed_positions_trailer(data);
     let plan = data.pointer("/derived_metrics/accumulation_plan").filter(|p| !p.is_null());
     let Some(_) = plan else {
         return format!(
-            "🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n{lp_line}"
+            "🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n{lp_line}{closed}"
         );
     };
     let n = |k: &str| plan.and_then(|p| p.get(k)).and_then(|x| x.as_u64()).unwrap_or(0);
@@ -174,7 +184,7 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
          • Lump-sum counterfactual (whole budget at first fill price): {} NOCK\n\
          • Constraint: {}\n\
          • Protected cash reserve: ${}\n\
-         {detection}{quotes}{lp_line}",
+         {detection}{quotes}{lp_line}{closed}",
         s(plan, "plan_id"), s(plan, "venue"), s(plan, "status"),
         if s(plan, "status") == "complete" {
             "none (plan complete)".to_string()

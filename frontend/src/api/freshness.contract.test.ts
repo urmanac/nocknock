@@ -181,8 +181,16 @@ describe('Freshness Contract', () => {
       expect(parseFloat(p.tokens_owed_1)).toBeGreaterThanOrEqual(0);
       expect(typeof p.in_range).toBe('boolean');
     }
-    // Exactly one designated price-source position feeds the NOCK/USD spot.
-    expect(data.positions.filter((p: any) => p.is_price_source).length).toBe(1);
+    // Exactly one designated price source feeds the NOCK/USD spot: a live position, or
+    // (2.8.0, #144) the pool of a closed Uniswap v4 entry, which is not a position.
+    const liveSources = data.positions.filter((p: any) => p.is_price_source).length;
+    const closedSources = (data.closed_positions ?? []).filter((c: any) => c.supplies_spot_price === true).length;
+    expect(liveSources + (liveSources === 0 ? closedSources : 0)).toBe(1);
+    // A closed position is never also a live one.
+    for (const c of data.closed_positions ?? []) {
+      expect(c.status).toBe('closed');
+      expect(data.positions.some((p: any) => p.position_id === c.position_id)).toBe(false);
+    }
     // ConcentratedLiquidity is deprecated: worker emits an empty array.
     expect(Array.isArray(data.concentrated_liquidity)).toBe(true);
     expect(data.concentrated_liquidity.length).toBe(0);
@@ -192,7 +200,7 @@ describe('Freshness Contract', () => {
     expect(ag.positions_nock.length).toBe(data.positions.length);
     expect(ag.tranche_1_nock).toBeUndefined();
     // Meta version: the current snapshot spec (specs/core/snapshot.yaml info.version).
-    expect(latestSnapshot!.meta.version).toBe('2.7.0');
+    expect(latestSnapshot!.meta.version).toBe('2.8.0');
   });
 
   it('2.3.0 pillars partition the total and the wallet reports its gas', () => {

@@ -637,6 +637,10 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             collectible_rewards_usd: collectible.rewards_usd.clone(),
             collectible_rewards_note: collectible.note.clone(),
             total_collectible_usd: collectible.total_usd.clone(),
+            // Closed positions (#144) are stated here and counted nowhere above: they
+            // are not in raw.positions, which every figure of this function is built from.
+            closed_positions_count: (!raw.closed_positions.is_empty()).then_some(raw.closed_positions.len() as u32),
+            closed_positions_note: closed_positions_note(&raw.closed_positions),
         },
         asset_aggregation_series: AssetAggregationSeries {
             time_points: vec![now_str.clone()],
