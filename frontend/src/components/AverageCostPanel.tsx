@@ -94,6 +94,18 @@ export function CostChartSvg({ chart, width, height }: { chart: CostChart; width
         width={70}
       />
       <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+      {/* Backfilled candles: one lighter region and one caption per run (issue #137). */}
+      {chart.backfill.map((b) => (
+        <ReferenceArea
+          key={`backfill-${b.start}`}
+          x1={b.start}
+          x2={b.end}
+          fill="#a78bfa"
+          fillOpacity={0.06}
+          strokeOpacity={0}
+          label={{ value: b.caption, fill: '#a78bfa', fontSize: 10, position: 'insideBottom' }}
+        />
+      ))}
       {chart.gaps.map((g) => (
         <ReferenceArea
           key={`gap-${g.gapStart}`}
@@ -102,7 +114,7 @@ export function CostChartSvg({ chart, width, height }: { chart: CostChart; width
           fill="#64748b"
           fillOpacity={0.15}
           strokeOpacity={0}
-          label={{ value: g.time, fill: '#94a3b8', fontSize: 10, position: 'insideTop' }}
+          label={g.labelled ? { value: g.time, fill: '#94a3b8', fontSize: 10, position: 'insideTop' } : undefined}
         />
       ))}
       <Line

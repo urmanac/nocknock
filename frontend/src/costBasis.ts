@@ -20,8 +20,8 @@ import {
   GAP_CADENCE_MULTIPLIER,
   formatGapDuration,
   finiteOrNull,
+  gapThresholdMs,
   timeMs,
-  toChartSeries,
   isGapRow,
   type GapRow,
 } from './timeline.ts';
@@ -324,14 +324,123 @@ export interface FillMarker {
   txHash: string;
 }
 
+/** A real gap in the stored spot line. Only some carry a label, so none overprint. */
+export type CostGap = GapRow & { labelled: boolean };
+
+/** A run of backfilled third-party candles, captioned once (issue #137). */
+export interface BackfillStretch {
+  start: number;
+  end: number;
+  caption: string;
+}
+
+/** Labelled gaps closer than this share of the x range to the last label stay unlabelled. */
+export const GAP_LABEL_MIN_FRACTION = 0.12;
+
+/**
+ * The candle period of the backfilled points: the median spacing between consecutive
+ * backfilled points (3,600,000 for hourly candles). Null with fewer than two.
+ */
+export function candlePeriodMs(rows: SpotRow[]): number | null {
+  const sorted = rows.filter((r) => Number.isFinite(r.t)).sort((a, b) => a.t - b.t);
+  const spacings: number[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].backfilled && sorted[i - 1].backfilled) spacings.push(sorted[i].t - sorted[i - 1].t);
+  }
+  const positive = spacings.filter((d) => d > 0).sort((a, b) => a - b);
+  if (positive.length === 0) return null;
+  return positive[Math.floor((positive.length - 1) / 2)];
+}
+
+function candleCaption(periodMs: number | null): string {
+  if (periodMs === 3_600_000) return 'hourly third-party candles';
+  if (periodMs === 86_400_000) return 'daily third-party candles';
+  return periodMs ? `third-party candles every ${formatGapDuration(periodMs)}` : 'third-party candles';
+}
+
+/**
+ * The stored spot points with breaks only at real gaps (issue #137). Pure.
+ *
+ * A gap is measured against the cadence of the points on either side: worker reads
+ * come one bucket apart, backfilled candles one candle period apart. Between two
+ * worker reads the rule is the dashboard's (more than 2.5 buckets); when either side is
+ * a backfilled candle it is more than 2.5 candle periods. So consecutive hourly candles
+ * are one stretch, captioned once, and only real holes get a break and count as gaps.
+ * Gap labels are thinned so none overprints another: a gap starting within
+ * `GAP_LABEL_MIN_FRACTION` of the x range after the last labelled one is shaded but
+ * not labelled. Rows with no real neighbour are marked `isolated` (drawn as dots).
+ */
+export function spotChartSeries(
+  spotRows: SpotRow[],
+  bucketSeconds: number | null,
+  domain?: [number, number],
+): { rows: Array<SpotRow | CostGap>; gaps: CostGap[]; backfill: BackfillStretch[] } {
+  const sorted = spotRows.filter((r) => Number.isFinite(r.t)).sort((a, b) => a.t - b.t);
+  const readThreshold = gapThresholdMs(bucketSeconds);
+  const period = candlePeriodMs(sorted);
+  const candleThreshold = period ? Math.max(readThreshold, period * GAP_CADENCE_MULTIPLIER) : readThreshold;
+  const span = domain ? domain[1] - domain[0] : sorted.length > 1 ? sorted[sorted.length - 1].t - sorted[0].t : 0;
+  const minLabelGap = span > 0 ? span * GAP_LABEL_MIN_FRACTION : 0;
+
+  const rows: Array<SpotRow | CostGap> = [];
+  const gaps: CostGap[] = [];
+  let lastLabel: number | null = null;
+  sorted.forEach((row, i) => {
+    if (i > 0) {
+      const prev = sorted[i - 1];
+      const dt = row.t - prev.t;
+      const threshold = prev.backfilled || row.backfilled ? candleThreshold : readThreshold;
+      if (Number.isFinite(dt) && dt > threshold) {
+        const labelled = lastLabel === null || prev.t - lastLabel >= minLabelGap;
+        if (labelled) lastLabel = prev.t;
+        const gap: CostGap = {
+          gap: true,
+          t: prev.t + Math.floor(dt / 2),
+          time: `no stored price for ${formatGapDuration(dt)}`,
+          gapStart: prev.t,
+          gapEnd: row.t,
+          gapMs: dt,
+          labelled,
+        };
+        rows.push(gap);
+        gaps.push(gap);
+      }
+    }
+    rows.push(row);
+  });
+  rows.forEach((r, i) => {
+    if (isGapRow(r)) return;
+    const prev = rows[i - 1];
+    const next = rows[i + 1];
+    r.isolated = !((prev !== undefined && !isGapRow(prev)) || (next !== undefined && !isGapRow(next)));
+  });
+
+  // One caption per unbroken run of two or more backfilled candles.
+  const backfill: BackfillStretch[] = [];
+  let run: SpotRow[] = [];
+  const flush = () => {
+    if (run.length >= 2) backfill.push({ start: run[0].t, end: run[run.length - 1].t, caption: candleCaption(period) });
+    run = [];
+  };
+  for (const r of rows) {
+    if (isGapRow(r) || !r.backfilled) flush();
+    else run.push(r);
+  }
+  flush();
+  return { rows, gaps, backfill };
+}
+
 export interface CostChart {
   /** x domain in epoch ms: the range the worker served. */
   domain: [number, number];
   /** Evenly spaced x ticks across the domain, ends included. */
   ticks: number[];
   /** Stored spot points with break rows between runs. Empty when there is none. */
-  spot: Array<SpotRow | GapRow>;
-  gaps: GapRow[];
+  spot: Array<SpotRow | CostGap>;
+  /** Real gaps only (issue #137); a backfilled stretch is not a gap. */
+  gaps: CostGap[];
+  /** Runs of backfilled candles, one caption each. */
+  backfill: BackfillStretch[];
   /** Running average of the verified buys, as a step line carried to the end of the range. */
   planAvg: StepRow[];
   /** Blended whole-stack average from the opening basis on; empty unless configured. */
@@ -388,10 +497,9 @@ export function buildCostChart(series: CostBasisSeries | null | undefined): Cost
     if (t === null || v === null || v <= 0) continue; // an unreadable point is left out, never drawn as 0
     spotRows.push({ t, spot: v, backfilled: p.is_backfilled === true });
   }
-  // toChartSeries breaks at 2.5x the cadence it is given; here the cadence is the bucket.
-  const spotSeries = toChartSeries(spotRows, bucket);
-  const gaps = spotSeries.gaps.map((g) => ({ ...g, time: `no stored price for ${formatGapDuration(g.gapMs)}` }));
-  const spot = spotSeries.rows.map((r) => (isGapRow(r) ? gaps[spotSeries.gaps.indexOf(r)] : r));
+  // Breaks at 2.5x the cadence of the points on either side: the bucket for worker
+  // reads, the candle period for backfilled candles (issue #137).
+  const { rows: spot, gaps, backfill } = spotChartSeries(spotRows, bucket, [from, to]);
 
   const fills: FillMarker[] = [];
   const planChanges: StepRow[] = [];
@@ -441,6 +549,7 @@ export function buildCostChart(series: CostBasisSeries | null | undefined): Cost
     ticks: evenTicks(from, to),
     spot,
     gaps,
+    backfill,
     planAvg,
     wholeAvg,
     fills,
