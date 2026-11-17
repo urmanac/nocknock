@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security — CI hardened for outside contributions (#146)
+- Every action in `ci.yml` is pinned to a full commit SHA; the workflow declares read-only
+  permissions at the top; the release job takes the tag name from the environment and
+  refuses anything that is not a plain version tag.
+- Repository settings, changed by the operator: every pull request from an outside
+  contributor waits for approval before CI runs, every time; workflows may no longer
+  approve pull request reviews.
+- The audit, the decisions and the rules for reviewing an outside pull request are in
+  `docs/kb/ci-security-audit-2026-11-17.md` and AGENTS.md section 14.
 ### Fixed — a withdrawn position reports as closed instead of stalling ingestion (#144)
 On 2026-11-17 the operator withdrew the Aero CL position in the Aero app (NFT #2914490,
 burned in Base block 58637717). From the next cycle every ingestion cycle failed, and

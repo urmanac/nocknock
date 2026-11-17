@@ -117,15 +117,23 @@ This guide captures the operational rules, environment quirks, toolchain configu
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
     ```
-- **Pinned Modern Action Versions & Runners**:
+- **Pinned Action Versions & Runners**:
   - Runners: Pin `runs-on: ubuntu-24.04` to eliminate `ubuntu-latest` migration notice annotations.
-  - Checkout: `actions/checkout@v7`
-  - Upload Artifacts: `actions/upload-artifact@v7`
-  - Download Artifacts: `actions/download-artifact@v8`
-  - Setup Node: `actions/setup-node@v7` (with `node-version: 22`)
-  - GitHub Release: `softprops/action-gh-release@v3`
+  - Every `uses:` is pinned to a **full commit SHA**, with the version it was tagged as in a
+    trailing comment (since 2026-11-17, #146). Never add or bump an action by tag or branch:
+    resolve the tag to its commit (`git ls-remote https://github.com/<owner>/<repo> 'refs/tags/<tag>^{}'`)
+    and pin that. Versions in use:
+    - Checkout: `actions/checkout` v7
+    - Upload Artifacts: `actions/upload-artifact` v7
+    - Download Artifacts: `actions/download-artifact` v8
+    - Setup Node: `actions/setup-node` v7 (with `node-version: 22`)
+    - Rust toolchain: `dtolnay/rust-toolchain` (pinned commit of its `stable` branch, `toolchain: stable`)
+    - Rust cache: `Swatinem/rust-cache` v2
+    - GitHub Release: `softprops/action-gh-release` v3
+  - `ci.yml` declares `permissions: contents: read` at the top; only `create-release` asks for more.
 - **Release Automation**:
-  - The `create-release` job runs automatically on tag pushes (`v*`).
+  - The `create-release` job runs automatically on tag pushes (`v*`). The tag must be a plain
+    version (`vX.Y.Z`); any other tag name stops the job.
   - Parses `CHANGELOG.md` via `awk` to extract version-specific release notes.
   - Attaches 4 artifacts:
     1. `nocknock_brain.wasm`
@@ -262,3 +270,24 @@ charts restart. See
   root) and never copy the key off the host. See `DEPLOYMENT.md` §7.
 - Other hosts (`netmoom`, `metnoom`) reject the workstation's SSH key; nothing runs there.
 
+---
+
+## 14. Outside Contributions
+
+The first pull request from outside arrived on 2026-11-17 (#141). The audit it prompted is
+[`docs/kb/ci-security-audit-2026-11-17.md`](docs/kb/ci-security-audit-2026-11-17.md); read
+it before touching an outside pull request.
+
+- **Every outside pull request waits for approval before CI runs, every time** (repository
+  setting `all_external_contributors`). Approving the run, commenting on the pull request
+  and merging it are the operator's decisions: an agent does none of them without the
+  operator's word for that pull request, and an agent's read does not count as a review.
+- **Read before running.** Read the whole diff before the CI run is approved and again
+  before merging. Never run a fork's code on the workstation or on chudmax before reading
+  it. Read every changed line of `Makefile`, `deploy/`, `.github/`, lockfiles, `build.rs`
+  and scripts; a lockfile change needs a stated reason.
+- **Verify, do not trust.** A pull request's description is a claim. Reproduce the defect
+  and test the fix.
+- **Be kind and curious.** The project is AI-forward and does not reject a contribution for
+  being automated. Say what the evidence shows about who sent it, and ask how they found
+  the project.
