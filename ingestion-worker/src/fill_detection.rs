@@ -557,16 +557,20 @@ pub(crate) fn open_offer_notice(ps: &AccumulationPlanStatus) -> Option<String> {
     })
 }
 
-/// Put the open-offer notice in front of whatever advice was chosen, unless the text
-/// already carries it (the plan's own arms do). An arm that outranks the plan (an
-/// overextension, a range exit, a due harvest) or follows it (a finished plan) would
-/// otherwise say nothing about a swap that is waiting for an answer. Details only: the
-/// action title is never touched. Pure.
+/// The final advice text, led by the open-offer notice when the plan has one (issue
+/// #118). Every directive says it, first and once: a notice found further in (an arm
+/// that wrapped the plan's text behind an LP rebuild or a floor deficit) is moved to
+/// the front (issue #135), so a push cut at 1024 characters keeps it. Pure.
 pub(crate) fn lead_with_open_offer_notice(ps: Option<&AccumulationPlanStatus>, details: String) -> String {
-    match ps.and_then(open_offer_notice) {
-        Some(notice) if !details.contains(&notice) => format!("{notice} {details}"),
-        _ => details,
+    let Some(notice) = ps.and_then(open_offer_notice) else {
+        return details;
+    };
+    if details.starts_with(&notice) && details.matches(&notice).count() == 1 {
+        return details;
     }
+    let rest = details.replace(&notice, "");
+    let rest = rest.split_whitespace().collect::<Vec<_>>().join(" ");
+    if rest.is_empty() { notice } else { format!("{notice} {rest}") }
 }
 
 /// What to do after buying, given whether detection is working this cycle. Without a

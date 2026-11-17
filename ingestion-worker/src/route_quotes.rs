@@ -823,15 +823,23 @@ pub(crate) fn tranche_to_quote(enabled: bool, plan: Option<&AccumulationPlanStat
 /// A sentence pointing from the due-tranche advice to the quotes. Added only to the
 /// plan's own due-tranche advice, whenever quotes were asked for (`quotes` is Some). It
 /// carries no number and does not depend on what the quoters answered: the advice text
-/// is part of the state hash, and a quote coming or going must not move it. Pure.
+/// is part of the state hash, and a quote coming or going must not move it.
+///
+/// It sits right after the plan's due-tranche sentence ("Buy $X of NOCK …", with its
+/// sizing note), before the plan's progress sentence (`Plan "<id>": …`), so "this
+/// amount" is the tranche and never the LP deposit amounts an LP rebuild bias appends
+/// after the plan's text (issue #135). Without a progress sentence it goes at the end.
+/// Pure.
 pub(crate) fn with_route_quote_pointer(action: &str, details: String, quotes: Option<&RouteQuotes>) -> String {
     const POINTER: &str =
         "Read-only route quotes for this amount on Aero and on Uniswap, or why a venue could not be quoted, are listed with the plan.";
     let requested = quotes.is_some();
-    if requested && action.contains("DCA TRANCHE DUE") && !details.contains(POINTER) {
-        format!("{details} {POINTER}")
-    } else {
-        details
+    if !requested || !action.contains("DCA TRANCHE DUE") || details.contains(POINTER) {
+        return details;
+    }
+    match details.find(" Plan \"") {
+        Some(at) => format!("{} {POINTER}{}", &details[..at], &details[at..]),
+        None => format!("{details} {POINTER}"),
     }
 }
 

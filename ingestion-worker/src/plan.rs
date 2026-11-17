@@ -211,10 +211,6 @@ pub(crate) fn plan_advice(ps: &AccumulationPlanStatus, spot_price: f64) -> (Stri
             ps.plan_id,
             PLAN_LEDGER_UNREADABLE_REASON.trim_end_matches(", so plan progress is unknown")
         );
-        let details = match open_offer_notice(ps) {
-            Some(notice) => format!("{notice} {details}"),
-            None => details,
-        };
         return ("DCA BLOCKED (ledger unreadable)".to_string(), details);
     }
     let progress = format!(
@@ -290,12 +286,10 @@ pub(crate) fn plan_advice(ps: &AccumulationPlanStatus, spot_price: f64) -> (Stri
             ),
         ),
     };
-    // A detected swap that is not counted yet leads the text (issue #118). Only the
-    // details change: the notifier compares action titles, so no notification fires.
-    match open_offer_notice(ps) {
-        Some(notice) => (action, format!("{notice} {details}")),
-        None => (action, details),
-    }
+    // A detected swap that is not counted yet (issue #118) is not written here: the
+    // directive engine leads the final text with it once, whichever arm wraps this one
+    // (lead_with_open_offer_notice; issue #135).
+    (action, details)
 }
 
 /// Fire-and-forget directive-transition notifications (issue #28). Delivery
