@@ -5,13 +5,13 @@ One entry per working session, newest first. Longer sessions keep their full log
 
 | Dates | Agent | Releases | Log |
 |---|---|---|---|
-| 2026-11-17 | Claude (Fable 5.2) | none yet: #142 open as a pull request | [The Aero CL position goes live; gauge rewards as collectible earnings](docs/kb/session-2026-11-17-aero-cl-collectible-rewards.md) |
+| 2026-11-17 | Claude (Fable 5.2) | none tagged: #142 merged as PR #143 and deployed to chudmax from `main`; #144 fix on a local branch | [The Aero CL position goes live; gauge rewards as collectible earnings; the withdrawal that stalled ingestion](docs/kb/session-2026-11-17-aero-cl-collectible-rewards.md) |
 | 2026-11-14 (evening) → 2026-11-16 | Claude (Opus 5.5, then Fable 5.2) | v0.5.2, v0.5.3, v0.8.0 (the v0.6.0–v0.8.0 stack, PRs #120–#126) | [v0.5.2, v0.5.3, and v0.8.0: the v0.6.0–v0.8.0 stack](docs/kb/session-2026-11-15-overnight-stack.md) |
 | 2026-11-14 (afternoon) | Claude (Fable 5.2, then Opus 5.5) | none: planning | [Planning v0.5.1 and v0.5.2, lore, the mining reply](docs/kb/session-2026-11-14-planning-lore-mining.md) |
 | 2026-11-13 → 2026-11-14 | Claude (Opus 5.5, then Fable 5.2) | v0.4.0, v0.5.0 | [On-prem deployment, DCA plan, LP guidance, Aerodrome tranche](docs/kb/session-2026-11-13-chudmax-dca-aerodrome.md) |
 | 2026-10-10 | pi → antigravity (Gemini) | v0.1.0 | Below |
 
-**Headline of the latest session:** the Aero CL position is tracked on chudmax, the operator's first AERO claim is in the harvest ledger, and gauge rewards are reported as collectible earnings in an open pull request (#142).
+**Headline of the latest session:** the operator's first AERO claim is in the harvest ledger, and gauge rewards are reported as collectible earnings (#142, merged as PR #143 and deployed on 2026-11-17). During that deploy the operator withdrew the Aero CL position (NFT #2914490, burned in Base block 58637717 at 12:18:39Z), and every ingestion cycle failed until its config entry was commented out by hand: issue #144. Its fix, which reports a withdrawn position as closed and keeps ingesting, is on a local branch and is not yet merged or deployed.
 
 - **Two patches are planned:**
   - **v0.5.1, "Honest numbers":** due before the DCA plan completes around 2026-11-18,

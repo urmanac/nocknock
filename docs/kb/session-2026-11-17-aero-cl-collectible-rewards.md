@@ -27,7 +27,7 @@ after v0.8.0 was released and deployed.*
 - **The operator's AERO claim:** at 2026-11-17T11:13:04Z the wallet claimed 17.654015 AERO
   from the CL gauge (tx `0x2d2b609b…a16e`). It was found on-chain and recorded in the
   harvest ledger on chudmax at $7.75 (the AERO price pool at that block).
-- **#142, this pull request:** a staked Aero position's gauge reward is reported as its
+- **#142, merged as pull request #143 at 2026-11-17T12:19:34Z:** a staked Aero position's gauge reward is reported as its
   collectible earnings on the snapshot (spec 2.7.0), the claim simulation, both MCP
   transports, the dashboard and the Lite cockpit. LP fees, AERO rewards and their total
   are three labelled figures. Reporting only: the total, the directive, the harvest
@@ -50,14 +50,38 @@ after v0.8.0 was released and deployed.*
 
 ## Not verified, and open questions for the operator
 
-- Nothing was deployed from this branch; chudmax runs v0.8.0.
+- When this log was first written nothing had been deployed from the branch and chudmax
+  ran v0.8.0. That changed the same day: see "After the merge" below.
 - The basic gauge's claim call has not been sent by the operator's wallet itself.
 - Whether gauge rewards should count toward BATCH HARVEST: no rule is set, and today they
   do not.
 - With the CL reward claimed and the position out of range, that position's collectible
   earnings read 0.000000 AERO until it earns again.
 
+## After the merge: the withdrawal, and issue #144
+
+*Added with the fix for #144. An earlier version of this log, and `SESSION_LOG.md`, still
+called #142 an open pull request.*
+
+- #142 was merged to `main` as pull request #143 at 2026-11-17T12:19:34Z (merge commit
+  `1db3c11`) and deployed to chudmax that day. The deployment's snapshot of 12:24:59Z
+  carries spec version 2.7.0, which only that code emits. It is not a tagged release.
+- At 12:18:39Z, while that was going on, the operator withdrew the Aero CL position in
+  the Aero app: transaction `0x09223b2a…801a`, Base block 58637717. NFT #2914490 was
+  unstaked from the gauge and burned, and 0.099668 WETH returned to the wallet.
+- From the next cycle (12:20:13Z) every ingestion cycle failed with `Aero CL positions()
+  read failed (NFT #2914490 …)`; `/health` read `degraded` and the snapshot stayed at
+  12:15:14Z. It was noticed a few minutes later because the deploy was being verified.
+  The `aero-cl200-weth-nock` entry was commented out of the operator's config and the
+  stack redeployed; the three remaining positions have been read since.
+- That is issue #144 (opened 12:25:50Z): an ordinary action in the wallet stopped all
+  reporting. The fix reports such a position as closed and keeps ingesting; it is
+  described in `CHANGELOG.md` under Unreleased and in `ONCHAIN_INTEGRATION.md` §13. At
+  the time of writing it is a local branch (`fix/144-closed-positions`): not pushed, not
+  merged and not deployed.
+
 ## Filed today
 
-#140 (`make dist` overwrites binaries in place), #142 (this work). #130 to #137 from the
+#140 (`make dist` overwrites binaries in place), #142 (this work), #144 (a withdrawn
+position stalls ingestion). #130 to #137 from the
 v0.8.0 stack review remain open.

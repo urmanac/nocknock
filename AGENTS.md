@@ -79,7 +79,11 @@ This guide captures the operational rules, environment quirks, toolchain configu
   startup. Functions live in modules: `adapters/` (one file per protocol; `adapters/mod.rs`
   holds every function that branches on the protocol string), `onchain` (one cycle's reads),
   `valuation`, `advice`, `lp_rebuild`, `plan`, `ledger`, `claims`, `market`, `ingest`, `api`,
-  `aero_rewards`, `aero_text`, `rewards`, `reward_text`, `fill_verify`, `fill_detection`, `fill_text`, `route_quotes`, `quote_text`, `cost_basis`, `cost_basis_text`, `rpc`, `evm`, `calldata`, `contracts`, `notify`, `mcp_text`, `mcp_http`, and `tests` (each feature since #91 adds its own `tests_<topic>.rs`).
+  `aero_rewards`, `aero_text`, `rewards`, `reward_text`, `closed`, `closed_text`, `fill_verify`, `fill_detection`, `fill_text`, `route_quotes`, `quote_text`, `cost_basis`, `cost_basis_text`, `rpc`, `evm`, `calldata`, `contracts`, `notify`, `mcp_text`, `mcp_http`, and `tests` (each feature since #91 adds its own `tests_<topic>.rs`).
+  `closed` (#144) decides when a configured position's NFT provably does not exist; the
+  allow-list of contract answers is in `adapters/mod.rs`. `testdata/closed/cycle_fixture.json`
+  is one whole cycle's real RPC answers, re-recorded with
+  `NOCKNOCK_LIVE_RPC_URL=https://base-rpc.publicnode.com cargo test test_record_closed_cycle_fixture -- --ignored`.
   Moved items are `pub(crate)`. `testdata/golden_snapshot.json` pins the snapshot bytes: a
   refactor must leave it untouched; an intended behaviour change regenerates it with
   `NOCKNOCK_BLESS_GOLDEN=1 cargo test test_golden_snapshot` and the diff is reviewed.
@@ -154,8 +158,8 @@ This guide captures the operational rules, environment quirks, toolchain configu
 Before pushing any PR or tag:
 ```bash
 make test-brain       # 3 tests (WASM invariants)
-make test-worker      # 367 tests as of #142: 343 worker + 24 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger, collectible rewards)
-make test-frontend    # 299 tests as of #142 (staleness, contract, display helpers, charts, surfaces, ledger, collectible rewards)
+make test-worker      # 382 tests as of #144: 356 worker + 26 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger, collectible rewards, closed positions)
+make test-frontend    # 309 tests as of #144 (staleness, contract, display helpers, charts, surfaces, ledger, collectible rewards, closed positions)
 make dist             # Verifies packaging of dist/ binaries and tarballs
 NOCKNOCK_API_URL=http://chudmax:8081 make test-mcp   # both MCP transports against the deployment
 ```
