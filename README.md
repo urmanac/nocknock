@@ -52,7 +52,11 @@ Everything comes from `ingestion-worker/config.yaml`:
   its `gauge_address`; an `aerodrome-cl` position's gauge is read from its pool) and
   AERO/USD from `aero_price_pool` (an AERO/USDC pool; the shipped default is verified and
   refused if it has no in-range liquidity). Unclaimed AERO is shown beside uncollected LP
-  fees and is not in the total until you claim it. Anything that cannot be read says so
+  fees and is not in the total until you claim it. A staked position's unclaimed AERO is
+  reported as that position's collectible earnings (#142): the amount, its USD value and
+  the gauge it is collected from, in the Aero app. LP fees, AERO rewards and their sum
+  are three labelled figures, never one merged number, and the harvest rule keeps
+  counting LP fees only. Anything that cannot be read says so
   with the reason; it is never shown as 0. AERO is the token the Aero gauges pay
   (`0x3f5bF3Ed…a4Ee`), not the older "Aerodrome" token with the same symbol: a legacy
   gauge that pays the older token is stated as not read, never shown as AERO.
@@ -185,7 +189,8 @@ minutes of it, otherwise to the nearest backfilled point in that window.
   - Generates deterministic SHA-256 state hashes.
   - Implements snapshot deduplication to prevent database bloat.
 * **React Frontend Dashboard** (`frontend/`):
-  - 7 KPI Stat Cards: Sovereign NOCK Stack, USDC Stack, Net Portfolio, Claimable Yield, Floor Health, High-Water Mark, AERO (wallet).
+  - 7 KPI Stat Cards: Sovereign NOCK Stack, USDC Stack, Net Portfolio, Claimable Yield (LP fees and AERO rewards as two labelled figures and their total; the LP-fee net of gas, as before, for a wallet with no staked Aero position), Floor Health, High-Water Mark, AERO (wallet).
+  - Position cards: a staked Aero position shows its gauge reward as its collectible earnings, with the LP-fee reason beneath; the velocity chart draws rewards as their own series beside LP fees.
   - Pillar line: NOCK · USDC · ETH · AERO, which add up to the total, with what is held as gas and as AERO and what AERO is unclaimed in each tracked gauge.
   - Tactical Shot Advice Cockpit Banner.
   - 7 Recharts panels with historical time-series curves and 100,000 NOCK Reference Line.
@@ -349,9 +354,9 @@ To connect NockNock to Claude Desktop, Gemini Antigravity, Cursor, or Mecris, ad
 ```
 
 **Exposed MCP Tools:**
-- `get_portfolio_state`: Balances, the four pillars (NOCK, USDC, ETH, AERO), gas held, AERO held and unclaimed, the NOCK floor buffer (if you set a floor), the average cost of your plan's verified buys against spot (and the whole-stack average if you configured an opening basis), and the directive.
-- `get_shot_advice`: The current directive, its details, and the harvest rule.
-- `simulate_claim_fees`: Gas versus uncollected LP fees across the tracked LP positions. A position whose fees are not LP-claimable says why, followed by its unclaimed AERO (an amount, not a suggestion to claim).
+- `get_portfolio_state`: Balances, the four pillars (NOCK, USDC, ETH, AERO), gas held, AERO held and unclaimed (each staked position's reward with the gauge it is collected from), collectible earnings (LP fees, AERO rewards and their sum, none of it in the total), the NOCK floor buffer (if you set a floor), the average cost of your plan's verified buys against spot (and the whole-stack average if you configured an opening basis), and the directive.
+- `get_shot_advice`: The current directive, its details, uncollected LP fees, collectible AERO rewards and the total collectible as three labelled lines, and the harvest rule (which counts LP fees only).
+- `simulate_claim_fees`: Gas versus uncollected LP fees across the tracked LP positions, then collectible AERO rewards and the total collectible. A staked Aero position's row states its reward (amount, USD value, the gauge it is collected from, in the Aero app) and then why its LP fees are not LP-claimable. A gas estimate for collecting a reward is printed only for a gauge whose claim call is verified on-chain ([`ONCHAIN_INTEGRATION.md`](ONCHAIN_INTEGRATION.md) §9); otherwise the row says the gas is not estimated. These are amounts, not a suggestion to claim, and no transaction is built for a reward.
 - `get_accumulation_plan`: Your DCA plan's status, next tranche, verified buys, swaps found on-chain that await your confirmation (listed only: MCP has no write tool), the LP rebuild bias and, while a tranche is due, read-only route quotes for that amount on Aero and Uniswap (a comparison, not a recommendation).
 
 Every answer ends with the snapshot's generation time and the worker's health.

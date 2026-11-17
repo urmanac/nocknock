@@ -2,7 +2,8 @@
 //!
 //! One source file for both MCP transports: the worker's HTTP endpoint (`mod aero_text`
 //! in main.rs) and the stdio binary, which cannot import from main.rs and includes this
-//! file by path (src/bin/mcp.rs). It depends on nothing but serde_json.
+//! file by path (src/bin/mcp.rs). It depends on nothing but serde_json and reward_text.rs,
+//! which both binaries compile at their crate root.
 //!
 //! The text states amounts. It never says to claim, sell, hold or accumulate AERO. A
 //! field the snapshot does not carry (an older snapshot, or a value the worker could
@@ -63,7 +64,12 @@ pub fn aero_lines(data: &Value) -> String {
         let row = match (s("unclaimed_aero"), s("unclaimed_aero_note")) {
             (Some(a), _) => {
                 read += 1;
-                amount_usd(a, s("unclaimed_aero_usd"))
+                let amount = amount_usd(a, s("unclaimed_aero_usd"));
+                // Where it is collected (issue #142), when the snapshot says so.
+                match p.get("collectible_reward").filter(|r| r.is_object()) {
+                    Some(reward) => format!("{amount}, {}", crate::reward_text::reward_where_text(reward)),
+                    None => amount,
+                }
             }
             (None, Some(note)) => format!("not read ({note})"),
             (None, None) => continue,

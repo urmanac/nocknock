@@ -337,6 +337,9 @@ pub(crate) async fn get_claim_fees_payload_handler(Extension(state): Extension<A
         let pos_id = position_key(pos);
         finish_claim_action(&state.http_client, &alchemy_url, &wallet, &snapshot,
             &mut action, &pos_id, 40 + idx as i32, nock_spot, eth_price, true).await;
+        // Not LP-claimable: say what the position earns instead and where it is
+        // collected (#142). No transaction is built for it.
+        state_reward_on_not_claimable(&mut action, snapshot.data.positions.iter().find(|p| p.position_id == pos_id));
         actions.push(action);
     }
 
@@ -370,6 +373,7 @@ pub(crate) async fn get_claim_fees_payload_handler(Extension(state): Extension<A
             finish_claim_action(&state.http_client, &alchemy_url, &wallet, &snapshot,
                 &mut action, &pos_id, 60 + idx as i32, nock_spot, eth_price, false).await;
         }
+        state_reward_on_not_claimable(&mut action, snap_pos);
         actions.push(action);
     }
 
@@ -422,14 +426,37 @@ pub(crate) async fn get_claim_fees_payload_handler(Extension(state): Extension<A
     let (estimated_gas_usd, net_after_gas_usd) =
         claim_payload_totals(&actions, &gross_usd, gas_price_wei.is_some() && eth_price.is_some());
 
+    // --- Gauge rewards (#142): reported beside the LP fees, never as an action ---
+    // A gas figure is estimated only for a claim call proven for that gauge
+    // (rewards.rs); it is a read-only eth_estimateGas from the wallet. The rows carry
+    // no calldata, so nothing here can be dispatched.
+    let reward_gas = estimate_reward_claim_gas(
+        &state.http_client,
+        &alchemy_url,
+        &wallet,
+        &snapshot.data.positions,
+        eth_price,
+        // The gas price read above for the LP actions: one price for the whole payload.
+        GasPrice::Known(gas_price_wei),
+        std::time::Duration::from_millis(REWARD_GAS_BUDGET_MS),
+    )
+    .await;
+    let rewards = claim_reward_rows(&snapshot.data.positions, &reward_gas);
+    let global = &snapshot.data.derived_metrics.global_status;
+
     let payload = ClaimFeesPayload {
         chain_id: 8453,
         from: wallet,
         generated_at: Utc::now().to_rfc3339(),
-        gross_usd: Some(gross_usd),
+        gross_usd: Some(gross_usd.clone()),
         estimated_gas_usd,
         net_after_gas_usd,
         actions,
+        collectible_lp_fees_usd: Some(gross_usd),
+        collectible_rewards_usd: global.collectible_rewards_usd.clone(),
+        collectible_rewards_note: global.collectible_rewards_note.clone(),
+        total_collectible_usd: global.total_collectible_usd.clone(),
+        rewards,
     };
     Json(payload).into_response()
 }

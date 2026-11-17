@@ -34,7 +34,7 @@ const SOURCE_LABELS: Record<string, string> = {
   aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
-import { POSITION_COLORS, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText, velocityRowText } from './positions.ts';
+import { POSITION_COLORS, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText } from './positions.ts';
 import { isAeroProtocol, positionFeesText } from './aeroCl.ts';
 import { PositionStakingLine, RangeSideList } from './components/PositionRangeNotes.tsx';
 import { floorState, floorDeltaText, floorSummaryText, regimeLabel, regimeTone } from './floor.ts';
@@ -43,6 +43,18 @@ import { ethUsdPrice, gasLine, hwmSubtitle, pillarLine } from './pillars.ts';
 import { LEDGER_TITLE, ledgerView } from './ledger.ts';
 import { aeroRewardsSentence, aeroStatSubtitle, compositionAeroText, compositionResidualLabel } from './aero.ts';
 import { AeroPillarLines, PositionAeroLine } from './components/AeroPillar.tsx';
+import { PositionEarningsLines, hasPositionEarnings } from './components/CollectibleEarnings.tsx';
+import {
+  LP_FEE_COLOR,
+  LP_FEE_SERIES_NAME,
+  REWARD_COLOR,
+  REWARD_SERIES_NAME,
+  claimableYieldTile,
+  velocityHasRewards,
+  velocityRewardRowText,
+  velocityRowColor,
+  velocityRows,
+} from './rewards.ts';
 
 function Dashboard() {
   // The worker's real cadence when the historical response reports it; 300 s otherwise.
@@ -115,6 +127,8 @@ function Dashboard() {
   const charts = buildChartRows(history, rawData, syncWindowSeconds, snapshot?.meta?.generated_at);
   const { assetSeries, valueVsBaseline, composition, channel: channelSeries, positionSeriesDefs, spansMultipleDays } = charts;
   const positionsList: any[] = rawData?.positions || [];
+  // Built one per position, in the same order: a card's LP-fee reason comes from its row.
+  const contractFees: any[] = rawData?.contract_fees || [];
   const compositionHasEth = composition.rows.some((r: any) => r.eth != null);
 
   const deviationData = (metrics?.portfolio_deviation_matrix?.allocations || []).map((a: any) => ({
@@ -163,14 +177,9 @@ function Dashboard() {
     // A full-range position (Aerodrome) has no bracket to draw.
   }).filter((t: any) => !t.fullRange);
 
-  const gasData = (metrics?.velocity_gas_sandbox?.contracts || []).map((c: any) => ({
-    name: c.contract_name,
-    claimable: parseFloat(c.claimable_usd),
-    gasBreakEven: parseFloat(c.gas_break_even_usd),
-    ratio: c.efficiency_ratio,
-    action: c.recommended_action,
-    note: c.note,
-  }));
+  // Velocity rows (#142): LP fees and gauge rewards are two series, never one figure.
+  const gasData = velocityRows(metrics?.velocity_gas_sandbox?.contracts);
+  const gasHasRewards = velocityHasRewards(gasData);
 
   // Zero-mock: never fabricate a floor target. A missing field is '—'/unavailable; the
   // worker's "0" is the operator's own "no floor", shown as such in a neutral style.
@@ -269,11 +278,13 @@ function Dashboard() {
             prefix="$"
             subtitle={`${pillarLine(global)} · @ $${metrics?.tick_bracket_hypervisor?.current_price || '—'}/NOCK`}
           />
+          {/* Collectible earnings (#142): LP fees and AERO rewards as two labelled figures
+              and their total. An older snapshot renders the tile it always did. */}
           <StatCard
-            label="Claimable Yield (Net)"
-            value={global?.gas_to_fee_delta_usd}
+            label={claimableYieldTile(global, positionsList).label}
+            value={claimableYieldTile(global, positionsList).value}
             prefix="$"
-            subtitle={`Gross: ${statValueText(global?.total_fees_claimable_usd, '$')}; net of two claims' gas`}
+            subtitle={claimableYieldTile(global, positionsList).subtitle}
             highlightColor="#f1c40f"
           />
           <StatCard
@@ -383,7 +394,7 @@ function Dashboard() {
       <section style={styles.positionsSection}>
         <div style={styles.positionsHeader}>TRACKED POSITIONS ({positionsList.length})</div>
         <div style={styles.positionsGrid}>
-          {positionsList.map((p: any) => (
+          {positionsList.map((p: any, pi: number) => (
             <div key={p.position_id} style={styles.positionCard}>
               <div style={styles.positionCardTop}>
                 <span style={styles.positionPair}>{p.token0.symbol}/{p.token1.symbol}</span>
@@ -414,11 +425,26 @@ function Dashboard() {
               <div style={styles.positionCardMeta}>
                 Range: {positionRangeText(p)}
               </div>
-              <div style={styles.positionCardMeta}>
-                {p.token0.symbol}: {p.amount0} ({p.token1.symbol}: {p.amount1}) · {positionFeesText(p)}
-              </div>
-              <PositionStakingLine position={p} style={styles.positionCardMeta} />
-              <PositionAeroLine position={p} style={styles.positionCardMeta} />
+              {/* A position with a gauge reward (#142) shows it as its collectible
+                  earnings, with the LP-fee figure or reason beneath. Any other position,
+                  and any older snapshot, keeps the lines it had. */}
+              {hasPositionEarnings(p) ? (
+                <>
+                  <div style={styles.positionCardMeta}>
+                    {p.token0.symbol}: {p.amount0} ({p.token1.symbol}: {p.amount1})
+                  </div>
+                  <PositionEarningsLines position={p} feeRow={contractFees[pi]} style={styles.positionCardMeta} />
+                  <PositionStakingLine position={p} style={styles.positionCardMeta} />
+                </>
+              ) : (
+                <>
+                  <div style={styles.positionCardMeta}>
+                    {p.token0.symbol}: {p.amount0} ({p.token1.symbol}: {p.amount1}) · {positionFeesText(p)}
+                  </div>
+                  <PositionStakingLine position={p} style={styles.positionCardMeta} />
+                  <PositionAeroLine position={p} style={styles.positionCardMeta} />
+                </>
+              )}
               <div style={styles.positionCardMeta}>
                 {p.protocol === 'aerodrome' ? 'LP token' : `#${p.nft_id}`} · {p.network}{p.is_price_source ? ' · price source' : ''}
               </div>
@@ -743,15 +769,17 @@ function Dashboard() {
                 labelStyle={{ color: '#f0f6fc', fontWeight: 700, marginBottom: 4 }}
                 formatter={(v: any) => `$${Number(v).toFixed(4)}`}
               />
-              <Bar dataKey="claimable" fill="#10b981" fillOpacity={0.85} name="Claimable Fee Yield ($)" />
+              <Bar dataKey="claimable" fill={LP_FEE_COLOR} fillOpacity={0.85} name={gasHasRewards ? LP_FEE_SERIES_NAME : 'Claimable Fee Yield ($)'} />
+              {/* A staked position's earnings (#142): its own series and legend entry. */}
+              {gasHasRewards && <Bar dataKey="reward" fill={REWARD_COLOR} fillOpacity={0.9} name={REWARD_SERIES_NAME} />}
               <Bar dataKey="gasBreakEven" fill="#ef4444" fillOpacity={0.85} name="Gas Fee ($)" />
               <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </BarChart>
           </ResponsiveContainer>
           <div style={{ marginTop: 8, fontSize: '0.75rem', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            {gasData.map((g: any) => (
-              <span key={g.name} style={{ color: g.action === 'claim_now' ? '#10b981' : '#f59e0b' }}>
-                {velocityRowText(g)}
+            {gasData.map((g) => (
+              <span key={g.name} style={{ color: velocityRowColor(g) }}>
+                {velocityRewardRowText(g)}
               </span>
             ))}
           </div>
@@ -875,7 +903,8 @@ const styles: Record<string, React.CSSProperties> = {
   statCard: { background: '#111317', border: '1px solid #22262d', borderRadius: 8, padding: '1rem', display: 'flex', flexDirection: 'column', gap: 4 },
   statLabel: { fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#8b949e' },
   statValue: { fontSize: '1.2rem', fontWeight: 700, fontFamily: 'monospace' },
-  statSubtitle: { fontSize: '0.7rem', color: '#7ee787', fontFamily: 'monospace' },
+  // overflowWrap: a subtitle may carry an address or a reason with no space in it.
+  statSubtitle: { fontSize: '0.7rem', color: '#7ee787', fontFamily: 'monospace', overflowWrap: 'anywhere' },
   
   // Shot Advice Banner Styles
   shotAdviceBanner: {

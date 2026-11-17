@@ -4,11 +4,12 @@
 //! through https://base-rpc.publicnode.com on 2026-11-16, pinned to block 58077673
 //! (`0x37631e9`, 2026-11-16T05:11:50Z) unless its comment names another block, and is
 //! recorded with its call in ONCHAIN_INTEGRATION.md §9. Nothing here is hand-made
-//! except where a test says "synthetic".
+//! except where a test says "synthetic". The fixture builders are `pub(super)` so that
+//! tests_rewards.rs (#142) builds on the same real cycle.
 
 use super::*;
 
-const WALLET: &str = "0xeE114cC97eC5adeB34bA5645e315B497D8487a45";
+pub(super) const WALLET: &str = "0xeE114cC97eC5adeB34bA5645e315B497D8487a45";
 
 // ---- The token ----
 /// The older token that also carries the symbol "AERO" (name "Aerodrome"). Not what
@@ -19,11 +20,11 @@ const REAL_AERO_DECIMALS: &str = "0x00000000000000000000000000000000000000000000
 const REAL_AERO_SYMBOL: &str = "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000044145524f00000000000000000000000000000000000000000000000000000000";
 const REAL_AERO_NAME: &str = "0x000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000044165726f00000000000000000000000000000000000000000000000000000000";
 /// AERO.balanceOf(wallet) = 0: the operator has not claimed yet.
-const REAL_AERO_BALANCE_WALLET: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
+pub(super) const REAL_AERO_BALANCE_WALLET: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
 // ---- The basic (volatile pool) gauge ----
-const BASIC_POOL: &str = "0x770fE8Fc9248c6382950A86E39a9391B41D59e0A";
-const BASIC_GAUGE: &str = "0xc82782ee66d82c4d19db0429652091a085083526";
+pub(super) const BASIC_POOL: &str = "0x770fE8Fc9248c6382950A86E39a9391B41D59e0A";
+pub(super) const BASIC_GAUGE: &str = "0xc82782ee66d82c4d19db0429652091a085083526";
 /// gauge.earned(wallet): 0.121026111298851597 AERO.
 const REAL_BASIC_EARNED_WALLET: &str = "0x00000000000000000000000000000000000000000000000001adf89b6483d30d";
 /// gauge.earned(0x…dead), an account with no stake: zero.
@@ -31,20 +32,20 @@ const REAL_BASIC_EARNED_NO_STAKE: &str = "0x000000000000000000000000000000000000
 /// gauge.rewardToken(): reverts on both gauges (the whole JSON-RPC response).
 const REAL_REWARD_TOKEN_RESPONSE: &str = r#"{"jsonrpc":"2.0","id":1,"error":{"code":3,"message":"execution reverted"}}"#;
 /// Pool reads for the position itself.
-const REAL_BASIC_TOKEN0: &str = "0x000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913";
-const REAL_BASIC_TOKEN1: &str = "0x0000000000000000000000009b5e262cf9bb04869ab40b19af91d2dc85761722";
-const REAL_BASIC_RESERVE0: u128 = 0x365530f6;
-const REAL_BASIC_RESERVE1: u128 = 0x2c1ef9786aa216adb1;
-const REAL_BASIC_TOTAL_SUPPLY: u128 = 0x30f5cf6d2eb46;
+pub(super) const REAL_BASIC_TOKEN0: &str = "0x000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+pub(super) const REAL_BASIC_TOKEN1: &str = "0x0000000000000000000000009b5e262cf9bb04869ab40b19af91d2dc85761722";
+pub(super) const REAL_BASIC_RESERVE0: u128 = 0x365530f6;
+pub(super) const REAL_BASIC_RESERVE1: u128 = 0x2c1ef9786aa216adb1;
+pub(super) const REAL_BASIC_TOTAL_SUPPLY: u128 = 0x30f5cf6d2eb46;
 /// pool.balanceOf(wallet) = 0; gauge.balanceOf(wallet) = 29684955447174 (all staked).
-const REAL_BASIC_LP_STAKED: u128 = 0x1aff91397f86;
+pub(super) const REAL_BASIC_LP_STAKED: u128 = 0x1aff91397f86;
 
 // ---- Legacy Aerodrome gauges: the same reads, the older token (block 58093329) ----
 // Read at block 58093329 (`0x3766f11`, 2026-11-16T06:04:01Z).
 /// The gauge of the legacy vAMM USDC/NOCK pool 0x85f1aa3a…d626:
 /// Voter 0x16613524…80A5 `gauges(pool)` `0xb9a09fd5` returns it, and its
 /// `stakingToken()` is that pool.
-const LEGACY_BASIC_GAUGE: &str = "0x4cbb6188c6101cacd4eb1126cc14882bd93dc3db";
+pub(super) const LEGACY_BASIC_GAUGE: &str = "0x4cbb6188c6101cacd4eb1126cc14882bd93dc3db";
 /// legacyGauge.rewardToken(): the OLDER token 0x940181a9…8631 (name "Aerodrome").
 const REAL_LEGACY_REWARD_TOKEN: &str = "0x000000000000000000000000940181a94a35a4569e4529a3cdfb74e38fd98631";
 /// legacyGauge.earned(wallet): it answers the same `earned(address)` (0 for the wallet).
@@ -52,14 +53,14 @@ const REAL_LEGACY_EARNED_WALLET: &str = "0x0000000000000000000000000000000000000
 /// The gauge of the legacy Slipstream CL100 WETH/USDC pool 0xb2cc224c…dc59
 /// (`pool.gauge()` `0xa6f19c84`) names the older token too. Its
 /// `earned(address,uint256[])` reverts, so it could not be misread anyway.
-const LEGACY_CL_GAUGE: &str = "0xf33a96b5932d9e9b9a0eda447abd8c9d48d2e0c8";
+pub(super) const LEGACY_CL_GAUGE: &str = "0xf33a96b5932d9e9b9a0eda447abd8c9d48d2e0c8";
 const REAL_LEGACY_CL_REWARD_TOKEN: &str = "0x000000000000000000000000940181a94a35a4569e4529a3cdfb74e38fd98631";
 
 // ---- The CL gauge and NFT #2914490 ----
 const NPM: &str = "0x4857db576ee0e45f10525ec59527bfd10beec60b";
 const CL_POOL: &str = "0x957256c98d61A714081DE2EE70ae3A96c9b40874";
-const CL_GAUGE: &str = "0x3bf70c880adc8370917994ab0df68e763b7a60fd";
-const NFT_ID: u64 = 2914490;
+pub(super) const CL_GAUGE: &str = "0x3bf70c880adc8370917994ab0df68e763b7a60fd";
+pub(super) const NFT_ID: u64 = 2914490;
 /// gauge.earned(wallet, [2914490]): 11.922077777221318098 AERO.
 const REAL_CL_EARNED_WALLET: &str = "0x000000000000000000000000000000000000000000000000a573ba928fdaf5d2";
 /// gauge.earned(wallet, []), no token ids: zero.
@@ -79,8 +80,8 @@ const REAL_CL_TOKEN1: &str = "0x0000000000000000000000009b5e262cf9bb04869ab40b19
 const REAL_STAKED_CONTAINS_WALLET: &str = "0x0000000000000000000000000000000000000000000000000000000000000001";
 
 // ---- The AERO/USD price pool: Aero CL200 AERO/USDC 0xd0acf293…6816 ----
-const REAL_PRICE_POOL_TOKEN0: &str = "0x0000000000000000000000003f5bf3edac59d650d8fdf9657a71f2f904a3a4ee";
-const REAL_PRICE_POOL_TOKEN1: &str = "0x000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913";
+pub(super) const REAL_PRICE_POOL_TOKEN0: &str = "0x0000000000000000000000003f5bf3edac59d650d8fdf9657a71f2f904a3a4ee";
+pub(super) const REAL_PRICE_POOL_TOKEN1: &str = "0x000000000000000000000000833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 /// slot0(): six words (a Slipstream pool); word 0 is sqrtPriceX96, the tick is -285057.
 const REAL_PRICE_POOL_SLOT0: &str = "0x000000000000000000000000000000000000000000000ad784fbb267f75a7626fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffba67f00000000000000000000000000000000000000000000000000000000000001d1000000000000000000000000000000000000000000000000000000000000070900000000000000000000000000000000000000000000000000000000000007090000000000000000000000000000000000000000000000000000000000000001";
 const REAL_PRICE_POOL_LIQUIDITY: &str = "0x000000000000000000000000000000000000000000000026ee51c707e7470a2d";
@@ -111,11 +112,11 @@ const REAL_WALLET_ETH_RAW: u128 = 0x2c417829806937;
 // ---- A real claim: tx 0x189f6ddf…b8f8, block 57635701, account 0x7c12cd5b…386d ----
 // The account called claimEmissions on the basic gauge above. One block earlier
 // gauge.earned(account) returned 0x12df9e0749351725, exactly what was minted to it.
-const CLAIMER: &str = "0x7c12cd5b7db841f7ba9b3fd1b7a6d02c1304386d";
+pub(super) const CLAIMER: &str = "0x7c12cd5b7db841f7ba9b3fd1b7a6d02c1304386d";
 const REAL_EARNED_BEFORE_CLAIM: &str = "0x00000000000000000000000000000000000000000000000012df9e0749351725";
 
 /// The receipt's token logs (the other nine logs are voter and messaging events).
-fn real_claim_receipt() -> serde_json::Value {
+pub(super) fn real_claim_receipt() -> serde_json::Value {
     let transfer = TRANSFER_EVENT_TOPIC;
     let zero = "0x0000000000000000000000000000000000000000000000000000000000000000";
     json!({
@@ -154,7 +155,7 @@ fn real_claim_receipt() -> serde_json::Value {
 // Fixture builders: one real cycle at block 58077673
 // ------------------------------------------------------------------
 
-fn basic_config(gauge: Option<&str>) -> PositionConfig {
+pub(super) fn basic_config(gauge: Option<&str>) -> PositionConfig {
     let gauge_line = gauge.map(|g| format!("gauge_address: \"{g}\"\n")).unwrap_or_default();
     serde_yaml::from_str(&format!(
         "id: aero-basic-nock-usdc\nprotocol: aerodrome\nnetwork: base\npool_address: \"{BASIC_POOL}\"\n{gauge_line}"
@@ -162,7 +163,7 @@ fn basic_config(gauge: Option<&str>) -> PositionConfig {
     .expect("position config parses")
 }
 
-fn cl_config() -> PositionConfig {
+pub(super) fn cl_config() -> PositionConfig {
     serde_yaml::from_str(&format!(
         "id: aero-cl200-weth-nock\nprotocol: aerodrome-cl\nnetwork: base\nnft_id: {NFT_ID}\nnpm_address: \"{NPM}\"\npool_address: \"{CL_POOL}\"\n"
     ))
@@ -223,16 +224,16 @@ fn real_cl_position() -> (RawPosition, PositionFacts) {
     .unwrap()
 }
 
-fn real_eth_usd() -> f64 {
+pub(super) fn real_eth_usd() -> f64 {
     sqrt_price_x96_to_raw(U256::from_hex_be(REAL_ETH_POOL_SQRT_PRICE).unwrap()) * 1e18 / 1e6
 }
 
-fn real_nock_usd() -> f64 {
+pub(super) fn real_nock_usd() -> f64 {
     // v4 USDC(6)/NOCK(16) pool: raw = NOCK_raw per USDC_raw.
     1e10 / sqrt_price_x96_to_raw(U256::from_hex_be(REAL_NOCK_USDC_SQRT_PRICE).unwrap())
 }
 
-fn real_aero_price() -> Result<f64> {
+pub(super) fn real_aero_price() -> Result<f64> {
     aero_price_from_pool_reads(
         DEFAULT_AERO_PRICE_POOL,
         REAL_PRICE_POOL_TOKEN0,
@@ -242,14 +243,14 @@ fn real_aero_price() -> Result<f64> {
     )
 }
 
-fn ok_hex(hex: &str) -> Result<Option<String>> {
+pub(super) fn ok_hex(hex: &str) -> Result<Option<String>> {
     Ok(Some(hex.trim_start_matches("0x").to_string()))
 }
 
 /// The AERO reads as fetch_aero_reads assembles them, with the gauge answers supplied
 /// by `earned` (gauge address → the outcome of its eth_call). Asserts that the calldata
 /// each position sends is the call that was verified on-chain.
-fn aero_reads_from(
+pub(super) fn aero_reads_from(
     configs: &[PositionConfig],
     facts: &HashMap<String, PositionFacts>,
     wallet_aero_hex: &str,
@@ -299,7 +300,7 @@ fn real_reward_token(gauge: &str) -> Result<Option<String>> {
     }
 }
 
-fn real_earned(gauge: &str) -> Result<Option<String>> {
+pub(super) fn real_earned(gauge: &str) -> Result<Option<String>> {
     if gauge.eq_ignore_ascii_case(BASIC_GAUGE) {
         ok_hex(REAL_BASIC_EARNED_WALLET)
     } else if gauge.eq_ignore_ascii_case(LEGACY_BASIC_GAUGE) {
@@ -314,7 +315,7 @@ fn real_earned(gauge: &str) -> Result<Option<String>> {
 /// One cycle's reads for the real wallet at block 58077673, holding its two staked Aero
 /// positions (the wallet's two Uniswap positions are left out to keep the case about
 /// #93). Gas cost is a stated figure, not a pinned read.
-fn real_cycle_with(aero: &dyn Fn(&[PositionConfig], &HashMap<String, PositionFacts>) -> AeroReads) -> RawOnChainData {
+pub(super) fn real_cycle_with(aero: &dyn Fn(&[PositionConfig], &HashMap<String, PositionFacts>) -> AeroReads) -> RawOnChainData {
     let basic = real_basic_position();
     let (cl, facts) = real_cl_position();
     let (nock_usd, eth_usd) = (real_nock_usd(), real_eth_usd());
@@ -358,14 +359,14 @@ fn real_cycle_with(aero: &dyn Fn(&[PositionConfig], &HashMap<String, PositionFac
     raw
 }
 
-fn real_cycle() -> RawOnChainData {
+pub(super) fn real_cycle() -> RawOnChainData {
     real_cycle_with(&|cfgs, facts| {
         aero_reads_from(cfgs, facts, REAL_AERO_BALANCE_WALLET, real_aero_price(), &real_earned).unwrap()
     })
 }
 
 /// The explicit numbers of config.yaml.example (a test profile, not a product default).
-fn example_profile() -> OperatorProfile {
+pub(super) fn example_profile() -> OperatorProfile {
     OperatorProfile {
         treasury_floor_nock: 100_000.0,
         lp_floor_tolerance_bps: 0,
@@ -375,7 +376,7 @@ fn example_profile() -> OperatorProfile {
 }
 
 /// The tail of fetch_raw_data plus run_ingestion_cycle's pure steps.
-fn snapshot_of(mut raw: RawOnChainData, profile: &OperatorProfile, prev_hwm: f64) -> SnapshotData {
+pub(super) fn snapshot_of(mut raw: RawOnChainData, profile: &OperatorProfile, prev_hwm: f64) -> SnapshotData {
     let (spot, eth) = (raw.spot_price_nock_usd, raw.live_eth_price_usd);
     let positions = snapshot_positions(&raw);
     raw.pool_mechanics = build_pool_mechanics(&raw.positions, spot, eth);
@@ -406,7 +407,7 @@ fn snapshot_of(mut raw: RawOnChainData, profile: &OperatorProfile, prev_hwm: f64
     }
 }
 
-fn f(s: &str) -> f64 {
+pub(super) fn f(s: &str) -> f64 {
     s.parse().unwrap()
 }
 
@@ -417,7 +418,7 @@ fn abi_string(hex: &str) -> String {
 }
 
 /// Every string in a JSON value, for checks over a whole snapshot.
-fn all_strings(v: &serde_json::Value, out: &mut Vec<String>) {
+pub(super) fn all_strings(v: &serde_json::Value, out: &mut Vec<String>) {
     match v {
         serde_json::Value::String(s) => out.push(s.clone()),
         serde_json::Value::Array(a) => a.iter().for_each(|x| all_strings(x, out)),
@@ -1009,7 +1010,7 @@ fn test_failed_price_read_leaves_unclaimed_aero_stated_and_unpriced() {
     assert_eq!(g.total_portfolio_usd, priced.derived_metrics.global_status.total_portfolio_usd);
     let text = format_portfolio_state_text(&serde_json::to_value(&snap).unwrap());
     assert!(text.contains("• Unclaimed AERO: 12.043104 AERO (USD value not reported) in tracked gauges, not counted in the total\n"), "{text}");
-    assert!(text.contains("   - Aero USDC/NOCK: 0.121026 AERO (USD value not reported)\n"), "{text}");
+    assert!(text.contains("   - Aero USDC/NOCK: 0.121026 AERO (USD value not reported), collectible from gauge 0xc82782ee66d82c4d19db0429652091a085083526 in the Aero app\n"), "{text}");
     assert!(text.contains("• AERO/USD: not reported\n"), "{text}");
 
     // The same failure while the wallet HOLDS AERO fails the cycle (synthetic balance).
@@ -1064,7 +1065,7 @@ fn test_mcp_portfolio_text_states_the_fourth_pillar() {
     let text = format_portfolio_state_text(&serde_json::to_value(&snapshot_of(holding, &OperatorProfile::default(), 0.0)).unwrap());
     assert!(text.contains(" · AERO $0.57\n"), "{text}");
     assert!(text.contains("• AERO held (wallet): 1.359979 AERO ($0.57), counted in the total; not cash, not deployable, no target\n"), "{text}");
-    assert!(text.contains("• Unclaimed AERO: 12.043104 AERO ($5.03) in tracked gauges, not counted in the total\n   - Aero USDC/NOCK: 0.121026 AERO ($0.05)\n   - Aero CL WETH/NOCK #2914490: 11.922078 AERO ($4.98)\n"), "{text}");
+    assert!(text.contains("• Unclaimed AERO: 12.043104 AERO ($5.03) in tracked gauges, not counted in the total\n   - Aero USDC/NOCK: 0.121026 AERO ($0.05), collectible from gauge 0xc82782ee66d82c4d19db0429652091a085083526 in the Aero app\n   - Aero CL WETH/NOCK #2914490: 11.922078 AERO ($4.98), collectible from gauge 0x3bf70c880adc8370917994ab0df68e763b7a60fd in the Aero app\n"), "{text}");
     assert!(text.contains("• AERO/USD: $0.417608\n"), "{text}");
     assert!(!text.contains("AERO not read"), "{text}");
     // The lines sit between gas and the high-water mark.

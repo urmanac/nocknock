@@ -4,6 +4,8 @@
  * Three elements only: floor health, uncollected fees + gas ROI, and the
  * EXECUTE BATCH HARVEST button that dispatches the worker-built claim
  * transactions to the paired wallet via WalletConnect (zero custody).
+ * Gauge rewards (#142) are listed in the uncollected-fees card as facts: they
+ * are never an action here, and nothing about them is sent to a wallet.
  *
  * Handles the Uniswap-app broadcast quirk: after the wallet approves a
  * transaction, broadcasting may be deferred until the operator returns to the
@@ -15,6 +17,8 @@ import { floorDeltaText } from '../floor';
 import { api, describeApiError, ClaimFeeAction, ClaimFeesPayload, LedgerSummary } from '../api/client';
 import { ledgerLiteText } from '../ledger';
 import { AeroLiteCard } from './AeroPillar';
+import { LiteCollectibleLines } from './CollectibleEarnings';
+import { lpFeeReasonOfDetail } from '../rewards';
 import {
   connectWallet,
   connectedAccount,
@@ -292,9 +296,13 @@ export function LiteCockpit({ top, bottom }: { top?: React.ReactNode; bottom?: R
               .filter((a) => a.simulation === 'not_claimable')
               .map((a) => (
                 <div key={`nc-${a.label}`} style={lite.sub}>
-                  {a.label}: {a.simulation_detail ?? 'not LP-claimable'}
+                  {/* With a worker that lists rewards on their own lines (#142), only
+                      the LP-fee reason is repeated here. */}
+                  {a.label}: {payload.rewards ? lpFeeReasonOfDetail(a.simulation_detail) : (a.simulation_detail ?? 'not LP-claimable')}
                 </div>
               ))}
+            {/* Gauge rewards and the split totals (#142): facts only, no button. */}
+            <LiteCollectibleLines payload={payload} data={snapshotData} subStyle={lite.sub} />
             <div style={lite.sub}>
               {ledger ? ledgerLiteText(ledger) : 'ledger: loading…'}
             </div>
@@ -417,7 +425,7 @@ const lite: Record<string, React.CSSProperties> = {
   },
   label: { fontSize: 11, letterSpacing: 2, color: '#8b949e', marginBottom: 8 },
   big: { fontSize: 28, fontWeight: 700, marginBottom: 4 },
-  sub: { fontSize: 12, color: '#8b949e', lineHeight: 1.6 },
+  sub: { fontSize: 12, color: '#8b949e', lineHeight: 1.6, overflowWrap: 'anywhere' },
   button: {
     width: '100%',
     border: 'none',

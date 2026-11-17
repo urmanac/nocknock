@@ -105,7 +105,7 @@ async fn main() -> Result<()> {
                             },
                             {
                                 "name": "get_shot_advice",
-                                "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics.",
+                                "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics, with uncollected LP fees, collectible AERO rewards and their total as separate labelled lines. The harvest rule counts LP fees only.",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {},
@@ -114,7 +114,7 @@ async fn main() -> Result<()> {
                             },
                             {
                                 "name": "simulate_claim_fees",
-                                "description": "Simulates gas expenditure vs uncollected LP fees across the tracked LP positions.",
+                                "description": "Simulates gas expenditure vs uncollected LP fees across the tracked LP positions, and states each staked Aero position's collectible gauge reward: the amount, the gauge it is collected from (in the Aero app) and a gas estimate only where the claim call is verified on-chain. LP fees, AERO rewards and their total are separate labelled figures. Reports amounts only: no advice about AERO, and no transaction is built for a reward.",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {},
@@ -340,6 +340,8 @@ fn format_portfolio_state(data: &Value) -> String {
         aero_pillar_text(data)
     );
     let aero = aero_lines(data);
+    // Collectible earnings (issue #142): the worker's own line, from the same source file.
+    let collectible = collectible_earnings_line(data);
     let gas = match (get("wallet_gas_eth"), get("wallet_gas_usd")) {
         (Some(eth), Some(usd)) => format!("{eth} ETH (${usd}), counted in the total; not cash, not deployable"),
         (Some(eth), None) => format!("{eth} ETH (USD value not reported), counted in the total; not cash, not deployable"),
@@ -357,6 +359,7 @@ fn format_portfolio_state(data: &Value) -> String {
          • Stable Stack: {total_usdc}\n\
          • Gas held (wallet ETH+WETH): {gas}\n\
          {aero}\n\
+         {collectible}\
          • High-Water Mark: {hwm}\n\
          {cost_basis}\n\
          • Tactical Directive: {advice}"
@@ -376,6 +379,8 @@ fn format_shot_advice(data: &Value) -> String {
             None => format!("+${v} USD"),
         })
         .unwrap_or_else(|| "unavailable".to_string());
+    // Gauge rewards and the total (issue #142). "Uncollected Claimable Fees" stays LP fees.
+    let collectible = collectible_advice_lines(data);
 
     format!(
         "🎯 Tactical Shot Advice Engine\n\
@@ -384,76 +389,15 @@ fn format_shot_advice(data: &Value) -> String {
          • Decision Matrix Details: {details}\n\
          • Uncollected Claimable Fees: {claimable_usd}\n\
          • Net of two claims' gas: {gas_delta}\n\
+         {collectible}\
          • Harvest rule: {HARVEST_RULE_TEXT}"
     )
 }
 
+/// The claim simulation from the snapshot alone: the worker's own text (reward_text.rs),
+/// with no live gas estimate for a reward, which only the worker's /v1/mcp can make.
 fn format_claim_simulation(data: &Value) -> String {
-    let fees = data.get("contract_fees").and_then(|f| f.as_array());
-    let mut details = String::new();
-    let mut total_claimable_usd = 0.0f64;
-    let mut gas_usd: Option<f64> = None;
-    let (mut claimable_rows, mut not_claimable_rows) = (0usize, 0usize);
-
-    if let Some(list) = fees {
-        for fee in list {
-            let symbol = fee.get("fee_token_symbol").and_then(|s| s.as_str()).unwrap_or("Pool");
-            let amount = fee.get("amount").and_then(|a| a.as_str()).unwrap_or("0");
-            let amount_usd = fee.get("amount_usd").and_then(|a| a.as_str()).unwrap_or("0.00");
-            let gas_str = fee.get("gas_break_even_usd").and_then(|g| g.as_str()).unwrap_or_default();
-            if amount.starts_with("not LP-claimable") {
-                // No fee figure to print: an Aero pool whose claimFees() reverts, or an
-                // Aero CL position staked in its gauge. The worker's own reason is
-                // shown; nothing to claim, no gas to count.
-                details.push_str(&format!("  - {symbol}: {amount}\n"));
-                not_claimable_rows += 1;
-                continue;
-            }
-            claimable_rows += 1;
-            match gas_str.parse::<f64>() {
-                Ok(g) => {
-                    // Live per-contract gas break-even; take the max as representative.
-                    gas_usd = Some(match gas_usd {
-                        Some(acc) => acc.max(g),
-                        None => g,
-                    });
-                    details.push_str(&format!("  - {symbol}: {amount} (~${amount_usd} USD | Gas Est: ${:.4})\n", g));
-                }
-                Err(_) => {
-                    details.push_str(&format!("  - {symbol}: {amount} (~${amount_usd} USD | Gas Est: unavailable)\n"));
-                }
-            }
-            if let Ok(usd_val) = amount_usd.parse::<f64>() {
-                total_claimable_usd += usd_val;
-            }
-        }
-    }
-
-    let (gas_line, net_line) = match gas_usd {
-        Some(g) => (
-            format!("~${:.4} USD", g),
-            format!("${:.4} USD", (total_claimable_usd - g).max(0.0)),
-        ),
-        // Every row is one the LP cannot claim: there is no claim to cost, which is
-        // not the same as a gas estimate that could not be read.
-        None if claimable_rows == 0 && not_claimable_rows > 0 => (
-            "n/a (nothing LP-claimable)".to_string(),
-            "n/a (nothing LP-claimable)".to_string(),
-        ),
-        None => (
-            "unavailable".to_string(),
-            "unknown (live gas estimate unavailable)".to_string(),
-        ),
-    };
-    format!(
-        "⚡ Fee Claim Simulation\n\
-         =======================\n\
-         • Total Gross Claimable: ${:.4} USD\n\
-         • Estimated Gas: {}\n\
-         • Net Accretion if Harvested: {}\n\
-         Pool Breakdown:\n{}",
-        total_claimable_usd, gas_line, net_line, details
-    )
+    claim_simulation_text(data, &[])
 }
 
 /// The worker is unreachable on both its MCP endpoint and its snapshot API. Say so,
@@ -478,6 +422,11 @@ fn zero_db_fallback_text(tool_name: &str, api_base: &str) -> String {
 #[path = "../aero_text.rs"]
 mod aero_text;
 use aero_text::*;
+
+// Collectible gauge rewards and the claim simulation (issue #142): the same source file.
+#[path = "../reward_text.rs"]
+mod reward_text;
+use reward_text::*;
 
 // Aero CL fee rows (issue #91); kept in its own file beside the worker's tests.
 #[cfg(test)]
@@ -681,3 +630,8 @@ mod tests_fills;
 #[cfg(test)]
 #[path = "../mcp_bin_tests_quotes.rs"]
 mod tests_quotes;
+
+// Collectible gauge rewards in the snapshot-API fallback (issue #142).
+#[cfg(test)]
+#[path = "../mcp_bin_tests_rewards.rs"]
+mod tests_rewards;
