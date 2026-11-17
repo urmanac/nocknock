@@ -10,8 +10,75 @@ pub(crate) fn resolve_high_water_mark_date(prev: Option<(f64, DateTime<Utc>)>, c
     }
 }
 
-/// Run one ingestion cycle and remember whether it failed, for /health.
+/// One ingestion cycle at a time (issue #134). The scheduled loop and POST /v1/ingest
+/// both run cycles; a cycle reads the plan, then makes network calls (fill detection,
+/// route quotes, cost basis) before it reads the previous directive and stores. Two
+/// interleaved cycles could push a stale directive or announce a transition twice, so
+/// the whole cycle runs under one lock.
+///
+/// `run` waits for the cycle in flight and then runs its own. `run_or_join` serves a
+/// request: it needs a cycle that started after the request arrived (it must see what
+/// the request just recorded), so it waits for the cycle in flight and then either
+/// reuses the result of a cycle that another waiter started meanwhile, or runs one.
+/// However many requests pile up behind one cycle, at most one more cycle runs for them.
+#[derive(Default)]
+pub(crate) struct CycleGate {
+    /// Cycles started, counted while the lock is held.
+    started: std::sync::atomic::AtomicU64,
+    /// The last cycle's outcome, as text for an error. Held for the whole cycle.
+    last: Mutex<Option<std::result::Result<(), String>>>,
+}
+
+impl CycleGate {
+    /// Run `cycle` once no other cycle is running.
+    pub(crate) async fn run<F, Fut>(&self, cycle: F) -> Result<()>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<()>>,
+    {
+        let mut last = self.last.lock().await;
+        self.started.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let result = cycle().await;
+        *last = Some(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+        result
+    }
+
+    /// Like `run`, but a cycle that started after this call (while it waited) answers
+    /// for it instead of a new one.
+    pub(crate) async fn run_or_join<F, Fut>(&self, cycle: F) -> Result<()>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<()>>,
+    {
+        let seen = self.started.load(std::sync::atomic::Ordering::SeqCst);
+        let mut last = self.last.lock().await;
+        // Every cycle counted after `seen` was started after this call and has finished
+        // (the lock is held): its reads are at least as new as this request.
+        if self.started.load(std::sync::atomic::Ordering::SeqCst) > seen {
+            if let Some(outcome) = last.clone() {
+                return outcome.map_err(|e| anyhow::anyhow!(e));
+            }
+        }
+        self.started.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let result = cycle().await;
+        *last = Some(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+        result
+    }
+}
+
+/// Run one ingestion cycle and remember whether it failed, for /health. Serialised by
+/// the state's `CycleGate`: it waits for a cycle in flight (issue #134).
 pub(crate) async fn run_cycle_tracked(state: &Arc<AppState>) -> Result<()> {
+    state.cycle_gate.run(|| run_cycle_recorded(state)).await
+}
+
+/// The cycle a POST /v1/ingest asks for: a cycle that started after the request,
+/// shared with every other request that waited for the same one (issue #134).
+pub(crate) async fn run_requested_cycle(state: &Arc<AppState>) -> Result<()> {
+    state.cycle_gate.run_or_join(|| run_cycle_recorded(state)).await
+}
+
+async fn run_cycle_recorded(state: &Arc<AppState>) -> Result<()> {
     let result = run_ingestion_cycle(state).await;
     if let Ok(mut slot) = state.last_ingest_error.lock() {
         *slot = result.as_ref().err().map(|e| (Utc::now(), e.to_string()));

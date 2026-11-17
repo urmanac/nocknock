@@ -1596,6 +1596,8 @@ struct AppState {
     last_sync_duration_ms: std::sync::atomic::AtomicU64,
     /// Error from the most recent ingestion cycle, cleared by the next success (issue #87).
     last_ingest_error: std::sync::Mutex<Option<(DateTime<Utc>, String)>>,
+    /// One ingestion cycle at a time, scheduled or requested (issue #134).
+    cycle_gate: CycleGate,
 }
 
 // ============================================================
@@ -1695,6 +1697,7 @@ async fn main() -> Result<()> {
         latest_snapshot: Mutex::new(initial_latest),
         last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
         last_ingest_error: std::sync::Mutex::new(None),
+        cycle_gate: CycleGate::default(),
     });
 
     // Historical price backfill (v0.3.0): heal multi-hour/multi-day gaps left by
@@ -2092,3 +2095,5 @@ mod tests_notify;
 mod tests_rewards;
 #[cfg(test)]
 mod tests_closed;
+#[cfg(test)]
+mod tests_burndown;

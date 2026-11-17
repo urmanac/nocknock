@@ -973,6 +973,7 @@ fn state_from_example_config() -> Arc<AppState> {
         latest_snapshot: Mutex::new(None),
         last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
         last_ingest_error: std::sync::Mutex::new(None),
+        cycle_gate: CycleGate::default(),
     })
 }
 

@@ -140,7 +140,15 @@ pub(crate) fn no_snapshot_body(last_error: Option<&str>) -> serde_json::Value {
 pub(crate) async fn trigger_ingest_handler(
     Extension(state): Extension<Arc<AppState>>,
 ) -> impl IntoResponse {
-    match run_cycle_tracked(&state).await {
+    // The cycle runs in its own task (issue #134): a client that disconnects, or nginx
+    // giving up after 60 seconds, drops this handler but never a cycle half-way
+    // between storing the snapshot and sending its notification.
+    let cycle = tokio::spawn(async move { run_requested_cycle(&state).await });
+    let outcome = match cycle.await {
+        Ok(r) => r,
+        Err(e) => Err(anyhow::anyhow!("the ingestion task stopped: {e}")),
+    };
+    match outcome {
         Ok(_) => (
             StatusCode::OK,
             Json(json!({
