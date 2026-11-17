@@ -68,6 +68,36 @@ export interface ClaimFeesPayload {
   estimated_gas_usd?: string | null;
   net_after_gas_usd?: string | null;
   actions: ClaimFeeAction[];
+  /** Collectible LP fees: the same figure as gross_usd (#142) */
+  collectible_lp_fees_usd?: string | null;
+  /** Collectible gauge rewards in USD; null when not totalled (#142) */
+  collectible_rewards_usd?: string | null;
+  collectible_rewards_note?: string | null;
+  /** LP fees plus gauge rewards; null whenever the rewards part is null (#142) */
+  total_collectible_usd?: string | null;
+  /** One row per position with a gauge reward (#142). Information only: a row has no
+   *  `to` and no `data`, so it can never be dispatched to a wallet. Absent from a worker
+   *  that predates #142 */
+  rewards?: ClaimRewardRow[];
+}
+
+/** A position's gauge reward in the claim payload (#142): a fact, not an action. */
+export interface ClaimRewardRow {
+  position_id: string;
+  label: string;
+  status: 'read' | 'not_read';
+  token_symbol: string;
+  amount?: string | null;
+  usd?: string | null;
+  gauge?: string | null;
+  collected_in: string;
+  collect_url: string;
+  note?: string | null;
+  /** Gas units of the verified claim call (hex); null unless verified for this gauge */
+  gas_estimate?: string | null;
+  gas_usd?: string | null;
+  /** The gas statement in words, e.g. why there is no estimate */
+  gas_note: string;
 }
 
 export interface RecordHarvestResponse {

@@ -258,6 +258,37 @@ export interface GlobalStatus {
   unclaimed_aero_usd?: string | null;
   /** The worker's stated reason whenever an AERO figure above is null (v0.6.0, #93) */
   aero_note?: string | null;
+  /** Collectible gauge rewards of the tracked staked positions in USD (#142). Null when a
+   *  gauge was not read or a reward is unpriced (collectible_rewards_note says which):
+   *  never a partial sum. NOT in total_portfolio_usd; no directive reads it. Absent on
+   *  an older snapshot: clients show "not reported" */
+  collectible_rewards_usd?: string | null;
+  /** Why collectible_rewards_usd and total_collectible_usd are null (#142) */
+  collectible_rewards_note?: string | null;
+  /** total_fees_claimable_usd (LP fees only) plus collectible_rewards_usd (#142). Null
+   *  whenever the rewards part is null. NOT in total_portfolio_usd */
+  total_collectible_usd?: string | null;
+}
+
+/** A gauge reward stated as collectible earnings (#142): what is there and where it is
+ *  collected. Never advice, and not counted in the portfolio total. */
+export interface CollectibleReward {
+  /** 'not_read' has no amount and no USD value; note says why */
+  status: 'read' | 'not_read';
+  /** 'AERO' */
+  token_symbol: string;
+  token_address: string;
+  /** Reward earned and not collected, 6 decimals; null when not read (never 0) */
+  amount?: string | null;
+  /** amount at the cycle's AERO/USD price; null when not read or unpriced */
+  usd?: string | null;
+  /** The gauge the reward is collected from; null when none is configured */
+  gauge?: string | null;
+  /** 'the Aero app' */
+  collected_in: string;
+  /** Always on app.aero.xyz */
+  collect_url: string;
+  note?: string | null;
 }
 
 export interface AssetAggregationSeries {
@@ -348,6 +379,14 @@ export interface FeeCollectionIndex {
    *  followed by its unclaimed AERO or why that was not read (#93). A claimable row
    *  carries no AERO statement: its action is about LP fees only. */
   note?: string;
+  /** 'gauge_reward' when the row's reported earnings are the position's gauge reward,
+   *  drawn as its own series (#142). Only ever beside 'not_claimable'; absent for a row
+   *  whose earnings are LP fees. Never one of the harvest words */
+  earnings_kind?: 'gauge_reward';
+  /** The gauge reward the row reports as the position's earnings (#142) */
+  reward?: CollectibleReward;
+  /** With 'not_claimable': the reason alone, without the AERO statement (#142) */
+  lp_fees_note?: string;
 }
 
 // ============================================================
@@ -406,6 +445,12 @@ export interface ContractFee {
   amount_usd: string;
   claimable: boolean;
   gas_break_even_usd: string;
+  /** 'gauge_reward' when the position's earnings are its gauge reward (#142) */
+  earnings_kind?: 'gauge_reward';
+  /** The position's gauge reward, when it has one (#142) */
+  reward?: CollectibleReward;
+  /** The reason alone why the LP fees are not LP-claimable (#142) */
+  lp_fees_note?: string;
 }
 
 export interface PositionToken {
@@ -458,6 +503,11 @@ export interface Position {
   unclaimed_aero_usd?: string;
   /** Why unclaimed_aero is absent for an Aero position that could earn AERO (v0.6.0, #93) */
   unclaimed_aero_note?: string;
+  /** The position's gauge reward as collectible earnings: the same read as
+   *  unclaimed_aero*, structured (#142). Present for every Aero position that can earn
+   *  a reward, also when the gauge was not read (status 'not_read'). Absent otherwise
+   *  and on an older snapshot */
+  collectible_reward?: CollectibleReward;
 }
 
 export interface RawSnapshotData {
