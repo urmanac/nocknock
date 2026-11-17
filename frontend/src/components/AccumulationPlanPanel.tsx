@@ -109,6 +109,8 @@ export function AccumulationPlanPanel({
   const due = timeUntil(plan.next_due_at);
   const vsLump = dcaVsLumpSumNock(plan);
   const acquired = parseFloat(plan.acquired_nock);
+  // The ledger was not read this cycle (issue #130): progress is unknown, never zero.
+  const unknown = plan.progress_unknown === true;
   const canRecord = plan.status !== 'invalid';
   // What to say around "Buy $X" follows the detection state (v0.6.0, issue #118).
   const dueHint = trancheDueHint(plan.fill_detection);
@@ -156,7 +158,8 @@ export function AccumulationPlanPanel({
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={label}>BUDGET DEPLOYED</div>
           <div style={{ ...big, color: '#f0f6fc' }}>
-            ${plan.spent_usdc} <span style={{ fontSize: '0.85rem', color: '#8b949e' }}>of ${plan.budget_usdc}</span>
+            {unknown ? 'unknown' : `$${plan.spent_usdc}`}{' '}
+            <span style={{ fontSize: '0.85rem', color: '#8b949e' }}>of ${plan.budget_usdc}</span>
           </div>
           <div
             style={{
@@ -168,10 +171,12 @@ export function AccumulationPlanPanel({
               marginTop: 6,
             }}
           >
-            <div style={{ width: `${pct}%`, background: color, height: '100%', borderRadius: 999 }} />
+            {pct !== null && <div style={{ width: `${pct}%`, background: color, height: '100%', borderRadius: 999 }} />}
           </div>
           <div style={small}>
-            {plan.fills} verified buy{plan.fills === 1 ? '' : 's'} · ${plan.remaining_usdc} remaining
+            {unknown
+              ? 'Verified buys and the remainder are unknown: the ledger was not read this cycle.'
+              : `${plan.fills} verified buy${plan.fills === 1 ? '' : 's'} · $${plan.remaining_usdc} remaining`}
           </div>
           {plan.cash_reserve_usdc && (
             <div style={{ ...small, color: '#2ecc71', letterSpacing: 1 }}>
@@ -183,12 +188,14 @@ export function AccumulationPlanPanel({
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={label}>AVERAGE COST</div>
           <div style={{ ...big, color: '#f0f6fc' }}>
-            {plan.avg_price_usd ? `$${parseFloat(plan.avg_price_usd).toFixed(5)}` : '—'}
+            {unknown ? 'unknown' : plan.avg_price_usd ? `$${parseFloat(plan.avg_price_usd).toFixed(5)}` : '—'}
           </div>
           <div style={small}>
-            {acquired > 0
-              ? `${acquired.toLocaleString(undefined, { maximumFractionDigits: 0 })} NOCK acquired`
-              : 'No verified buys yet'}
+            {unknown
+              ? 'NOCK acquired is unknown this cycle'
+              : acquired > 0
+                ? `${acquired.toLocaleString(undefined, { maximumFractionDigits: 0 })} NOCK acquired`
+                : 'No verified buys yet'}
             {vsLump !== null && (
               <>
                 <br />

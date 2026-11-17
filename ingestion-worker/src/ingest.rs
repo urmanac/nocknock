@@ -323,13 +323,17 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // only after this one is stored. A directive change notifies, and so do a plan
     // completing, the price-source range being exited and a tracked position closing
     // (#144). A first cycle with no previous snapshot stays silent.
-    let (prev_directive, prev_plan_status) = match state.latest_snapshot.lock().await.as_ref() {
+    let stored_prev = match state.latest_snapshot.lock().await.as_ref() {
         Some(s) => (
             Some(s.data.derived_metrics.global_status.shot_advice_action.clone()),
             s.data.derived_metrics.accumulation_plan.clone(),
         ),
         None => (None, None),
     };
+    // A cycle that could not read the plan ledger is never the news, nor the baseline
+    // the next good cycle is compared against (issue #130).
+    let (prev_directive, prev_plan_status) =
+        notification_baseline(stored_prev, last_ledger_read_cycle(), &next_directive_action, next_plan_status.as_ref());
     let range_exit = range_exit_note(last_range_top_reading().as_ref(), next_range_top.as_ref());
     let notification = cycle_notification_with_closed(
         prev_directive.as_deref(),
@@ -362,6 +366,7 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // Update in-memory cache
     *state.latest_snapshot.lock().await = Some(envelope);
     remember_range_top_reading(next_range_top);
+    remember_ledger_read_cycle(&next_directive_action, next_plan_status.as_ref());
 
     // Sent after the store: a cycle whose store fails leaves the previous snapshot in
     // place, so the same transition is decided again next cycle and is pushed once, when

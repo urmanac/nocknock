@@ -81,6 +81,12 @@ export interface AccumulationPlanStatus {
    * in older snapshots. Not part of state_hash.
    */
   route_quotes?: RouteQuotes | null;
+  /**
+   * True when the worker could not read the accumulation ledger this cycle (2.8.1,
+   * issue #130). spent_usdc, remaining_usdc and acquired_nock then read "unknown", and
+   * fills and tranche_index are not progress. Absent when the ledger was read.
+   */
+  progress_unknown?: boolean;
 }
 
 /**

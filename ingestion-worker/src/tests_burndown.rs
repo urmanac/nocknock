@@ -316,3 +316,87 @@ fn test_stored_quotes_are_pruned_only_where_no_fill_can_use_them() {
         assert_eq!(latest_before(&kept, fill_block), latest_before(&all, fill_block), "fill at {fill_block}");
     }
 }
+
+// ---------------- #130: a cycle that could not read the plan ledger ----------------
+
+fn fills_at(count: i64, spent: f64) -> PlanFills {
+    PlanFills {
+        count,
+        spent_usdc: spent,
+        acquired_nock: spent / 0.011,
+        last_at: Some(DateTime::parse_from_rfc3339("2026-11-16T10:00:00Z").unwrap().with_timezone(&Utc)),
+        first_price: Some(0.011),
+    }
+}
+
+fn unreadable_plan() -> AccumulationPlanStatus {
+    build_plan_status(
+        &burndown_plan_cfg(),
+        &PlanFills::default(),
+        &PlanDirective::Blocked { reason: PLAN_LEDGER_UNREADABLE_REASON.to_string() },
+    )
+}
+
+#[test]
+fn test_an_unread_ledger_reports_unknown_progress_not_zero() {
+    let ps = unreadable_plan();
+    assert!(ps.progress_unknown);
+    assert_eq!((ps.spent_usdc.as_str(), ps.remaining_usdc.as_str(), ps.acquired_nock.as_str()), ("unknown", "unknown", "unknown"));
+    let json = serde_json::to_value(&ps).unwrap();
+    assert_eq!(json["progress_unknown"], serde_json::json!(true));
+
+    let (action, details) = plan_advice(&ps, 0.0113);
+    assert_eq!(action, "DCA BLOCKED (ledger unreadable)");
+    assert!(details.contains("progress is unknown"), "{details}");
+    for wrong in ["$0.00", "0 verified", "1 of 5", "(1 of"] {
+        assert!(!details.contains(wrong) && !action.contains(wrong), "{wrong} in {action} / {details}");
+    }
+
+    // A cycle that read the ledger is unchanged, and the field is absent from it.
+    let good = build_plan_status(&burndown_plan_cfg(), &fills_at(3, 60.0), &PlanDirective::Waiting { next_due_at: Utc::now() });
+    assert!(!good.progress_unknown);
+    assert_eq!(good.spent_usdc, "60.00");
+    assert!(serde_json::to_value(&good).unwrap().get("progress_unknown").is_none());
+    assert_eq!(plan_advice(&good, 0.0113).0, "DCA ON SCHEDULE (4 of 5 next)");
+    // A snapshot from before 2.8.1 still reads.
+    let old: AccumulationPlanStatus = serde_json::from_value(serde_json::to_value(&good).unwrap()).unwrap();
+    assert!(!old.progress_unknown);
+}
+
+#[test]
+fn test_mcp_text_says_unknown_for_an_unread_ledger() {
+    let data = serde_json::json!({ "derived_metrics": { "accumulation_plan": unreadable_plan() } });
+    let text = format_accumulation_plan_text(&data);
+    assert!(text.contains("Progress: unknown of $100.00"), "{text}");
+    assert!(!text.contains("$0.00") && !text.contains("1 of 5") && !text.contains("verified buy"), "{text}");
+}
+
+#[test]
+fn test_an_unread_ledger_cycle_is_not_a_directive_change() {
+    let waiting = build_plan_status(&burndown_plan_cfg(), &fills_at(3, 60.0), &PlanDirective::Waiting { next_due_at: Utc::now() });
+    let good_action = "DCA ON SCHEDULE (4 of 5 next)";
+    let bad = unreadable_plan();
+    let bad_action = plan_advice(&bad, 0.0113).0;
+    let notify = |prev: NotifyBaseline, last: Option<NotifyBaseline>, action: &str, plan: &AccumulationPlanStatus| {
+        let (pa, pp) = notification_baseline(prev, last, action, Some(plan));
+        cycle_notification_with_closed(pa.as_deref(), action, "details", pp.as_ref(), Some(plan), None, &[], None)
+    };
+    let good_base: NotifyBaseline = (Some(good_action.to_string()), Some(waiting.clone()));
+
+    // good -> unreadable: silent.
+    assert_eq!(notify(good_base.clone(), Some(good_base.clone()), &bad_action, &bad), None);
+    // unreadable -> good, same directive as the last good read: silent.
+    let bad_base: NotifyBaseline = (Some(bad_action.clone()), Some(bad.clone()));
+    assert_eq!(notify(bad_base.clone(), Some(good_base.clone()), good_action, &waiting), None);
+    // unreadable -> good with a real change since the last good read: pushed once.
+    let due = build_plan_status(&burndown_plan_cfg(), &fills_at(3, 60.0), &PlanDirective::TrancheDue { usdc: 20.0, limited_by: None });
+    let pushed = notify(bad_base.clone(), Some(good_base.clone()), "DCA TRANCHE DUE (4 of 5)", &due).expect("a change");
+    assert!(pushed.contains("DCA TRANCHE DUE (4 of 5)"));
+    // The last buy was recorded just before the unreadable cycle: the completion is
+    // announced on the next good read, against the last cycle that read the ledger.
+    let complete = build_plan_status(&burndown_plan_cfg(), &fills_at(5, 100.0), &PlanDirective::Complete);
+    let text = notify(bad_base.clone(), Some(good_base.clone()), "HOLD & ACCRETE", &complete).expect("completion pushed");
+    assert!(text.contains("is complete"), "{text}");
+    // After a restart nothing is remembered: nothing is compared, as on a first boot.
+    assert_eq!(notify(bad_base, None, good_action, &waiting), None);
+}

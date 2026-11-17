@@ -293,7 +293,9 @@ pub(crate) fn plan_completion_note(
     if prev.plan_id != next.plan_id || prev.status == "complete" || next.status != "complete" {
         return None;
     }
-    if prev.status == "blocked" && prev.binding_constraint.as_deref() == Some(PLAN_LEDGER_UNREADABLE_REASON) {
+    if prev.progress_unknown
+        || (prev.status == "blocked" && prev.binding_constraint.as_deref() == Some(PLAN_LEDGER_UNREADABLE_REASON))
+    {
         return None;
     }
     Some(format!(
@@ -341,6 +343,47 @@ pub(crate) fn range_exit_note(prev: Option<&RangeTopReading>, next: Option<&Rang
 /// wallet, and a restart starts from None, so the first cycle after it pushes no range
 /// exit of its own (a directive change still does).
 static LAST_RANGE_TOP: std::sync::Mutex<Option<RangeTopReading>> = std::sync::Mutex::new(None);
+
+/// The directive and plan status of the latest stored cycle that read the ledger
+/// (issue #130). In memory only: after a restart the stored snapshot is the baseline.
+pub(crate) type NotifyBaseline = (Option<String>, Option<AccumulationPlanStatus>);
+
+static LAST_LEDGER_READ: std::sync::Mutex<Option<NotifyBaseline>> = std::sync::Mutex::new(None);
+
+pub(crate) fn last_ledger_read_cycle() -> Option<NotifyBaseline> {
+    LAST_LEDGER_READ.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+
+/// Called after a cycle's snapshot is stored, and only for a cycle that read the
+/// ledger, so an unreadable cycle never becomes the baseline.
+pub(crate) fn remember_ledger_read_cycle(action: &str, plan: Option<&AccumulationPlanStatus>) {
+    if !plan_progress_unknown(plan) {
+        *LAST_LEDGER_READ.lock().unwrap_or_else(|p| p.into_inner()) = Some((Some(action.to_string()), plan.cloned()));
+    }
+}
+
+/// What a cycle's notification is decided against (issue #130). Pure.
+/// - This cycle could not read the ledger: its directive is not news. The baseline is
+///   this cycle's own action (no directive change) and no plan (no completion note).
+/// - The previous stored cycle could not read the ledger: compare against the last
+///   cycle that did (`last_read`), so the return to a good read is not pushed as a
+///   change and a plan that completed meanwhile is announced once. With none in
+///   memory (a restart), nothing is compared, as on a first boot.
+/// - Otherwise the previous stored cycle, as before.
+pub(crate) fn notification_baseline(
+    prev: NotifyBaseline,
+    last_read: Option<NotifyBaseline>,
+    next_action: &str,
+    next_plan: Option<&AccumulationPlanStatus>,
+) -> NotifyBaseline {
+    if plan_progress_unknown(next_plan) {
+        return (Some(next_action.to_string()), None);
+    }
+    if plan_progress_unknown(prev.1.as_ref()) {
+        return last_read.unwrap_or((None, None));
+    }
+    prev
+}
 
 pub(crate) fn last_range_top_reading() -> Option<RangeTopReading> {
     LAST_RANGE_TOP.lock().unwrap_or_else(|p| p.into_inner()).clone()

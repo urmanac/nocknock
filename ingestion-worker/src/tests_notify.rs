@@ -316,6 +316,7 @@ fn test_a_ledger_read_failure_does_not_announce_an_old_completion_again() {
     assert!(!text.contains("is complete:"), "{text}");
     // A plan blocked for any other reason that then completes is a real completion.
     let mut blocked_other = outage_plan.clone();
+    blocked_other.progress_unknown = false;
     blocked_other.binding_constraint = Some("nothing spendable: wallet USDC $0.40 less the $0.00 virtual tax reserve".to_string());
     assert!(plan_completion_note(Some(&blocked_other), Some(done_plan)).is_some());
 }

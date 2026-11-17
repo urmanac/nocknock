@@ -1,8 +1,15 @@
 openapi: 3.0.3
 info:
   title: NockNock Snapshot Data Model
-  version: 2.8.0
-  description: Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
+  version: 2.8.1
+  description: |
+    Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
+
+    2.8.1 (v0.8.1 burn-down, issues #130-#137), every change additive or a widening:
+    - AccumulationPlanStatus.progress_unknown (new, optional, absent when false): the
+      cycle could not read the plan ledger (#130). Then spent_usdc, remaining_usdc and
+      acquired_nock read "unknown", and fills, tranche_index and tranches_total are
+      not progress.
   license:
     name: ISC
 servers:
@@ -1009,13 +1016,23 @@ components:
           type: string
         spent_usdc:
           type: string
+          description: USDC spent by recorded buys; "unknown" when progress_unknown (2.8.1)
         remaining_usdc:
           type: string
+          description: Budget not yet spent; "unknown" when progress_unknown (2.8.1)
         acquired_nock:
           type: string
+          description: NOCK received by recorded buys; "unknown" when progress_unknown (2.8.1)
         fills:
           type: integer
-          description: Number of receipt-verified buys
+          description: Number of receipt-verified buys. Not a count when progress_unknown (2.8.1); surfaces print "unknown".
+        progress_unknown:
+          type: boolean
+          description: |
+            True when this cycle could not read the accumulation ledger (2.8.1, issue
+            #130). The status is then `blocked` with that reason, the amounts above read
+            "unknown", and `fills`, `tranche_index` and `tranches_total` carry no
+            progress. Absent (false) whenever the ledger was read, and in older snapshots.
         last_fill_at:
           type: string
           format: date-time

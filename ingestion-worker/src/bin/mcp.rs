@@ -280,6 +280,18 @@ fn format_accumulation_plan(data: &Value) -> String {
         Some(plan) => {
             let s = |k: &str| plan.get(k).and_then(|v| v.as_str()).unwrap_or("n/a").to_string();
             let n = |k: &str| plan.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+            // A cycle that could not read the ledger knows no progress (issue #130).
+            if plan.get("progress_unknown").and_then(|v| v.as_bool()) == Some(true) {
+                return format!(
+                    "🪜 Accumulation Plan \"{}\"\n====================\n\
+                     • Status: {}\n\
+                     • Progress: unknown of ${} (the ledger was not read this cycle)\n\
+                     • Constraint: {}\n\
+                     {detection}{lp_line}{closed}",
+                    s("plan_id"), s("status"), s("budget_usdc"), s("binding_constraint"),
+                    detection = fill_detection_lines(plan),
+                );
+            }
             // Same rule as the worker's text: only a due tranche is "due now".
             let next = match s("status").as_str() {
                 "complete" => "none (plan complete)".to_string(),

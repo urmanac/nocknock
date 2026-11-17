@@ -1056,6 +1056,12 @@ struct AccumulationPlanStatus {
     /// snapshot row.
     #[serde(default)]
     route_quotes: Option<RouteQuotes>,
+    /// True when this cycle could not read the accumulation ledger (2.8.1, issue #130):
+    /// status is `blocked`, `spent_usdc`, `remaining_usdc` and `acquired_nock` read
+    /// "unknown", and `fills`, `tranche_index` and `tranches_total` are not progress.
+    /// Absent (false) whenever the ledger was read.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    progress_unknown: bool,
 }
 
 /// Quotes for one due tranche, both venues read at the same block (v0.7.0, issue #115).
@@ -1447,7 +1453,7 @@ struct GlobalStatus {
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
-const SNAPSHOT_SPEC_VERSION: &str = "2.8.0";
+const SNAPSHOT_SPEC_VERSION: &str = "2.8.1";
 
 /// The gas (wallet ETH + WETH) and ETH pillar figures, each None when it cannot be
 /// measured: unread wallet balances or an unpriced ETH. Never a zero stand-in.

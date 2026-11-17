@@ -144,6 +144,10 @@ pub(crate) fn build_plan_status(
         PlanDirective::Blocked { reason } => ("blocked", 0.0, None, Some(reason.clone())),
         PlanDirective::Complete => ("complete", 0.0, None, None),
     };
+    // A cycle that could not read the ledger knows nothing of the plan's progress
+    // (issue #130): its amounts say "unknown", never the zero of an empty read.
+    let progress_unknown =
+        matches!(directive, PlanDirective::Blocked { reason } if reason == PLAN_LEDGER_UNREADABLE_REASON);
     let fills_done = fills.count.max(0) as u32;
     let complete = matches!(directive, PlanDirective::Complete);
     let tranche_index = if complete { fills_done } else { fills_done + 1 };
@@ -164,9 +168,13 @@ pub(crate) fn build_plan_status(
         nominal_tranche_usdc: format!("{:.2}", nominal),
         next_due_at,
         budget_usdc: format!("{:.2}", cfg.budget_usdc),
-        spent_usdc: format!("{:.2}", fills.spent_usdc),
-        remaining_usdc: format!("{:.2}", (cfg.budget_usdc - fills.spent_usdc).max(0.0)),
-        acquired_nock: format!("{:.4}", fills.acquired_nock),
+        spent_usdc: if progress_unknown { PLAN_PROGRESS_UNKNOWN.to_string() } else { format!("{:.2}", fills.spent_usdc) },
+        remaining_usdc: if progress_unknown {
+            PLAN_PROGRESS_UNKNOWN.to_string()
+        } else {
+            format!("{:.2}", (cfg.budget_usdc - fills.spent_usdc).max(0.0))
+        },
+        acquired_nock: if progress_unknown { PLAN_PROGRESS_UNKNOWN.to_string() } else { format!("{:.4}", fills.acquired_nock) },
         fills: fills.count,
         last_fill_at: fills.last_at.map(|t| t.to_rfc3339()),
         avg_price_usd: avg_price.map(|p| format!("{:.6}", p)),
@@ -181,11 +189,34 @@ pub(crate) fn build_plan_status(
         // Attached by the cycle after the directive is known, and only for a due
         // tranche (issue #115).
         route_quotes: None,
+        progress_unknown,
     }
+}
+
+/// What a plan amount reads when the ledger could not be read (issue #130).
+pub(crate) const PLAN_PROGRESS_UNKNOWN: &str = "unknown";
+
+/// Whether this plan status was built without a ledger read (issue #130). Pure.
+pub(crate) fn plan_progress_unknown(ps: Option<&AccumulationPlanStatus>) -> bool {
+    ps.is_some_and(|p| p.progress_unknown)
 }
 
 /// Advice text for an active (not complete) plan.
 pub(crate) fn plan_advice(ps: &AccumulationPlanStatus, spot_price: f64) -> (String, String) {
+    // No ledger read: no progress sentence and no "(n of N)", which would be the zero of
+    // an empty read presented as the plan's (issue #130).
+    if ps.progress_unknown {
+        let details = format!(
+            "Plan \"{}\": progress is unknown because {}. Nothing is paced until the ledger can be read again.",
+            ps.plan_id,
+            PLAN_LEDGER_UNREADABLE_REASON.trim_end_matches(", so plan progress is unknown")
+        );
+        let details = match open_offer_notice(ps) {
+            Some(notice) => format!("{notice} {details}"),
+            None => details,
+        };
+        return ("DCA BLOCKED (ledger unreadable)".to_string(), details);
+    }
     let progress = format!(
         "Plan \"{}\": ${} of ${} deployed over {} verified buy(s){}.",
         ps.plan_id,

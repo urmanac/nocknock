@@ -174,6 +174,18 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
     let detection = plan.map(fill_detection_lines).unwrap_or_default();
     // Route quotes for a due tranche (issue #115); empty unless the snapshot has them.
     let quotes = plan.map(route_quote_lines).unwrap_or_default();
+    // A cycle that could not read the ledger knows no progress (issue #130).
+    if plan.and_then(|p| p.get("progress_unknown")).and_then(|x| x.as_bool()) == Some(true) {
+        return format!(
+            "🪜 Accumulation Plan \"{}\" ({})\n====================\n\
+             • Status: {}\n\
+             • Next tranche: unknown\n\
+             • Progress: unknown of ${} (the ledger was not read this cycle)\n\
+             • Constraint: {}\n\
+             {detection}{lp_line}{closed}",
+            s(plan, "plan_id"), s(plan, "venue"), s(plan, "status"), s(plan, "budget_usdc"), s(plan, "binding_constraint"),
+        );
+    }
     format!(
         "🪜 Accumulation Plan \"{}\" ({})\n====================\n\
          • Status: {}\n\
