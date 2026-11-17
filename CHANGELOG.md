@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   approve pull request reviews.
 - The audit, the decisions and the rules for reviewing an outside pull request are in
   `docs/kb/ci-security-audit-2026-11-17.md` and AGENTS.md section 14.
+
 ### Fixed — a withdrawn position reports as closed instead of stalling ingestion (#144)
 On 2026-11-17 the operator withdrew the Aero CL position in the Aero app (NFT #2914490,
 burned in Base block 58637717). From the next cycle every ingestion cycle failed, and
