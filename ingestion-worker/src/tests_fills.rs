@@ -1273,6 +1273,7 @@ async fn test_fill_detection_sql_against_a_scratch_database() {
             last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
             last_ingest_error: std::sync::Mutex::new(None),
         cycle_gate: CycleGate::default(),
+        quote_refresh_at: std::sync::Mutex::new(None),
         })
     };
     // No Alchemy key: the transfer history cannot be read. No network call is made.

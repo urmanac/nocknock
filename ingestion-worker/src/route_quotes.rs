@@ -1103,11 +1103,95 @@ pub(crate) async fn quote_due_tranche(
             spot,
         ),
     };
-    if let Err(e) = store_route_quotes(&state.db, &plan.plan_id, plan.tranche_index, &quotes).await {
+    match store_route_quotes(&state.db, &plan.plan_id, plan.tranche_index, &quotes).await {
+        Ok(true) => prune_stored_quotes(state, &plan.plan_id).await,
+        Ok(false) => {}
         // The quotes are still shown; only the later cost-over-quote figure is lost.
-        tracing::warn!("Route quotes could not be stored: {e}");
+        Err(e) => tracing::warn!("Route quotes could not be stored: {e}"),
     }
     Some(quotes)
+}
+
+/// Which stored quote rows no fill can use any more (issue #133). Pure. `rows` are the
+/// plan's rows as (id, block, quoted_at). A fill's reference is the latest row read
+/// before its block, and only if it was not read before the buy before it
+/// (`quote_applies_to_fill`). So once the plan has a recorded fill at block L, a row
+/// read before L can serve only a buy below L that is not recorded yet; the ones
+/// NockNock knows of are the swaps still on offer or dismissed (a dismissed one can be
+/// restored), and each keeps the latest row read before its block. Everything else
+/// read before L, and more than `FILL_QUOTE_MAX_AGE_MINUTES` ago, goes. Nothing goes
+/// before the plan's first recorded fill. A buy below L that fill detection never
+/// offered and that is recorded by hash afterwards reads "no quote on record".
+pub(crate) fn stored_quotes_to_prune(
+    rows: &[(i64, i64, DateTime<Utc>)],
+    latest_fill_block: Option<i64>,
+    open_candidate_blocks: &[i64],
+    now: DateTime<Utc>,
+) -> Vec<i64> {
+    let Some(latest_fill) = latest_fill_block else {
+        return Vec::new();
+    };
+    let keep: std::collections::HashSet<i64> = open_candidate_blocks
+        .iter()
+        .filter_map(|c| rows.iter().filter(|r| r.1 < *c).max_by_key(|r| r.1).map(|r| r.0))
+        .collect();
+    let too_old = now - chrono::Duration::minutes(FILL_QUOTE_MAX_AGE_MINUTES);
+    rows.iter()
+        .filter(|(id, block, quoted_at)| *block < latest_fill && *quoted_at < too_old && !keep.contains(id))
+        .map(|r| r.0)
+        .collect()
+}
+
+/// Delete the stored quotes `stored_quotes_to_prune` names. Without it a due tranche
+/// adds a row every cycle and every refresh, for as long as it stays due. A database
+/// error is logged; the rows are tried again next time.
+pub(crate) async fn prune_stored_quotes(state: &Arc<AppState>, plan_id: &str) {
+    let wallet = state.config.tracked_wallets.first().map(|w| w.to_lowercase()).unwrap_or_default();
+    let prune = async {
+        let latest: Option<i64> =
+            sqlx::query("SELECT MAX(block_number) AS b FROM accumulation_events WHERE plan_id = $1")
+                .bind(plan_id)
+                .fetch_one(&state.db)
+                .await?
+                .try_get("b")?;
+        let Some(latest) = latest else {
+            return Ok::<u64, sqlx::Error>(0);
+        };
+        let open: Vec<i64> = sqlx::query(
+            "SELECT block_number FROM accumulation_candidates \
+             WHERE wallet = $1 AND state IN ('offered', 'dismissed') AND block_number IS NOT NULL",
+        )
+        .bind(&wallet)
+        .fetch_all(&state.db)
+        .await?
+        .iter()
+        .filter_map(|r| r.try_get::<i64, _>("block_number").ok())
+        .collect();
+        let rows: Vec<(i64, i64, DateTime<Utc>)> = sqlx::query(
+            "SELECT id, block_number, quoted_at FROM accumulation_quotes WHERE plan_id = $1 AND block_number < $2",
+        )
+        .bind(plan_id)
+        .bind(latest)
+        .fetch_all(&state.db)
+        .await?
+        .iter()
+        .filter_map(|r| Some((r.try_get("id").ok()?, r.try_get("block_number").ok()?, r.try_get("quoted_at").ok()?)))
+        .collect();
+        let ids = stored_quotes_to_prune(&rows, Some(latest), &open, Utc::now());
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        Ok(sqlx::query("DELETE FROM accumulation_quotes WHERE id = ANY($1)")
+            .bind(&ids)
+            .execute(&state.db)
+            .await?
+            .rows_affected())
+    };
+    match prune.await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("Pruned {n} stored route quote row(s) no fill can use"),
+        Err(e) => tracing::warn!("Stored route quotes could not be pruned: {e}"),
+    }
 }
 
 // ---------------- Stored quotes and a fill's cost over them ----------------
@@ -1407,6 +1491,28 @@ pub(crate) fn refresh_refusal(
     None
 }
 
+/// Minimum time between two refreshes that read the chain (issue #133).
+pub(crate) const QUOTE_REFRESH_COOLDOWN_SECONDS: u64 = 10;
+
+/// Take the refresh slot: None when a refresh may read now (and the slot is taken from
+/// `now`), or the time left in the cooldown. Check and claim happen under one lock, so
+/// two refreshes at the same moment read the chain once.
+pub(crate) fn claim_quote_refresh(
+    slot: &std::sync::Mutex<Option<std::time::Instant>>,
+    now: std::time::Instant,
+) -> Option<std::time::Duration> {
+    let mut last = slot.lock().unwrap_or_else(|p| p.into_inner());
+    let window = std::time::Duration::from_secs(QUOTE_REFRESH_COOLDOWN_SECONDS);
+    if let Some(at) = *last {
+        let since = now.saturating_duration_since(at);
+        if since < window {
+            return Some(window - since);
+        }
+    }
+    *last = Some(now);
+    None
+}
+
 /// POST /v1/accumulation/quotes/refresh — quote the due tranche again at the latest
 /// block, for the operator about to follow a swap link. It quotes the tranche amount of
 /// the latest snapshot and nothing else, takes no parameters, and writes only the
@@ -1430,6 +1536,26 @@ pub(crate) async fn refresh_route_quotes_handler(Extension(state): Extension<Arc
     let Some(plan) = plan else {
         return (StatusCode::CONFLICT, Json(json!({ "error": "NO_TRANCHE_DUE", "detail": "No tranche is due." }))).into_response();
     };
+    // A short cooldown (issue #133): each refresh makes about a dozen RPC reads and
+    // stores a row. Inside the window the quotes already held are the answer.
+    if let Some(wait) = claim_quote_refresh(&state.quote_refresh_at, std::time::Instant::now()) {
+        return match plan.route_quotes.clone() {
+            Some(quotes) => Json(json!({ "plan_id": plan.plan_id, "tranche_index": plan.tranche_index, "route_quotes": quotes }))
+                .into_response(),
+            None => {
+                let secs = wait.as_secs().max(1);
+                (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [(axum::http::header::RETRY_AFTER, secs.to_string())],
+                    Json(json!({
+                        "error": "REFRESH_COOLDOWN",
+                        "detail": format!("The quotes were read moments ago; try again in {secs} s."),
+                    })),
+                )
+                    .into_response()
+            }
+        };
+    }
     // The reference stays the cycle's own spot, at the precision the cycle carried it
     // (the cycle's quotes keep it even when no venue could be quoted). Without it no
     // cost over spot is shown: the snapshot's displayed price is rounded to five

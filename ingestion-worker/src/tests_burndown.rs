@@ -105,3 +105,214 @@ async fn test_a_dropped_request_does_not_cancel_its_cycle() {
     tokio::time::sleep(std::time::Duration::from_millis(80)).await;
     assert_eq!(finished.load(Ordering::SeqCst), 1, "the cycle ran to the end");
 }
+
+// ---------------- #133: LAN API hardening ----------------
+
+fn burndown_plan_cfg() -> AccumulationPlanConfig {
+    AccumulationPlanConfig {
+        id: "2026-11-reentry".to_string(),
+        budget_usdc: 100.0,
+        tranches: 5,
+        interval_hours: 24.0,
+        starts_at: None,
+        venue: "Aero".to_string(),
+        max_price_usd: None,
+        pause_when_overextended: true,
+        respect_cash_target: true,
+        cash_reserve_usdc: None,
+    }
+}
+
+fn envelope(plan: Option<AccumulationPlanStatus>) -> SnapshotEnvelope {
+    SnapshotEnvelope {
+        meta: SnapshotMeta {
+            generated_at: Utc::now(),
+            state_hash: "test".to_string(),
+            version: SNAPSHOT_SPEC_VERSION.to_string(),
+            snapshot_id: Uuid::new_v4(),
+        },
+        data: SnapshotData {
+            closed_positions: vec![],
+            wallet_balances: vec![],
+            positions: vec![],
+            pool_mechanics: vec![],
+            concentrated_liquidity: vec![],
+            contract_fees: vec![],
+            derived_metrics: DerivedMetrics { accumulation_plan: plan, ..Default::default() },
+        },
+    }
+}
+
+/// A worker with a plan, no RPC key and a database that is never reached.
+fn offline_state(snapshot: Option<SnapshotEnvelope>) -> Arc<AppState> {
+    let mut config: AppConfig = serde_yaml::from_str("alchemy_api_keys: [\"YOUR_ALCHEMY_API_KEY\"]\n").unwrap();
+    config.accumulation_plan = Some(burndown_plan_cfg());
+    Arc::new(AppState {
+        db: PgPool::connect_lazy("postgres://nobody@127.0.0.1:1/none").unwrap(),
+        http_client: Client::new(),
+        config: Arc::new(config),
+        latest_snapshot: Mutex::new(snapshot),
+        last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
+        last_ingest_error: std::sync::Mutex::new(None),
+        cycle_gate: CycleGate::default(),
+        quote_refresh_at: std::sync::Mutex::new(None),
+    })
+}
+
+fn due_plan() -> AccumulationPlanStatus {
+    build_plan_status(&burndown_plan_cfg(), &PlanFills::default(), &PlanDirective::TrancheDue { usdc: 20.0, limited_by: None })
+}
+
+#[test]
+fn test_cross_site_writes_are_refused_and_same_host_ones_pass() {
+    use axum::http::Method;
+    let post = Method::POST;
+    let refused = |sfs, origin, host| cross_site_refusal(&post, sfs, origin, host).is_some();
+    // curl, scripts and MCP clients send neither header.
+    assert!(!refused(None, None, Some("chudmax:8081")));
+    assert!(!refused(None, None, None));
+    // The dashboard through nginx on :3000: nginx forwards Host without the port.
+    assert!(!refused(Some("same-origin"), Some("http://chudmax:3000"), Some("chudmax")));
+    // Behind the TLS proxy (Caddy keeps Host, nginx drops the port again).
+    assert!(!refused(Some("same-origin"), Some("https://chudmax:3443"), Some("chudmax")));
+    // The Vite dev server passes the browser's Host through.
+    assert!(!refused(Some("same-origin"), Some("http://127.0.0.1:3000"), Some("127.0.0.1:3000")));
+    assert!(!refused(Some("same-origin"), Some("http://[::1]:3000"), Some("[::1]:3000")));
+    // A page on another port of the operator's own host.
+    assert!(!refused(Some("same-site"), Some("http://chudmax:3000"), Some("chudmax:8081")));
+    // Case does not matter in a host name.
+    assert!(!refused(None, Some("http://ChudMax:3000"), Some("chudmax")));
+
+    // Any page elsewhere.
+    assert!(refused(Some("cross-site"), Some("https://evil.example"), Some("chudmax:8081")));
+    assert!(refused(Some("cross-site"), None, Some("chudmax:8081")));
+    assert!(refused(None, Some("https://evil.example"), Some("chudmax:8081")));
+    // A sandboxed page or a file sends "null".
+    assert!(refused(None, Some("null"), Some("chudmax:8081")));
+    // DNS rebinding: the page's name points at the host, but its Origin is its own name.
+    assert!(refused(Some("same-origin"), Some("http://rebind.example:8081"), Some("chudmax:8081")));
+    // An Origin with no Host to compare against.
+    assert!(refused(None, Some("http://chudmax:3000"), None));
+    // Reads are never refused.
+    assert!(cross_site_refusal(&Method::GET, Some("cross-site"), Some("https://evil.example"), Some("chudmax")).is_none());
+}
+
+#[tokio::test]
+async fn test_the_router_refuses_a_cross_site_post_before_any_handler_runs() {
+    let state = offline_state(None);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, api_router(state)).await.unwrap() });
+    let base = format!("http://{addr}");
+    let client = Client::new();
+
+    // A page elsewhere asks for an ingest cycle: 403, and no cycle runs (the database
+    // here is unreachable, so a cycle would answer 500).
+    let r = client
+        .post(format!("{base}/v1/ingest"))
+        .header("Origin", "https://evil.example")
+        .header("Sec-Fetch-Site", "cross-site")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), reqwest::StatusCode::FORBIDDEN);
+    let body: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(body["error"].as_str(), Some("CROSS_SITE_REFUSED"));
+    assert!(!body.to_string().contains("alchemy"), "no RPC URL in an error");
+
+    for path in ["/v1/accumulation/quotes/refresh", "/v1/notifications/test"] {
+        let r = client.post(format!("{base}{path}")).header("Origin", "https://evil.example").send().await.unwrap();
+        assert_eq!(r.status(), reqwest::StatusCode::FORBIDDEN, "{path}");
+    }
+
+    // The same request without Origin (curl) reaches the handler: no snapshot yet.
+    let r = client.post(format!("{base}/v1/accumulation/quotes/refresh")).send().await.unwrap();
+    assert_eq!(r.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    // And so does the dashboard's own POST, through nginx (Host without the port).
+    let r = client
+        .post(format!("{base}/v1/accumulation/quotes/refresh"))
+        .header("Origin", "http://127.0.0.1:3000")
+        .header("Sec-Fetch-Site", "same-origin")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+    // Reads are untouched.
+    let r = client.get(format!("{base}/health")).header("Origin", "https://evil.example").send().await.unwrap();
+    assert_eq!(r.status(), reqwest::StatusCode::OK);
+}
+
+#[test]
+fn test_the_refresh_slot_is_held_for_the_cooldown() {
+    let slot = std::sync::Mutex::new(None);
+    let t0 = std::time::Instant::now();
+    assert_eq!(claim_quote_refresh(&slot, t0), None, "the first refresh reads");
+    let wait = claim_quote_refresh(&slot, t0 + std::time::Duration::from_secs(3)).expect("inside the window");
+    assert_eq!(wait, std::time::Duration::from_secs(QUOTE_REFRESH_COOLDOWN_SECONDS - 3));
+    // A refused call does not extend the window.
+    assert_eq!(claim_quote_refresh(&slot, t0 + std::time::Duration::from_secs(QUOTE_REFRESH_COOLDOWN_SECONDS)), None);
+    assert!(claim_quote_refresh(&slot, t0 + std::time::Duration::from_secs(QUOTE_REFRESH_COOLDOWN_SECONDS + 1)).is_some());
+}
+
+#[tokio::test]
+async fn test_a_refresh_inside_the_cooldown_answers_with_the_quotes_held() {
+    async fn body(resp: Response) -> (StatusCode, HeaderMap, serde_json::Value) {
+        let (status, headers) = (resp.status(), resp.headers().clone());
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        (status, headers, serde_json::from_slice(&bytes).unwrap())
+    }
+    let state = offline_state(Some(envelope(Some(due_plan()))));
+    // The first refresh reads (no key here: "unavailable", which is still an answer)
+    // and attaches its result.
+    let (status, _, first) = body(refresh_route_quotes_handler(Extension(state.clone())).await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(first["route_quotes"]["status"].as_str(), Some("unavailable"));
+    // A second one moments later is answered from memory, with the same quotes.
+    let (status, _, second) = body(refresh_route_quotes_handler(Extension(state.clone())).await).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(second, first);
+
+    // Inside the window with nothing held: 429 with Retry-After, never an empty quote.
+    let bare = offline_state(Some(envelope(Some(due_plan()))));
+    *bare.quote_refresh_at.lock().unwrap() = Some(std::time::Instant::now());
+    let (status, headers, err) = body(refresh_route_quotes_handler(Extension(bare)).await).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(err["error"].as_str(), Some("REFRESH_COOLDOWN"));
+    let secs: u64 = headers[axum::http::header::RETRY_AFTER].to_str().unwrap().parse().unwrap();
+    assert!((1..=QUOTE_REFRESH_COOLDOWN_SECONDS).contains(&secs));
+}
+
+#[test]
+fn test_stored_quotes_are_pruned_only_where_no_fill_can_use_them() {
+    let now = DateTime::parse_from_rfc3339("2026-11-17T12:00:00Z").unwrap().with_timezone(&Utc);
+    let at = |mins_ago: i64| now - chrono::Duration::minutes(mins_ago);
+    // One row every 5 minutes for 10 hours, oldest first: (id, block, quoted_at).
+    let rows: Vec<(i64, i64, DateTime<Utc>)> =
+        (0..120).map(|i| (i as i64, 1000 + i as i64 * 150, at(600 - i as i64 * 5))).collect();
+    // No recorded fill: nothing is pruned, whatever its age.
+    assert!(stored_quotes_to_prune(&rows, None, &[], now).is_empty());
+
+    // A recorded fill at block 10000 (row 60 sits at 10000). Rows before it, read more
+    // than an hour ago, go; the rest stay.
+    let gone = stored_quotes_to_prune(&rows, Some(10_000), &[], now);
+    assert_eq!(gone, (0..60).collect::<Vec<i64>>());
+
+    // A swap still on offer at block 5100 keeps the latest row read before it (row 27,
+    // block 5050): confirming it later still finds its quote.
+    let gone = stored_quotes_to_prune(&rows, Some(10_000), &[5_100], now);
+    assert!(!gone.contains(&27));
+    assert_eq!(gone.len(), 59);
+
+    // Rows read within the last hour stay even below the fill.
+    let recent: Vec<(i64, i64, DateTime<Utc>)> = vec![(1, 100, at(30)), (2, 200, at(90))];
+    assert_eq!(stored_quotes_to_prune(&recent, Some(300), &[], now), vec![2]);
+
+    // What is left still answers every fill the same way: for a fill above the latest
+    // recorded one, the latest row before it is unchanged.
+    let kept: Vec<_> = rows.iter().filter(|r| !stored_quotes_to_prune(&rows, Some(10_000), &[5_100], now).contains(&r.0)).collect();
+    let latest_before = |rs: &[&(i64, i64, DateTime<Utc>)], b: i64| rs.iter().filter(|r| r.1 < b).max_by_key(|r| r.1).map(|r| r.0);
+    let all: Vec<_> = rows.iter().collect();
+    for fill_block in [5_100, 10_001, 12_000, 18_000] {
+        assert_eq!(latest_before(&kept, fill_block), latest_before(&all, fill_block), "fill at {fill_block}");
+    }
+}

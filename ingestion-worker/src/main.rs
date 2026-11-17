@@ -1598,6 +1598,8 @@ struct AppState {
     last_ingest_error: std::sync::Mutex<Option<(DateTime<Utc>, String)>>,
     /// One ingestion cycle at a time, scheduled or requested (issue #134).
     cycle_gate: CycleGate,
+    /// When POST /v1/accumulation/quotes/refresh last read the chain (issue #133).
+    quote_refresh_at: std::sync::Mutex<Option<std::time::Instant>>,
 }
 
 // ============================================================
@@ -1698,6 +1700,7 @@ async fn main() -> Result<()> {
         last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
         last_ingest_error: std::sync::Mutex::new(None),
         cycle_gate: CycleGate::default(),
+        quote_refresh_at: std::sync::Mutex::new(None),
     });
 
     // Historical price backfill (v0.3.0): heal multi-hour/multi-day gaps left by
@@ -1727,98 +1730,7 @@ async fn main() -> Result<()> {
     });
 
     // Start API server
-    let app = axum::Router::new()
-        .route("/health", axum::routing::get(health_handler))
-        .route("/v1/health", axum::routing::get(health_handler))
-        .route(
-            "/v1/snapshot/latest",
-            axum::routing::get(get_latest_snapshot_handler),
-        )
-        .route(
-            "/v1/snapshot",
-            axum::routing::get(get_latest_snapshot_handler),
-        )
-        .route(
-            "/snapshot",
-            axum::routing::get(get_latest_snapshot_handler),
-        )
-        .route(
-            "/v1/snapshot/historical",
-            axum::routing::get(get_historical_snapshots_handler),
-        )
-        .route(
-            "/v1/snapshot/metadata",
-            axum::routing::get(get_snapshot_metadata_handler),
-        )
-        .route(
-            "/v1/snapshot/:id",
-            axum::routing::get(get_snapshot_by_id_handler),
-        )
-        .route(
-            "/v1/ingest",
-            axum::routing::post(trigger_ingest_handler),
-        )
-        .route(
-            "/v1/mcp",
-            axum::routing::post(mcp_http_handler),
-        )
-        .route(
-            "/mcp",
-            axum::routing::post(mcp_http_handler),
-        )
-        .route(
-            "/v1/execute/claim-fees/payload",
-            axum::routing::get(get_claim_fees_payload_handler),
-        )
-        .route(
-            "/v1/execute/record-harvest",
-            axum::routing::post(record_harvest_handler),
-        )
-        .route(
-            "/v1/execute/record-accumulation",
-            axum::routing::post(record_accumulation_handler),
-        )
-        .route(
-            "/v1/accumulation/events",
-            axum::routing::get(accumulation_events_handler),
-        )
-        .route(
-            "/v1/accumulation/candidates",
-            axum::routing::get(accumulation_candidates_handler),
-        )
-        .route(
-            "/v1/accumulation/candidates/dismiss",
-            axum::routing::post(dismiss_candidate_handler),
-        )
-        .route(
-            "/v1/accumulation/candidates/restore",
-            axum::routing::post(restore_candidate_handler),
-        )
-        .route(
-            "/v1/accumulation/quotes/latest",
-            axum::routing::get(latest_route_quotes_handler),
-        )
-        .route(
-            "/v1/accumulation/quotes/refresh",
-            axum::routing::post(refresh_route_quotes_handler),
-        )
-        .route(
-            "/v1/tax/export",
-            axum::routing::get(tax_export_handler),
-        )
-        .route(
-            "/v1/notifications/status",
-            axum::routing::get(notification_status_handler),
-        )
-        .route(
-            "/v1/notifications/test",
-            axum::routing::post(notification_test_handler),
-        )
-        .route(
-            "/v1/cost-basis/series",
-            axum::routing::get(cost_basis_series_handler),
-        )
-        .layer(Extension(state.clone()));
+    let app = api_router(state.clone());
 
     let port = state.config.port;
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))

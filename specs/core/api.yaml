@@ -13,6 +13,13 @@ info:
     - Frontend validates freshness locally; shows non-obtrusive stale indicator
     - Zero "act now" urgency — pure observation
 
+    **Cross-site writes (v0.8.1, issue #133):** a POST is refused with 403
+    `CROSS_SITE_REFUSED` before any handler runs when its `Sec-Fetch-Site` header is
+    `cross-site`, or when it carries an `Origin` whose host is not the request's `Host`
+    host (ports are not compared: nginx forwards the host without its port). Requests
+    without `Origin` (curl, scripts, MCP clients) are unaffected, and so is every GET.
+    The API has no authentication; it is meant for the LAN.
+
 servers:
   - url: http://localhost:8080/v1
     description: Local development
@@ -328,10 +335,13 @@ paths:
         measured against the reference spot of the cycle's own quotes; when the worker
         holds none (just after a restart), `cost_over_spot_pct` is null.
         Unauthenticated, like the other endpoints of this LAN-only API; each call
-        makes about a dozen RPC reads.
+        makes about a dozen RPC reads, so calls are at least 10 seconds apart (v0.8.1,
+        issue #133): inside that window the answer is the quotes the worker already
+        holds for the tranche (a 200, with their own block and time), or 429
+        `REFRESH_COOLDOWN` with `Retry-After` when it holds none.
       responses:
         '200':
-          description: The quotes. A venue that could not be quoted is `unavailable` with its reason; that is still a 200.
+          description: The quotes. A venue that could not be quoted is `unavailable` with its reason; that is still a 200. Inside the cooldown, the quotes already held, unchanged.
           content:
             application/json:
               schema:
@@ -343,6 +353,8 @@ paths:
                     $ref: './snapshot.yaml#/components/schemas/RouteQuotes'
         '409':
           description: NO_PLAN (no accumulation_plan is configured), QUOTES_DISABLED (route_quotes.enabled is false) or NO_TRANCHE_DUE (nothing is due, so nothing is quoted)
+        '429':
+          description: REFRESH_COOLDOWN. The quotes were read less than 10 seconds ago and the worker holds none to answer with; `Retry-After` gives the seconds left.
         '503':
           description: NO_SNAPSHOT. No snapshot yet, so it is not known whether a tranche is due.
 

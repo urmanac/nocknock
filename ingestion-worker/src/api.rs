@@ -384,3 +384,165 @@ pub(crate) async fn get_snapshot_by_id_handler(
         )
     }
 }
+
+/// The worker's HTTP API: every route, the cross-site guard and the state (issue #133).
+pub(crate) fn api_router(state: Arc<AppState>) -> axum::Router {
+    axum::Router::new()
+        .route("/health", axum::routing::get(health_handler))
+        .route("/v1/health", axum::routing::get(health_handler))
+        .route(
+            "/v1/snapshot/latest",
+            axum::routing::get(get_latest_snapshot_handler),
+        )
+        .route(
+            "/v1/snapshot",
+            axum::routing::get(get_latest_snapshot_handler),
+        )
+        .route(
+            "/snapshot",
+            axum::routing::get(get_latest_snapshot_handler),
+        )
+        .route(
+            "/v1/snapshot/historical",
+            axum::routing::get(get_historical_snapshots_handler),
+        )
+        .route(
+            "/v1/snapshot/metadata",
+            axum::routing::get(get_snapshot_metadata_handler),
+        )
+        .route(
+            "/v1/snapshot/:id",
+            axum::routing::get(get_snapshot_by_id_handler),
+        )
+        .route(
+            "/v1/ingest",
+            axum::routing::post(trigger_ingest_handler),
+        )
+        .route(
+            "/v1/mcp",
+            axum::routing::post(mcp_http_handler),
+        )
+        .route(
+            "/mcp",
+            axum::routing::post(mcp_http_handler),
+        )
+        .route(
+            "/v1/execute/claim-fees/payload",
+            axum::routing::get(get_claim_fees_payload_handler),
+        )
+        .route(
+            "/v1/execute/record-harvest",
+            axum::routing::post(record_harvest_handler),
+        )
+        .route(
+            "/v1/execute/record-accumulation",
+            axum::routing::post(record_accumulation_handler),
+        )
+        .route(
+            "/v1/accumulation/events",
+            axum::routing::get(accumulation_events_handler),
+        )
+        .route(
+            "/v1/accumulation/candidates",
+            axum::routing::get(accumulation_candidates_handler),
+        )
+        .route(
+            "/v1/accumulation/candidates/dismiss",
+            axum::routing::post(dismiss_candidate_handler),
+        )
+        .route(
+            "/v1/accumulation/candidates/restore",
+            axum::routing::post(restore_candidate_handler),
+        )
+        .route(
+            "/v1/accumulation/quotes/latest",
+            axum::routing::get(latest_route_quotes_handler),
+        )
+        .route(
+            "/v1/accumulation/quotes/refresh",
+            axum::routing::post(refresh_route_quotes_handler),
+        )
+        .route(
+            "/v1/tax/export",
+            axum::routing::get(tax_export_handler),
+        )
+        .route(
+            "/v1/notifications/status",
+            axum::routing::get(notification_status_handler),
+        )
+        .route(
+            "/v1/notifications/test",
+            axum::routing::post(notification_test_handler),
+        )
+        .route(
+            "/v1/cost-basis/series",
+            axum::routing::get(cost_basis_series_handler),
+        )
+        .layer(axum::middleware::from_fn(refuse_cross_site_writes))
+        .layer(Extension(state))
+}
+
+/// Why a state-changing request is refused as cross-site, or None to let it through
+/// (issue #133). Pure.
+///
+/// A web page on any origin can send a body-less POST (a form, or `fetch` with
+/// `mode: 'no-cors'`) to this LAN API without a preflight. Browsers mark such a request:
+/// `Sec-Fetch-Site: cross-site`, and an `Origin` naming the page. So a POST, PUT, PATCH
+/// or DELETE is refused when `Sec-Fetch-Site` is `cross-site`, or when `Origin` is
+/// present and its host is not the host the request was sent to (`Host`).
+///
+/// Hosts are compared without the port, because the dashboard's own requests reach the
+/// worker through proxies that do not keep it: nginx on :3000 forwards `Host: $host`
+/// (the name without the port) while the page's Origin is `http://chudmax:3000`, or
+/// `https://chudmax:3443` behind the TLS proxy. A page on another port of the same host
+/// is the operator's own host and passes. Requests without `Origin` and without
+/// `Sec-Fetch-Site` (curl, scripts, MCP clients) pass: they are not a browser acting for
+/// some page. GET and HEAD are never refused; nothing they do changes state.
+pub(crate) fn cross_site_refusal(
+    method: &axum::http::Method,
+    sec_fetch_site: Option<&str>,
+    origin: Option<&str>,
+    host: Option<&str>,
+) -> Option<String> {
+    use axum::http::Method;
+    if matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS) {
+        return None;
+    }
+    if sec_fetch_site.map(|s| s.trim().eq_ignore_ascii_case("cross-site")).unwrap_or(false) {
+        return Some("a cross-site request may not change anything here (Sec-Fetch-Site: cross-site)".to_string());
+    }
+    let Some(origin) = origin.map(str::trim) else {
+        return None;
+    };
+    let origin_host = origin
+        .split_once("://")
+        .map(|(_, rest)| rest.split('/').next().unwrap_or(""))
+        .map(host_without_port);
+    let request_host = host.map(host_without_port);
+    match (origin_host, request_host) {
+        (Some(o), Some(h)) if !o.is_empty() && o.eq_ignore_ascii_case(&h) => None,
+        _ => Some(format!("a request from {origin} may not change anything on this host")),
+    }
+}
+
+/// "chudmax:3000" -> "chudmax", "[::1]:8081" -> "[::1]". Pure.
+fn host_without_port(authority: &str) -> String {
+    let a = authority.trim().rsplit('@').next().unwrap_or("");
+    if a.starts_with('[') {
+        return a.split(']').next().map(|h| format!("{h}]")).unwrap_or_default();
+    }
+    a.split(':').next().unwrap_or("").to_string()
+}
+
+/// The middleware for `cross_site_refusal`: 403 CROSS_SITE_REFUSED before the handler
+/// runs.
+pub(crate) async fn refuse_cross_site_writes(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let refusal = {
+        let header = |name: &str| req.headers().get(name).and_then(|v| v.to_str().ok());
+        cross_site_refusal(req.method(), header("sec-fetch-site"), header("origin"), header("host"))
+    };
+    if let Some(detail) = refusal {
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": "CROSS_SITE_REFUSED", "detail": detail }))).into_response();
+    }
+    next.run(req).await
+}
