@@ -400,3 +400,51 @@ fn test_an_unread_ledger_cycle_is_not_a_directive_change() {
     // After a restart nothing is remembered: nothing is compared, as on a first boot.
     assert_eq!(notify(bad_base, None, good_action, &waiting), None);
 }
+
+// ---------------- #131: sub-cent range bounds keep their digits ----------------
+
+/// The bounds of a WETH (18 decimals) / NOCK (16 decimals) range as the snapshot carries
+/// them: lower_price from the upper tick, upper_price from the lower tick.
+fn weth_nock_bounds(tick_lower: i32, tick_upper: i32) -> (String, String, f64, f64) {
+    let exact_lower = tick_to_display_price_dec(tick_upper, 18, 16);
+    let exact_upper = tick_to_display_price_dec(tick_lower, 18, 16);
+    (fmt_price(exact_lower), fmt_price(exact_upper), exact_lower, exact_upper)
+}
+
+fn sig_digits(s: &str) -> usize {
+    s.trim_start_matches(['0', '.']).chars().filter(|c| c.is_ascii_digit()).count()
+}
+
+#[test]
+fn test_weth_nock_bounds_match_their_ticks_to_the_displayed_digit() {
+    // aerodrome-cl:base:2914490, ticks 73400..74800: the Aero app shows 154,015 - 177,158
+    // NOCK per WETH.
+    let (lower, upper, exact_lower, exact_upper) = weth_nock_bounds(73400, 74800);
+    assert!(sig_digits(&lower) >= 6 && sig_digits(&upper) >= 6, "{lower} {upper}");
+    assert_eq!((lower.as_str(), upper.as_str()), ("0.00000564468", "0.00000649289"));
+    let inv = |s: &str| (1.0 / s.parse::<f64>().unwrap()).round() as i64;
+    // The card prints 1/upper - 1/lower rounded to whole NOCK.
+    assert_eq!((inv(&upper), inv(&lower)), (154_015, 177_158));
+    assert_eq!((inv(&upper), inv(&lower)), ((1.0 / exact_upper).round() as i64, (1.0 / exact_lower).round() as i64));
+    // The USD bracket at ETH $1811.02 agrees with the ticks to five significant digits.
+    let eth = 1811.02;
+    for (shown, exact) in [(&lower, exact_lower), (&upper, exact_upper)] {
+        let usd = shown.parse::<f64>().unwrap() * eth;
+        assert_eq!(format!("{:.5}", usd), format!("{:.5}", exact * eth));
+    }
+
+    // The wider range 70400..74800.
+    let (lower, upper, exact_lower, exact_upper) = weth_nock_bounds(70400, 74800);
+    assert!(sig_digits(&lower) >= 6 && sig_digits(&upper) >= 6, "{lower} {upper}");
+    assert_eq!((inv(&upper), inv(&lower)), ((1.0 / exact_upper).round() as i64, (1.0 / exact_lower).round() as i64));
+    assert_eq!(inv(&lower), 177_158);
+}
+
+#[test]
+fn test_bounds_of_a_cent_or_more_keep_five_decimals() {
+    assert_eq!(fmt_price(0.01128675), "0.01129");
+    assert_eq!(fmt_price(1811.02), "1811.02000");
+    assert_eq!(fmt_price(0.0), "0.00000");
+    // Sub-cent USD bounds gain digits too, never lose them.
+    assert_eq!(fmt_price(0.0054998), "0.00549980");
+}

@@ -30,8 +30,9 @@ const cl = {
   staked_in_gauge: '0x3bf70c880adc8370917994ab0df68e763b7a60fd',
   lower_tick: 73400,
   upper_tick: 74800,
-  lower_price: '0.00000564',
-  upper_price: '0.00000649',
+  // As the worker publishes them since v0.8.1 (#131): six significant digits.
+  lower_price: '0.00000564468',
+  upper_price: '0.00000649289',
   in_range: true,
   full_range: false,
   pool_active: true,
@@ -47,7 +48,10 @@ describe('Aero CL position display (#91)', () => {
     expect(isAeroProtocol('uniswap-v3')).toBe(false);
     expect(isAeroProtocol(undefined)).toBe(false);
     // A ranged position: it prints a real range and can be in or out of it.
-    expect(positionRangeText(cl)).toBe('154,083 – 177,305 NOCK per WETH');
+    // The ticks give 154,015 – 177,158, which is what the Aero app shows (#131).
+    expect(positionRangeText(cl)).toBe('154,015 – 177,158 NOCK per WETH');
+    // Three significant digits printed 154,083 – 177,305.
+    expect(positionRangeText({ ...cl, lower_price: '0.00000564', upper_price: '0.00000649' })).toBe('154,083 – 177,305 NOCK per WETH');
     expect(rangeStatus(cl)).toEqual({ label: '● IN RANGE', tone: 'good' });
     expect(rangeStatus({ ...cl, in_range: false })).toEqual({ label: '● OUT OF RANGE', tone: 'warn' });
   });

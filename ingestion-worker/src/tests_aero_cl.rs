@@ -344,7 +344,7 @@ fn test_aero_cl_is_valued_with_the_snapshot_prices() {
     assert!(!p.full_range);
     assert!(p.in_range);
     // ETH per NOCK, lower bound from the upper tick.
-    assert_eq!((p.lower_price.as_str(), p.upper_price.as_str()), ("0.00000564", "0.00000649"));
+    assert_eq!((p.lower_price.as_str(), p.upper_price.as_str()), ("0.00000564468", "0.00000649289")); // 6 significant digits (#131)
 
     let m = &snap.pool_mechanics[0];
     assert_eq!(m.platform, "Aerodrome");
@@ -388,7 +388,7 @@ fn test_aero_cl_range_shows_in_the_tick_bracket_panel() {
     let b = &snap.derived_metrics.tick_bracket_hypervisor.brackets[0];
     assert!(b.in_range);
     assert!(!b.full_range);
-    assert_eq!((b.lower_price.as_str(), b.upper_price.as_str()), ("0.00000564", "0.00000649"));
+    assert_eq!((b.lower_price.as_str(), b.upper_price.as_str()), ("0.00000564468", "0.00000649289")); // 6 significant digits (#131)
     assert_eq!(b.liquidity_usd, "180.20");
     // ETH-denominated bounds have no honest bps distance to a USD spot.
     assert_eq!(b.distance_bps, None);
