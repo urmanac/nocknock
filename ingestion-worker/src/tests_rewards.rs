@@ -370,6 +370,45 @@ fn test_totals_state_lp_fees_and_rewards_side_by_side_and_add_up() {
     assert!(with_fees.contract_fees[0].claimable);
 }
 
+#[test]
+fn test_rewards_total_is_the_summed_amount_at_the_price_not_the_sum_of_rounded_rows() {
+    // The real basic reward and AERO price of block 58618045 with a synthetic CL reward
+    // of 9.987260 AERO: the rows print $0.09 and $4.38, and the summed amount
+    // (10.197691 AERO at $0.438859) is $4.48, one cent more than the rows add up to.
+    let earned = |gauge: &str| {
+        if gauge.eq_ignore_ascii_case(CL_GAUGE) {
+            ok_hex(&format!("{:064x}", 9_987_260_000_000_000_000u128))
+        } else {
+            ok_hex(REAL_BASIC_EARNED_AT_CLAIM)
+        }
+    };
+    let snap = snapshot_of(cycle(REAL_AERO_BALANCE_WALLET, &price_at_claim, &earned), &OperatorProfile::default(), 0.0);
+    let usd = |i: usize| snap.positions[i].collectible_reward.as_ref().unwrap().usd.clone().unwrap();
+    assert_eq!((usd(0).as_str(), usd(1).as_str()), ("0.09", "4.38"));
+    let g = &snap.derived_metrics.global_status;
+    assert_eq!(g.unclaimed_aero_amount.as_deref(), Some("10.197691"));
+    // The stated total is the amount at the price: the figure `unclaimed_aero_usd` has
+    // carried since #93, so the same AERO never prints with two dollar values.
+    assert_eq!(g.collectible_rewards_usd.as_deref(), Some("4.48"));
+    assert_eq!(g.collectible_rewards_usd, g.unclaimed_aero_usd);
+    assert_eq!(g.collectible_rewards_usd, Some(format!("{:.2}", 10.197691026731433905 * price_at_claim().unwrap())));
+    // It is documented as such, and not as the sum of the rounded rows (which is $4.47).
+    assert_ne!(f(&usd(0)) + f(&usd(1)), f(g.collectible_rewards_usd.as_deref().unwrap()));
+    let spec = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../specs/core/snapshot.yaml")).unwrap();
+    let at = spec.find("        collectible_rewards_usd:").expect("the field is in the spec");
+    let description: String = spec[at..at + spec[at..].find("example:").unwrap()].split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(description.contains("summed amount at the cycle's AERO price"), "{description}");
+    assert!(description.contains("not the sum of the rounded positions[].collectible_reward.usd values"), "{description}");
+    // LP fees + rewards = total still holds to the cent, and one line states both the
+    // amount and its value.
+    assert_eq!(g.total_collectible_usd.as_deref(), Some("4.48"));
+    let advice = format_shot_advice_text(&full(&snap));
+    assert!(advice.contains("• Collectible AERO rewards: $4.48 USD (10.197691 AERO in tracked gauges, collected in the Aero app)\n"), "{advice}");
+    let state = format_portfolio_state_text(&full(&snap));
+    assert!(state.contains("• Unclaimed AERO: 10.197691 AERO ($4.48) in tracked gauges"), "{state}");
+    assert!(state.contains("AERO rewards $4.48; total collectible $4.48\n"), "{state}");
+}
+
 // ------------------------------------------------------------------
 // What must not change
 // ------------------------------------------------------------------
@@ -666,6 +705,10 @@ fn test_an_unpriced_reward_has_an_amount_and_a_null_usd() {
     let r = zero.positions[1].collectible_reward.as_ref().unwrap();
     assert_eq!((r.amount.as_deref(), r.usd.as_deref()), (Some("0.000000"), Some("0.00")));
     assert_eq!(zero.derived_metrics.global_status.collectible_rewards_usd.as_deref(), Some("0.00"));
+    // Every gauge answered zero: the total says there is nothing to collect, and does
+    // not describe 0.000000 AERO as collected anywhere.
+    let advice = format_shot_advice_text(&full(&zero));
+    assert!(advice.contains("• Collectible AERO rewards: $0.00 USD (0.000000 AERO in tracked gauges: nothing to collect)\n"), "{advice}");
 }
 
 #[test]
@@ -678,12 +721,39 @@ fn test_after_the_claim_the_reward_is_a_read_zero_and_the_wallet_holds_it() {
     assert_eq!(g.total_collectible_usd.as_deref(), Some("0.09"));
     assert_eq!(g.wallet_aero_amount.as_deref(), Some("17.654015"));
     let data = full(&snap);
+    // A read zero is stated as nothing to collect, never as an amount "collectible in
+    // the Aero app", and no gas statement is attached to it, whatever was estimated.
+    for gas_for_cl in [RewardGas::NotRequested, RewardGas::Estimated { units: 418_528, usd: Some(0.0067) }] {
+        let claim = claim_simulation_text(&data, &[RewardGas::Estimated { units: 390_860, usd: Some(0.0063) }, gas_for_cl]);
+        assert!(
+            claim.contains("  - WETH+NOCK (Aero CL #2914490): reward 0.000000 AERO ($0.00), nothing to collect in gauge 0x3bf70c880adc8370917994ab0df68e763b7a60fd; LP fees not LP-claimable (staked: swap fees on staked liquidity go to the gauge)\n"),
+            "{claim}"
+        );
+    }
     let claim = claim_simulation_text(&data, &[RewardGas::Estimated { units: 390_860, usd: Some(0.0063) }, RewardGas::NotRequested]);
-    // Nothing to collect: no gas figure is attached to a zero reward, whatever was estimated.
+    let cl_value = serde_json::to_value(cl).unwrap();
+    assert_eq!(reward_statement(&cl_value), "0.000000 AERO ($0.00), nothing to collect in gauge 0x3bf70c880adc8370917994ab0df68e763b7a60fd");
+    assert_eq!(reward_where_text(&cl_value), "nothing to collect in gauge 0x3bf70c880adc8370917994ab0df68e763b7a60fd");
+    // Every surface built from the statement: the position row of get_portfolio_state,
+    // the claim action's detail and the payload row.
+    let state = format_portfolio_state_text(&data);
     assert!(
-        claim.contains("  - WETH+NOCK (Aero CL #2914490): reward 0.000000 AERO ($0.00), collectible from gauge 0x3bf70c880adc8370917994ab0df68e763b7a60fd in the Aero app | nothing to collect, gas not estimated; LP fees not LP-claimable (staked: swap fees on staked liquidity go to the gauge)\n"),
-        "{claim}"
+        state.contains(
+            "   - Aero USDC/NOCK: 0.210431 AERO ($0.09), collectible from gauge 0xc82782ee66d82c4d19db0429652091a085083526 in the Aero app\n   \
+             - Aero CL WETH/NOCK #2914490: 0.000000 AERO ($0.00), nothing to collect in gauge 0x3bf70c880adc8370917994ab0df68e763b7a60fd\n"
+        ),
+        "{state}"
     );
+    assert_eq!(
+        reward_detail(&snap.positions[1]).as_deref(),
+        Some("reward 0.000000 AERO ($0.00), nothing to collect in gauge 0x3bf70c880adc8370917994ab0df68e763b7a60fd")
+    );
+    let rows = claim_reward_rows(&snap.positions, &[]);
+    assert_eq!((rows[1].amount.as_deref(), rows[1].gas_note.as_str()), (Some("0.000000"), "nothing to collect, gas not estimated"));
+    for text in [&claim, &state] {
+        assert!(!text.contains("($0.00), collectible"), "a zero is not described as collectible: {text}");
+    }
+    // The gauge that still holds a reward keeps its gas statement.
     assert!(claim.contains("  - USDC+NOCK (Aerodrome): reward 0.210431 AERO ($0.09), collectible from gauge 0xc82782ee66d82c4d19db0429652091a085083526 in the Aero app | gas est. 390860 units (~$0.0063); LP fees not LP-claimable (claimFees() reverts)\n"), "{claim}");
     // And no estimate is asked for it.
     assert_eq!(reward_gas_request(&snap.positions[1], WALLET), Err(RewardGas::NotRequested));
@@ -755,7 +825,7 @@ async fn test_a_failed_live_estimate_never_shows_the_rpc_url() {
     let url = "http://127.0.0.1:9/v2/SECRET-RPC-KEY";
     let snap = snapshot_of(before_claim(), &OperatorProfile::default(), 0.0);
     let started = std::time::Instant::now();
-    let gas = estimate_reward_claim_gas(&Client::new(), url, WALLET, &snap.positions, Some(ETH_USD_2026_11_17), std::time::Duration::from_millis(1500)).await;
+    let gas = estimate_reward_claim_gas(&Client::new(), url, WALLET, &snap.positions, Some(ETH_USD_2026_11_17), GasPrice::ReadNow, std::time::Duration::from_millis(1500)).await;
     assert!(started.elapsed() < std::time::Duration::from_millis(2000), "the estimate is bounded: {:?}", started.elapsed());
     assert_eq!(gas.len(), 2);
     for g in &gas {
@@ -770,13 +840,87 @@ async fn test_a_failed_live_estimate_never_shows_the_rpc_url() {
     let none = snapshot_of(after_claim(), &OperatorProfile::default(), 0.0);
     let mut positions = none.positions.clone();
     positions[0].collectible_reward = None;
-    let quick = estimate_reward_claim_gas(&Client::new(), url, WALLET, &positions, None, std::time::Duration::from_millis(1500)).await;
+    let quick = estimate_reward_claim_gas(&Client::new(), url, WALLET, &positions, None, GasPrice::ReadNow, std::time::Duration::from_millis(1500)).await;
     assert_eq!(quick, vec![RewardGas::NotRequested, RewardGas::NotRequested]);
     // No key configured: no URL is built.
     assert_eq!(request_rpc_url(&[]), None);
     assert_eq!(request_rpc_url(&["YOUR_ALCHEMY_API_KEY".to_string()]), None);
     assert_eq!(request_rpc_url(&[" ".to_string()]), None);
     assert_eq!(request_rpc_url(&["abc".to_string()]).as_deref(), Some("https://base-mainnet.g.alchemy.com/v2/abc"));
+}
+
+/// A local JSON-RPC server for the request-time estimate. `eth_estimateGas` is answered
+/// per gauge: the basic gauge with the real estimate of 2026-11-17 (0x5f6cc), the CL
+/// gauge with the gas the operator's real claim used (0x662e0). `eth_gasPrice` is
+/// answered with `gas_price_hex`. Anything else is an RPC error, never an invented
+/// answer. Returns the URL and the method of each request received.
+async fn estimate_rpc(gas_price_hex: &'static str) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
+    let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("a local port");
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let handler = {
+        let seen = seen.clone();
+        move |Json(req): Json<serde_json::Value>| {
+            let seen = seen.clone();
+            async move {
+                let method = req["method"].as_str().unwrap_or_default().to_string();
+                seen.lock().unwrap().push(method.clone());
+                let to = req["params"][0]["to"].as_str().unwrap_or_default().to_lowercase();
+                let result = match (method.as_str(), to.as_str()) {
+                    ("eth_gasPrice", _) => Some(gas_price_hex.to_string()),
+                    ("eth_estimateGas", BASIC_GAUGE) => Some(REAL_ESTIMATE_BASIC_CLAIM.to_string()),
+                    ("eth_estimateGas", CL_GAUGE) => Some(format!("0x{:x}", REAL_OPERATOR_CLAIM_GAS_USED)),
+                    _ => None,
+                };
+                Json(match result {
+                    Some(r) => json!({ "jsonrpc": "2.0", "id": req["id"], "result": r }),
+                    None => json!({ "jsonrpc": "2.0", "id": req["id"], "error": { "code": -32000, "message": "no answer for this call" } }),
+                })
+            }
+        }
+    };
+    let app = axum::Router::new().route("/", axum::routing::post(handler));
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (url, seen)
+}
+
+#[tokio::test]
+async fn test_the_callers_gas_price_is_used_and_not_read_a_second_time() {
+    // The claim payload has already read eth_gasPrice for its LP actions. The reward rows
+    // are priced at that same price: no second read, which could land on another base fee.
+    // The server would answer eth_gasPrice with ten times the caller's price (synthetic),
+    // so a second read would show in the dollars.
+    let (url, seen) = estimate_rpc("0x55d4a80").await;
+    let snap = snapshot_of(before_claim(), &OperatorProfile::default(), 0.0);
+    let budget = std::time::Duration::from_millis(1500);
+    let known = GasPrice::Known(Some(REAL_OPERATOR_CLAIM_GAS_PRICE));
+    let gas = estimate_reward_claim_gas(&Client::new(), &url, WALLET, &snap.positions, Some(ETH_USD_2026_11_17), known, budget).await;
+    let methods = seen.lock().unwrap().clone();
+    assert_eq!(methods, vec!["eth_estimateGas".to_string(), "eth_estimateGas".to_string()], "no eth_gasPrice read");
+    assert_eq!(reward_gas_text(&gas[0], false), "gas est. 390860 units (~$0.0063)");
+    assert_eq!(reward_gas_text(&gas[1], false), "gas est. 418528 units (~$0.0067)");
+
+    // The caller's own read failed: units and no dollars, and still no second read
+    // that would price the reward rows when the LP actions of the same payload are not.
+    seen.lock().unwrap().clear();
+    let gas = estimate_reward_claim_gas(&Client::new(), &url, WALLET, &snap.positions, Some(ETH_USD_2026_11_17), GasPrice::Known(None), budget).await;
+    assert_eq!(seen.lock().unwrap().iter().filter(|m| m.as_str() == "eth_gasPrice").count(), 0);
+    assert_eq!(gas, vec![RewardGas::Estimated { units: 390_860, usd: None }, RewardGas::Estimated { units: 418_528, usd: None }]);
+
+    // A caller with no gas price of its own (the HTTP MCP): exactly one read, and the
+    // node's price is the one used.
+    seen.lock().unwrap().clear();
+    let gas = estimate_reward_claim_gas(&Client::new(), &url, WALLET, &snap.positions, Some(ETH_USD_2026_11_17), GasPrice::ReadNow, budget).await;
+    let methods = seen.lock().unwrap().clone();
+    assert_eq!(methods, vec!["eth_gasPrice".to_string(), "eth_estimateGas".to_string(), "eth_estimateGas".to_string()]);
+    assert_eq!(reward_gas_text(&gas[0], false), "gas est. 390860 units (~$0.0630)");
+
+    // The claim payload handler passes the price it read for its LP actions.
+    let claims = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/claims.rs")).unwrap();
+    assert!(claims.contains("GasPrice::Known(gas_price_wei)"), "claims.rs reuses its own eth_gasPrice read");
+    assert_eq!(claims.matches("\"eth_gasPrice\"").count(), 1, "claims.rs reads the gas price once");
 }
 
 // ------------------------------------------------------------------
@@ -970,7 +1114,7 @@ fn test_both_transports_share_the_reward_text_and_describe_the_tools_alike() {
 }
 
 #[test]
-fn test_older_snapshot_without_reward_fields_reads_not_reported_never_zero() {
+fn test_older_snapshot_without_reward_fields_reads_as_it_did_before() {
     let snap = snapshot_of(before_claim(), &OperatorProfile::default(), 0.0);
     let mut data = full(&snap);
     {
@@ -999,25 +1143,41 @@ fn test_older_snapshot_without_reward_fields_reads_not_reported_never_zero() {
     // What #93 stored is still there and still read.
     assert_eq!(parsed.positions[1].unclaimed_aero.as_deref(), Some("17.654015"));
 
-    // Both the raw JSON and the worker's re-serialized form (keys present, null) say so.
+    // Both the raw JSON and the worker's re-serialized form (keys present, null), which
+    // is what the worker serves from its database until the first cycle after an upgrade.
+    // Such a snapshot states its unclaimed AERO ($7.84); a "rewards not reported" line
+    // beside that figure would contradict it. The texts gain no reward line: they read
+    // as they did before #142.
     for old in [data.clone(), serde_json::to_value(&parsed).unwrap()] {
         let advice = format_shot_advice_text(&old);
-        assert!(advice.contains("• Collectible AERO rewards: not reported\n• Total collectible (LP fees + AERO rewards): not reported\n"), "{advice}");
+        assert!(advice.contains("• Net of two claims' gas: -$0.01 USD\n• Harvest rule: "), "{advice}");
         let state = format_portfolio_state_text(&old);
-        assert!(state.contains("• Collectible earnings (not counted in the total): LP fees $0.00; AERO rewards not reported\n"), "{state}");
-        // The position rows are what they were before #142.
-        assert!(state.contains("   - Aero CL WETH/NOCK #2914490: 17.654015 AERO ($7.75)\n"), "{state}");
+        assert!(
+            state.contains(
+                "• Unclaimed AERO: 17.864446 AERO ($7.84) in tracked gauges, not counted in the total\n   \
+                 - Aero USDC/NOCK: 0.210431 AERO ($0.09)\n   \
+                 - Aero CL WETH/NOCK #2914490: 17.654015 AERO ($7.75)\n\
+                 • AERO/USD: $0.438859\n\
+                 • High-Water Mark: "
+            ),
+            "{state}"
+        );
         let claim = format_claim_simulation_text(&old);
-        assert!(claim.contains("• Collectible AERO rewards: not reported\n• Total collectible (LP fees + AERO rewards, before gas): not reported\n"), "{claim}");
+        assert!(claim.contains("• Net Accretion if Harvested: n/a (nothing LP-claimable)\nPool Breakdown:\n"), "{claim}");
         // The fee row prints the worker's own `amount`, as it did.
         assert!(
             claim.contains("  - WETH+NOCK (Aero CL #2914490): not LP-claimable (staked: swap fees on staked liquidity go to the gauge); unclaimed AERO 17.654015 ($7.75)\n"),
             "{claim}"
         );
-        for line in [&advice, &claim].iter().flat_map(|t| t.lines()).filter(|l| l.contains("Collectible AERO rewards") || l.contains("Total collectible")) {
-            assert!(!line.contains('$') && !line.contains('0'), "no figure is invented: {line}");
+        for text in [&advice, &state, &claim] {
+            for new_line in ["Collectible AERO rewards", "Total collectible", "Collectible earnings", "rewards not reported", "rewards: not reported", "\n\n"] {
+                assert!(!text.contains(new_line), "'{new_line}' in: {text}");
+            }
         }
     }
+    // The same snapshot from a #142 worker does state them (the lines are not simply gone).
+    let advice = format_shot_advice_text(&full(&snap));
+    assert!(advice.contains("• Collectible AERO rewards: $7.84 USD (17.864446 AERO in tracked gauges, collected in the Aero app)\n"), "{advice}");
     // The payload rows of such a snapshot: none, rather than rows of zeros.
     assert!(claim_reward_rows(&parsed.positions, &[]).is_empty());
 }

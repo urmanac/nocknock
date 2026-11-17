@@ -31,6 +31,7 @@ async fn simulation_reward_gas(state: &AppState, data: &SnapshotData) -> Vec<Rew
         wallet,
         &data.positions,
         eth_price,
+        GasPrice::ReadNow,
         std::time::Duration::from_millis(REWARD_GAS_BUDGET_MS),
     )
     .await

@@ -168,8 +168,10 @@ fn test_fallback_says_not_read_and_not_totalled_never_zero() {
 }
 
 #[test]
-fn test_fallback_says_not_reported_for_a_snapshot_without_reward_fields() {
-    // A snapshot from a worker that predates #142.
+fn test_fallback_prints_a_snapshot_without_reward_fields_as_it_always_did() {
+    // A snapshot from a worker that predates #142. It carries its unclaimed AERO ($7.84)
+    // on the AERO lines; a "rewards not reported" line beside that figure would
+    // contradict it, so the text gains no reward line at all.
     let mut old = snapshot_with_rewards();
     {
         let g = old["derived_metrics"]["global_status"].as_object_mut().unwrap();
@@ -185,18 +187,67 @@ fn test_fallback_says_not_reported_for_a_snapshot_without_reward_fields() {
             row.as_object_mut().unwrap().remove(k);
         }
     }
-    let advice = format_shot_advice(&old);
-    assert!(advice.contains("• Collectible AERO rewards: not reported\n• Total collectible (LP fees + AERO rewards): not reported\n"), "{advice}");
-    let state = format_portfolio_state(&old);
-    assert!(state.contains("• Collectible earnings (not counted in the total): LP fees $1.95; AERO rewards not reported\n"), "{state}");
-    // The position rows and the fee rows read exactly as they did before #142.
-    assert!(state.contains("   - Aero USDC/NOCK: 0.210015 AERO ($0.09)\n   - Aero CL WETH/NOCK #2914490: 17.654015 AERO ($7.75)\n"), "{state}");
-    let claim = format_claim_simulation(&old);
-    assert!(claim.contains(&format!("  - WETH+NOCK (Aero CL #2914490): {STAKED}; unclaimed AERO 17.654015 ($7.75)\n")), "{claim}");
-    assert!(claim.contains("• Collectible AERO rewards: not reported\n• Total collectible (LP fees + AERO rewards, before gas): not reported\n"), "{claim}");
-    // Nothing at all in the snapshot: still words, never a zero.
+    // The same snapshot as a #142 worker serves it after reading it from its database:
+    // the keys are present and null.
+    let mut reserialized = old.clone();
+    {
+        let g = reserialized["derived_metrics"]["global_status"].as_object_mut().unwrap();
+        for k in ["collectible_rewards_usd", "collectible_rewards_note", "total_collectible_usd"] {
+            g.insert(k.to_string(), Value::Null);
+        }
+    }
+    for old in [&old, &reserialized] {
+        let advice = format_shot_advice(old);
+        assert!(advice.contains("• Net of two claims' gas: +$1.94 USD\n• Harvest rule: "), "{advice}");
+        let state = format_portfolio_state(old);
+        // The unclaimed AERO it does carry, the position rows and the next line, as before #142.
+        assert!(
+            state.contains(
+                "• Unclaimed AERO: 17.864030 AERO ($7.84) in tracked gauges, not counted in the total\n   \
+                 - Aero USDC/NOCK: 0.210015 AERO ($0.09)\n   \
+                 - Aero CL WETH/NOCK #2914490: 17.654015 AERO ($7.75)\n\
+                 • AERO/USD: $0.438859\n\
+                 • High-Water Mark: $2857.78 USD\n"
+            ),
+            "{state}"
+        );
+        let claim = format_claim_simulation(old);
+        assert!(claim.contains("• Net Accretion if Harvested: $1.9462 USD\nPool Breakdown:\n"), "{claim}");
+        assert!(claim.contains(&format!("  - WETH+NOCK (Aero CL #2914490): {STAKED}; unclaimed AERO 17.654015 ($7.75)\n")), "{claim}");
+        for text in [&advice, &state, &claim] {
+            for new_line in ["Collectible AERO rewards", "Total collectible", "Collectible earnings", "AERO rewards not reported", "\n\n"] {
+                assert!(!text.contains(new_line), "'{new_line}' in: {text}");
+            }
+        }
+        assert_eq!((collectible_advice_lines(old), collectible_earnings_line(old)), (String::new(), String::new()));
+    }
+    // Nothing at all in the snapshot: no reward line, and never a zero in its place.
     let empty = format_claim_simulation(&json!({}));
-    assert!(empty.contains("• Collectible AERO rewards: not reported\n"), "{empty}");
+    assert!(!empty.contains("AERO") && empty.contains("• Net Accretion if Harvested: unknown (live gas estimate unavailable)\nPool Breakdown:\n"), "{empty}");
     let empty_advice = format_shot_advice(&json!({}));
-    assert!(empty_advice.contains("• Collectible AERO rewards: not reported\n") && !empty_advice.contains("0.00"), "{empty_advice}");
+    assert!(!empty_advice.contains("AERO") && !empty_advice.contains("0.00"), "{empty_advice}");
+}
+
+#[test]
+fn test_fallback_states_a_read_zero_as_nothing_to_collect() {
+    // The operator's CL gauge after the claim of 2026-11-17 (block 58618046): earned() is 0.
+    let mut data = snapshot_with_rewards();
+    let zero = reward("0.000000", "0.00", CL_GAUGE);
+    let p = data["positions"][3].as_object_mut().unwrap();
+    p.insert("unclaimed_aero".to_string(), json!("0.000000"));
+    p.insert("unclaimed_aero_usd".to_string(), json!("0.00"));
+    p.insert("collectible_reward".to_string(), zero.clone());
+    data["contract_fees"][3]["reward"] = zero;
+    let state = format_portfolio_state(&data);
+    assert!(state.contains("   - Aero CL WETH/NOCK #2914490: 0.000000 AERO ($0.00), nothing to collect in gauge 0x3bf70c880adc8370917994ab0df68e763b7a60fd\n"), "{state}");
+    let claim = format_claim_simulation(&data);
+    assert!(
+        claim.contains(&format!("  - WETH+NOCK (Aero CL #2914490): reward 0.000000 AERO ($0.00), nothing to collect in gauge 0x3bf70c880adc8370917994ab0df68e763b7a60fd; LP fees {STAKED}\n")),
+        "{claim}"
+    );
+    // The gauge that does hold a reward still reads as collectible.
+    assert!(state.contains("   - Aero USDC/NOCK: 0.210015 AERO ($0.09), collectible from gauge 0xc82782ee66d82c4d19db0429652091a085083526 in the Aero app\n"), "{state}");
+    for text in [&state, &claim] {
+        assert!(!text.contains("($0.00), collectible"), "a zero is not described as collectible: {text}");
+    }
 }

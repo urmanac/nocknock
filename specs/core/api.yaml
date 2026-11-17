@@ -996,7 +996,7 @@ components:
         gas_usd:
           type: string
           nullable: true
-          description: gas_estimate at the live gas price and ETH/USD, 4 decimals; L2 execution gas only. Null when either input is missing. (#142)
+          description: gas_estimate at the live gas price and ETH/USD, 4 decimals; L2 execution gas only. The gas price is the payload's one eth_gasPrice read, the same price as actions[].gas_usd. Null when either input is missing. (#142)
         gas_note:
           type: string
           description: >

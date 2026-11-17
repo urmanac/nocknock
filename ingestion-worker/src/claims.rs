@@ -436,6 +436,8 @@ pub(crate) async fn get_claim_fees_payload_handler(Extension(state): Extension<A
         &wallet,
         &snapshot.data.positions,
         eth_price,
+        // The gas price read above for the LP actions: one price for the whole payload.
+        GasPrice::Known(gas_price_wei),
         std::time::Duration::from_millis(REWARD_GAS_BUDGET_MS),
     )
     .await;

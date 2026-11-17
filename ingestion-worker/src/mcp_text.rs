@@ -78,7 +78,7 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
          • Stable Stack: {total_usdc}\n\
          • Gas held (wallet ETH+WETH): {gas}\n\
          {aero}\n\
-         {collectible}\n\
+         {collectible}\
          • High-Water Mark: {hwm}\n\
          {cost_basis}\n\
          • Tactical Directive: {advice}"
@@ -112,7 +112,7 @@ pub fn format_shot_advice_text(data: &serde_json::Value) -> String {
          • Decision Matrix Details: {details}\n\
          • Uncollected Claimable Fees: {claimable_usd}\n\
          • Net of two claims' gas: {gas_delta}\n\
-         {collectible}\n\
+         {collectible}\
          • Harvest rule: {HARVEST_RULE_TEXT}"
     )
 }

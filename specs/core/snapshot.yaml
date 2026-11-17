@@ -308,7 +308,9 @@ components:
             Present for every Aero position that can earn a reward, also when the
             gauge could not be read (status not_read, with the reason). Absent for
             a position that cannot earn one and on a snapshot from before this
-            field existed; clients then show "not reported", never 0. Not part of
+            field existed; clients then show that position as they always did,
+            with its unclaimed_aero, never a 0. A read zero amount is stated as
+            "nothing to collect", not as an amount collectible. Not part of
             amount_usd, fees_usd or total_portfolio_usd. A statement of fact, never
             advice. (#142)
 
@@ -1393,14 +1395,18 @@ components:
           nullable: true
           description: >
             Collectible gauge rewards of the tracked staked positions in USD, 2
-            decimals; the sum of positions[].collectible_reward.usd. Null when any
+            decimals: the tracked gauges' summed amount at the cycle's AERO price,
+            the same figure as unclaimed_aero_usd. It is not the sum of the rounded
+            positions[].collectible_reward.usd values and can differ from that sum
+            by a cent per position. Null when any
             gauge was not read or a non-zero reward is unpriced
             (collectible_rewards_note says which), never a partial sum and never 0
             for something not read. "0.00" when every gauge answered zero or no
             staked Aero position is tracked. NOT counted in total_portfolio_usd, and
             no directive, notification or threshold reads it; BATCH HARVEST counts
-            LP fees only. Absent on a snapshot from before this field existed;
-            clients then show "not reported". (#142)
+            LP fees only. Absent (or null with a null collectible_rewards_note) on
+            a snapshot from before this field existed; clients then print no
+            reward total and show that snapshot as they always did. (#142)
           example: "7.84"
         collectible_rewards_note:
           type: string

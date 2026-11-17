@@ -83,6 +83,10 @@ pub(crate) struct CollectibleTotals {
 /// - The rewards figure is the AERO pillar's unclaimed USD: stated only when every
 ///   gauge was read and every non-zero reward is priced. Otherwise it is None with the
 ///   reason, never a partial sum and never 0.
+/// - It is the tracked gauges' summed amount at the cycle's price, the same figure as
+///   `global_status.unclaimed_aero_usd`, so one amount of AERO never prints with two
+///   dollar values. It is NOT the sum of the rounded per-position `usd` strings and can
+///   differ from that sum by a cent per position.
 /// - The total is the printed LP-fee figure plus the printed rewards figure, so the
 ///   three numbers a surface shows always add up to the cent.
 /// - `lp_fees_usd` is the caller's LP-fee total; it is only added, never changed.
@@ -195,16 +199,29 @@ pub(crate) fn reward_gas_from_estimate(
     }
 }
 
+/// Where a request's gas price comes from.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum GasPrice {
+    /// The caller has made no `eth_gasPrice` read for this request: make one here.
+    ReadNow,
+    /// The caller's own `eth_gasPrice` read for this request: the price (None when that
+    /// read failed). It is used as it is and not read again, so one response never
+    /// prices its LP actions and its reward rows at two gas prices.
+    Known(Option<u128>),
+}
+
 /// Live gas statements for the rewards of a snapshot's positions, index-aligned with
-/// `positions` (and so with `contract_fees`). Read-only: `eth_gasPrice` once, then one
-/// `eth_estimateGas` from the wallet per reward that has a proven claim call. Bounded by
-/// `budget`; a call that does not return in time is stated as such, never guessed.
+/// `positions` (and so with `contract_fees`). Read-only: `eth_gasPrice` at most once
+/// (not at all when the caller already read it), then one `eth_estimateGas` from the
+/// wallet per reward that has a proven claim call. Bounded by `budget`; a call that
+/// does not return in time is stated as such, never guessed.
 pub(crate) async fn estimate_reward_claim_gas(
     http_client: &Client,
     rpc_url: &str,
     wallet: &str,
     positions: &[Position],
     eth_price_usd: Option<f64>,
+    gas_price: GasPrice,
     budget: std::time::Duration,
 ) -> Vec<RewardGas> {
     let deadline = tokio::time::Instant::now() + budget;
@@ -213,14 +230,18 @@ pub(crate) async fn estimate_reward_claim_gas(
     if requests.iter().all(|r| r.is_err()) {
         return requests.into_iter().map(|r| r.err().unwrap_or(RewardGas::NotRequested)).collect();
     }
-    let gas_price_payload = json!({ "jsonrpc": "2.0", "method": "eth_gasPrice", "params": [], "id": 70 });
-    let gas_price_wei: Option<u128> =
-        tokio::time::timeout_at(deadline, post_rpc_with_retry(http_client, rpc_url, &gas_price_payload, 1))
-            .await
-            .ok()
-            .flatten()
-            .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
-            .and_then(|s| u128::from_str_radix(s.trim_start_matches("0x"), 16).ok());
+    let gas_price_wei: Option<u128> = match gas_price {
+        GasPrice::Known(wei) => wei,
+        GasPrice::ReadNow => {
+            let gas_price_payload = json!({ "jsonrpc": "2.0", "method": "eth_gasPrice", "params": [], "id": 70 });
+            tokio::time::timeout_at(deadline, post_rpc_with_retry(http_client, rpc_url, &gas_price_payload, 1))
+                .await
+                .ok()
+                .flatten()
+                .and_then(|r| r.get("result").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                .and_then(|s| u128::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+        }
+    };
     let mut out = Vec::with_capacity(requests.len());
     for (idx, request) in requests.into_iter().enumerate() {
         out.push(match request {

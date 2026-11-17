@@ -1351,9 +1351,11 @@ struct GlobalStatus {
     /// Stated reason whenever an AERO figure above is null in a live cycle (v0.6.0, #93).
     #[serde(default)]
     aero_note: Option<String>,
-    /// Collectible gauge rewards of the tracked staked positions, in USD (#142): the sum
-    /// of positions[].collectible_reward.usd. Null when a gauge was not read or a
-    /// non-zero reward is unpriced (`collectible_rewards_note` says which): never a
+    /// Collectible gauge rewards of the tracked staked positions, in USD (#142): the
+    /// tracked gauges' summed amount at the cycle's AERO price, the same figure as
+    /// `unclaimed_aero_usd`. It can differ by a cent per position from the sum of the
+    /// rounded positions[].collectible_reward.usd values. Null when a gauge was not read
+    /// or a non-zero reward is unpriced (`collectible_rewards_note` says which): never a
     /// partial sum, never 0 for something not read. NOT in total_portfolio_usd, and no
     /// directive, notification or threshold reads it.
     #[serde(default)]

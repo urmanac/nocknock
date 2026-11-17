@@ -31,7 +31,7 @@ fn test_fallback_state_reports_the_four_pillars_and_unclaimed_aero() {
     assert!(text.contains("• Pillars: NOCK $1312.88 · USDC $1033.71 · ETH $66.41 · AERO $0.57\n"), "{text}");
     assert!(text.contains("• AERO held (wallet): 1.359979 AERO ($0.57), counted in the total; not cash, not deployable, no target\n"), "{text}");
     assert!(text.contains("• Unclaimed AERO: 12.043104 AERO ($5.03) in tracked gauges, not counted in the total\n   - Aero USDC/NOCK: 0.121026 AERO ($0.05)\n   - Aero CL WETH/NOCK #2914490: 11.922078 AERO ($4.98)\n"), "{text}");
-    assert!(text.contains("• AERO/USD: $0.417608\n• Collectible earnings (not counted in the total): "), "{text}");
+    assert!(text.contains("• AERO/USD: $0.417608\n• High-Water Mark"), "{text}");
     // The Uniswap position earns no AERO and gets no row.
     assert!(!text.contains("uniswap"), "{text}");
     // Amounts only: nothing tells the reader what to do with AERO.
