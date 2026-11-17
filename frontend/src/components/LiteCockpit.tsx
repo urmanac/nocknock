@@ -17,6 +17,7 @@ import { floorDeltaText } from '../floor';
 import { api, describeApiError, ClaimFeeAction, ClaimFeesPayload, LedgerSummary } from '../api/client';
 import { ledgerLiteText } from '../ledger';
 import { AeroLiteCard } from './AeroPillar';
+import { ClosedPositionsLiteCard } from './ClosedPositions';
 import { LiteCollectibleLines } from './CollectibleEarnings';
 import { lpFeeReasonOfDetail } from '../rewards';
 import {
@@ -312,6 +313,9 @@ export function LiteCockpit({ top, bottom }: { top?: React.ReactNode; bottom?: R
 
       {/* 2b. AERO, the fourth pillar (issue #93): amounts only, no action */}
       <AeroLiteCard data={snapshotData} cardStyle={lite.card} labelStyle={lite.label} bigStyle={lite.big} subStyle={lite.sub} />
+
+      {/* 2c. Closed positions (issue #144): the fact, no figure and no action */}
+      <ClosedPositionsLiteCard data={snapshotData} cardStyle={lite.card} labelStyle={lite.label} subStyle={lite.sub} />
 
       {/* 3. EXECUTE BATCH HARVEST */}
       <section style={lite.card}>

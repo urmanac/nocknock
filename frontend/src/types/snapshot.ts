@@ -270,6 +270,12 @@ export interface GlobalStatus {
   /** total_fees_claimable_usd (LP fees only) plus collectible_rewards_usd (#142). Null
    *  whenever the rewards part is null. NOT in total_portfolio_usd */
   total_collectible_usd?: string | null;
+  /** How many configured positions are closed: the length of data.closed_positions.
+   *  Absent when none is (2.8.0, #144) */
+  closed_positions_count?: number;
+  /** One statement naming the closed positions, that they are in no total and that
+   *  their config entries can be removed. Absent when none is closed (2.8.0, #144) */
+  closed_positions_note?: string;
 }
 
 /** A gauge reward stated as collectible earnings (#142): what is there and where it is
@@ -512,6 +518,42 @@ export interface Position {
   collectible_reward?: CollectibleReward;
 }
 
+/** One read that proved a position closed (2.8.0, #144). */
+export interface ClosedEvidence {
+  /** The call's signature, e.g. 'ownerOf(uint256)' */
+  call: string;
+  contract: string;
+  outcome: 'reverted' | 'returned';
+  /** The answer in words, e.g. 'Error("ERC721: owner query for nonexistent token")' */
+  answer: string;
+  /** Raw revert data or returned data, hex with 0x */
+  raw: string;
+}
+
+/** A configured position whose NFT does not exist (2.8.0, #144): withdrawn and burned,
+ *  or a mistyped nft_id. It carries no amount and no value: nothing was read from it,
+ *  and its last known value is not a current one. */
+export interface ClosedPosition {
+  /** The entry's `id` in config.yaml, which the operator can remove */
+  config_id: string;
+  position_id: string;
+  protocol: string;
+  network: string;
+  nft_id: number;
+  pool_id?: string | null;
+  position_manager: string;
+  /** Built from the config entry alone: venue, pair when config states it, NFT id, config id */
+  label: string;
+  status: 'closed';
+  reason: string;
+  evidence: ClosedEvidence[];
+  /** When this worker first recorded it as closed; not the time of the burn */
+  first_seen_closed_at?: string | null;
+  /** True when the entry's pool still supplies the NOCK/USD spot (Uniswap v4 only):
+   *  another position must be flagged is_price_source before the entry is removed */
+  supplies_spot_price?: boolean;
+}
+
 export interface RawSnapshotData {
   wallet_balances: WalletBalance[];
   positions: Position[];
@@ -519,5 +561,9 @@ export interface RawSnapshotData {
   /** DEPRECATED since v2.0.0 — superseded by positions; worker emits an empty array */
   concentrated_liquidity: ConcentratedLiquidity[];
   contract_fees: ContractFee[];
+  /** Configured positions whose NFT provably no longer exists (2.8.0, #144). Never in
+   *  `positions`; nothing of them is in any total. Absent when there are none and on
+   *  every older snapshot */
+  closed_positions?: ClosedPosition[];
   derived_metrics: DerivedMetrics;
 }
