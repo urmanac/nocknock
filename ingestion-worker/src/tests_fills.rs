@@ -636,7 +636,7 @@ fn plan_cfg() -> AccumulationPlanConfig {
         tranches: 5,
         interval_hours: 24.0,
         starts_at: None,
-        venue: "Aero".to_string(),
+        venue: Some("Aero".to_string()),
         max_price_usd: None,
         pause_when_overextended: true,
         respect_cash_target: true,
@@ -831,7 +831,7 @@ fn test_open_offers_are_not_progress_and_lead_the_advice_in_every_plan_branch() 
     let d = &with.global_status.shot_advice_details;
     assert!(d.starts_with(found), "{d}");
     assert!(d.contains("In the dashboard, confirm it or mark it as not part of the plan before buying again."), "{d}");
-    assert!(d.contains("Buy $20.00 of NOCK on Aero"), "the tranche advice itself is still there: {d}");
+    assert!(d.contains("Buy $20.00 of NOCK (spot $0.01153; your plan's venue label: Aero)"), "the tranche advice itself is still there: {d}");
     assert!(!without.global_status.shot_advice_details.contains("was found on-chain"));
     // An offer is not a fill: nothing is counted until it is recorded.
     let ps = with.accumulation_plan.as_ref().unwrap();

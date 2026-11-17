@@ -75,3 +75,19 @@ describe('#130: a cycle that could not read the plan ledger', () => {
     expect(t).toContain('3 verified buys · $40.00 remaining');
   });
 });
+
+describe('#132: the plan venue is the operator\'s label or nothing', () => {
+  it('shows no venue when none is configured', () => {
+    for (const venue of [null, undefined]) {
+      const t = text(renderToStaticMarkup(<AccumulationPlanPanel plan={plan({ venue })} />));
+      expect(t).toContain('PLAN “2026-11-reentry”');
+      expect(t).not.toContain('AERO');
+      expect(t).not.toContain('VENUE');
+    }
+  });
+
+  it('shows a configured venue as the operator\'s label', () => {
+    const t = text(renderToStaticMarkup(<AccumulationPlanPanel plan={plan({ venue: 'Aero' })} />));
+    expect(t).toContain('PLAN “2026-11-reentry” · YOUR VENUE LABEL: AERO');
+  });
+});

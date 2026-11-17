@@ -189,7 +189,10 @@ operator_profile:
 #   tranches: 5                    # equal buys
 #   interval_hours: 24             # minimum spacing between buys
 #   starts_at: "2026-11-15T00:00:00Z"   # optional; default is immediately
-#   venue: "Aero"                  # label shown in advice (aero.xyz, formerly Aerodrome)
+#   venue: "Aero"                  # optional, no default: your own label for where you buy,
+#                                  # shown as "your plan's venue label: Aero". Unset, the
+#                                  # advice names no venue (NockNock never picks one; the
+#                                  # route quotes compare Aero and Uniswap as facts).
 #   max_price_usd: 0.020           # optional ceiling: pause while spot is above it
 #   pause_when_overextended: true  # pause while daily RSI(14) >= 70
 #   respect_cash_target: true      # never spend liquid USDC below target_weights_bps.cash

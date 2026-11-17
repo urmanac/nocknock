@@ -101,7 +101,7 @@ fn plan() -> AccumulationPlanConfig {
         tranches: 5,
         interval_hours: 24.0,
         starts_at: None,
-        venue: "Aero".to_string(),
+        venue: Some("Aero".to_string()),
         max_price_usd: None,
         pause_when_overextended: true,
         respect_cash_target: true,
@@ -199,7 +199,7 @@ fn test_tranche_becoming_due_changes_the_action_and_notifies() {
     assert_eq!(due.global_status.shot_advice_action, "DCA TRANCHE DUE (2 of 5)");
     let text = pushed(&waiting, &due).expect("a tranche becoming due must notify");
     assert!(text.starts_with("🛡️ NockNock directive change: DCA TRANCHE DUE (2 of 5)\n"), "{text}");
-    assert!(text.contains("Buy $20.00 of NOCK on Aero"), "{text}");
+    assert!(text.contains("Buy $20.00 of NOCK (spot $0.01153; your plan's venue label: Aero)"), "{text}");
     assert!(text.ends_with("\n→ http://host:3000/?view=lite"), "{text}");
     // The cycles before it, and a second cycle while it is still due, push nothing.
     assert!(pushed(&waiting, &waiting).is_none());
@@ -446,7 +446,7 @@ fn test_range_exit_with_another_directive_change_is_said_before_the_details() {
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines[0], "🛡️ NockNock directive change: DCA TRANCHE DUE (2 of 5)");
     assert!(lines[1].starts_with("Range exit: spot $0.0415 is at or above the top"), "{text}");
-    assert!(lines[2].starts_with("Buy $20.00 of NOCK on Aero"), "{text}");
+    assert!(lines[2].starts_with("Buy $20.00 of NOCK (spot $0.04147; your plan's venue label: Aero)"), "{text}");
 }
 
 #[test]

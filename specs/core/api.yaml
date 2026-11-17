@@ -273,7 +273,7 @@ paths:
                       properties:
                         plan_id: { type: string }
                         tx_hash: { type: string }
-                        venue: { type: string }
+                        venue: { type: string, nullable: true, description: "The plan's venue label when the buy was recorded; null when the plan had none (v0.8.1, issue #132)" }
                         usdc_spent: { type: string }
                         nock_received: { type: string }
                         effective_price_usd: { type: string }

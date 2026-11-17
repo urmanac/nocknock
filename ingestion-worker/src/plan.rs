@@ -160,7 +160,7 @@ pub(crate) fn build_plan_status(
     AccumulationPlanStatus {
         plan_id: cfg.id.clone(),
         status: status.to_string(),
-        venue: cfg.venue.clone(),
+        venue: plan_venue_label(cfg),
         tranche_index,
         // A plan whose tranches were shrunk by guardrails can need more buys than planned.
         tranches_total: cfg.tranches.max(tranche_index),
@@ -191,6 +191,11 @@ pub(crate) fn build_plan_status(
         route_quotes: None,
         progress_unknown,
     }
+}
+
+/// The operator's venue label, or None when none is set (or it is blank). Pure.
+pub(crate) fn plan_venue_label(cfg: &AccumulationPlanConfig) -> Option<String> {
+    cfg.venue.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(str::to_string)
 }
 
 /// What a plan amount reads when the ledger could not be read (issue #130).
@@ -233,10 +238,11 @@ pub(crate) fn plan_advice(ps: &AccumulationPlanStatus, spot_price: f64) -> (Stri
         "tranche_due" => (
             format!("DCA TRANCHE DUE ({n})"),
             format!(
-                "Buy ${} of NOCK on {} (spot ${:.5}).{} {} {}",
+                "Buy ${} of NOCK (spot ${:.5}{}).{} {} {}",
                 ps.tranche_usdc,
-                ps.venue,
                 spot_price,
+                // The operator's own label, never a venue NockNock chose (issue #132).
+                ps.venue.as_deref().map(|v| format!("; your plan's venue label: {v}")).unwrap_or_default(),
                 ps.binding_constraint
                     .as_ref()
                     .map(|c| format!(" Sized below the nominal ${} tranche: {}.", ps.nominal_tranche_usdc, c))

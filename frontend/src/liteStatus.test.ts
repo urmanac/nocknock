@@ -8,7 +8,7 @@ const base: LiteStatusInput = {
   syncStatus: 'fresh',
   ageSeconds: 42,
   action: 'DCA TRANCHE DUE (2 of 5)',
-  details: 'Buy $20.00 of NOCK on Aero (spot $0.01153).',
+  details: 'Buy $20.00 of NOCK (spot $0.01153).',
 };
 
 describe('lite status', () => {
@@ -17,7 +17,7 @@ describe('lite status', () => {
       tone: 'live',
       freshness: 'LIVE ON-CHAIN · read 42s ago',
       action: 'DCA TRANCHE DUE (2 of 5)',
-      details: 'Buy $20.00 of NOCK on Aero (spot $0.01153).',
+      details: 'Buy $20.00 of NOCK (spot $0.01153).',
     });
   });
 
@@ -43,7 +43,7 @@ describe('lite status', () => {
       freshness:
         'NOT LIVE · Worker unreachable: Failed to fetch · last read 50s ago. Everything on this page is from that read.',
       action: 'DCA TRANCHE DUE (2 of 5)',
-      details: 'Buy $20.00 of NOCK on Aero (spot $0.01153).',
+      details: 'Buy $20.00 of NOCK (spot $0.01153).',
     });
     // Nor SYNC IN PROGRESS: with the worker unreachable there is no evidence of a sync.
     const late = liteStatusView({ ...base, syncStatus: 'syncing', ageSeconds: 330, pollError: 'Worker unreachable: Failed to fetch' });

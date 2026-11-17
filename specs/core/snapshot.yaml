@@ -10,6 +10,8 @@ info:
       cycle could not read the plan ledger (#130). Then spent_usdc, remaining_usdc and
       acquired_nock read "unknown", and fills, tranche_index and tranches_total are
       not progress.
+    - AccumulationPlanStatus.venue is nullable and no longer required: null when the
+      operator set no accumulation_plan.venue (#132). There is no default venue.
   license:
     name: ISC
 servers:
@@ -987,7 +989,7 @@ components:
         Progress of the operator's dollar-cost-averaging plan (2.1.0). Derived only from
         the `accumulation_plan` config and receipt-verified rows in the accumulation
         ledger — never from assumed fills. The plan paces buys; it does not execute them.
-      required: [plan_id, status, venue, tranche_index, tranches_total, tranche_usdc, nominal_tranche_usdc, budget_usdc, spent_usdc, remaining_usdc, acquired_nock, fills]
+      required: [plan_id, status, tranche_index, tranches_total, tranche_usdc, nominal_tranche_usdc, budget_usdc, spent_usdc, remaining_usdc, acquired_nock, fills]
       properties:
         plan_id:
           type: string
@@ -996,7 +998,11 @@ components:
           enum: [pending, tranche_due, waiting, paused, blocked, complete, invalid]
         venue:
           type: string
-          description: Where the operator executes (label)
+          nullable: true
+          description: |
+            The operator's own venue label from `accumulation_plan.venue`, shown as
+            theirs. Null when none is set (2.8.1, issue #132): NockNock never chooses a
+            venue, so it no longer defaults to "Aero". Always a string before 2.8.1.
         tranche_index:
           type: integer
           description: 1-based index of the next tranche (verified fills + 1)

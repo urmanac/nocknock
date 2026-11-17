@@ -130,7 +130,7 @@ fn plan_cfg() -> AccumulationPlanConfig {
         tranches: 5,
         interval_hours: 24.0,
         starts_at: None,
-        venue: "Aero".to_string(),
+        venue: Some("Aero".to_string()),
         max_price_usd: None,
         pause_when_overextended: true,
         respect_cash_target: true,

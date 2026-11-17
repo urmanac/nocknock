@@ -174,20 +174,27 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
     let detection = plan.map(fill_detection_lines).unwrap_or_default();
     // Route quotes for a due tranche (issue #115); empty unless the snapshot has them.
     let quotes = plan.map(route_quote_lines).unwrap_or_default();
+    // The operator's venue label, when set; none is chosen for them (issue #132).
+    let venue_label = plan
+        .and_then(|p| p.get("venue"))
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+        .map(|v| format!(" (your venue label: {v})"))
+        .unwrap_or_default();
     // A cycle that could not read the ledger knows no progress (issue #130).
     if plan.and_then(|p| p.get("progress_unknown")).and_then(|x| x.as_bool()) == Some(true) {
         return format!(
-            "🪜 Accumulation Plan \"{}\" ({})\n====================\n\
+            "🪜 Accumulation Plan \"{}\"{}\n====================\n\
              • Status: {}\n\
              • Next tranche: unknown\n\
              • Progress: unknown of ${} (the ledger was not read this cycle)\n\
              • Constraint: {}\n\
              {detection}{lp_line}{closed}",
-            s(plan, "plan_id"), s(plan, "venue"), s(plan, "status"), s(plan, "budget_usdc"), s(plan, "binding_constraint"),
+            s(plan, "plan_id"), venue_label, s(plan, "status"), s(plan, "budget_usdc"), s(plan, "binding_constraint"),
         );
     }
     format!(
-        "🪜 Accumulation Plan \"{}\" ({})\n====================\n\
+        "🪜 Accumulation Plan \"{}\"{}\n====================\n\
          • Status: {}\n\
          • Next tranche: {}\n\
          • Next due at: {}\n\
@@ -197,7 +204,7 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
          • Constraint: {}\n\
          • Protected cash reserve: ${}\n\
          {detection}{quotes}{lp_line}{closed}",
-        s(plan, "plan_id"), s(plan, "venue"), s(plan, "status"),
+        s(plan, "plan_id"), venue_label, s(plan, "status"),
         if s(plan, "status") == "complete" {
             "none (plan complete)".to_string()
         } else if s(plan, "status") != "tranche_due" {

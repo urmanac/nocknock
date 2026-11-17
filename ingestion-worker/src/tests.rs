@@ -431,7 +431,7 @@ database_url: "postgresql://localhost/test"
             tranches: 5,
             interval_hours: 24.0,
             starts_at: None,
-            venue: "Aero".to_string(),
+            venue: Some("Aero".to_string()),
             max_price_usd: None,
             pause_when_overextended: true,
             respect_cash_target: true,
@@ -654,7 +654,8 @@ database_url: "postgresql://localhost/test"
         )
         .unwrap();
         let plan = cfg.accumulation_plan.expect("plan parsed");
-        assert_eq!(plan.venue, "Aero");
+        // No venue is chosen for the operator (issue #132).
+        assert_eq!(plan.venue, None);
         assert!(plan.pause_when_overextended && plan.respect_cash_target);
         assert!(plan.starts_at.is_none() && plan.max_price_usd.is_none());
         // Absent section keeps the feature off.
@@ -699,7 +700,7 @@ database_url: "postgresql://localhost/test"
         let ctx = PlanContext { cfg: Some(plan_cfg()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-15T12:00:00Z") };
         let m = metrics_with_plan(&raw, &ctx, &MarketRegime::default());
         assert_eq!(m.global_status.shot_advice_action, "DCA TRANCHE DUE (1 of 5)");
-        assert!(m.global_status.shot_advice_details.contains("Buy $100.00 of NOCK on Aero (spot"));
+        assert!(m.global_status.shot_advice_details.contains("Buy $100.00 of NOCK (spot"));
         assert!(!m.global_status.shot_advice_details.contains("Deploy $"));
         let ps = m.accumulation_plan.expect("plan status emitted");
         assert_eq!(ps.status, "tranche_due");
@@ -2782,7 +2783,7 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
             tranches: 5,
             interval_hours: 24.0,
             starts_at: None,
-            venue: "Aero".to_string(),
+            venue: Some("Aero".to_string()),
             max_price_usd: None,
             pause_when_overextended: true,
             respect_cash_target: true,
@@ -2878,7 +2879,7 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
         let m = zero_metrics(&from_zero_raw(500.0, 0.0), &OperatorProfile::default(), &own_plan_due());
         assert_eq!(m.global_status.shot_advice_action, "DCA TRANCHE DUE (1 of 5)");
         let d = &m.global_status.shot_advice_details;
-        assert!(d.starts_with("Buy $20.00 of NOCK on Aero (spot $0.01153)."), "{d}");
+        assert!(d.starts_with("Buy $20.00 of NOCK (spot $0.01153; your plan's venue label: Aero)."), "{d}");
         assert!(d.contains("Plan \"my-first-plan\": $0.00 of $100.00 deployed over 0 verified buy(s)."), "{d}");
         assert!(!d.contains("DEFENSIVE LOCK") && !d.contains("Standing bias"));
         assert_no_invented_text(d);
@@ -2918,7 +2919,7 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
         assert_eq!(due.global_status.shot_advice_action, "DEFENSIVE LOCK (Floor Recovery) · DCA TRANCHE DUE (1 of 5)");
         let d = &due.global_status.shot_advice_details;
         assert!(d.contains("is below the 100000 floor by 100000 NOCK"), "{d}");
-        assert!(d.contains("Your accumulation plan is the recovery path: Buy $20.00 of NOCK on Aero (spot $0.01153)"), "{d}");
+        assert!(d.contains("Your accumulation plan is the recovery path: Buy $20.00 of NOCK (spot $0.01153; your plan's venue label: Aero)"), "{d}");
         assert!(!d.contains("stable reserves are locked"));
         assert_no_invented_text(d);
         assert_eq!(due.global_status.nock_floor_target, "100000");

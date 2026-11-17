@@ -227,9 +227,11 @@ pub struct AccumulationPlanConfig {
     /// First tranche is not due before this instant (default: immediately).
     #[serde(default)]
     pub starts_at: Option<DateTime<Utc>>,
-    /// Where the operator executes (label only in Phase 1).
-    #[serde(default = "default_plan_venue")]
-    pub venue: String,
+    /// The operator's own label for where they buy (label only). Optional with no
+    /// default (issue #132): unset, the advice names no venue, because NockNock never
+    /// chooses one; set, it is shown as the operator's label.
+    #[serde(default)]
+    pub venue: Option<String>,
     /// Optional ceiling: tranches pause while spot is above this price.
     #[serde(default)]
     pub max_price_usd: Option<f64>,
@@ -284,12 +286,6 @@ impl Default for RouteQuotesConfig {
     }
 }
 
-fn default_plan_venue() -> String {
-    // Aerodrome and Velodrome merged into Aero (aero.xyz) on 2026-10-21; see
-    // ONCHAIN_INTEGRATION.md §6. The label is informational: receipt verification
-    // is contract-agnostic.
-    "Aero".to_string()
-}
 
 /// Cost-basis inputs only the operator can supply (issue #98). Optional: without this
 /// section NockNock reports the average cost of the plan's receipt-verified buys and
@@ -1017,7 +1013,10 @@ struct AccumulationPlanStatus {
     plan_id: String,
     /// pending | tranche_due | waiting | paused | blocked | complete | invalid
     status: String,
-    venue: String,
+    /// The operator's venue label from the config, or null when none is set (2.8.1,
+    /// issue #132: no default venue is presented as the operator's).
+    #[serde(default)]
+    venue: Option<String>,
     /// 1-based index of the NEXT tranche (verified fills + 1).
     tranche_index: u32,
     tranches_total: u32,

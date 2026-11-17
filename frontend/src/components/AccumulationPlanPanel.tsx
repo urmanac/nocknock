@@ -121,7 +121,8 @@ export function AccumulationPlanPanel({
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 14 }}>
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={label}>
-            PLAN “{plan.plan_id}” · {plan.venue.toUpperCase()}
+            PLAN “{plan.plan_id}”
+            {plan.venue ? ` · YOUR VENUE LABEL: ${plan.venue.toUpperCase()}` : ''}
           </div>
           <div style={{ ...big, color }}>{PLAN_STATUS_LABEL[plan.status] ?? plan.status}</div>
           <div style={small}>

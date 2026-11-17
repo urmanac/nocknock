@@ -115,7 +115,7 @@ fn burndown_plan_cfg() -> AccumulationPlanConfig {
         tranches: 5,
         interval_hours: 24.0,
         starts_at: None,
-        venue: "Aero".to_string(),
+        venue: Some("Aero".to_string()),
         max_price_usd: None,
         pause_when_overextended: true,
         respect_cash_target: true,
@@ -447,4 +447,53 @@ fn test_bounds_of_a_cent_or_more_keep_five_decimals() {
     assert_eq!(fmt_price(0.0), "0.00000");
     // Sub-cent USD bounds gain digits too, never lose them.
     assert_eq!(fmt_price(0.0054998), "0.00549980");
+}
+
+// ---------------- #132: no default venue presented as the operator's ----------------
+
+#[test]
+fn test_an_unset_plan_venue_names_no_venue_anywhere() {
+    let cfg: AppConfig = serde_yaml::from_str(
+        "accumulation_plan:\n  id: reentry\n  budget_usdc: 100\n  tranches: 5\n  interval_hours: 24\n",
+    )
+    .unwrap();
+    let plan_cfg = cfg.accumulation_plan.unwrap();
+    assert_eq!(plan_cfg.venue, None, "no default venue");
+    let ps = build_plan_status(&plan_cfg, &PlanFills::default(), &PlanDirective::TrancheDue { usdc: 20.0, limited_by: None });
+    assert_eq!(ps.venue, None);
+    assert_eq!(serde_json::to_value(&ps).unwrap()["venue"], serde_json::Value::Null);
+    let (action, details) = plan_advice(&ps, 0.01129);
+    assert_eq!(action, "DCA TRANCHE DUE (1 of 5)");
+    assert!(details.starts_with("Buy $20.00 of NOCK (spot $0.01129). Plan \"reentry\""), "{details}");
+    for venue in ["Aero", "Uniswap", "venue"] {
+        assert!(!details.contains(venue), "{venue} in {details}");
+    }
+    let text = format_accumulation_plan_text(&serde_json::json!({ "derived_metrics": { "accumulation_plan": ps } }));
+    assert!(text.starts_with("🪜 Accumulation Plan \"reentry\"\n"), "{text}");
+    assert!(!text.contains("Aero") && !text.contains("(n/a)"), "{text}");
+}
+
+#[test]
+fn test_a_set_plan_venue_loads_unchanged_and_reads_as_the_operators_label() {
+    for yaml in ["  venue: \"Aero\"\n", "  venue: Aero\n"] {
+        let cfg: AppConfig = serde_yaml::from_str(&format!(
+            "accumulation_plan:\n  id: reentry\n  budget_usdc: 100\n  tranches: 5\n  interval_hours: 24\n{yaml}"
+        ))
+        .unwrap();
+        assert_eq!(cfg.accumulation_plan.as_ref().unwrap().venue.as_deref(), Some("Aero"));
+    }
+    let ps = build_plan_status(&burndown_plan_cfg(), &PlanFills::default(), &PlanDirective::TrancheDue { usdc: 20.0, limited_by: None });
+    assert_eq!(ps.venue.as_deref(), Some("Aero"));
+    let (_, details) = plan_advice(&ps, 0.01129);
+    assert!(details.starts_with("Buy $20.00 of NOCK (spot $0.01129; your plan's venue label: Aero)."), "{details}");
+    assert!(!details.contains("on Aero"), "never an imperative to buy on a venue: {details}");
+    let text = format_accumulation_plan_text(&serde_json::json!({ "derived_metrics": { "accumulation_plan": ps } }));
+    assert!(text.starts_with("🪜 Accumulation Plan \"2026-11-reentry\" (your venue label: Aero)\n"), "{text}");
+    // A blank label is no label.
+    let mut blank = burndown_plan_cfg();
+    blank.venue = Some("  ".to_string());
+    assert_eq!(plan_venue_label(&blank), None);
+    // A stored snapshot from before 2.8.1 (venue a string) still reads.
+    let old: AccumulationPlanStatus = serde_json::from_value(serde_json::to_value(&ps).unwrap()).unwrap();
+    assert_eq!(old.venue.as_deref(), Some("Aero"));
 }
