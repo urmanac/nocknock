@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — v0.8.1 burn-down (#130-#137)
+Eight minor findings of the 2026-11-16 adversarial review, each with a test that fails
+without its fix. Snapshot spec 2.8.1: additive (`accumulation_plan.progress_unknown`) and
+one widening (`accumulation_plan.venue` nullable). No new config key is required.
+
+- **#134 One ingestion cycle at a time.** The scheduled loop and `POST /v1/ingest` share
+  one lock held for the whole cycle, so a stale cycle can no longer push a directive that
+  a newer one already replaced, or push a transition twice. The endpoint runs its cycle
+  in a task of its own: a client that disconnects (or nginx's 60 s timeout) no longer
+  drops a cycle between the store and its notification. Requests that arrive while a
+  cycle runs wait for it and then share one new cycle.
+- **#133 LAN API hardening.** A POST is refused with 403 `CROSS_SITE_REFUSED` when its
+  `Sec-Fetch-Site` is `cross-site`, or its `Origin` host is not the request's `Host` host
+  (ports are not compared, because nginx forwards the host without the port: the
+  dashboard on `:3000` and behind the `:3443` TLS proxy keeps working). Requests without
+  `Origin` (curl, scripts, MCP clients) are unaffected. `POST
+  /v1/accumulation/quotes/refresh` reads the chain at most once every 10 seconds; inside
+  the window it answers with the quotes held (200), or 429 `REFRESH_COOLDOWN` with
+  `Retry-After` when it holds none. Stored `accumulation_quotes` rows that no buy can use
+  any more are deleted after each stored quote (this also covers the table growth noted
+  in #136). The Vite dev proxy passes the browser's `Host` through. No authentication was
+  added.
+- **#130 An unread ledger is unknown progress.** A cycle that cannot read the plan
+  ledger reads `DCA BLOCKED (ledger unreadable)` with no "$0.00 of $X" sentence and no
+  "(1 of N)"; the plan status carries `progress_unknown: true` and its amounts read
+  "unknown"; the dashboard panel, the Lite view and both MCP transports say unknown; the
+  LP rebuild keeps the whole budget liquid meanwhile. That cycle pushes no directive
+  change, and the next good cycle is compared with the last one that read the ledger, so
+  a plan completed just before the outage is announced once.
+- **#131 Range bounds keep their digits.** Sub-cent `lower_price`/`upper_price` carry six
+  significant digits (`0.00000564468`, was `0.00000564`): the Aero CL card reads 154,015 -
+  177,158 NOCK per WETH, as the ticks and the Aero app do (was 154,083 - 177,305), and the
+  USD bracket matches the ticks.
+- **#135 The swap-on-offer notice leads every directive.** Under REBUILD LP TRANCHES and a
+  floor lock too, it now comes first and once. The read-only route-quote pointer sits
+  right after the due-tranche sentence, before the progress sentence and any LP text, so
+  "this amount" is the tranche. Which directive is chosen is unchanged.
+- **#132 No default venue.** `accumulation_plan.venue` is optional with no default
+  (it was "Aero"). Unset, the advice reads "Buy $X of NOCK (spot $Y)." with no venue, the
+  panel and MCP show no venue label and recorded buys store none (`venue: null` in
+  `GET /v1/accumulation/events`). Set, it reads as the operator's label ("your plan's
+  venue label: Aero"). Configs that set it load unchanged.
+- **#136 Lighter history rows.** `/v1/snapshot/historical` rows carry no
+  `accumulation_plan.route_quotes` and empty `fill_detection.offers`/`dismissed`
+  (detection's status and check times stay); the latest snapshot keeps them in full.
+- **#137 Average-cost chart gaps.** Consecutive backfilled candles one candle period apart
+  are no longer gaps: a run of hourly candles is one lighter region with one caption
+  ("hourly third-party candles"), only real gaps break the line and count in the footer,
+  and gap labels are thinned so none overprints another.
+
 ### Security — CI hardened for outside contributions (#146)
 - Every action in `ci.yml` is pinned to a full commit SHA; the workflow declares read-only
   permissions at the top; the release job takes the tag name from the environment and

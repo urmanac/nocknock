@@ -156,7 +156,8 @@ cost_basis:
 
 Where the numbers are: `derived_metrics.cost_basis` in the snapshot, the series behind
 the chart at `GET /v1/cost-basis/series` (fills with their running averages, and stored
-spot; gaps in the price history stay gaps), and two lines in the `get_portfolio_state`
+spot; gaps in the price history stay gaps, while consecutive backfilled candles are one
+captioned stretch, not a gap each), and two lines in the `get_portfolio_state`
 MCP text. After a database loss the plan buys come back when you record their
 transaction hashes again; the opening basis lives in `config.yaml`; the stored price
 history restarts from backfilled candles, so older stretches of the spot line are coarser.
@@ -291,7 +292,7 @@ npm run build
 cd ../ingestion-worker
 SQLX_OFFLINE=true cargo check
 
-# 4. Trigger Immediate On-Chain Sync
+# 4. Trigger Immediate On-Chain Sync (waits for a cycle already running, then runs one)
 curl -X POST http://localhost:8080/v1/ingest
 ```
 
