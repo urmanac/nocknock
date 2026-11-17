@@ -165,8 +165,14 @@ pub(crate) fn decode_revert_reason(data: Option<&str>) -> RevertReason {
             let Some(len) = small_word(&body[64..128]) else {
                 return RevertReason::Malformed;
             };
-            let padded = len.div_ceil(32) * 32;
             let text = &body[128..];
+            // The length word is the contract's (or the node's) to choose: bound it by
+            // the data that is actually there before any arithmetic on it, so a length
+            // of 2^63 or more is Malformed and never an overflow or a slice panic.
+            if len > text.len() / 2 {
+                return RevertReason::Malformed;
+            }
+            let padded = len.div_ceil(32) * 32;
             if text.len() != padded * 2 || !text[len * 2..].bytes().all(|b| b == b'0') {
                 return RevertReason::Malformed;
             }
@@ -226,6 +232,18 @@ pub(crate) async fn eth_call_outcome(client: &Client, url: &str, payload: &serde
         }
     }
     Err(anyhow::anyhow!(last))
+}
+
+/// The latest block's number and time (#144), for reads that must all be made at one
+/// current block. `Err` when the header could not be read or carries no number or time:
+/// never a substitute block. The error text never contains the URL.
+pub(crate) async fn latest_block_header(client: &Client, url: &str) -> Result<(i64, DateTime<Utc>)> {
+    let payload = json!({ "jsonrpc": "2.0", "id": 88, "method": "eth_getBlockByNumber", "params": ["latest", false] });
+    let resp = post_rpc_with_retry(client, url, &payload, 2)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("the node's latest block could not be read (eth_getBlockByNumber gave no answer)"))?;
+    parse_block_header(&resp)
+        .ok_or_else(|| anyhow::anyhow!("the node's answer for its latest block carries no readable number and time"))
 }
 
 /// Single-word (or selected-word) eth_call helper for v3 pool reads.

@@ -17,6 +17,9 @@
 //! The cycle tests replay that file from a local JSON-RPC server. A request the file
 //! does not hold is answered with a JSON-RPC error, never an invented value, so a
 //! missing read fails the test's cycle loudly. The negative tests swap ONE answer.
+//! The file also holds that block's own header (`eth_getBlockByNumber`): a closure is
+//! proven at one current block, so the replayed cycle runs on the clock of that block
+//! (`read_clock`), and the stale-node tests move the clock, not the chain's answer.
 //!
 //! The config entries are those of config.yaml.example (ids, pools, ticks), plus the
 //! commented Aero CL example entry, which is the one that was withdrawn. Synthetic, and
@@ -136,6 +139,27 @@ fn test_revert_data_is_kept_and_decoded_strictly() {
     );
     assert_eq!(decode_revert_reason(Some("08c379a0")), RevertReason::Malformed);
     assert_eq!(decode_revert_reason(Some("08c3")), RevertReason::Malformed);
+    // A length word the data cannot hold is Malformed, whatever its size: the length is
+    // bounded before any arithmetic, so 2^63 and above neither overflow nor slice out of
+    // bounds (either would panic the ingestion task instead of failing the cycle).
+    let head = format!("08c379a0{:064x}", 0x20);
+    assert_eq!(decode_revert_reason(Some(&format!("{head}{:064x}4944", 3))), RevertReason::Malformed);
+    assert_eq!(decode_revert_reason(Some(&format!("{head}{:064x}{}", 33, "49".repeat(32)))), RevertReason::Malformed);
+    for len in [1u64 << 31, (1 << 63) - 1, 1 << 63, (1 << 63) + 1, u64::MAX - 31, u64::MAX] {
+        for tail in ["", "4944", &"00".repeat(32), &"49".repeat(64)] {
+            let data = format!("{head}{len:064x}{tail}");
+            assert_eq!(decode_revert_reason(Some(&data)), RevertReason::Malformed, "length {len:#x} with {} bytes of text", tail.len() / 2);
+            // The same payload as a node would send it, through both proofs: never closed.
+            let out = CallOutcome::Reverted(Some(data));
+            assert!(describe_outcome(&out).contains("does not decode"));
+            assert!(matches!(nft_closure_verdict("aerodrome-cl", CL_NPM, &out, &outcome(REAL_CL_OWNER_OF_BURNED)), ClosureVerdict::NotProven(_)));
+            assert!(matches!(nft_closure_verdict("aerodrome-cl", LEGACY_CL_NPM, &out, &out), ClosureVerdict::NotProven(_)));
+            assert!(matches!(v4_closure_verdict(&out, &returned(REAL_V4_INFO_BURNED)), ClosureVerdict::NotProven(_)));
+        }
+    }
+    // A length that fits is still read: the bound rejects nothing real.
+    assert_eq!(decode_revert_reason(Some(&format!("{head}{:064x}", 0))), RevertReason::Message(String::new()));
+    assert_eq!(decode_revert_reason(Some(&format!("{head}{:064x}{}", 32, "41".repeat(32)))), RevertReason::Message("A".repeat(32)));
     // None of these descriptions could be mistaken for a reason on the allow-list.
     for r in [RevertReason::NoData, RevertReason::Empty, RevertReason::Malformed, RevertReason::Custom("0x1f2a2005".into())] {
         assert!(!r.describe().contains("Error("), "{}", r.describe());
@@ -304,6 +328,33 @@ fn key_owner_of(npm: &str, nft: u64) -> String {
     key_call(npm, &format!("{ERC721_OWNER_OF}{nft:064x}"))
 }
 
+/// The block parameter a request was made with ("latest" or a block number), for an
+/// `eth_call`; empty for a method without one.
+fn call_block(req: &serde_json::Value) -> String {
+    match req["method"].as_str().unwrap_or_default() {
+        "eth_call" => req["params"][1].as_str().unwrap_or_default().to_string(),
+        _ => String::new(),
+    }
+}
+
+/// A swap key for one call at one block only: `key_at(&key, "latest")`.
+fn key_at(key: &str, block: &str) -> String {
+    format!("{key}@{block}")
+}
+
+const KEY_LATEST_BLOCK: &str = "eth_getBlockByNumber";
+
+/// The fixture's block as the proof reads name it.
+fn proof_block_tag() -> String {
+    fixture()["block_hex"].as_str().unwrap().to_string()
+}
+
+/// The clock of a replayed cycle: the fixture block's own time plus 3 seconds, which is
+/// what a worker reading that block as `latest` would see.
+fn read_clock() -> DateTime<Utc> {
+    Utc.timestamp_opt(fixture()["block_timestamp"].as_i64().unwrap() + 3, 0).unwrap()
+}
+
 /// What the local node answers for one key instead of the recorded answer.
 #[derive(Clone)]
 enum Swap {
@@ -311,6 +362,8 @@ enum Swap {
     Json(serde_json::Value),
     /// An HTTP status with an empty body.
     Http(u16),
+    /// An HTTP status with this body, sent as it is (it need not be JSON).
+    Body(u16, String),
     /// The connection is dropped without a response: a transport failure.
     Drop,
 }
@@ -327,31 +380,46 @@ fn swap_real(response: &str) -> Swap {
 struct Node {
     url: String,
     seen: Arc<std::sync::Mutex<Vec<String>>>,
+    /// Every request again, with the block it was made at: `key@latest`, `key@0x…`.
+    seen_at: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 impl Node {
     fn count(&self, key: &str) -> usize {
         self.seen.lock().unwrap().iter().filter(|k| k.as_str() == key).count()
     }
+
+    /// The blocks one call was made at, in order.
+    fn blocks_of(&self, key: &str) -> Vec<String> {
+        let prefix = format!("{key}@");
+        self.seen_at.lock().unwrap().iter().filter_map(|k| k.strip_prefix(&prefix).map(str::to_string)).collect()
+    }
 }
 
 /// A local JSON-RPC server that replays the recorded cycle. A request the fixture does
 /// not hold is a JSON-RPC error (which fails the cycle), never an invented answer.
+/// A swap keyed `key_at(key, block)` replaces the answer at that block only.
 async fn replay_node(swaps: Vec<(String, Swap)>) -> Node {
     let responses = fixture()["responses"].clone();
     let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen_at: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("a local port");
     let url = format!("http://{}", listener.local_addr().unwrap());
     let handler = {
-        let seen = seen.clone();
+        let (seen, seen_at) = (seen.clone(), seen_at.clone());
         move |Json(req): Json<serde_json::Value>| {
-            let (seen, responses, swaps) = (seen.clone(), responses.clone(), swaps.clone());
+            let (seen, seen_at, responses, swaps) = (seen.clone(), seen_at.clone(), responses.clone(), swaps.clone());
             async move {
                 let key = call_key(&req);
+                let at = key_at(&key, &call_block(&req));
                 seen.lock().unwrap().push(key.clone());
-                let answer = match swaps.iter().find(|(k, _)| k == &key) {
+                seen_at.lock().unwrap().push(at.clone());
+                let answer = match swaps.iter().find(|(k, _)| k == &key || k == &at) {
                     Some((_, Swap::Http(status))) => {
                         return StatusCode::from_u16(*status).unwrap().into_response();
+                    }
+                    Some((_, Swap::Body(status, body))) => {
+                        return (StatusCode::from_u16(*status).unwrap(), [("content-type", "application/json")], body.clone()).into_response();
                     }
                     // Unwinding without the panic hook: the connection closes with no
                     // response and nothing is printed.
@@ -378,7 +446,7 @@ async fn replay_node(swaps: Vec<(String, Swap)>) -> Node {
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
-    Node { url, seen }
+    Node { url, seen, seen_at }
 }
 
 /// A URL nothing listens on: every request is a transport failure.
@@ -456,6 +524,13 @@ fn entry_v4_nonexistent(price_source: bool) -> String {
         .replace("is_price_source: true", &format!("is_price_source: {price_source}"))
 }
 
+/// The v4 entry with `nft_id` left out: it reads as token id 0, which was never minted.
+fn entry_v4_without_nft_id() -> String {
+    let entry = ENTRY_V4.replace("uniswap-v4-nock-usdc-wide", "uniswap-v4-nock-usdc-no-id").replace("    nft_id: 3163450\n", "");
+    assert!(!entry.contains("nft_id"));
+    entry
+}
+
 fn entry_v3_nonexistent() -> String {
     ENTRY_V3.replace("uniswap-v3-weth-nock", "uniswap-v3-weth-nock-gone").replace("nft_id: 6336662", &format!("nft_id: {V3_BURNED_NFT}"))
 }
@@ -475,7 +550,13 @@ const NOW: &str = "2026-11-17T13:00:00+00:00";
 
 /// One cycle's reads against the local node.
 async fn read_cycle(node: &Node, cfg: &AppConfig) -> Result<RawOnChainData> {
-    fetch_raw_data_from(&Client::new(), &node.url, cfg).await
+    read_cycle_at(node, cfg, read_clock()).await
+}
+
+/// The same reads on another clock: `now` is the worker's time when it reads the
+/// fixture block as the node's latest.
+async fn read_cycle_at(node: &Node, cfg: &AppConfig, now: DateTime<Utc>) -> Result<RawOnChainData> {
+    fetch_raw_data_from(&Client::new(), &node.url, cfg, now).await
 }
 
 /// The pure rest of the cycle, as run_ingestion_cycle applies it: the metrics, then
@@ -518,6 +599,9 @@ fn assert_no_url(text: &str, node_url: &str) {
 // Optional NOCKNOCK_RECORD_BLOCK=<decimal block> pins another block (the node must
 // still hold its state). The recorder runs the worker's own reads through a proxy that
 // pins every `latest` to that block, so the fixture's requests are the worker's own.
+// Recording again at the block the file already holds keeps its `eth_gasPrice` answer
+// (the price at first recording): that method has no block, and a new price would move
+// every gas figure of the golden file for no reason.
 
 #[tokio::test]
 #[ignore = "needs NOCKNOCK_LIVE_RPC_URL (a Base mainnet JSON-RPC endpoint); rewrites testdata/closed/cycle_fixture.json"]
@@ -546,10 +630,16 @@ async fn test_record_closed_cycle_fixture() {
     let recorded: Arc<std::sync::Mutex<BTreeMap<String, serde_json::Value>>> = Arc::new(std::sync::Mutex::new(BTreeMap::new()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_url = format!("http://{}", listener.local_addr().unwrap());
+    // The gas price of the first recording at this block, if the file holds one.
+    let kept_gas_price: Option<serde_json::Value> = Some(fixture())
+        .filter(|old| old["block"].as_u64() == Some(block))
+        .map(|old| old["responses"]["eth_gasPrice"].clone())
+        .filter(|v| v.is_object());
     let handler = {
         let (recorded, http, upstream, block_hex) = (recorded.clone(), http.clone(), upstream.clone(), block_hex.clone());
         move |Json(req): Json<serde_json::Value>| {
             let (recorded, http, upstream, block_hex) = (recorded.clone(), http.clone(), upstream.clone(), block_hex.clone());
+            let kept_gas_price = kept_gas_price.clone();
             async move {
                 let key = call_key(&req);
                 let forward = |body: serde_json::Value| {
@@ -569,15 +659,32 @@ async fn test_record_closed_cycle_fixture() {
                 let answer = match method.as_str() {
                     "eth_call" | "eth_getBalance" => {
                         let mut pinned = req.clone();
-                        assert_eq!(pinned["params"][1], "latest", "the cycle reads at latest");
+                        // A proving read names the block the worker was just given as
+                        // the latest, which is this one; every other read says latest.
+                        assert!(
+                            pinned["params"][1] == "latest" || (method == "eth_call" && pinned["params"][1] == json!(block_hex)),
+                            "the cycle reads at latest, or at the proof block: {}",
+                            pinned["params"][1]
+                        );
                         pinned["params"][1] = json!(block_hex);
                         forward(pinned).await
                     }
-                    "eth_gasPrice" => {
-                        let mut v = forward(req.clone()).await;
-                        v["note"] = json!("the gas price when the fixture was recorded; eth_gasPrice cannot be pinned to a block");
-                        v
+                    "eth_getBlockByNumber" => {
+                        // The node's latest block, for a closure proof: the pinned block's
+                        // own header, as the node sends it.
+                        assert_eq!(req["params"], json!(["latest", false]), "the cycle asks for the latest header only");
+                        let mut pinned = req.clone();
+                        pinned["params"][0] = json!(block_hex);
+                        forward(pinned).await
                     }
+                    "eth_gasPrice" => match kept_gas_price {
+                        Some(kept) => kept,
+                        None => {
+                            let mut v = forward(req.clone()).await;
+                            v["note"] = json!("the gas price when the fixture was recorded; eth_gasPrice cannot be pinned to a block");
+                            v
+                        }
+                    },
                     "alchemy_getTokenBalances" => {
                         // Not served by a public node. The response is assembled, in
                         // Alchemy's shape, from the two real balanceOf reads at the block.
@@ -618,6 +725,7 @@ async fn test_record_closed_cycle_fixture() {
     let v4_gone = entry_v4_nonexistent(false);
     let v3_gone = entry_v3_nonexistent();
     let cl_legacy = ENTRY_CL_WITHDRAWN.replace(CL_NPM, LEGACY_CL_NPM).replace("2914490", "99999999999");
+    let v4_no_id = entry_v4_without_nft_id();
     let runs: Vec<(&str, AppConfig)> = vec![
         ("the book with the withdrawn Aero CL entry", book_with_withdrawn_cl()),
         ("the book without it", book_without_cl()),
@@ -625,9 +733,12 @@ async fn test_record_closed_cycle_fixture() {
         ("a nonexistent v4 and v3 NFT beside the live book", config(&[ENTRY_V4, ENTRY_V3, ENTRY_BASIC, &v4_gone, &v3_gone])),
         ("the wallet's empty v4 NFT", config(&[ENTRY_V4, ENTRY_V3, ENTRY_BASIC, ENTRY_V4_EMPTY])),
         ("an NFT on a position manager that is not on the allow-list", config(&[ENTRY_V4, &cl_legacy])),
+        ("a v4 entry with no nft_id as the only entry", config(&[&v4_no_id])),
     ];
+    // The worker's clock while it reads the pinned block as the latest one.
+    let clock = Utc.timestamp_opt(timestamp as i64 + 3, 0).unwrap();
     for (what, cfg) in &runs {
-        match fetch_raw_data_from(&http, &proxy_url, cfg).await {
+        match fetch_raw_data_from(&http, &proxy_url, cfg, clock).await {
             Ok(raw) => println!("{what}: {} live, {} closed, spot {}", raw.positions.len(), raw.closed_positions.len(), raw.spot_price_nock_usd),
             Err(e) => println!("{what}: cycle error: {e}"),
         }
@@ -663,10 +774,14 @@ async fn test_the_withdrawn_aero_cl_position_is_closed_and_the_cycle_succeeds() 
     assert_eq!(fx["responses"][key_owner_of(CL_NPM, CL_NFT)]["error"], sent(REAL_CL_OWNER_OF_BURNED));
 
     let raw = read_cycle(&node, &book_with_withdrawn_cl()).await.expect("a closed position does not fail the cycle");
-    // Each of the two proving reads was made exactly once, and nothing else was read
-    // from the position: not its pool, not its gauge.
-    assert_eq!(node.count(&key_positions(CL_NPM, CL_NFT)), 1);
-    assert_eq!(node.count(&key_owner_of(CL_NPM, CL_NFT)), 1);
+    // positions() reverted at latest; then the proof: the node's latest block was read
+    // once, and positions() and ownerOf() were each read once AT THAT BLOCK. Nothing
+    // else was read from the position: not its pool, not its gauge.
+    let block = proof_block_tag();
+    assert_eq!(block, "0x37edf0d");
+    assert_eq!(node.blocks_of(&key_positions(CL_NPM, CL_NFT)), vec!["latest".to_string(), block.clone()]);
+    assert_eq!(node.blocks_of(&key_owner_of(CL_NPM, CL_NFT)), vec![block.clone()]);
+    assert_eq!(node.count(KEY_LATEST_BLOCK), 1);
     let seen = node.seen.lock().unwrap().clone();
     assert!(!seen.iter().any(|k| k.contains(&CL_POOL.to_lowercase()) || k.contains(CL_GAUGE)), "{seen:?}");
 
@@ -740,6 +855,14 @@ async fn test_the_withdrawn_aero_cl_position_is_closed_and_the_cycle_succeeds() 
 async fn test_no_answer_or_another_answer_fails_the_cycle_and_is_never_closed() {
     let positions_key = key_positions(CL_NPM, CL_NFT);
     let owner_key = key_owner_of(CL_NPM, CL_NFT);
+    let positions_at_proof = key_at(&positions_key, &proof_block_tag());
+    // The first 200 characters of a real response: the revert selector is in them and
+    // the JSON is not closed.
+    let cut_short = |response: &str| {
+        let cut = response[..200].to_string();
+        assert!(cut.contains("0x08c379a0") && serde_json::from_str::<serde_json::Value>(&cut).is_err());
+        cut
+    };
     let rpc_error = |code: i64, message: &str| Swap::Json(json!({ "error": { "code": code, "message": message } }));
     let revert = |data: Option<&str>| {
         let mut err = json!({ "code": 3, "message": "execution reverted" });
@@ -766,6 +889,16 @@ async fn test_no_answer_or_another_answer_fails_the_cycle_and_is_never_closed() 
         ("transport failure on ownerOf()", &owner_key, Swap::Drop, "ownerOf() read failed: network error"),
         ("HTTP 500 on ownerOf()", &owner_key, Swap::Http(500), "ownerOf() read failed: HTTP 500"),
         ("a JSON-RPC error on ownerOf()", &owner_key, rpc_error(-32005, "rate limit exceeded"), "ownerOf() read failed: RPC error -32005"),
+        // An error status is no answer, whatever its body says: here the body is the
+        // real "nonexistent" revert, as a cache or a relay in front of the node could
+        // send it. A 200 whose body is that revert cut short is no answer either.
+        ("HTTP 429 carrying the real revert", &positions_key, Swap::Body(429, REAL_CL_POSITIONS_BURNED.to_string()), "positions() read failed: HTTP 429"),
+        ("HTTP 500 carrying the real revert", &positions_key, Swap::Body(500, REAL_CL_POSITIONS_BURNED.to_string()), "positions() read failed: HTTP 500"),
+        ("HTTP 200 with the revert cut short", &positions_key, Swap::Body(200, cut_short(REAL_CL_POSITIONS_BURNED)), "positions() read failed: unparseable response"),
+        ("HTTP 429 carrying the real revert, at the proof block", &positions_at_proof, Swap::Body(429, REAL_CL_POSITIONS_BURNED.to_string()), "positions() read failed: HTTP 429"),
+        ("HTTP 429 carrying the real revert on ownerOf()", &owner_key, Swap::Body(429, REAL_CL_OWNER_OF_BURNED.to_string()), "ownerOf() read failed: HTTP 429"),
+        ("HTTP 503 carrying the real revert on ownerOf()", &owner_key, Swap::Body(503, REAL_CL_OWNER_OF_BURNED.to_string()), "ownerOf() read failed: HTTP 503"),
+        ("HTTP 200 with the ownerOf() revert cut short", &owner_key, Swap::Body(200, cut_short(REAL_CL_OWNER_OF_BURNED)), "ownerOf() read failed: unparseable response"),
     ];
     for (what, key, swap, expect) in cases {
         let node = replay_node(vec![(key.clone(), swap)]).await;
@@ -788,10 +921,11 @@ async fn test_no_answer_or_another_answer_fails_the_cycle_and_is_never_closed() 
 
     // No node at all.
     let dead = dead_url().await;
-    let err = fetch_raw_data_from(&Client::new(), &dead, &book_with_withdrawn_cl()).await.unwrap_err().to_string();
+    let err = fetch_raw_data_from(&Client::new(), &dead, &book_with_withdrawn_cl(), read_clock()).await.unwrap_err().to_string();
     assert!(!err.contains(&dead) && !err.contains("127.0.0.1"), "{err}");
     let cfg = book_with_withdrawn_cl();
-    let err = fetch_aero_cl_position(&Client::new(), &dead, &cfg.positions[3], WALLET).await.unwrap_err().to_string();
+    let clock = ProofClock::for_cycle(read_clock(), cfg.sync_window_seconds);
+    let err = fetch_aero_cl_position(&Client::new(), &dead, &cfg.positions[3], WALLET, clock).await.unwrap_err().to_string();
     assert!(err.starts_with("position aero-cl200-weth-nock: Aero CL positions() read failed: network error"), "{err}");
     assert!(!err.contains(&dead) && !err.contains("127.0.0.1"), "{err}");
     let err = eth_call_outcome(&Client::new(), &dead, &json!({"jsonrpc": "2.0", "id": 1, "method": "eth_call", "params": []})).await.unwrap_err().to_string();
@@ -841,6 +975,8 @@ async fn test_uniswap_v3_and_v4_fail_the_cycle_unless_both_reads_prove_it() {
         ("v4: ownerOf() transport failure", &v4_owner, Swap::Drop, "POSM ownerOf() query failed: network error"),
         ("v4: ownerOf() HTTP 429", &v4_owner, Swap::Http(429), "POSM ownerOf() query failed: HTTP 429"),
         ("v4: ownerOf() JSON-RPC error", &v4_owner, rpc_error.clone(), "POSM ownerOf() query failed: RPC error -32005"),
+        ("v4: ownerOf() HTTP 429 carrying the real revert", &v4_owner, Swap::Body(429, REAL_V4_OWNER_OF_BURNED.to_string()), "POSM ownerOf() query failed: HTTP 429"),
+        ("v3: positions() HTTP 500 carrying the real revert", &v3_positions, Swap::Body(500, REAL_V3_POSITIONS_BURNED.to_string()), "NPM positions() query failed: HTTP 500"),
         ("v4: only ownerOf() says nonexistent", &v4_info, Swap::Json(json!({ "result": REAL_V4_INFO_EMPTY_BUT_EXISTING })), "the two reads do not agree"),
         ("v4: the info read reverts", &v4_info, swap_real(REAL_GAUGE_EARNED_NA), "the two reads do not agree"),
         ("v4: the info read fails", &v4_info, Swap::Http(500), "POSM getPoolAndPositionInfo() query failed: HTTP 500"),
@@ -902,6 +1038,220 @@ async fn test_an_nft_that_exists_with_zero_liquidity_is_a_live_position_not_a_cl
     assert_eq!(basic.liquidity, 0);
     assert_eq!(node.count(&key_call(gauge, &gauge_earned_basic_calldata(WALLET))), 1, "earned AERO stays claimable after an unstake");
     assert!(raw.aero.unclaimed.as_ref().unwrap().iter().any(|u| u.position_id == basic.position_id && u.amount.is_some()));
+}
+
+// ------------------------------------------------------------------
+// (b2) The proof is read at one current block
+// ------------------------------------------------------------------
+// A never-minted id answers byte for byte like a burned one, so a node whose state is
+// older than an NFT's mint gives both "nonexistent" answers for a live position. The
+// proof is therefore read at ONE block, and that block must be current.
+
+#[test]
+fn test_a_proof_block_must_be_current() {
+    let time = Utc.timestamp_opt(fixture()["block_timestamp"].as_i64().unwrap(), 0).unwrap();
+    let block = ProofBlock { number: fixture()["block"].as_i64().unwrap(), time };
+    assert_eq!(block.tag(), "0x37edf0d");
+    assert_eq!(block.tag(), proof_block_tag());
+    let after = |seconds: i64| time + chrono::Duration::seconds(seconds);
+
+    // The limit is 120 seconds and never longer than the cycle interval, so a proof
+    // block is always newer than the previous cycle.
+    assert_eq!(MAX_PROOF_BLOCK_AGE_SECONDS, 120);
+    let limit = |sync_window: u64| ProofClock::for_cycle(time, sync_window).max_block_age_seconds;
+    assert_eq!((limit(300), limit(120), limit(60), limit(0), limit(u64::MAX)), (120, 120, 60, 1, 120));
+    // The clock is the cycle's start plus the time that has passed since: it never
+    // runs behind its start, and it moves.
+    let clock = ProofClock::for_cycle(after(3), 300);
+    let (first, second) = (clock.now(), clock.now());
+    assert!(first >= after(3) && second >= first && second < after(63), "{first} {second}");
+    let example = load_app_config(concat!(env!("CARGO_MANIFEST_DIR"), "/config.yaml.example"), Some("/nonexistent/config.yaml"), false).unwrap();
+    assert!(example.sync_window_seconds as i64 >= MAX_PROOF_BLOCK_AGE_SECONDS, "the example's interval keeps the full limit");
+
+    for (seconds_after, sync_window, current) in [
+        (0, 300, true),
+        (3, 300, true),
+        (120, 300, true),
+        (121, 300, false),
+        (3600, 300, false),
+        (60, 60, true),
+        (61, 60, false),
+        // The block is ahead of the clock: fine within the limit (two clocks differ by
+        // seconds), refused beyond it.
+        (-120, 300, true),
+        (-121, 300, false),
+    ] {
+        let verdict = proof_block_is_current(after(seconds_after), limit(sync_window), &block);
+        assert_eq!(verdict.is_ok(), current, "{seconds_after}s after the block, window {sync_window}: {verdict:?}");
+    }
+    assert_eq!(
+        proof_block_is_current(after(121), 120, &block).unwrap_err(),
+        "the node's latest block 58646285 is 121 seconds old (limit 120): a node that is behind the chain cannot prove that a token id does not exist, because an id that was not minted yet answers the same way"
+    );
+    assert_eq!(
+        proof_block_is_current(after(-121), 120, &block).unwrap_err(),
+        "the node's latest block 58646285 is 121 seconds ahead of this host's clock (limit 120): its age cannot be judged, so it proves nothing about a token id"
+    );
+    // The adapters go through it, and the cycle's clock is the real one.
+    for adapter in [include_str!("adapters/aero_cl.rs"), include_str!("adapters/uniswap_v3.rs"), include_str!("adapters/uniswap_v4.rs")] {
+        assert!(adapter.contains("fetch_proof_block(http_client, alchemy_url, clock)"));
+        assert!(include_str!("closed.rs").contains("proof_block_is_current(clock.now(), clock.max_block_age_seconds, &block)"));
+        assert_eq!(adapter.matches("block.tag()").count(), 2, "both proving reads name the proof block");
+    }
+    assert!(include_str!("onchain.rs").contains("fetch_raw_data_from(&state.http_client, &alchemy_url, &state.config, Utc::now())"));
+}
+
+#[tokio::test]
+async fn test_a_node_behind_the_chain_fails_the_cycle_and_closes_nothing() {
+    let block = proof_block_tag();
+    let (v4_gone, v3_gone) = (entry_v4_nonexistent(false), entry_v3_nonexistent());
+    let books: Vec<(&str, AppConfig, &str)> = vec![
+        (
+            "Aero CL",
+            book_with_withdrawn_cl(),
+            "position aero-cl200-weth-nock: Aero CL positions() read failed (NFT #2914490 on position manager 0x4857db576ee0e45f10525ec59527bfd10beec60b: positions() reverted with Error(\"ID\"), and the node's latest block 58646285 is ",
+        ),
+        (
+            "Uniswap v4",
+            config(&[ENTRY_V4, ENTRY_V3, ENTRY_BASIC, &v4_gone]),
+            "position uniswap-v4-nock-usdc-gone: NFT #3229273 reads zero liquidity and whether it exists on PositionManager 0x7c5f5a4bbd8fd63184577525326123b519429bdc could not be established (ownerOf() reverted with Error(\"NOT_MINTED\"), and the node's latest block 58646285 is ",
+        ),
+        (
+            "Uniswap v3",
+            config(&[ENTRY_V4, ENTRY_V3, ENTRY_BASIC, &v3_gone]),
+            "position uniswap-v3-weth-nock-gone: NPM positions() query failed (NFT #6604113 on position manager 0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1: positions() reverted with Error(\"Invalid token ID\"), and the node's latest block 58646285 is ",
+        ),
+    ];
+    let block_time = Utc.timestamp_opt(fixture()["block_timestamp"].as_i64().unwrap(), 0).unwrap();
+    for (what, cfg, expect) in &books {
+        // The node's latest block is the recorded one, and every answer is the real
+        // "nonexistent" one. Only the worker's clock differs: 100 seconds after the
+        // block the proof stands, 121 seconds after it the node is behind. (The exact
+        // limit is pinned in test_a_proof_block_must_be_current; the cycle's clock also
+        // counts the time the cycle itself takes, so these leave a margin.)
+        let node = replay_node(vec![]).await;
+        let raw = read_cycle_at(&node, cfg, block_time + chrono::Duration::seconds(100)).await.unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(raw.closed_positions.len(), 1, "{what}");
+        let node = replay_node(vec![]).await;
+        let err = match read_cycle_at(&node, cfg, block_time + chrono::Duration::seconds(121)).await {
+            Err(e) => e.to_string(),
+            Ok(raw) => panic!("{what}: a node behind the chain must fail the cycle, but {} closed", raw.closed_positions.len()),
+        };
+        assert!(err.starts_with(expect), "{what}: {err}");
+        assert!(err.ends_with(" seconds old (limit 120): a node that is behind the chain cannot prove that a token id does not exist, because an id that was not minted yet answers the same way)"), "{what}: {err}");
+        assert_no_url(&err, &node.url);
+        // The block was read once and no proving read was spent on it.
+        assert_eq!(node.count(KEY_LATEST_BLOCK), 1, "{what}");
+        assert!(node.seen_at.lock().unwrap().iter().all(|k| !k.ends_with(&format!("@{block}"))), "{what}");
+        // A clock far behind the chain is refused as well.
+        let node = replay_node(vec![]).await;
+        let err = read_cycle_at(&node, cfg, block_time - chrono::Duration::seconds(180)).await.unwrap_err().to_string();
+        assert!(err.contains(" seconds ahead of this host's clock (limit 120): its age cannot be judged"), "{what}: {err}");
+        assert!(node.seen_at.lock().unwrap().iter().all(|k| !k.ends_with(&format!("@{block}"))), "{what}");
+    }
+
+    // The clock decides a proof and nothing else: a book with no closed entry, and one
+    // with an NFT that exists and is empty, read the same on any clock and never ask
+    // for the block.
+    for cfg in [book_without_cl(), config(&[ENTRY_V4, ENTRY_V3, ENTRY_BASIC, ENTRY_V4_EMPTY])] {
+        let node = replay_node(vec![]).await;
+        let raw = read_cycle_at(&node, &cfg, block_time + chrono::Duration::days(365)).await.expect("no proof, no clock");
+        assert!(raw.closed_positions.is_empty());
+        assert_eq!(node.count(KEY_LATEST_BLOCK), 0);
+    }
+
+    // Both proving reads name the proof block, for every protocol.
+    let node = replay_node(vec![]).await;
+    read_cycle(&node, &config(&[ENTRY_V4, ENTRY_V3, ENTRY_BASIC, &v4_gone, &v3_gone])).await.unwrap();
+    let v4_owner = key_owner_of(UNISWAP_V4_POSM_BASE, V4_BURNED_NFT);
+    let v4_info = key_call(UNISWAP_V4_POSM_BASE, &format!("{V4_GET_POOL_AND_POSITION_INFO}{V4_BURNED_NFT:064x}"));
+    assert_eq!(node.blocks_of(&v4_owner), vec!["latest".to_string(), block.clone()]);
+    assert_eq!(node.blocks_of(&v4_info), vec![block.clone()]);
+    assert_eq!(node.blocks_of(&key_positions(V3_NPM, V3_BURNED_NFT)), vec!["latest".to_string(), block.clone()]);
+    assert_eq!(node.blocks_of(&key_owner_of(V3_NPM, V3_BURNED_NFT)), vec![block.clone()]);
+    assert_eq!(node.count(KEY_LATEST_BLOCK), 2, "one block per proof");
+
+    // What can go wrong between the trigger and the proof. Each fails the cycle.
+    let cl_positions = key_positions(CL_NPM, CL_NFT);
+    let cl_owner = key_owner_of(CL_NPM, CL_NFT);
+    // (synthetic, by the JSON-RPC rules) what a backend answers for a block it does not hold
+    let no_such_block = Swap::Json(json!({ "error": { "code": -32000, "message": "header not found" } }));
+    let header = fixture()["responses"][KEY_LATEST_BLOCK]["result"].clone();
+    assert_eq!(header["number"], json!(block));
+    let mut header_without_time = header.clone();
+    header_without_time.as_object_mut().unwrap().remove("timestamp");
+    let wallet_owns = fixture()["responses"][key_owner_of(UNISWAP_V4_POSM_BASE, V4_EMPTY_NFT)].clone();
+    assert!(wallet_owns["result"].is_string());
+    let cases: Vec<(&str, AppConfig, String, Swap, &str)> = vec![
+        ("the block read fails", book_with_withdrawn_cl(), KEY_LATEST_BLOCK.to_string(), Swap::Http(500), "and the node's latest block could not be read"),
+        ("the block read is rate limited", book_with_withdrawn_cl(), KEY_LATEST_BLOCK.to_string(), Swap::Json(json!({ "error": { "code": -32005, "message": "rate limit exceeded" } })), "and the node's latest block could not be read"),
+        ("the node knows no latest block", book_with_withdrawn_cl(), KEY_LATEST_BLOCK.to_string(), Swap::Json(json!({ "result": null })), "carries no readable number and time"),
+        ("the header has no time", book_with_withdrawn_cl(), KEY_LATEST_BLOCK.to_string(), Swap::Json(json!({ "result": header_without_time })), "carries no readable number and time"),
+        ("positions() lands on a backend without the proof block", book_with_withdrawn_cl(), key_at(&cl_positions, &block), no_such_block.clone(), "positions() read failed: RPC error -32000"),
+        ("ownerOf() lands on a backend without the proof block", book_with_withdrawn_cl(), key_at(&cl_owner, &block), no_such_block.clone(), "ownerOf() read failed: RPC error -32000"),
+        // The read at latest said "nonexistent" and the proof block says the NFT is
+        // there (the real ownerOf answer of one block before the burn).
+        ("the proof block names an owner", book_with_withdrawn_cl(), key_at(&cl_owner, &block), swap_real(REAL_CL_OWNER_OF_BEFORE_BURN), "at block 58646285: positions() reverted with Error(\"ID\") but ownerOf() returned 32 bytes of data: the two reads do not agree"),
+        ("positions() answers another revert at the proof block", book_with_withdrawn_cl(), key_at(&cl_positions, &block), swap_real(REAL_GAUGE_EARNED_NA), "at block 58646285: positions() reverted with Error(\"NA\")"),
+        ("v4: the proof block names an owner", config(&[ENTRY_V4, ENTRY_V3, ENTRY_BASIC, &v4_gone]), key_at(&v4_owner, &block), Swap::Json(wallet_owns), "at block 58646285: ownerOf() returned 32 bytes of data, which is not the PositionManager's answer for a token id that does not exist"),
+        ("v4: ownerOf() lands on a backend without the proof block", config(&[ENTRY_V4, ENTRY_V3, ENTRY_BASIC, &v4_gone]), key_at(&v4_owner, &block), no_such_block.clone(), "POSM ownerOf() query failed: RPC error -32000"),
+        ("v3: ownerOf() lands on a backend without the proof block", config(&[ENTRY_V4, ENTRY_V3, ENTRY_BASIC, &v3_gone]), key_at(&key_owner_of(V3_NPM, V3_BURNED_NFT), &block), no_such_block, "NPM ownerOf() query failed: RPC error -32000"),
+    ];
+    for (what, cfg, key, swap, expect) in cases {
+        let node = replay_node(vec![(key, swap)]).await;
+        let err = match read_cycle(&node, &cfg).await {
+            Err(e) => e.to_string(),
+            Ok(raw) => panic!("{what}: the cycle must fail, but it listed {} closed", raw.closed_positions.len()),
+        };
+        assert!(err.contains(expect), "{what}: {err}");
+        assert_no_url(&err, &node.url);
+    }
+}
+
+// ------------------------------------------------------------------
+// (b3) A Uniswap v4 entry with no nft_id
+// ------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_a_v4_entry_without_nft_id_is_closed_and_is_not_a_position_holding_nothing() {
+    let node = replay_node(vec![]).await;
+    let no_id = entry_v4_without_nft_id();
+    // The key stays optional: the config loads, and the id reads as 0.
+    let alone = config(&[&no_id]);
+    assert_eq!(alone.positions[0].nft_id, 0);
+    // Token id 0 was never minted: the PositionManager's real answers at the recorded
+    // block are the same bytes as for the burned id.
+    let fx = fixture();
+    assert_eq!(
+        fx["responses"][key_owner_of(UNISWAP_V4_POSM_BASE, 0)]["error"],
+        serde_json::from_str::<serde_json::Value>(REAL_V4_OWNER_OF_BURNED).unwrap()["error"]
+    );
+    assert_eq!(fx["responses"][key_call(UNISWAP_V4_POSM_BASE, &format!("{V4_GET_POOL_AND_POSITION_INFO}{:064x}", 0))]["result"], json!(REAL_V4_INFO_BURNED));
+
+    // As the only entry (before #144 this completed, as one "position" holding $0 of an
+    // NFT that does not exist): the cycle fails, like any config whose every position
+    // is closed. A price-only setup is an `aerodrome` entry, which is never closed.
+    let err = read_cycle(&node, &alone).await.unwrap_err().to_string();
+    assert_eq!(
+        err,
+        "No live positions: every configured position is closed (uniswap-v4-nock-usdc-no-id: NFT #0 does not exist on position manager 0x7c5f5a4bbd8fd63184577525326123b519429bdc: withdrawn and burned, or a mistyped nft_id). Remove the closed entries and add your current positions under `positions:` in config.yaml (see ONCHAIN_INTEGRATION.md §5)"
+    );
+
+    // Beside live positions, as the price source: the cycle goes on, its pool supplies
+    // the spot, and it is listed as closed, never among the positions.
+    let live = read_cycle(&node, &book_without_cl()).await.unwrap();
+    let raw = read_cycle(&node, &config(&[&no_id, ENTRY_V3, ENTRY_BASIC])).await.expect("the pool still prices NOCK");
+    assert_eq!(raw.spot_price_nock_usd, live.spot_price_nock_usd);
+    assert_eq!(raw.positions.len(), 2);
+    assert!(raw.positions.iter().all(|p| p.protocol != "uniswap-v4"));
+    let c = &raw.closed_positions[0];
+    assert_eq!((c.nft_id, c.label.as_str(), c.supplies_spot_price), (0, "v4 USDC/NOCK #0 (uniswap-v4-nock-usdc-no-id)", true));
+
+    // The example config says that a v4 entry needs the id of an NFT that exists, and
+    // what a price-only setup uses instead.
+    let example = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/config.yaml.example")).unwrap();
+    assert!(example.contains("An entry with no nft_id reads as token id 0, which does not exist"), "config.yaml.example");
+    assert!(example.contains("use an `aerodrome` entry on a NOCK/USDC pool with is_price_source: true"), "config.yaml.example");
 }
 
 // ------------------------------------------------------------------
@@ -998,7 +1348,7 @@ async fn test_a_closed_entry_changes_no_figure_and_the_arrays_stay_aligned() {
         serde_json::to_string(&claim_reward_rows(&without.positions, &[])).unwrap()
     );
 
-    // The MCP text: the same text plus the closed block, on both tools that print it.
+    // The MCP text: the same text plus the closed block, on all four tools.
     let (full_with, full_without) = (serde_json::to_value(&with).unwrap(), serde_json::to_value(&without).unwrap());
     let block = closed_positions_lines(&full_with);
     assert_eq!(
@@ -1012,11 +1362,30 @@ async fn test_a_closed_entry_changes_no_figure_and_the_arrays_stay_aligned() {
     let claim = format_claim_simulation_text(&full_with);
     assert!(claim.ends_with(&block), "{claim}");
     assert_eq!(claim.replace(&block, ""), format_claim_simulation_text(&full_without));
-    // The other two tools print nothing about it and are unchanged.
-    assert_eq!(format_shot_advice_text(&full_with), format_shot_advice_text(&full_without));
-    assert_eq!(format_accumulation_plan_text(&full_with), format_accumulation_plan_text(&full_without));
+    // The directive and the plan state the closing too: both list what the tracked
+    // positions hold and are short of, and the fourth configured entry is in neither
+    // list. Apart from the block, each text is what it is without a closed position:
+    // the directive, its details and every rebuild line are unchanged.
+    let advice = format_shot_advice_text(&full_with);
+    assert!(advice.contains(&format!("{block}• Harvest rule: ")), "{advice}");
+    assert_eq!(advice.replace(&block, ""), format_shot_advice_text(&full_without));
+    let trailer = closed_positions_trailer(&full_with);
+    assert_eq!(trailer, format!("\n{}", block.trim_end()));
+    assert_eq!(closed_positions_trailer(&full_without), "");
+    let plan = format_accumulation_plan_text(&full_with);
+    assert!(plan.starts_with("🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n") && plan.ends_with(&trailer), "{plan}");
+    assert_eq!(plan.replace(&trailer, ""), format_accumulation_plan_text(&full_without));
+    assert!(plan.contains("LP rebuild bias: under_target") && !plan.replace(&trailer, "").contains("2914490"), "{plan}");
+    // With a plan configured (a synthetic plan object, for the text's other branch).
+    let planned = |full: &serde_json::Value| {
+        let mut v = full.clone();
+        v["derived_metrics"]["accumulation_plan"] = json!({ "plan_id": "synthetic-test-plan", "status": "waiting" });
+        format_accumulation_plan_text(&v)
+    };
+    assert!(planned(&full_with).starts_with("🪜 Accumulation Plan \"synthetic-test-plan\"") && planned(&full_with).ends_with(&trailer));
+    assert_eq!(planned(&full_with).replace(&trailer, ""), planned(&full_without));
     // No surface text advises anything about AERO because of it.
-    for text in [&state, &claim] {
+    for text in [&state, &claim, &advice, &plan] {
         let lower = text.to_lowercase();
         assert!(!lower.contains("claim aero") && !lower.contains("sell aero") && !lower.contains("aerodrome.finance"), "{text}");
     }
@@ -1049,7 +1418,33 @@ async fn test_a_closed_price_source_never_guesses_a_price() {
     assert!(notes.is_empty());
     assert!(serde_json::to_value(&snap.closed_positions[0]).unwrap()["supplies_spot_price"] == json!(true));
     let note = snap.derived_metrics.global_status.closed_positions_note.clone().unwrap();
-    assert!(note.ends_with("The pool of v4 USDC/NOCK #3229273 (uniswap-v4-nock-usdc-gone) still supplies the NOCK/USD spot: flag another position as is_price_source before removing that entry."), "{note}");
+    assert_eq!(
+        note,
+        "1 configured position is closed and is not counted in any total: v4 USDC/NOCK #3229273 (uniswap-v4-nock-usdc-gone) (NFT #3229273 no longer exists: withdrawn and burned, or a mistyped nft_id). The pool of v4 USDC/NOCK #3229273 (uniswap-v4-nock-usdc-gone) still supplies the NOCK/USD spot: flag another position as is_price_source before removing that entry."
+    );
+    // Removing this entry first would leave no price source and fail every cycle, so
+    // no text may say it "can be removed": not the note, and not the push.
+    assert!(!note.contains("can be removed"), "{note}");
+    let pushed = closed_position_notes(Some(&[snap.closed_positions[0].position_id.clone()]), &snap.closed_positions);
+    assert_eq!(pushed, vec![
+        "Position closed: v4 USDC/NOCK #3229273 (uniswap-v4-nock-usdc-gone). NFT #3229273 no longer exists on 0x7c5f5a4bbd8fd63184577525326123b519429bdc (withdrawn and burned, or a mistyped nft_id). It is no longer counted in any total. Its pool still supplies the NOCK/USD spot: flag another position as is_price_source before removing its entry (uniswap-v4-nock-usdc-gone) from config.yaml.".to_string()
+    ]);
+    assert!(!pushed[0].contains("can be removed") && !pushed[0].contains("AERO"));
+    assert!(pushed[0].chars().count() < PUSHOVER_MESSAGE_LIMIT / 2);
+    // Beside a closed entry that does not supply the price: only that one is removable.
+    let raw_two = read_cycle(&node, &config(&[&v4_gone_source, ENTRY_V3, ENTRY_BASIC, ENTRY_CL_WITHDRAWN])).await.unwrap();
+    let (snap_two, _) = finish_cycle(raw_two, None);
+    let note_two = snap_two.derived_metrics.global_status.closed_positions_note.clone().unwrap();
+    assert!(note_two.starts_with("2 configured positions are closed and are not counted in any total: "), "{note_two}");
+    assert!(
+        note_two.ends_with("or a mistyped nft_id). The entry of Aero CL #2914490 (aero-cl200-weth-nock) can be removed from config.yaml. The pool of v4 USDC/NOCK #3229273 (uniswap-v4-nock-usdc-gone) still supplies the NOCK/USD spot: flag another position as is_price_source before removing that entry."),
+        "{note_two}"
+    );
+    assert!(!note_two.contains("Their entries") && note_two.matches("can be removed").count() == 1, "{note_two}");
+    let both_live_before: Vec<String> = snap_two.closed_positions.iter().map(|c| c.position_id.clone()).collect();
+    let pushed_two = closed_position_notes(Some(&both_live_before), &snap_two.closed_positions);
+    assert_eq!(pushed_two.iter().filter(|t| t.contains("can be removed")).count(), 1);
+    assert!(pushed_two.iter().any(|t| t.contains("Aero CL #2914490") && t.ends_with("Its entry (aero-cl200-weth-nock) can be removed from config.yaml.")));
     let text = closed_positions_lines(&serde_json::to_value(&snap).unwrap());
     assert!(text.contains("Its pool still supplies the NOCK/USD spot: flag another position as is_price_source before removing its entry from config.yaml."), "{text}");
     assert!(!text.contains("You can remove its entry"), "{text}");

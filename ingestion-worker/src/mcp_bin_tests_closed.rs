@@ -36,10 +36,20 @@ fn test_fallback_prints_the_closed_positions_the_worker_prints() {
         let claim = format_claim_simulation(data);
         assert_eq!(claim, worker["simulate_claim_fees"].as_str().unwrap(), "{case}");
         assert!(claim.ends_with(&block), "{case}: {claim}");
-        // The directive text is the worker's own and says nothing about the closing.
+        // get_shot_advice: the worker's text byte for byte, with the block before the
+        // harvest rule. The directive itself says nothing about the closing.
         let advice = format_shot_advice(data);
         assert_eq!(advice, worker["get_shot_advice"].as_str().unwrap(), "{case}");
-        assert!(!advice.to_lowercase().contains("closed"), "{case}: {advice}");
+        assert!(advice.contains(&format!("{block}• Harvest rule: ")), "{case}: {advice}");
+        let directive = advice.split("• Uncollected Claimable Fees").next().unwrap();
+        assert!(!directive.to_lowercase().contains("closed"), "{case}: {directive}");
+        // get_accumulation_plan: the fallback's own shorter text, ending in the block.
+        // The worker's text ends in the same block.
+        let plan = format_accumulation_plan(data);
+        let trailer = closed_positions_trailer(data);
+        assert_eq!(trailer, format!("\n{}", block.trim_end()), "{case}");
+        assert!(plan.ends_with(&trailer), "{case}: {plan}");
+        assert!(worker["get_accumulation_plan"].as_str().unwrap().ends_with(&trailer), "{case}");
 
         // A closed position is stated, never valued: no "$" on its line, and it is in
         // no row of the pool breakdown.
@@ -65,7 +75,21 @@ fn test_fallback_text_is_unchanged_for_a_snapshot_without_closed_positions() {
     let block = closed_positions_lines(&with);
     assert_eq!(format_portfolio_state(&with).replace(&block, ""), format_portfolio_state(&without));
     assert_eq!(format_claim_simulation(&with).replace(&block, ""), format_claim_simulation(&without));
-    assert!(!format_portfolio_state(&without).contains("Closed positions"));
+    assert_eq!(format_shot_advice(&with).replace(&block, ""), format_shot_advice(&without));
+    let trailer = closed_positions_trailer(&with);
+    assert_eq!(closed_positions_trailer(&without), "");
+    assert_eq!(format_accumulation_plan(&with).replace(&trailer, ""), format_accumulation_plan(&without));
+    // With a plan configured (a synthetic plan object, for the text's other branch).
+    let planned = |snapshot: &Value| {
+        let mut v = snapshot.clone();
+        v["derived_metrics"]["accumulation_plan"] = json!({ "plan_id": "synthetic-test-plan", "status": "waiting" });
+        format_accumulation_plan(&v)
+    };
+    assert!(planned(&with).starts_with("🪜 Accumulation Plan \"synthetic-test-plan\"") && planned(&with).ends_with(&trailer));
+    assert_eq!(planned(&with).replace(&trailer, ""), planned(&without));
+    for text in [format_portfolio_state(&without), format_shot_advice(&without), format_accumulation_plan(&without), format_claim_simulation(&without)] {
+        assert!(!text.contains("Closed positions"), "{text}");
+    }
     // An empty or null list prints nothing either.
     for empty in [json!([]), Value::Null] {
         let mut data = without.clone();

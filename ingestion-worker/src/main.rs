@@ -522,8 +522,8 @@ struct SnapshotData {
 }
 
 /// A configured position that is closed (2.8.0, #144): its NFT does not exist on its
-/// position manager, proven by two reads of the same cycle that both gave the
-/// contract's own "no such token" answer. It carries no amount, no value and no fee
+/// position manager, proven by two reads of the same cycle, made at one current block,
+/// that both gave the contract's own "no such token" answer. It carries no amount, no value and no fee
 /// figure: nothing was read from it, and its last known value is not a current one.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 struct ClosedPosition {

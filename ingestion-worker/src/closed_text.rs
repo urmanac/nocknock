@@ -6,7 +6,9 @@
 //!
 //! A closed position is a configured position whose NFT no longer exists. The text
 //! states that fact, that the position is in no total, and that its config entry can be
-//! removed. It prints no amount and no value for it: none was read, and its last known
+//! removed. All four tools print the block: a tool that lists the tracked positions
+//! (the plan's rebuild lines, the directive's shortfall) and left the closed one out
+//! without a word would read as if it had never been configured. It prints no amount and no value for it: none was read, and its last known
 //! value is not a current one. A snapshot that lists no closed position (every snapshot
 //! from before #144, and every one without a closed position) gets no line at all, so
 //! its text is what it was.
@@ -58,4 +60,15 @@ pub fn closed_positions_lines(data: &Value) -> String {
         out.push_str(&format!("   ✗ {}\n", closed_position_statement(e)));
     }
     out
+}
+
+/// The same block for a text whose last line does not end in a newline: it starts on a
+/// new line and ends without one. Empty when the snapshot lists no closed position, so
+/// such a text is what it was.
+pub fn closed_positions_trailer(data: &Value) -> String {
+    let block = closed_positions_lines(data);
+    if block.is_empty() {
+        return block;
+    }
+    format!("\n{}", block.trim_end_matches('\n'))
 }

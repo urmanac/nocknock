@@ -273,8 +273,10 @@ fn format_accumulation_plan(data: &Value) -> String {
     } else {
         format!("• LP rebuild bias: {lp_status} (${lp_gap} short of target; rebuilding is a reposition, no net cash change)")
     };
+    // Closed positions (issue #144): the worker's own lines, from the same source file.
+    let closed = closed_positions_trailer(data);
     match data.pointer("/derived_metrics/accumulation_plan").filter(|p| !p.is_null()) {
-        None => format!("🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n{lp_line}"),
+        None => format!("🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n{lp_line}{closed}"),
         Some(plan) => {
             let s = |k: &str| plan.get(k).and_then(|v| v.as_str()).unwrap_or("n/a").to_string();
             let n = |k: &str| plan.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
@@ -293,7 +295,7 @@ fn format_accumulation_plan(data: &Value) -> String {
                  • Next tranche: {}\n\
                  • Next due at: {}\n\
                  • Progress: ${} of ${} spent; average ${}\n\
-                 {detection}{quotes}{lp_line}",
+                 {detection}{quotes}{lp_line}{closed}",
                 s("plan_id"), s("status"), next,
                 s("next_due_at"), s("spent_usdc"), s("budget_usdc"), s("avg_price_usd"),
                 detection = fill_detection_lines(plan),
@@ -384,6 +386,8 @@ fn format_shot_advice(data: &Value) -> String {
         .unwrap_or_else(|| "unavailable".to_string());
     // Gauge rewards and the total (issue #142). "Uncollected Claimable Fees" stays LP fees.
     let collectible = collectible_advice_lines(data);
+    // Closed positions (issue #144): the worker's own lines, from the same source file.
+    let closed = closed_positions_lines(data);
 
     format!(
         "🎯 Tactical Shot Advice Engine\n\
@@ -393,6 +397,7 @@ fn format_shot_advice(data: &Value) -> String {
          • Uncollected Claimable Fees: {claimable_usd}\n\
          • Net of two claims' gas: {gas_delta}\n\
          {collectible}\
+         {closed}\
          • Harvest rule: {HARVEST_RULE_TEXT}"
     )
 }

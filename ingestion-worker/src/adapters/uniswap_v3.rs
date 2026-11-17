@@ -5,6 +5,7 @@ pub(crate) async fn fetch_v3_position(
     alchemy_url: &str,
     pos: &PositionConfig,
     wallet: &str,
+    clock: ProofClock,
 ) -> Result<PositionRead<RawPosition>> {
     let npm = pos
         .npm_address
@@ -19,37 +20,45 @@ pub(crate) async fn fetch_v3_position(
         ))?;
 
     // 1. positions(uint256) -> 12-word decode (self-describing: tokens/fee/ticks/liquidity).
-    //    A burned or unknown id reverts. The revert is read with its reason (#144):
-    //    when positions() AND ownerOf() both give the position manager's own "no such
-    //    token" answer, the position is closed and the cycle goes on. Any other outcome
-    //    fails the cycle.
-    let outcome = |selector: &'static str, id: u64, what: &'static str| {
+    //    A burned or unknown id reverts. The revert is read with its reason (#144).
+    //    When it is the position manager's own "no such token" answer, the proof is
+    //    read: positions() AND ownerOf(), both at one current block
+    //    (closed::fetch_proof_block). When both give that answer there, the position is
+    //    closed and the cycle goes on. Any other outcome fails the cycle.
+    let outcome = |selector: &'static str, id: u64, what: &'static str, block: String| {
         let (cfg_id, npm) = (pos.id.clone(), npm.clone());
         let data = format!("{}{:064x}", selector, pos.nft_id);
         async move {
             let payload = json!({
                 "jsonrpc": "2.0", "method": "eth_call", "id": id,
-                "params": [{ "to": npm, "data": data }, "latest"]
+                "params": [{ "to": npm, "data": data }, block]
             });
             eth_call_outcome(http_client, alchemy_url, &payload)
                 .await
                 .map_err(|e| anyhow::anyhow!("position {}: NPM {} query failed: {e}", cfg_id, what))
         }
     };
-    let res_hex = match outcome(V3_POSITIONS, 60, "positions()").await? {
+    let not_proven = |why: String| {
+        anyhow::anyhow!(
+            "position {}: NPM positions() query failed (NFT #{} on position manager {}: {why})",
+            pos.id, pos.nft_id, npm
+        )
+    };
+    let res_hex = match outcome(V3_POSITIONS, 60, "positions()", "latest".to_string()).await? {
         CallOutcome::Returned(hex) => hex,
         reverted => {
-            let owner_of = outcome(ERC721_OWNER_OF, 69, "ownerOf()").await?;
-            match nft_closure_verdict(&pos.protocol, &npm, &reverted, &owner_of) {
+            positions_says_nonexistent(&pos.protocol, &npm, &reverted).map_err(&not_proven)?;
+            let block = fetch_proof_block(http_client, alchemy_url, clock)
+                .await
+                .map_err(|e| not_proven(format!("positions() {}, and {e}", describe_outcome(&reverted))))?;
+            let positions = outcome(V3_POSITIONS, 68, "positions()", block.tag()).await?;
+            let owner_of = outcome(ERC721_OWNER_OF, 69, "ownerOf()", block.tag()).await?;
+            match nft_closure_verdict(&pos.protocol, &npm, &positions, &owner_of) {
                 ClosureVerdict::Closed(evidence) => {
+                    tracing::info!("position {}: NFT #{} proven nonexistent at block {}", pos.id, pos.nft_id, block.number);
                     return Ok(PositionRead::Closed(ClosedProof { position_manager: npm, evidence }));
                 }
-                ClosureVerdict::NotProven(why) => {
-                    return Err(anyhow::anyhow!(
-                        "position {}: NPM positions() query failed (NFT #{} on position manager {}: {why})",
-                        pos.id, pos.nft_id, npm
-                    ));
-                }
+                ClosureVerdict::NotProven(why) => return Err(not_proven(format!("at block {}: {why}", block.number))),
             }
         }
     };

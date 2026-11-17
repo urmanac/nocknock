@@ -36,9 +36,15 @@ token_addresses:
 # reported as closed: listed apart from the live positions, counted in no total, and
 # ingestion goes on. You are notified once, and can remove the entry whenever you like. A mistyped
 # nft_id reads the same way ("withdrawn and burned, or a mistyped nft_id"). Only proof
-# counts: if the node does not answer, or answers anything else, the cycle fails as
-# before rather than drop a position that may still hold money. An NFT that still
-# exists with no liquidity in it is not closed; it stays a live position holding nothing.
+# counts: if the node does not answer, answers anything else, or is more than two
+# minutes behind the chain, the cycle fails as before rather than drop a position that
+# may still hold money. An NFT that still exists with no liquidity in it is not closed;
+# it stays a live position holding nothing.
+# A uniswap-v4 or uniswap-v3 entry needs the nft_id of an NFT that exists.
+# An entry with no nft_id reads as token id 0, which does not exist: it is reported as
+# closed, and if it is your only entry the cycle fails. To watch a price without holding
+# a position, use an `aerodrome` entry on a NOCK/USDC pool with is_price_source: true:
+# it has no NFT and is never closed.
 # If the closed entry is the price source: a uniswap-v4 entry's pool keeps supplying the
 # NOCK/USD price until you flag another position; a uniswap-v3 or aerodrome-cl entry
 # fails the cycle with a message asking you to flag another position as is_price_source.

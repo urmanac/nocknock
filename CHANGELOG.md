@@ -14,10 +14,10 @@ the dashboard, the MCP tools and the notifier went stale until the config entry 
 commented out by hand. An ordinary action in the wallet must not stop all reporting.
 
 - **Closed, on proof only.** A configured position whose NFT does not exist is reported
-  as closed and the cycle goes on. It is proof when two reads of the same cycle both give
-  the position manager's own answer for a token id that does not exist, decoded strictly
-  from the raw revert data, on a position manager whose answers were read on-chain
-  (`ONCHAIN_INTEGRATION.md` §13):
+  as closed and the cycle goes on. It is proof when two reads of the same cycle, made at
+  one current block, both give the position manager's own answer for a token id that
+  does not exist, decoded strictly from the raw revert data, on a position manager whose
+  answers were read on-chain (`ONCHAIN_INTEGRATION.md` §13):
   - `aerodrome-cl` (`0x4857db57…c60b`): `positions()` reverts `Error("ID")` and
     `ownerOf()` reverts `Error("ERC721: owner query for nonexistent token")`;
   - `uniswap-v3` (`0x03a520b3…34f1`): `positions()` reverts `Error("Invalid token ID")`
@@ -32,11 +32,27 @@ commented out by hand. An ordinary action in the wallet must not stop all report
   reason, with empty data or with none, a position manager that is not on the list, and
   one read saying "nonexistent" while the other does not. Wrongly calling a live
   position closed would silently take real money out of the total.
+- **The proof is read at one current block.** A token id that was never minted answers
+  exactly like a burned one, so a node whose state is older than an NFT's mint would
+  "prove" a live position closed. When the first read at `latest` says "nonexistent",
+  the worker reads the node's latest block header and makes both proving reads at that
+  block number. The block's time must be within 120 seconds of the worker's clock (or
+  within `sync_window_seconds`, if shorter). A node that is further behind, a header
+  that cannot be read, and a proving read answered by a backend that does not hold that
+  block all fail the cycle. A position that an earlier cycle read as live can therefore
+  not be reported closed by a lagging node. The check relies on the host's clock.
 - **A mistyped `nft_id` reads the same.** A token id that was never minted answers
   exactly like a burned one, so every text says "withdrawn and burned, or a mistyped
   nft_id". An NFT that exists with no liquidity is not closed: it stays a live position
   holding nothing. An Aero basic pool (`aerodrome`) has no NFT and is never closed; its
   gauge reward is read as before.
+- **Changed for a Uniswap v4 entry with no `nft_id`.** It reads as token id 0, which
+  does not exist, so it is closed like any other missing NFT. Before, such an entry read
+  as a live position holding nothing and could be the price source. Beside live
+  positions it still supplies the price (as a closed price-source entry, below). As the
+  ONLY configured entry it used to complete a cycle and now fails it with "No live
+  positions: every configured position is closed". Give a v4 entry the id of an NFT
+  that exists; to watch a price without a position, use an `aerodrome` entry.
 - **Listed apart, counted nowhere.** New `data.closed_positions[]` (config id, protocol,
   NFT id, pool, position manager, a label, the reason, the two reads with their raw
   answers, and when this worker first recorded it as closed). A closed position is never
@@ -51,7 +67,9 @@ commented out by hand. An ordinary action in the wallet must not stop all report
   guessed. A Uniswap v4 entry's pool goes on supplying the NOCK/USD spot through the
   same two reads as before (`poolKeys` and StateView `getSlot0`, neither of which needs
   the NFT; the stale-pool guard still runs), and every surface says to flag another
-  position before removing the entry. A Uniswap v3 or Aero CL entry fails the cycle with
+  position before removing the entry. No text says that this entry "can be removed":
+  not the notification, and not `closed_positions_note`, which names only the other
+  closed entries as removable. A Uniswap v3 or Aero CL entry fails the cycle with
   a configuration error that names the fix, because its pool was identified through the
   NFT. A live flagged position always comes first.
 - **All positions closed.** The cycle fails, as it does with no positions configured
@@ -60,17 +78,22 @@ commented out by hand. An ordinary action in the wallet must not stop all report
   in this one. Not on later cycles, not after a restart, and not for an entry that was
   never a tracked position. The directive is not changed by it.
 - **Surfaces.** A "Closed positions" note under the tracked positions on the dashboard,
-  a card in the Lite cockpit, and a block in `get_portfolio_state` and
-  `simulate_claim_fees` on both MCP transports (one shared text source): the label,
-  that the NFT no longer exists, "not counted in any total", and that its entry can be
-  removed from `config.yaml`. No amount and no value is printed for a closed position.
+  a card in the Lite cockpit, and a block in all four MCP tools (`get_portfolio_state`,
+  `get_shot_advice`, `get_accumulation_plan`, `simulate_claim_fees`) on both transports
+  (one shared text source): the label, that the NFT no longer exists, "not counted in
+  any total", and that its entry can be removed from `config.yaml`. The directive and
+  the rebuild lines themselves are unchanged; without the block each text is what it is
+  with no closed position. No amount and no value is printed for a closed position.
   The claim payload builds no action for one. A snapshot without the new fields renders
   exactly as before.
 - **`/health`**: a cycle with a closed position is a successful cycle (`ok`,
   `last_error` null).
 - **RPC layer.** `eth_call_outcome` keeps the revert data of a reverting call, and
   `decode_revert_reason` decodes `Error(string)`, `Panic(uint256)`, a custom error's
-  selector and an empty revert. Error text still never contains the RPC URL.
+  selector and an empty revert. A declared string length larger than the data is
+  refused before any arithmetic, so no revert payload can panic the ingestion task.
+  `latest_block_header` reads the block for a proof. Error text still never contains
+  the RPC URL.
 - **No new config key.** Existing configs load unchanged. Nothing was looked up about
   the burn itself (transaction or time): the worker proves that the id does not exist
   now.

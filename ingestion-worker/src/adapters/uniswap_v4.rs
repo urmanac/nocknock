@@ -148,6 +148,7 @@ pub(crate) async fn fetch_v4_position(
     alchemy_url: &str,
     pos: &PositionConfig,
     wallet: &str,
+    clock: ProofClock,
 ) -> Result<PositionRead<RawPosition>> {
     let (pool_id, currency0, currency1) = v4_pool_config(pos)?;
     let tick_lower = pos
@@ -186,41 +187,50 @@ pub(crate) async fn fetch_v4_position(
     //     never-minted id exactly as it does for an NFT that exists and is empty, so
     //     before #144 a burned v4 NFT read as a live position holding nothing. Zero
     //     liquidity is therefore followed by ownerOf: an owner means the NFT exists
-    //     (empty, still a live position); Error("NOT_MINTED") together with an empty
-    //     getPoolAndPositionInfo means it does not, and the position is closed. Any
-    //     other outcome fails the cycle. Liquidity above zero is itself proof that the
-    //     NFT exists (a burn clears it), so that path makes no extra read.
+    //     (empty, still a live position). When it reverts with Error("NOT_MINTED"), the
+    //     proof is read at one current block (closed::fetch_proof_block): ownerOf again
+    //     AND getPoolAndPositionInfo. When both say there is no such token there, the
+    //     position is closed. Any other outcome fails the cycle. Liquidity above zero
+    //     is itself proof that the NFT exists (a burn clears it), so that path makes no
+    //     extra read.
     if liquidity == 0 {
-        let outcome = |selector: &'static str, id: u64, what: &'static str| {
+        let outcome = |selector: &'static str, id: u64, what: &'static str, block: String| {
             let cfg_id = pos.id.clone();
             let data = format!("{}{:064x}", selector, pos.nft_id);
             async move {
                 let payload = json!({
                     "jsonrpc": "2.0", "method": "eth_call", "id": id,
-                    "params": [{ "to": UNISWAP_V4_POSM_BASE, "data": data }, "latest"]
+                    "params": [{ "to": UNISWAP_V4_POSM_BASE, "data": data }, block]
                 });
                 eth_call_outcome(http_client, alchemy_url, &payload)
                     .await
                     .map_err(|e| anyhow::anyhow!("position {}: POSM {} query failed: {e}", cfg_id, what))
             }
         };
-        match outcome(ERC721_OWNER_OF, 55, "ownerOf()").await? {
+        let not_proven = |why: String| {
+            anyhow::anyhow!(
+                "position {}: NFT #{} reads zero liquidity and whether it exists on PositionManager {} could not be established ({why})",
+                pos.id, pos.nft_id, UNISWAP_V4_POSM_BASE
+            )
+        };
+        match outcome(ERC721_OWNER_OF, 55, "ownerOf()", "latest".to_string()).await? {
             CallOutcome::Returned(_) => {}
             reverted => {
-                let info = outcome(V4_GET_POOL_AND_POSITION_INFO, 56, "getPoolAndPositionInfo()").await?;
-                match v4_closure_verdict(&reverted, &info) {
+                v4_owner_of_says_nonexistent(&reverted).map_err(&not_proven)?;
+                let block = fetch_proof_block(http_client, alchemy_url, clock)
+                    .await
+                    .map_err(|e| not_proven(format!("ownerOf() {}, and {e}", describe_outcome(&reverted))))?;
+                let owner_of = outcome(ERC721_OWNER_OF, 57, "ownerOf()", block.tag()).await?;
+                let info = outcome(V4_GET_POOL_AND_POSITION_INFO, 56, "getPoolAndPositionInfo()", block.tag()).await?;
+                match v4_closure_verdict(&owner_of, &info) {
                     ClosureVerdict::Closed(evidence) => {
+                        tracing::info!("position {}: NFT #{} proven nonexistent at block {}", pos.id, pos.nft_id, block.number);
                         return Ok(PositionRead::Closed(ClosedProof {
                             position_manager: UNISWAP_V4_POSM_BASE.to_string(),
                             evidence,
                         }));
                     }
-                    ClosureVerdict::NotProven(why) => {
-                        return Err(anyhow::anyhow!(
-                            "position {}: NFT #{} reads zero liquidity and whether it exists on PositionManager {} could not be established ({why})",
-                            pos.id, pos.nft_id, UNISWAP_V4_POSM_BASE
-                        ));
-                    }
+                    ClosureVerdict::NotProven(why) => return Err(not_proven(format!("at block {}: {why}", block.number))),
                 }
             }
         }

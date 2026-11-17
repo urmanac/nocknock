@@ -198,7 +198,7 @@ components:
           example: "NFT #2914490 does not exist on position manager 0x4857db576ee0e45f10525ec59527bfd10beec60b: withdrawn and burned, or a mistyped nft_id"
         evidence:
           type: array
-          description: The two reads that proved it, with the raw answers. (#144)
+          description: The two reads that proved it, with the raw answers. Both were made at one block, which had to be current (at most 120 seconds old). (#144)
           items:
             $ref: '#/components/schemas/ClosedEvidence'
         first_seen_closed_at:

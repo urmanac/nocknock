@@ -41,13 +41,21 @@ pub(crate) async fn fetch_eth_price_usd_at(http_client: &Client, alchemy_url: &s
 pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let alchemy_key = state.config.alchemy_api_keys.first().cloned().unwrap_or_default();
     let alchemy_url = format!("https://base-mainnet.g.alchemy.com/v2/{}", alchemy_key);
-    fetch_raw_data_from(&state.http_client, &alchemy_url, &state.config).await
+    fetch_raw_data_from(&state.http_client, &alchemy_url, &state.config, Utc::now()).await
 }
 
 /// One cycle's reads against a given RPC URL. `fetch_raw_data` builds the URL from the
 /// configured key; the tests of #144 point this at a local node that answers with real
-/// captured responses. It reads only `http_client` and `config`.
-pub(crate) async fn fetch_raw_data_from(http_client: &Client, alchemy_url: &str, config: &AppConfig) -> Result<RawOnChainData> {
+/// captured responses. It reads only `http_client` and `config`. `now` is the cycle's
+/// clock: the one thing it decides is whether the block of a closed position's proof is
+/// current (closed::ProofClock), so the tests pass the recorded block's own time.
+pub(crate) async fn fetch_raw_data_from(
+    http_client: &Client,
+    alchemy_url: &str,
+    config: &AppConfig,
+    now: DateTime<Utc>,
+) -> Result<RawOnChainData> {
+    let proof_clock = ProofClock::for_cycle(now, config.sync_window_seconds);
     let Some(wallet_addr) = config.tracked_wallets.first() else {
         return Err(anyhow::anyhow!(
             "No tracked wallet configured: set tracked_wallets in config.yaml to the address NockNock should read"
@@ -164,10 +172,10 @@ pub(crate) async fn fetch_raw_data_from(http_client: &Client, alchemy_url: &str,
     for pos in &config.positions {
         let read: PositionRead<RawPosition> = match Protocol::parse(&pos.protocol) {
             Some(Protocol::UniswapV4) => {
-                fetch_v4_position(http_client, alchemy_url, pos, wallet_addr).await?
+                fetch_v4_position(http_client, alchemy_url, pos, wallet_addr, proof_clock).await?
             }
             Some(Protocol::UniswapV3) => {
-                fetch_v3_position(http_client, alchemy_url, pos, wallet_addr).await?
+                fetch_v3_position(http_client, alchemy_url, pos, wallet_addr, proof_clock).await?
             }
             Some(Protocol::AeroBasic) => {
                 // No NFT, so never closed: an LP-token balance of zero is a live read.
@@ -181,7 +189,7 @@ pub(crate) async fn fetch_raw_data_from(http_client: &Client, alchemy_url: &str,
             Some(Protocol::AeroCl) => {
                 // Ownership is checked inside: an NFT the wallet neither holds nor staked
                 // in the pool's gauge fails the cycle here (issue #91).
-                match fetch_aero_cl_position(http_client, alchemy_url, pos, wallet_addr).await? {
+                match fetch_aero_cl_position(http_client, alchemy_url, pos, wallet_addr, proof_clock).await? {
                     PositionRead::Live((raw, facts)) => {
                         if facts.fees_note.is_some() {
                             fees_not_lp_claimable.push(raw.position_id.clone());
