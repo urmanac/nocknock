@@ -13,14 +13,17 @@
  *   LP-fee harvest words (CLAIM_NOW, CLAIM_RECOMMENDED, ACCUMULATE).
  * - LP fees and rewards are two labelled figures and a labelled total, never one merged
  *   number. `total_fees_claimable_usd` stays LP fees only.
- * - A snapshot without the fields (an older one) reads "not reported". A reward the
- *   worker could not read reads "not read" with its reason, and a total it could not
- *   form reads "not totalled" with its reason. None of them reads as 0.
+ * - A reward the worker could not read reads "not read" with its reason, and a total it
+ *   could not form reads "not totalled" with a short reason. Neither reads as 0. A read
+ *   zero is "nothing to collect", never an amount described as collectible.
+ * - A snapshot that states no collectible rewards at all (one from before #142, which a
+ *   new worker serves for the first minutes after an upgrade) gains nothing: every
+ *   surface renders it as it always did, with the unclaimed AERO it does carry.
  * - Nothing here is in the portfolio total.
  */
 
 import { positionFeesText, shortAddress } from './aeroCl.ts';
-import { velocityRowText } from './positions.ts';
+import { statValueText, velocityRowText } from './positions.ts';
 
 export const REWARD_NOT_REPORTED = 'not reported';
 /** The reward series' colour (AERO orange), apart from the LP-fee green. */
@@ -79,14 +82,28 @@ export function rewardAmountText(r: RewardView): string | null {
   return r.usd === null ? `${r.amount} ${r.symbol} (USD value not reported)` : `${r.amount} ${r.symbol} ($${r.usd})`;
 }
 
-/** "collectible from gauge 0x3bf7…60fd in the Aero app". */
+/** True when the gauge answered exactly zero: there is nothing to collect. */
+export function rewardIsZero(r: RewardView): boolean {
+  return r.amount !== null && Number(r.amount) === 0;
+}
+
+/**
+ * "collectible from gauge 0x3bf7…60fd in the Aero app". A read zero is not described
+ * as collectible: "nothing to collect in gauge 0x3bf7…60fd".
+ */
 export function rewardWhereText(r: RewardView): string {
+  if (rewardIsZero(r)) {
+    return r.gauge === null ? 'nothing to collect' : `nothing to collect in gauge ${shortAddress(r.gauge)}`;
+  }
   return r.gauge === null
     ? `collectible in ${r.collectedIn}`
     : `collectible from gauge ${shortAddress(r.gauge)} in ${r.collectedIn}`;
 }
 
-/** The reward as one statement of fact, or that it was not read and why. */
+/**
+ * The reward as one statement of fact: the amount and where it is collected, that there
+ * is nothing to collect (a read zero), or that it was not read and why.
+ */
 export function rewardStatement(r: RewardView): string {
   const amount = rewardAmountText(r);
   return amount === null ? `not read (${r.note ?? 'no reason recorded'})` : `${amount}, ${rewardWhereText(r)}`;
@@ -108,9 +125,11 @@ export function positionEarningsLines(
   if (reward === null) return { earnings: null, lpFees: positionFeesText(p ?? {}) };
   const reason = field(p, 'fees_note') ?? field(feeRow, 'lp_fees_note');
   const lpFees = reason !== null ? `LP fees: ${reason}` : positionFeesText(p).replace(/^Fees:/, 'LP fees:');
-  const earnings = reward.read
-    ? `Collectible earnings: ${rewardStatement(reward)}; not counted in the total`
-    : `Collectible earnings: reward ${rewardStatement(reward)}`;
+  const earnings = !reward.read
+    ? `Collectible earnings: reward ${rewardStatement(reward)}`
+    : rewardIsZero(reward)
+      ? `Collectible earnings: ${rewardStatement(reward)}`
+      : `Collectible earnings: ${rewardStatement(reward)}; not counted in the total`;
   return { earnings, lpFees };
 }
 
@@ -122,14 +141,38 @@ function rewardPositions(positions: any[] | undefined | null): number {
 export interface CollectibleTotals {
   /** "$1.95", or "unavailable". LP fees only. */
   lpFees: string;
-  /** "$7.84", "none (no staked Aero position is tracked)", "not totalled (reason)" or "not reported". */
+  /** "$7.84", "none (no staked Aero position is tracked)", "not totalled (short reason)" or "not reported". */
   rewards: string;
   /** "$9.79", "not totalled" or "not reported". */
   total: string;
   /** True when the worker stated a total: all three are then figures. */
   totalled: boolean;
-  /** True when the snapshot carries the fields at all (false for an older snapshot). */
+  /**
+   * True when the snapshot states its rewards: a figure, or the reason there is none.
+   * False for a snapshot from before #142 (keys absent, or null with no reason once a
+   * new worker has re-serialized it): surfaces then print nothing new.
+   */
   reported: boolean;
+  /** True when no tracked position can earn a reward: the wallet has no AERO rewards. */
+  none: boolean;
+}
+
+/**
+ * Why the rewards were not totalled, short enough for a stat tile and a phone line.
+ * The worker's note names each position id and gauge address in full (up to 57
+ * unbroken characters), which overflows both. When the positions show which rewards
+ * were not read, the count is stated and the reason stays where it already is, on that
+ * position's own line. Otherwise (an unpriced reward) the note is kept, with any
+ * address shortened.
+ */
+export function notTotalledReason(note: string, positions?: any[] | null): string {
+  const unread = (positions ?? []).filter((p) => {
+    const r = rewardOf(p);
+    return r !== null && !r.read;
+  }).length;
+  if (unread === 1) return '1 gauge reward not read';
+  if (unread > 1) return `${unread} gauge rewards not read`;
+  return note.replace(/0x[0-9a-fA-F]{40}/g, (address) => shortAddress(address));
 }
 
 /**
@@ -151,17 +194,30 @@ export function collectibleTotals(source: any, positions?: any[] | null): Collec
       total: totalUsd === null ? REWARD_NOT_REPORTED : `$${totalUsd}`,
       totalled: totalUsd !== null,
       reported: true,
+      none,
     };
   }
   if (note !== null) {
-    return { lpFees, rewards: `not totalled (${note})`, total: 'not totalled', totalled: false, reported: true };
+    return {
+      lpFees,
+      rewards: `not totalled (${notTotalledReason(note, positions)})`,
+      total: 'not totalled',
+      totalled: false,
+      reported: true,
+      none: false,
+    };
   }
-  return { lpFees, rewards: REWARD_NOT_REPORTED, total: REWARD_NOT_REPORTED, totalled: false, reported: false };
+  return { lpFees, rewards: REWARD_NOT_REPORTED, total: REWARD_NOT_REPORTED, totalled: false, reported: false, none: false };
 }
 
-/** "LP fees $1.95 · AERO rewards $7.84 · total collectible $9.79". */
-export function collectibleTotalsLine(source: any, positions?: any[] | null): string {
+/**
+ * "LP fees $1.95 · AERO rewards $7.84 · total collectible $9.79". Null when the source
+ * states no rewards (a snapshot or payload from before #142): there is no line to add
+ * beside the unclaimed AERO such a snapshot already shows.
+ */
+export function collectibleTotalsLine(source: any, positions?: any[] | null): string | null {
   const t = collectibleTotals(source, positions);
+  if (!t.reported) return null;
   return `LP fees ${t.lpFees} · AERO rewards ${t.rewards} · total collectible ${t.total}`;
 }
 
@@ -180,17 +236,29 @@ export interface ClaimableYieldTile {
 
 /**
  * The CLAIMABLE YIELD stat tile.
- * - The worker stated a total: the tile shows it, and the subtitle gives LP fees and
- *   AERO rewards as two labelled figures, then the LP-fee net of gas (the figure the
- *   tile used to show).
+ * - The worker stated a total and some position can earn a reward: the tile shows the
+ *   total, and the subtitle gives LP fees and AERO rewards as two labelled figures, then
+ *   the LP-fee net of gas (the figure the tile used to show).
+ * - No tracked position can earn a reward (a Uniswap-only or from-zero wallet): the
+ *   tile it always was, the LP-fee net of gas under "Claimable Yield (Net)". Its figure
+ *   does not turn from net to gross under a label naming rewards the wallet cannot
+ *   have; the subtitle says there are none.
  * - The rewards could not be totalled: the tile keeps the LP-fee net and says why
- *   there is no total. Never a partial sum.
- * - An older snapshot: exactly the tile it was, with "AERO rewards not reported".
+ *   there is no total, in short. Never a partial sum.
+ * - A snapshot that states no rewards (from before #142): exactly the tile it was.
  */
 export function claimableYieldTile(global: any, positions?: any[] | null): ClaimableYieldTile {
   const t = collectibleTotals(global, positions);
   const net = signedUsd(field(global, 'gas_to_fee_delta_usd'));
   const netText = net === null ? 'unavailable' : net;
+  // The tile as v0.8.0 drew it: the LP-fee net large, the gross in the subtitle.
+  const before = {
+    label: 'Claimable Yield (Net)',
+    value: field(global, 'gas_to_fee_delta_usd') ?? undefined,
+    subtitle: `Gross: ${statValueText(global?.total_fees_claimable_usd, '$')}; net of two claims' gas`,
+  };
+  if (!t.reported) return before;
+  if (t.none) return { ...before, subtitle: `${before.subtitle} · AERO rewards ${t.rewards}` };
   if (t.totalled) {
     return {
       label: 'Claimable Yield (LP fees + AERO rewards)',
@@ -198,17 +266,10 @@ export function claimableYieldTile(global: any, positions?: any[] | null): Claim
       subtitle: `LP fees ${t.lpFees} · AERO rewards ${t.rewards}${t.rewards.startsWith('$') ? ' in gauges' : ''} · neither is counted in the portfolio total · LP fees net of two claims' gas ${netText}`,
     };
   }
-  if (t.reported) {
-    return {
-      label: 'Claimable Yield (LP fees, net)',
-      value: field(global, 'gas_to_fee_delta_usd') ?? undefined,
-      subtitle: `LP fees ${t.lpFees} gross; net of two claims' gas · AERO rewards ${t.rewards} · total collectible ${t.total}`,
-    };
-  }
   return {
-    label: 'Claimable Yield (Net)',
+    label: 'Claimable Yield (LP fees, net)',
     value: field(global, 'gas_to_fee_delta_usd') ?? undefined,
-    subtitle: `Gross: ${t.lpFees === 'unavailable' ? '—' : t.lpFees}; net of two claims' gas · AERO rewards ${REWARD_NOT_REPORTED}`,
+    subtitle: `LP fees ${t.lpFees} gross; net of two claims' gas · AERO rewards ${t.rewards} · total collectible ${t.total}`,
   };
 }
 
@@ -269,7 +330,9 @@ export function velocityRewardRowText(g: VelocityRow): string {
   const reward =
     amount === null
       ? `reward not read (${r.note ?? 'no reason recorded'})`
-      : `reward collectible in gauge${r.gauge === null ? '' : ` ${shortAddress(r.gauge)}`}: ${amount}`;
+      : rewardIsZero(r)
+        ? `reward ${rewardStatement(r)}`
+        : `reward collectible in gauge${r.gauge === null ? '' : ` ${shortAddress(r.gauge)}`}: ${amount}`;
   const reason = g.lpFeesNote ?? 'not LP-claimable';
   return `${g.name}: ${reward}; LP fees ${reason}`;
 }
@@ -298,7 +361,8 @@ export function liteRewardLines(payload: any, snapshotData: any): LiteRewardLine
     return rows.flatMap((row: any, i: number) => {
       const r = rewardOf(row);
       if (r === null) return [];
-      const gas = field(row, 'gas_note');
+      // A read zero already says there is nothing to collect: no gas statement beside it.
+      const gas = rewardIsZero(r) ? null : field(row, 'gas_note');
       const label = field(row, 'label') ?? 'Position';
       const text = r.read
         ? `${label}: ${rewardStatement(r)}${gas === null ? '' : ` · ${gas}`}`
@@ -318,9 +382,10 @@ export function liteRewardLines(payload: any, snapshotData: any): LiteRewardLine
 
 /**
  * The split totals for the Lite cockpit: the claim payload's own when it carries them,
- * otherwise the snapshot's.
+ * otherwise the snapshot's. Null when neither states any rewards (an older worker and
+ * snapshot, or nothing loaded yet): the card then shows what it always did.
  */
-export function liteCollectibleTotalsLine(payload: any, snapshotData: any): string {
+export function liteCollectibleTotalsLine(payload: any, snapshotData: any): string | null {
   const fromPayload = payload && (payload.collectible_rewards_usd !== undefined || payload.total_collectible_usd !== undefined);
   const source = fromPayload ? payload : snapshotData?.derived_metrics?.global_status;
   return collectibleTotalsLine(source, fromPayload ? (payload.rewards ?? null) : (snapshotData?.positions ?? null));

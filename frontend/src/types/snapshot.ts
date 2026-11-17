@@ -258,10 +258,12 @@ export interface GlobalStatus {
   unclaimed_aero_usd?: string | null;
   /** The worker's stated reason whenever an AERO figure above is null (v0.6.0, #93) */
   aero_note?: string | null;
-  /** Collectible gauge rewards of the tracked staked positions in USD (#142). Null when a
+  /** Collectible gauge rewards of the tracked staked positions in USD (#142): the gauges'
+   *  summed amount at the cycle's AERO price, the same figure as unclaimed_aero_usd (it
+   *  can differ by a cent from the sum of the rounded per-position values). Null when a
    *  gauge was not read or a reward is unpriced (collectible_rewards_note says which):
-   *  never a partial sum. NOT in total_portfolio_usd; no directive reads it. Absent on
-   *  an older snapshot: clients show "not reported" */
+   *  never a partial sum. NOT in total_portfolio_usd; no directive reads it. Absent (or
+   *  null with a null note) on an older snapshot: clients then add no reward line */
   collectible_rewards_usd?: string | null;
   /** Why collectible_rewards_usd and total_collectible_usd are null (#142) */
   collectible_rewards_note?: string | null;

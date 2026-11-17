@@ -65,15 +65,46 @@ describe('CollectibleEarnings components (#142)', () => {
     expect(html).not.toMatch(/<button|<a /);
   });
 
-  it('an older worker and snapshot render "not reported" and no reward line', () => {
+  it('an older worker and snapshot add nothing to the card', () => {
+    // The 2.6.0 snapshot shows its unclaimed AERO on the AERO card; a line saying
+    // "AERO rewards not reported" beside it would contradict that figure.
     const html = renderToStaticMarkup(
       <LiteCollectibleLines payload={{ gross_usd: '1.95', actions: [] }} data={{ positions: [OLD_BASIC, OLD_CL], derived_metrics: { global_status: OLD_GLOBAL } }} />,
     );
-    expect(html).toContain('LP fees $1.95 · AERO rewards not reported · total collectible not reported');
+    expect(html).toBe('');
+    // A #142 worker serving that stored snapshot: keys present, null, no reward rows.
+    const reserialized = renderToStaticMarkup(
+      <LiteCollectibleLines
+        payload={{ gross_usd: '1.95', actions: [], collectible_lp_fees_usd: '1.95', collectible_rewards_usd: null, collectible_rewards_note: null, total_collectible_usd: null, rewards: [] }}
+        data={{ positions: [OLD_BASIC, OLD_CL], derived_metrics: { global_status: { ...OLD_GLOBAL, collectible_rewards_usd: null, collectible_rewards_note: null, total_collectible_usd: null } } }}
+      />,
+    );
+    expect(reserialized).toBe('');
+    // Still loading: nothing, never a zero.
+    expect(renderToStaticMarkup(<LiteCollectibleLines payload={null} data={null} />)).toBe('');
+  });
+
+  it('a read zero is drawn as nothing to collect', () => {
+    const zero = { ...CL, collectible_reward: reward('0.000000', '0.00', CL_GAUGE) };
+    const html = renderToStaticMarkup(<PositionEarningsLines position={zero} feeRow={CONTRACT_FEES[2]} />);
+    expect(html).toContain('Collectible earnings: 0.000000 AERO ($0.00), nothing to collect in gauge 0x3bf7…60fd');
     expect(html).not.toContain('collectible from gauge');
-    expect(html).not.toMatch(/AERO rewards \$/);
-    // Still loading: words, never a zero.
-    const loading = renderToStaticMarkup(<LiteCollectibleLines payload={null} data={null} />);
-    expect(loading).toContain('LP fees unavailable · AERO rewards not reported · total collectible not reported');
+    expect(html).not.toContain('in the Aero app');
+  });
+
+  it('the Lite lines wrap a long reason inside the card', () => {
+    // A not-read reason carries a 42-character gauge address with no space in it.
+    const reason = `gauge ${CL_GAUGE} earned() read failed: network error`;
+    const payload = {
+      ...PAYLOAD,
+      collectible_rewards_usd: null,
+      total_collectible_usd: null,
+      collectible_rewards_note: `gauge reward not read for ${CL.position_id} (${reason})`,
+      rewards: [PAYLOAD.rewards[0], { position_id: CL.position_id, label: 'WETH+NOCK (Aero CL #2914490)', ...reward(null, null, CL_GAUGE, reason) }],
+    };
+    const html = renderToStaticMarkup(<LiteCollectibleLines payload={payload} data={null} />);
+    expect(html).toContain('overflow-wrap:anywhere');
+    expect(html).toContain('LP fees $1.95 · AERO rewards not totalled (1 gauge reward not read) · total collectible not totalled');
+    expect(html).toContain(`WETH+NOCK (Aero CL #2914490): reward not read (${reason})`);
   });
 });

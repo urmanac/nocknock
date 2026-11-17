@@ -5,7 +5,8 @@
  * - PositionEarningsLines: on a position card, the reward as the position's collectible
  *   earnings (amount, USD, gauge) with the LP-fee figure or reason beneath.
  * - LiteCollectibleLines: in the Lite cockpit's uncollected-fees card, the reward lines
- *   and the split totals (LP fees, AERO rewards, total collectible).
+ *   and the split totals (LP fees, AERO rewards, total collectible). Nothing at all for
+ *   a worker and snapshot that state no rewards.
  *
  * The wording lives in ../rewards.ts and is unit-tested. It states amounts and where
  * they are collected. There is no button and no link here: NockNock builds no
@@ -71,9 +72,14 @@ export function LiteCollectibleLines({
   subStyle?: CSSProperties;
 }) {
   const lines = liteRewardLines(payload, data);
+  const totals = liteCollectibleTotalsLine(payload, data);
+  // An older worker and snapshot state no rewards: nothing is added to the card.
+  if (totals === null && lines.length === 0) return null;
   return (
-    <div data-testid="lite-collectible">
-      <div style={subStyle}>{liteCollectibleTotalsLine(payload, data)}</div>
+    // A reason can carry an address or a position id with no space in it: it wraps
+    // inside the card and never widens the phone page.
+    <div data-testid="lite-collectible" style={{ overflowWrap: 'anywhere' }}>
+      {totals !== null && <div style={subStyle}>{totals}</div>}
       {lines.map((l) => (
         <div key={l.key} style={{ ...subStyle, color: l.read ? REWARD_COLOR : WARN }}>
           {l.text}

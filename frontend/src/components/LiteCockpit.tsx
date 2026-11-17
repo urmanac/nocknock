@@ -425,7 +425,7 @@ const lite: Record<string, React.CSSProperties> = {
   },
   label: { fontSize: 11, letterSpacing: 2, color: '#8b949e', marginBottom: 8 },
   big: { fontSize: 28, fontWeight: 700, marginBottom: 4 },
-  sub: { fontSize: 12, color: '#8b949e', lineHeight: 1.6 },
+  sub: { fontSize: 12, color: '#8b949e', lineHeight: 1.6, overflowWrap: 'anywhere' },
   button: {
     width: '100%',
     border: 'none',

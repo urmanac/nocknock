@@ -903,7 +903,8 @@ const styles: Record<string, React.CSSProperties> = {
   statCard: { background: '#111317', border: '1px solid #22262d', borderRadius: 8, padding: '1rem', display: 'flex', flexDirection: 'column', gap: 4 },
   statLabel: { fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#8b949e' },
   statValue: { fontSize: '1.2rem', fontWeight: 700, fontFamily: 'monospace' },
-  statSubtitle: { fontSize: '0.7rem', color: '#7ee787', fontFamily: 'monospace' },
+  // overflowWrap: a subtitle may carry an address or a reason with no space in it.
+  statSubtitle: { fontSize: '0.7rem', color: '#7ee787', fontFamily: 'monospace', overflowWrap: 'anywhere' },
   
   // Shot Advice Banner Styles
   shotAdviceBanner: {

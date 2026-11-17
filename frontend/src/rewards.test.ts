@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   EARNINGS_KIND_GAUGE_REWARD,
   LP_FEE_COLOR,
@@ -12,8 +13,10 @@ import {
   liteCollectibleTotalsLine,
   liteRewardLines,
   lpFeeReasonOfDetail,
+  notTotalledReason,
   positionEarningsLines,
   rewardAmountText,
+  rewardIsZero,
   rewardOf,
   rewardStatement,
   rewardWhereText,
@@ -22,7 +25,7 @@ import {
   velocityRowColor,
   velocityRows,
 } from './rewards.ts';
-import { velocityRowText } from './positions.ts';
+import { statValueText, velocityRowText } from './positions.ts';
 import {
   BASIC,
   BASIC_GAUGE,
@@ -60,6 +63,10 @@ function expectNoAdvice(text: string) {
 }
 
 const NOT_READ_REASON = `gauge ${CL_GAUGE} earned() reverted`;
+/** The longest run of characters with no space in it: what a narrow card cannot wrap. */
+function longestUnbrokenRun(text: string): number {
+  return Math.max(...text.split(/\s+/).map((w) => w.length));
+}
 const CL_NOT_READ = {
   ...OLD_CL,
   unclaimed_aero: undefined,
@@ -134,6 +141,21 @@ describe('a reward as collectible earnings (#142)', () => {
     expect(r.read).toBe(true);
     expect(rewardAmountText(r)).toBe('0.000000 AERO ($0.00)');
   });
+
+  it('a read zero is "nothing to collect", never an amount collectible in the Aero app', () => {
+    // The operator's CL gauge after the claim of 2026-11-17 (block 58618046): earned() is 0.
+    const zero = rewardOf({ collectible_reward: reward('0.000000', '0.00', CL_GAUGE) })!;
+    expect(rewardIsZero(zero)).toBe(true);
+    expect(rewardWhereText(zero)).toBe('nothing to collect in gauge 0x3bf7…60fd');
+    expect(rewardStatement(zero)).toBe('0.000000 AERO ($0.00), nothing to collect in gauge 0x3bf7…60fd');
+    expect(rewardStatement(zero)).not.toContain('collectible');
+    expect(rewardWhereText(rewardOf({ collectible_reward: reward('0.000000', '0.00', null) })!)).toBe('nothing to collect');
+    // Any amount above zero, a reward that was not read and an unpriced one are not zeros.
+    expect(rewardIsZero(rewardOf(CL)!)).toBe(false);
+    expect(rewardIsZero(rewardOf({ collectible_reward: reward('0.000001', '0.00', CL_GAUGE) })!)).toBe(false);
+    expect(rewardIsZero(rewardOf(CL_NOT_READ)!)).toBe(false);
+    expect(rewardWhereText(rewardOf({ collectible_reward: reward('0.000001', '0.00', CL_GAUGE) })!)).toBe('collectible from gauge 0x3bf7…60fd in the Aero app');
+  });
 });
 
 describe('position card earnings (#142)', () => {
@@ -159,6 +181,14 @@ describe('position card earnings (#142)', () => {
     expect(lines.lpFees).toBe(`LP fees: ${STAKED_REASON}`);
   });
 
+  it('a read zero says there is nothing to collect', () => {
+    const zero = { ...CL, unclaimed_aero: '0.000000', unclaimed_aero_usd: '0.00', collectible_reward: reward('0.000000', '0.00', CL_GAUGE) };
+    expect(positionEarningsLines(zero, CONTRACT_FEES[2])).toEqual({
+      earnings: 'Collectible earnings: 0.000000 AERO ($0.00), nothing to collect in gauge 0x3bf7…60fd',
+      lpFees: `LP fees: ${STAKED_REASON}`,
+    });
+  });
+
   it('an older snapshot and a Uniswap position render as before', () => {
     expect(positionEarningsLines(OLD_CL)).toEqual({ earnings: null, lpFees: `Fees: ${STAKED_REASON}` });
     expect(positionEarningsLines(OLD_BASIC)).toEqual({ earnings: null, lpFees: 'Fees: $0.000000' });
@@ -174,6 +204,7 @@ describe('collectible totals (#142)', () => {
       total: '$9.79',
       totalled: true,
       reported: true,
+      none: false,
     });
     expect(collectibleTotalsLine(GLOBAL, POSITIONS)).toBe('LP fees $1.95 · AERO rewards $7.84 · total collectible $9.79');
   });
@@ -181,7 +212,8 @@ describe('collectible totals (#142)', () => {
   it('a failed gauge read leaves the total unstated, never a partial sum', () => {
     const t = collectibleTotals(GLOBAL_NOT_TOTALLED, [OLD_UNISWAP_V4, BASIC, CL_NOT_READ]);
     expect(t.lpFees).toBe('$1.95');
-    expect(t.rewards).toBe(`not totalled (gauge reward not read for aerodrome-cl:base:2914490 (${NOT_READ_REASON}))`);
+    // The reason in short: the full one is on the position's own line.
+    expect(t.rewards).toBe('not totalled (1 gauge reward not read)');
     expect(t.total).toBe('not totalled');
     expect(t.totalled).toBe(false);
     expect(t.reported).toBe(true);
@@ -192,13 +224,70 @@ describe('collectible totals (#142)', () => {
     expect(line).not.toMatch(/total collectible \$/);
   });
 
-  it('an older snapshot reads "not reported", never 0', () => {
+  it('the not-totalled reason is short enough for a stat tile and a phone line', () => {
+    // The worker's own note for the real basic position when its gauge read fails: a
+    // 57-character position id and a 42-character gauge address, neither with a space.
+    const reason = `gauge ${BASIC_GAUGE} earned() read failed: network error: error sending request`;
+    const note = `gauge reward not read for ${OLD_BASIC.position_id} (${reason})`;
+    expect(longestUnbrokenRun(note)).toBe(57);
+    const basicNotRead = { ...OLD_BASIC, unclaimed_aero: undefined, unclaimed_aero_usd: undefined, collectible_reward: reward(null, null, BASIC_GAUGE, reason) };
+    const global = { ...GLOBAL_NOT_TOTALLED, collectible_rewards_note: note };
+    const positions = [OLD_UNISWAP_V4, basicNotRead, CL];
+    expect(notTotalledReason(note, positions)).toBe('1 gauge reward not read');
+    expect(notTotalledReason(note, [basicNotRead, CL_NOT_READ])).toBe('2 gauge rewards not read');
+    // Without the positions the note is kept, with every address shortened.
+    expect(notTotalledReason(note)).toBe(
+      'gauge reward not read for aerodrome:base:0x770f…9e0a (gauge 0xc827…3526 earned() read failed: network error: error sending request)',
+    );
+    // An unpriced reward: no position is unread, so the worker's reason is the one shown.
+    const unpriced = '17.864446 AERO in tracked gauges has no USD value: AERO/USD price unavailable';
+    expect(notTotalledReason(unpriced, POSITIONS)).toBe(unpriced);
+    // Every surface that prints it: the tile, the Lite line from the snapshot and from the payload.
+    const payload = { ...PAYLOAD, collectible_rewards_usd: null, total_collectible_usd: null, collectible_rewards_note: note, rewards: [{ position_id: OLD_BASIC.position_id, label: 'USDC+NOCK (Aerodrome)', ...reward(null, null, BASIC_GAUGE, reason) }, PAYLOAD.rewards[1]] };
+    const surfaces = [
+      claimableYieldTile(global, positions).subtitle,
+      collectibleTotalsLine(global, positions)!,
+      liteCollectibleTotalsLine(payload, null)!,
+      liteCollectibleTotalsLine({ gross_usd: '1.95', actions: [] }, { positions, derived_metrics: { global_status: global } })!,
+      claimableYieldTile(global).subtitle,
+    ];
+    for (const text of surfaces) {
+      expect(text).toContain('not totalled (');
+      expect(text).not.toContain(OLD_BASIC.position_id);
+      expect(text).not.toContain(BASIC_GAUGE);
+      // 180px of tile at 0.7rem monospace holds about 22 characters.
+      expect(longestUnbrokenRun(text), text).toBeLessThanOrEqual(27);
+    }
+    expect(surfaces[1]).toBe('LP fees $1.95 · AERO rewards not totalled (1 gauge reward not read) · total collectible not totalled');
+    // The full reason is still stated, on the position's own line.
+    expect(positionEarningsLines(basicNotRead, CONTRACT_FEES[1]).earnings).toBe(`Collectible earnings: reward not read (${reason})`);
+    expect(liteRewardLines(payload, null)[0].text).toBe(`USDC+NOCK (Aerodrome): reward not read (${reason})`);
+  });
+
+  it('the tile subtitle and the Lite sub-lines wrap a string with no space in it', () => {
+    // Belt and braces for any reason that still carries a long token (a not-read reason
+    // on a reward line names its gauge in full): the two styles break anywhere.
+    const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
+    expect(app).toMatch(/\n  statSubtitle: \{[^}]*overflowWrap: 'anywhere'/);
+    const lite = readFileSync(new URL('./components/LiteCockpit.tsx', import.meta.url), 'utf8');
+    expect(lite).toMatch(/\n  sub: \{[^}]*overflowWrap: 'anywhere'/);
+  });
+
+  it('a snapshot that states no rewards gets no totals line, and never a zero', () => {
     const t = collectibleTotals(OLD_GLOBAL, [OLD_UNISWAP_V4, OLD_BASIC, OLD_CL]);
-    expect(t).toEqual({ lpFees: '$1.95', rewards: REWARD_NOT_REPORTED, total: REWARD_NOT_REPORTED, totalled: false, reported: false });
-    expect(collectibleTotalsLine(OLD_GLOBAL)).toBe('LP fees $1.95 · AERO rewards not reported · total collectible not reported');
-    // Keys present but null with no reason (a stored snapshot the worker re-serialized).
-    expect(collectibleTotals({ ...OLD_GLOBAL, collectible_rewards_usd: null, total_collectible_usd: null, collectible_rewards_note: null }).rewards).toBe(REWARD_NOT_REPORTED);
-    expect(collectibleTotals(undefined)).toEqual({ lpFees: 'unavailable', rewards: REWARD_NOT_REPORTED, total: REWARD_NOT_REPORTED, totalled: false, reported: false });
+    expect(t).toEqual({ lpFees: '$1.95', rewards: REWARD_NOT_REPORTED, total: REWARD_NOT_REPORTED, totalled: false, reported: false, none: false });
+    // The 2.6.0 snapshot shows its $7.84 of unclaimed AERO on the AERO lines; a "rewards
+    // not reported" line beside that figure would contradict it.
+    expect(OLD_GLOBAL.unclaimed_aero_usd).toBe('7.84');
+    expect(collectibleTotalsLine(OLD_GLOBAL)).toBeNull();
+    expect(collectibleTotalsLine(OLD_GLOBAL, [OLD_UNISWAP_V4, OLD_BASIC, OLD_CL])).toBeNull();
+    // Keys present but null with no reason: the same snapshot once a #142 worker has
+    // read it from its database and serialized it again.
+    const reserialized = { ...OLD_GLOBAL, collectible_rewards_usd: null, total_collectible_usd: null, collectible_rewards_note: null };
+    expect(collectibleTotals(reserialized).reported).toBe(false);
+    expect(collectibleTotalsLine(reserialized, [OLD_BASIC, OLD_CL])).toBeNull();
+    expect(collectibleTotals(undefined)).toEqual({ lpFees: 'unavailable', rewards: REWARD_NOT_REPORTED, total: REWARD_NOT_REPORTED, totalled: false, reported: false, none: false });
+    expect(collectibleTotalsLine(undefined)).toBeNull();
   });
 
   it('a wallet with no staked Aero position says "none", and its total is its LP fees', () => {
@@ -206,8 +295,11 @@ describe('collectible totals (#142)', () => {
     const t = collectibleTotals(global, [OLD_UNISWAP_V4]);
     expect(t.rewards).toBe('none (no staked Aero position is tracked)');
     expect(t.total).toBe('$0.54');
+    expect(t.none).toBe(true);
     // Every gauge answered zero: a real $0.00, with the positions that earned it.
-    expect(collectibleTotals(global, [{ collectible_reward: reward('0.000000', '0.00', CL_GAUGE) }]).rewards).toBe('$0.00');
+    const zero = collectibleTotals(global, [{ collectible_reward: reward('0.000000', '0.00', CL_GAUGE) }]);
+    expect(zero.rewards).toBe('$0.00');
+    expect(zero.none).toBe(false);
   });
 });
 
@@ -227,21 +319,52 @@ describe('the CLAIMABLE YIELD tile (#142)', () => {
     expect(tile.label).toBe('Claimable Yield (LP fees, net)');
     expect(tile.value).toBe('1.94');
     expect(tile.subtitle).toBe(
-      `LP fees $1.95 gross; net of two claims' gas · AERO rewards not totalled (gauge reward not read for aerodrome-cl:base:2914490 (${NOT_READ_REASON})) · total collectible not totalled`,
+      "LP fees $1.95 gross; net of two claims' gas · AERO rewards not totalled (1 gauge reward not read) · total collectible not totalled",
     );
     expect(tile.subtitle).not.toContain('0.09');
   });
 
-  it('an older snapshot renders the tile it always did, with "not reported"', () => {
+  it('a wallet with no staked Aero position keeps the net tile it always had', () => {
+    // A Uniswap-only wallet in a live #142 cycle: $1.95 of LP fees, two claims' gas of
+    // $0.0072, rewards "0.00" because no position can earn one. In v0.8.0 the tile read
+    // "Claimable Yield (Net)" $1.94; it must not turn into the gross $1.95 under a label
+    // naming AERO rewards the wallet cannot have.
+    const global = { total_fees_claimable_usd: '1.95', gas_to_fee_delta_usd: '1.94', collectible_rewards_usd: '0.00', collectible_rewards_note: null, total_collectible_usd: '1.95' };
+    expect(claimableYieldTile(global, [OLD_UNISWAP_V4])).toEqual({
+      label: 'Claimable Yield (Net)',
+      value: '1.94',
+      subtitle: "Gross: $1.95; net of two claims' gas · AERO rewards none (no staked Aero position is tracked)",
+    });
+    // The from-zero wallet: no position at all, no LP fees, and the net of gas is negative.
+    const fromZero = { total_fees_claimable_usd: '0.00', gas_to_fee_delta_usd: '-0.01', collectible_rewards_usd: '0.00', collectible_rewards_note: null, total_collectible_usd: '0.00' };
+    const tile = claimableYieldTile(fromZero, []);
+    expect(tile.label).toBe('Claimable Yield (Net)');
+    expect(tile.value).toBe('-0.01');
+    expect(tile.subtitle).toBe("Gross: $0; net of two claims' gas · AERO rewards none (no staked Aero position is tracked)");
+    // A staked position whose gauge answered zero does earn rewards: that tile is the total.
+    const stakedZero = claimableYieldTile(global, [{ collectible_reward: reward('0.000000', '0.00', CL_GAUGE) }]);
+    expect(stakedZero.label).toBe('Claimable Yield (LP fees + AERO rewards)');
+    expect(stakedZero.value).toBe('1.95');
+  });
+
+  it('a snapshot that states no rewards renders exactly the tile it always did', () => {
+    // v0.8.0: label "Claimable Yield (Net)", the net large, and this subtitle, formatted
+    // by statValueText. Nothing about rewards is added beside its own unclaimed AERO.
     expect(claimableYieldTile(OLD_GLOBAL, [OLD_BASIC, OLD_CL])).toEqual({
       label: 'Claimable Yield (Net)',
       value: '1.94',
-      subtitle: "Gross: $1.95; net of two claims' gas · AERO rewards not reported",
+      subtitle: `Gross: ${statValueText(OLD_GLOBAL.total_fees_claimable_usd, '$')}; net of two claims' gas`,
     });
+    expect(claimableYieldTile(OLD_GLOBAL, [OLD_BASIC, OLD_CL]).subtitle).toBe("Gross: $1.95; net of two claims' gas");
+    // The same snapshot re-serialized by a #142 worker (keys present, null).
+    const reserialized = { ...OLD_GLOBAL, collectible_rewards_usd: null, total_collectible_usd: null, collectible_rewards_note: null };
+    expect(claimableYieldTile(reserialized, [OLD_BASIC, OLD_CL])).toEqual(claimableYieldTile(OLD_GLOBAL, [OLD_BASIC, OLD_CL]));
+    // The gross figure keeps the formatter it had.
+    expect(claimableYieldTile({ ...OLD_GLOBAL, total_fees_claimable_usd: '1234.50' }).subtitle).toBe("Gross: $1,234.5; net of two claims' gas");
     // No snapshot at all: a dash, never a zero.
     const empty = claimableYieldTile(undefined);
     expect(empty.value).toBeUndefined();
-    expect(empty.subtitle).toBe("Gross: —; net of two claims' gas · AERO rewards not reported");
+    expect(empty.subtitle).toBe("Gross: —; net of two claims' gas");
   });
 });
 
@@ -286,6 +409,16 @@ describe('velocity rows and chart series (#142)', () => {
     expect(unread.kind).toBe('gauge_reward');
     expect(unread.reward).toBeNull();
     expect(velocityRewardRowText(unread)).toBe(`Aero CL WETH/NOCK 0.97% #2914490: reward not read (${NOT_READ_REASON}); LP fees ${STAKED_REASON}`);
+  });
+
+  it('a read zero is a zero bar and a row that says there is nothing to collect', () => {
+    const zero = velocityRows([{ ...CONTRACTS[2], reward: reward('0.000000', '0.00', CL_GAUGE) }])[0];
+    expect(zero.kind).toBe('gauge_reward');
+    expect(zero.reward).toBe(0);
+    expect(velocityRewardRowText(zero)).toBe(
+      `Aero CL WETH/NOCK 0.97% #2914490: reward 0.000000 AERO ($0.00), nothing to collect in gauge 0x3bf7…60fd; LP fees ${STAKED_REASON}`,
+    );
+    expect(velocityRewardRowText(zero)).not.toContain('collectible');
   });
 
   it('a row with a fee action never shows a reward, even if one were attached', () => {
@@ -343,13 +476,35 @@ describe('the Lite cockpit lines (#142)', () => {
     expect(liteCollectibleTotalsLine(oldPayload, data)).toBe('LP fees $1.95 · AERO rewards $7.84 · total collectible $9.79');
   });
 
-  it('an older worker and an older snapshot give no lines and "not reported"', () => {
+  it('an older worker and an older snapshot give no lines at all', () => {
     const oldPayload = { gross_usd: '1.95', actions: [] };
     const oldData = { positions: [OLD_UNISWAP_V4, OLD_BASIC, OLD_CL], derived_metrics: { global_status: OLD_GLOBAL } };
     expect(liteRewardLines(oldPayload, oldData)).toEqual([]);
-    expect(liteCollectibleTotalsLine(oldPayload, oldData)).toBe('LP fees $1.95 · AERO rewards not reported · total collectible not reported');
+    expect(liteCollectibleTotalsLine(oldPayload, oldData)).toBeNull();
     expect(liteRewardLines(null, null)).toEqual([]);
-    expect(liteCollectibleTotalsLine(null, null)).toBe('LP fees unavailable · AERO rewards not reported · total collectible not reported');
+    expect(liteCollectibleTotalsLine(null, null)).toBeNull();
+    // A #142 worker serving its stored 2.6.0 snapshot: the payload has the keys, null,
+    // and no reward rows.
+    const newWorkerOldSnapshot = { ...oldPayload, collectible_lp_fees_usd: '1.95', collectible_rewards_usd: null, collectible_rewards_note: null, total_collectible_usd: null, rewards: [] };
+    expect(liteRewardLines(newWorkerOldSnapshot, oldData)).toEqual([]);
+    expect(liteCollectibleTotalsLine(newWorkerOldSnapshot, oldData)).toBeNull();
+  });
+
+  it('a read zero is listed as nothing to collect, with no gas statement', () => {
+    const payload = {
+      ...PAYLOAD,
+      rewards: [
+        PAYLOAD.rewards[0],
+        { position_id: CL.position_id, label: 'WETH+NOCK (Aero CL #2914490)', ...reward('0.000000', '0.00', CL_GAUGE), gas_estimate: null, gas_usd: null, gas_note: 'nothing to collect, gas not estimated' },
+      ],
+    };
+    const lines = liteRewardLines(payload, null);
+    expect(lines[1]).toEqual({ key: CL.position_id, text: 'WETH+NOCK (Aero CL #2914490): 0.000000 AERO ($0.00), nothing to collect in gauge 0x3bf7…60fd', read: true });
+    expect(lines[0].text).toContain('collectible from gauge 0xc827…3526 in the Aero app · gas est. 390860 units');
+    // From the snapshot alone, the same statement.
+    const zeroCl = { ...CL, collectible_reward: reward('0.000000', '0.00', CL_GAUGE) };
+    const fromSnapshot = liteRewardLines({ gross_usd: '1.95', actions: [] }, { positions: [OLD_UNISWAP_V4, BASIC, zeroCl], contract_fees: CONTRACT_FEES });
+    expect(fromSnapshot[1].text).toBe('WETH+NOCK (Aero CL #2914490): 0.000000 AERO ($0.00), nothing to collect in gauge 0x3bf7…60fd');
   });
 
   it('a reward that was not read is a line of its own, never a zero', () => {
@@ -366,7 +521,7 @@ describe('the Lite cockpit lines (#142)', () => {
     const lines = liteRewardLines(payload, null);
     expect(lines[1]).toEqual({ key: CL.position_id, text: `WETH+NOCK (Aero CL #2914490): reward not read (${NOT_READ_REASON})`, read: false });
     expect(liteCollectibleTotalsLine(payload, null)).toBe(
-      `LP fees $1.95 · AERO rewards not totalled (gauge reward not read for aerodrome-cl:base:2914490 (${NOT_READ_REASON})) · total collectible not totalled`,
+      'LP fees $1.95 · AERO rewards not totalled (1 gauge reward not read) · total collectible not totalled',
     );
   });
 
@@ -390,6 +545,9 @@ describe('no advice about AERO on any of these surfaces (#142)', () => {
       const tile = claimableYieldTile(g, POSITIONS);
       push(tile.label, tile.subtitle, collectibleTotalsLine(g, POSITIONS));
     }
+    // A wallet with no staked Aero position, and the not-totalled reasons.
+    push(claimableYieldTile({ ...GLOBAL, collectible_rewards_usd: '0.00', total_collectible_usd: '1.95' }, [OLD_UNISWAP_V4]).subtitle);
+    push(notTotalledReason('x', [CL_NOT_READ]), notTotalledReason('x', [CL_NOT_READ, CL_NOT_READ]));
     for (const row of velocityRows([...CONTRACTS, { ...CONTRACTS[2], reward: reward(null, null, CL_GAUGE, NOT_READ_REASON) }])) {
       if (row.kind === 'gauge_reward') push(velocityRewardRowText(row));
     }
