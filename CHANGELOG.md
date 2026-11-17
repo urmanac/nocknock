@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — gauge rewards reported as collectible earnings (#142)
+A staked Aero position's earnings are its gauge reward, and NockNock reported them as if
+the position earned nothing collectible: a trailing note after "not LP-claimable", a $0
+bar in the velocity chart, and totals that left the AERO out. Reporting only: nothing
+here signs, sizes or advises.
+
+- **Each reward is stated as collectible earnings.** `positions[].collectible_reward`
+  carries the token ("AERO"), the amount, its USD value at the cycle's AERO price, the
+  gauge it is collected from and how ("the Aero app", `https://app.aero.xyz`), with
+  `status` `read` or `not_read`. It is the same read as `unclaimed_aero`,
+  `unclaimed_aero_usd` and `unclaimed_aero_note`, which keep their names and values.
+- **Totals side by side, never merged.** New `global_status` fields
+  `collectible_rewards_usd`, `collectible_rewards_note` and `total_collectible_usd`.
+  `total_fees_claimable_usd` keeps meaning LP fees only; the total is the printed LP-fee
+  figure plus the printed rewards figure, so the three add up to the cent. When a gauge
+  was not read, or a non-zero reward is unpriced, both new figures are null and the note
+  says which: never a partial sum, never 0.
+- **Fee and velocity rows.** `contract_fees[]` and `velocity_gas_sandbox.contracts[]`
+  gain `earnings_kind` (`gauge_reward` when the reward is what the position earns),
+  `reward` (the same object) and `lp_fees_note` (the reason alone). `recommended_action`
+  stays `not_claimable` and `claimable_usd` stays `0.00` for such a row: those are about
+  LP fees. A row with a fee action (claim_now, claim_recommended, accumulate) carries no
+  reward, so no harvest word ever labels AERO. `contract_fees[].amount` and the velocity
+  `note` are unchanged.
+- **What does not change.** Unclaimed AERO stays out of `total_portfolio_usd`. BATCH
+  HARVEST, the notifier and every threshold keep reading LP fees only; whether rewards
+  should count toward the harvest rule is the operator's to set. The directive is the
+  same for any reward size (tested from 0 to 1,000,000 AERO, on both sides of the $5.00
+  threshold). No text advises claiming, selling, holding or accumulating AERO.
+- **MCP, both transports, one source file** (`reward_text.rs`). `get_shot_advice` keeps
+  "Uncollected Claimable Fees" (LP fees) and adds "Collectible AERO rewards" and "Total
+  collectible (LP fees + AERO rewards)". `get_portfolio_state` adds a "Collectible
+  earnings" line and says on each position's AERO row which gauge it is collected from.
+  `simulate_claim_fees` prints "Collectible LP fees" (was "Total Gross Claimable"),
+  "Collectible AERO rewards" and "Total collectible", and a staked position's row now
+  reads "reward 17.654015 AERO ($7.75), collectible from gauge 0x… in the Aero app | …;
+  LP fees not LP-claimable (…)" where it read "not LP-claimable (…); unclaimed AERO …".
+- **Gas for collecting a reward, only where the claim call is proven.** On the worker's
+  HTTP MCP endpoint and in the claim payload, a reward's row carries a read-only
+  `eth_estimateGas` from the wallet for the gauge's claim call, bounded to 1.5 seconds.
+  It is made only for the two gauges whose call was proven on-chain to pay what `earned`
+  reports (ONCHAIN_INTEGRATION.md §9): the CL gauge by the tracked wallet's own claim of
+  2026-11-17 (tx `0x2d2b609b…a16e`, 17.654015228100787903 AERO, exactly `earned` one
+  block before), the basic gauge by another account's real claim and a simulation for
+  the wallet. Any other gauge reads "gas not estimated (claim call not verified for this
+  gauge)", a zero reward "nothing to collect, gas not estimated", and text built from a
+  stored snapshot alone (the stdio binary's fallback, the golden files) says no live
+  estimate was made. The USD figure is L2 execution gas at the live gas price.
+- **No transaction is built for a reward.** `GET /v1/execute/claim-fees/payload` gains
+  `collectible_lp_fees_usd`, `collectible_rewards_usd`, `collectible_rewards_note`,
+  `total_collectible_usd` and a `rewards` array whose rows have no `to` and no `data`.
+  A `not_claimable` action's `simulation_detail` now ends with the position's reward and
+  where it is collected. No action claims AERO, and the Lite cockpit sends none.
+- **Dashboard.** The Claimable Yield tile shows the total with LP fees and AERO rewards
+  as two labelled figures (it keeps the LP-fee net of gas in its subtitle). A staked
+  position's card shows "Collectible earnings: … AERO ($…), collectible from gauge … in
+  the Aero app" with the LP-fee reason beneath. The velocity chart draws rewards as
+  their own series and legend entry, in the AERO colour, beside LP fees; its text rows
+  read "…: reward collectible in gauge 0x3bf7…60fd: 17.654015 AERO ($7.75); LP fees not
+  LP-claimable (…)". The Lite cockpit's uncollected-fees card lists the reward lines and
+  the split totals. None of it has a button.
+- **Older snapshots.** Every new field is optional or nullable. A snapshot or a worker
+  without them renders as before, with "not reported" for the new figures, never 0.
+- **Snapshot spec 2.7.0.** `SNAPSHOT_SPEC_VERSION`, `specs/core/snapshot.yaml` and the
+  frontend contract test move from 2.6.0 to 2.7.0; `specs/core/api.yaml` documents the
+  claim payload's new fields. New fields are tagged "(#142)".
+- **Golden files.** `golden_snapshot.json` and `golden_snapshot_aero_cl.json` change by
+  three null `global_status` fields, `lp_fees_note` on the Aero rows, the new text lines
+  and the renamed "Collectible LP fees" label. `golden_snapshot_aero_rewards.json` also
+  gains the reward objects, `earnings_kind` and the reward wording of the claim text.
+  No existing number moved in any of them. New `golden_snapshot_rewards.json`: the
+  cycle one block before the operator's claim and the cycle in its block.
+- **No new config key.** An existing `config.yaml` loads unchanged.
+- New worker modules `rewards` (the reward object, totals, the proven claim calls and
+  the gas estimate) and `reward_text` (the shared MCP text); new frontend helpers
+  `rewards.ts` and `components/CollectibleEarnings.tsx`.
+- **Not exercised:** the worker against a live RPC or database. The live
+  `eth_estimateGas` path was run only against a refused port (to pin that no RPC URL
+  reaches its error text); the calls it sends were made by hand on 2026-11-17 and
+  answered. The dashboard and the Lite cockpit were looked at in a browser against a
+  mock API serving the deployment's real snapshot of 2026-11-17 with the new fields
+  added, not against a worker.
+
 ## [0.8.0] - 2026-11-16
 
 One minor release carrying three planned milestones, built as a stack of seven pull

@@ -490,7 +490,8 @@ So a staked position reports no fee figure. Its fee fields say
 `positions[].fees_note`, the claim payload (`not_claimable`) and, followed by the
 position's unclaimed AERO (§9), in `contract_fees[].amount`, the velocity row's `note`
 and the MCP text. It is never shown as $0 earned, and it adds nothing to the claimable
-total.
+total. Since #142 what it earns instead, the gauge reward, is reported as its collectible
+earnings beside that reason (§9, "The claim call, proven").
 
 **An unstaked position** (the wallet holds the NFT) can collect. Verified on NFT #3117536
 at **block 58063800** (`0x375fbb8`), then held by the EOA `0xe3c74593…a88a` (USDC / an
@@ -657,7 +658,104 @@ recipient. The same receipts also show, and NockNock ignores:
 The claim functions, by selector lookup only and never called by NockNock, are
 `claimEmissions(address,address)` `0x8ed86282` on the basic gauge and
 `claimEmissions(address,address,uint256[])` `0x09902477` on the CL gauge. Simulated from
-the wallet at the pinned block both return empty data without reverting.
+the wallet at the pinned block both return empty data without reverting. On 2026-11-17
+the tracked wallet itself claimed from the CL gauge with the second of them; what each
+call pays is proven in "The claim call, proven" below.
+
+### The claim call, proven (issue #142, read 2026-11-17)
+
+Issue #142 reports a staked position's gauge reward as its collectible earnings and may
+state what collecting it costs in gas, **only** for a claim call proven to pay what
+`earned` reports. Everything below was read with `eth_call`, `eth_getLogs`,
+`eth_getTransactionByHash`, `eth_getTransactionReceipt`, `eth_estimateGas` and
+`eth_simulateV1` through `https://base-rpc.publicnode.com`, and read again through
+`https://mainnet.base.org` with the same answers. Nothing was sent. (Base produced a
+block about every 0.2 s on this day: 542,070 blocks between 2026-11-16T05:11:50Z and
+2026-11-17T11:18:44Z.) The raw values are the fixtures in
+`ingestion-worker/src/tests_rewards.rs`.
+
+**CL gauge `0x3bf70c88…60fd`: proven by the tracked wallet's own claim.**
+
+| | |
+|---|---|
+| Tx | `0x2d2b609b74142a5e56951850c646963d3553adac0c5280b70847f0bf0ed7a16e` |
+| Block | 58618046 (`0x37e70be`, 2026-11-17T11:13:04Z, hash `0x453956f0…1c38`), status success |
+| From → to | the wallet `0xeE114cC9…7a45` → the gauge, directly |
+| Input | `0x09902477 ‖ wallet ‖ wallet ‖ 0x60 ‖ 1 ‖ 0x2c78ba`: two address words, then a one-element array holding token id 2914490 |
+| `earned(wallet, [2914490])` at block 58618045 | `0xf4ffa950a248bebf` = 17.654015228100787903 AERO |
+| AERO `Transfer` to the wallet (log `0x13`) | from the zero address, `0xf4ffa950a248bebf`: exactly that amount |
+| Gauge event (log `0x10`) | `EmissionsClaimed(address,uint256,address,uint256)`, topic `0x7b6bd720815adbeaaaed4fc759e1a535705901f33709fbb33e62ee9a89427bb1`, with the wallet, token id `0x2c78ba`, the wallet, and the same amount |
+| `earned(wallet, [2914490])` at block 58618046 | 0 |
+| `AERO.balanceOf(wallet)` | 0 at block 58618045, `0xf4ffa950a248bebf` at block 58618046 |
+| Further mint (log `0x14`) | `0x0c3ffbaa6e83a323` (0.882700761405039395 AERO, 5.0000% of the claim) to `0x9beb95cc…1156`, on top of the wallet's amount |
+| Gas | `gasUsed` 418,528 (`0x662e0`) at `effectiveGasPrice` 9,000,000 wei, `l1Fee` 1,258,065,811 wei: 3,768,010,065,811 wei in all, about $0.0067 at ETH $1,790.24. The L1 data fee is 0.03% of it |
+
+`eth_simulateV1` of the same call from the wallet on the state of block 58618045 returns
+status 1, `gasUsed` 418,528 and the same thirteen logs: the simulation reproduces the
+real transaction, on both nodes. That is what makes the simulation below evidence.
+
+On the same state, the two-address form `0x8ed86282 ‖ wallet ‖ wallet` sent to the **CL**
+gauge also succeeds (`gasUsed` 419,916) and emits the same logs, including
+`EmissionsClaimed` for token id 2914490 and the same AERO mint: with one NFT staked, it
+pays the same. NockNock estimates the form the real transaction used.
+
+**Basic gauge `0xc82782ee…3526`: proven by a real claim of another account, and for the
+tracked wallet by simulation.**
+
+- The real claim recorded above (tx `0x189f6ddf…b8f8`, block 57635701), re-read on
+  2026-11-17: from `0x7c12cd5b…386d` to the gauge, input
+  `0x8ed86282 ‖ claimer ‖ claimer`, `gasUsed` 349,146, AERO minted to the claimer
+  `0x12df9e0749351725`, which is `earned(claimer)` one block earlier.
+- For the tracked wallet, at block 58619904 (`0x37e7800`, 2026-11-17T11:19:16Z, hash
+  `0x5f3cff08…d457`): `earned(wallet)` = `0x02ecc3bc217fa18b` (0.210758495362851211
+  AERO). `eth_simulateV1` of `0x8ed86282 ‖ wallet ‖ wallet` from the wallet to the gauge
+  on that state: status 1, `gasUsed` 384,013, an AERO `Transfer` from the zero address to
+  the wallet of `0x02ecc3bc217fa18b` (exactly `earned`), the gauge's
+  `EmissionsClaimed(address,address,uint256)` (topic `0x41a8f9b7…7a968`) with the wallet
+  twice and the same amount, and the further 5% (`0x25702fce7994e0`) to
+  `0x9beb95cc…1156`. The same on both nodes. The wallet has not sent this transaction.
+
+**`eth_estimateGas` from the wallet**, 2026-11-17 near block 58619693:
+`0x8ed86282(wallet, wallet)` on the basic gauge 390,860 (`0x5f6cc`);
+`0x09902477(wallet, wallet, [2914490])` on the CL gauge 363,527 (`0x58c07`), with nothing
+left to collect there (it was 367,022 for `0x8ed86282` on the CL gauge).
+
+**What NockNock does with this** (`ingestion-worker/src/rewards.rs`):
+
+- It reports the reward as collectible earnings on every surface: the token, the amount,
+  its USD value at the cycle's AERO price, the gauge it is collected from and how
+  ("the Aero app"). `positions[].collectible_reward`, the `reward` of the fee and
+  velocity rows, `global_status.collectible_rewards_usd` and `total_collectible_usd`.
+- It still builds **no transaction** for a reward. The claim payload lists rewards in a
+  `rewards` array whose rows have no `to` and no `data`; no action claims AERO.
+- When the claim simulation is asked for, the worker runs a read-only `eth_estimateGas`
+  from the wallet for the call above and prints its units and USD cost (units × the live
+  gas price × the cycle's ETH/USD). It does so only for these two gauge addresses with
+  their own call. For any other gauge the row reads "gas not estimated (claim call not
+  verified for this gauge)". A zero reward reads "nothing to collect, gas not estimated".
+  The calldata is used for that estimate and nowhere else.
+- Unclaimed AERO stays out of `total_portfolio_usd`. `total_fees_claimable_usd`, BATCH
+  HARVEST, the notifier and every threshold keep reading LP fees only.
+
+**Still not verified:**
+
+- **The names.** `claimEmissions` and `EmissionsClaimed` come from a public signature
+  database. The selectors and topics are what the transactions and logs carry.
+- **The basic gauge for the tracked wallet in a real transaction.** The proof is another
+  account's real claim plus a simulation for the wallet, not a transaction of the wallet.
+- **Any other gauge.** Only these two addresses were exercised. Another Aero gauge may
+  be the same code behind the same proxy; that was not read, so no gas figure is shown
+  for it.
+- **What an estimate promises.** `eth_estimateGas` at request time says the call does not
+  revert from the wallet and what it would cost then. It is not a second proof of what
+  the call pays, and gas at the moment of a real claim can differ. The USD figure is L2
+  execution gas only (the L1 data fee was 0.03% of the operator's claim).
+- **Penalties and deferral** (see "Not verified" below). In the operator's claim `earned`
+  was paid in full.
+- **The further 5% mint** to `0x9beb95cc…1156`: seen in every claim examined, in addition
+  to the claimer's amount. What it is was not investigated.
+- **Which interface sent the operator's claim.** The transaction is a direct call from
+  the wallet to the gauge; the chain does not record the page it was signed from.
 
 ### A claim from several gauges in one transaction
 
@@ -757,6 +855,10 @@ Zero liquidity is "Stale AERO/USD price: price pool … has zero in-range liquid
   again; a valued row is never changed.
 - **No advice.** NockNock builds no claim transaction for AERO, sets no target, and no
   directive reads an AERO figure.
+- **Collectible earnings (#142).** The unclaimed AERO of a staked position is reported as
+  that position's collectible earnings, with the gauge it is collected from, and the
+  totals state LP fees, AERO rewards and their sum as three labelled figures. This is
+  reporting only: see "The claim call, proven" above for what is and is not estimated.
 
 ### Not verified
 
@@ -764,10 +866,12 @@ Zero liquidity is "Stale AERO/USD price: price pool … has zero in-range liquid
   (false for the wallet), `depositBlock(address)` `0x202019a6` (57425187, the deposit) and
   both gauges have `deferredEmissions(address)` `0xba135be9` and
   `deferredReferralEmissions(address)` `0xa9d4ee99` (0 for the wallet); the CL gauge has
-  `forfeitRollover()`. What these do to a claim was not investigated. In the two claims
-  observed, `earned` was paid in full. If a penalty can apply, `earned` would overstate
+  `forfeitRollover()`. What these do to a claim was not investigated. In the three claims
+  observed (the third is the tracked wallet's own, 2026-11-17), `earned` was paid in full. If a penalty can apply, `earned` would overstate
   what a claim pays; NockNock labels the figure "unclaimed AERO" and does not promise it.
-- **How the Aero app claims.** Both observed claims paid the claimer directly. If the app
+- **How the Aero app claims.** The three claims examined that were sent to a gauge
+  directly (two by other accounts, and the tracked wallet's own on 2026-11-17) paid the
+  claimer directly. If the app
   routes a claim through a contract that receives the AERO and forwards it, the wallet's
   `Transfer` would come from that contract rather than the zero address. The ledger books
   any AERO `Transfer` to the wallet in a recorded transaction, whatever its sender, so it
