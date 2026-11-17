@@ -103,6 +103,11 @@ The story is only worth telling with this part in it.
 - It cannot show a lap yet. The dashboard shows the gas pillar now, not what the tank held
   before and after each range. Reporting "what each range did" is planned.
 
+## Read next
+
+[Two trips and a wait](2026-11-17-two-trips-and-a-wait.md): why the waiting decides the
+outcome, where on a range to reopen, and the tax bill that comes with every trip.
+
 ## Not this
 
 Not a promise, not a yield figure, and not an argument that anyone else should do it. One
