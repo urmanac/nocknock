@@ -732,8 +732,11 @@ left to collect there (it was 367,022 for `0x8ed86282` on the CL gauge).
   from the wallet for the call above and prints its units and USD cost (units × the live
   gas price × the cycle's ETH/USD). It does so only for these two gauge addresses with
   their own call. For any other gauge the row reads "gas not estimated (claim call not
-  verified for this gauge)". A zero reward reads "nothing to collect, gas not estimated".
-  The calldata is used for that estimate and nowhere else.
+  verified for this gauge)". A zero reward reads "0.000000 AERO ($0.00), nothing to
+  collect in gauge 0x…" with no gas statement (its claim payload row says "nothing to
+  collect, gas not estimated"). The claim payload uses the `eth_gasPrice` it already
+  read for its LP actions; the HTTP MCP reads it once. The calldata is used for that
+  estimate and nowhere else.
 - Unclaimed AERO stays out of `total_portfolio_usd`. `total_fees_claimable_usd`, BATCH
   HARVEST, the notifier and every threshold keep reading LP fees only.
 

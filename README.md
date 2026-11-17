@@ -189,7 +189,7 @@ minutes of it, otherwise to the nearest backfilled point in that window.
   - Generates deterministic SHA-256 state hashes.
   - Implements snapshot deduplication to prevent database bloat.
 * **React Frontend Dashboard** (`frontend/`):
-  - 7 KPI Stat Cards: Sovereign NOCK Stack, USDC Stack, Net Portfolio, Claimable Yield (LP fees and AERO rewards as two labelled figures and their total), Floor Health, High-Water Mark, AERO (wallet).
+  - 7 KPI Stat Cards: Sovereign NOCK Stack, USDC Stack, Net Portfolio, Claimable Yield (LP fees and AERO rewards as two labelled figures and their total; the LP-fee net of gas, as before, for a wallet with no staked Aero position), Floor Health, High-Water Mark, AERO (wallet).
   - Position cards: a staked Aero position shows its gauge reward as its collectible earnings, with the LP-fee reason beneath; the velocity chart draws rewards as their own series beside LP fees.
   - Pillar line: NOCK · USDC · ETH · AERO, which add up to the total, with what is held as gas and as AERO and what AERO is unclaimed in each tracked gauge.
   - Tactical Shot Advice Cockpit Banner.

@@ -21,9 +21,12 @@ here signs, sizes or advises.
 - **Totals side by side, never merged.** New `global_status` fields
   `collectible_rewards_usd`, `collectible_rewards_note` and `total_collectible_usd`.
   `total_fees_claimable_usd` keeps meaning LP fees only; the total is the printed LP-fee
-  figure plus the printed rewards figure, so the three add up to the cent. When a gauge
-  was not read, or a non-zero reward is unpriced, both new figures are null and the note
-  says which: never a partial sum, never 0.
+  figure plus the printed rewards figure, so the three add up to the cent. The rewards
+  figure is the tracked gauges' summed amount at the cycle's AERO price, the same figure
+  as `unclaimed_aero_usd`, so one amount of AERO never prints with two dollar values; it
+  is not the sum of the rounded per-position `usd` values and can differ from that sum
+  by a cent per position. When a gauge was not read, or a non-zero reward is unpriced,
+  both new figures are null and the note says which: never a partial sum, never 0.
 - **Fee and velocity rows.** `contract_fees[]` and `velocity_gas_sandbox.contracts[]`
   gain `earnings_kind` (`gauge_reward` when the reward is what the position earns),
   `reward` (the same object) and `lp_fees_note` (the reason alone). `recommended_action`
@@ -44,6 +47,11 @@ here signs, sizes or advises.
   "Collectible AERO rewards" and "Total collectible", and a staked position's row now
   reads "reward 17.654015 AERO ($7.75), collectible from gauge 0x… in the Aero app | …;
   LP fees not LP-claimable (…)" where it read "not LP-claimable (…); unclaimed AERO …".
+- **A read zero is "nothing to collect".** A gauge that answers 0 (the operator's CL
+  gauge after the claim of 2026-11-17) reads "0.000000 AERO ($0.00), nothing to collect
+  in gauge 0x…" on every surface, never as an amount "collectible … in the Aero app",
+  and its row carries no gas statement. When every gauge answers 0 the rewards line
+  reads "$0.00 USD (0.000000 AERO in tracked gauges: nothing to collect)".
 - **Gas for collecting a reward, only where the claim call is proven.** On the worker's
   HTTP MCP endpoint and in the claim payload, a reward's row carries a read-only
   `eth_estimateGas` from the wallet for the gauge's claim call, bounded to 1.5 seconds.
@@ -52,31 +60,43 @@ here signs, sizes or advises.
   2026-11-17 (tx `0x2d2b609b…a16e`, 17.654015228100787903 AERO, exactly `earned` one
   block before), the basic gauge by another account's real claim and a simulation for
   the wallet. Any other gauge reads "gas not estimated (claim call not verified for this
-  gauge)", a zero reward "nothing to collect, gas not estimated", and text built from a
-  stored snapshot alone (the stdio binary's fallback, the golden files) says no live
-  estimate was made. The USD figure is L2 execution gas at the live gas price.
+  gauge)", a zero reward's payload row "nothing to collect, gas not estimated", and text
+  built from a stored snapshot alone (the stdio binary's fallback, the golden files)
+  says no live estimate was made. The USD figure is L2 execution gas at the live gas
+  price. The claim payload prices its reward rows at the `eth_gasPrice` it already read
+  for its LP actions: one read and one price per payload.
 - **No transaction is built for a reward.** `GET /v1/execute/claim-fees/payload` gains
   `collectible_lp_fees_usd`, `collectible_rewards_usd`, `collectible_rewards_note`,
   `total_collectible_usd` and a `rewards` array whose rows have no `to` and no `data`.
   A `not_claimable` action's `simulation_detail` now ends with the position's reward and
   where it is collected. No action claims AERO, and the Lite cockpit sends none.
 - **Dashboard.** The Claimable Yield tile shows the total with LP fees and AERO rewards
-  as two labelled figures (it keeps the LP-fee net of gas in its subtitle). A staked
+  as two labelled figures (it keeps the LP-fee net of gas in its subtitle). A wallet
+  with no position that can earn a reward (Uniswap only, or from zero) keeps the tile it
+  had: "Claimable Yield (Net)" with the LP-fee net of gas, and "AERO rewards none" in
+  the subtitle. When the rewards are not totalled, the tile and the Lite cockpit say so
+  in short ("not totalled (1 gauge reward not read)"); the full reason, with its gauge
+  address, stays on that position's own line, and both wrap inside their card. A staked
   position's card shows "Collectible earnings: … AERO ($…), collectible from gauge … in
   the Aero app" with the LP-fee reason beneath. The velocity chart draws rewards as
   their own series and legend entry, in the AERO colour, beside LP fees; its text rows
   read "…: reward collectible in gauge 0x3bf7…60fd: 17.654015 AERO ($7.75); LP fees not
   LP-claimable (…)". The Lite cockpit's uncollected-fees card lists the reward lines and
   the split totals. None of it has a button.
-- **Older snapshots.** Every new field is optional or nullable. A snapshot or a worker
-  without them renders as before, with "not reported" for the new figures, never 0.
+- **Older snapshots.** Every new field is optional or nullable. A snapshot that states
+  no collectible rewards (one from before 2.7.0, which the worker serves from its
+  database until its first cycle after the upgrade) renders exactly as before on the
+  dashboard, the Lite cockpit and all three MCP texts: no reward line is added, so
+  nothing reads "not reported" beside the unclaimed AERO that snapshot already shows.
+  The one difference is the claim text's renamed "Collectible LP fees" label.
 - **Snapshot spec 2.7.0.** `SNAPSHOT_SPEC_VERSION`, `specs/core/snapshot.yaml` and the
   frontend contract test move from 2.6.0 to 2.7.0; `specs/core/api.yaml` documents the
   claim payload's new fields. New fields are tagged "(#142)".
 - **Golden files.** `golden_snapshot.json` and `golden_snapshot_aero_cl.json` change by
-  three null `global_status` fields, `lp_fees_note` on the Aero rows, the new text lines
-  and the renamed "Collectible LP fees" label. `golden_snapshot_aero_rewards.json` also
-  gains the reward objects, `earnings_kind` and the reward wording of the claim text.
+  three null `global_status` fields, `lp_fees_note` on the Aero rows and the renamed
+  "Collectible LP fees" label (their fixtures read no AERO, so they state no rewards
+  and gain no reward line). `golden_snapshot_aero_rewards.json` also gains the reward
+  objects, `earnings_kind`, the reward lines and the reward wording of the claim text.
   No existing number moved in any of them. New `golden_snapshot_rewards.json`: the
   cycle one block before the operator's claim and the cycle in its block.
 - **No new config key.** An existing `config.yaml` loads unchanged.
