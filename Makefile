@@ -146,8 +146,8 @@ release: build-brain build-worker build-frontend
 dist: release
 	@mkdir -p dist
 	@cp brain/target/$(RUSTUP_TARGET)/release/nocknock_brain.wasm dist/ 2>/dev/null || cp brain/target/wasm32-wasip1/release/nocknock_brain.wasm dist/ 2>/dev/null || true
-	@cp ingestion-worker/target/release/nocknock-ingestion-worker dist/
-	@cp ingestion-worker/target/release/nocknock-mcp dist/
+	@set -eu; tmp=$$(mktemp dist/.nocknock-ingestion-worker.XXXXXX); trap 'rm -f "$$tmp"' EXIT; install -m 755 ingestion-worker/target/release/nocknock-ingestion-worker "$$tmp"; mv -f "$$tmp" dist/nocknock-ingestion-worker
+	@set -eu; tmp=$$(mktemp dist/.nocknock-mcp.XXXXXX); trap 'rm -f "$$tmp"' EXIT; install -m 755 ingestion-worker/target/release/nocknock-mcp "$$tmp"; mv -f "$$tmp" dist/nocknock-mcp
 	@tar -czf dist/nocknock-frontend.tar.gz -C frontend/dist .
 	@echo "=========================================================="
 	@echo "Release artifacts packaged in dist/:"
