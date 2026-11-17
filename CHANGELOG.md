@@ -67,6 +67,9 @@ one widening (`accumulation_plan.venue` nullable). No new config key is required
   its own period, so daily and hourly candles in one range are each read at their own
   cadence, and a worker read more than one bucket rule beyond the last candle's own
   period is a gap.
+- **CONFIRM and RECORD BUY wait at most 8 seconds for the refresh** they ask for. Since
+  one cycle runs at a time (#134) a requested cycle can wait for the one in flight; the
+  recording has already succeeded by then, and the next refresh shows it.
 
 ### Security — CI hardened for outside contributions (#146)
 - Every action in `ci.yml` is pinned to a full commit SHA; the workflow declares read-only

@@ -15,7 +15,7 @@ import { LpRebuildSteps } from './LpRebuildSteps';
 import { FillOffers } from './FillOffers';
 import { PlanFills } from './PlanFills';
 import { RouteQuotes } from './RouteQuotes';
-import { trancheDueHint } from '../fillOffers';
+import { refreshWithin, trancheDueHint } from '../fillOffers';
 import {
   PLAN_STATUS_COLOR,
   PLAN_STATUS_LABEL,
@@ -62,7 +62,7 @@ export function AccumulationPlanPanel({
       setTxHash('');
       // Refresh the worker so the plan advances, then the dashboard. A failed refresh
       // is not a failed recording: the next scheduled cycle picks it up.
-      await api.ingestNow().catch(() => undefined);
+      await refreshWithin(() => api.ingestNow());
       onRecorded?.();
     } catch (e) {
       setMessage({ ok: false, text: e instanceof Error ? e.message : 'Recording failed.' });

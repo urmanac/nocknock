@@ -245,6 +245,28 @@ const failure = (e: unknown, fallback: string): OfferActionResult => ({
 });
 
 /**
+ * How long a button waits for the refresh it asks for after a write. Since #134 a
+ * requested ingestion cycle waits for any cycle already running, so it can take two
+ * cycle lengths, longer than nginx lets a request live. The write itself has already
+ * succeeded by then; the button stops waiting after this and the next poll shows the
+ * result. The cycle carries on in the worker either way.
+ */
+export const REFRESH_WAIT_MS = 8000;
+
+/** Ask the worker for a cycle and wait for it, but never longer than `waitMs`. Never throws. */
+export async function refreshWithin(
+  ingestNow: () => Promise<unknown>,
+  waitMs: number = REFRESH_WAIT_MS,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, waitMs);
+  });
+  await Promise.race([ingestNow().then(() => undefined, () => undefined), timeout]);
+  if (timer !== undefined) clearTimeout(timer);
+}
+
+/**
  * CONFIRM: record the offered swap. This is the manual path with the hash filled in:
  * the worker fetches and verifies the receipt again, and what it records comes from
  * that verification, not from the offer. A failed refresh afterwards is not a failed
@@ -256,7 +278,7 @@ export async function confirmOffer(
 ): Promise<OfferActionResult> {
   try {
     const res = await client.recordAccumulation(offer.tx_hash);
-    await client.ingestNow().catch(() => undefined);
+    await refreshWithin(() => client.ingestNow());
     return {
       ok: true,
       text: res.duplicate
@@ -275,7 +297,7 @@ export async function dismissOffer(
 ): Promise<OfferActionResult> {
   try {
     await client.dismissFillOffer(offer.tx_hash);
-    await client.ingestNow().catch(() => undefined);
+    await refreshWithin(() => client.ingestNow());
     return { ok: true, text: 'Marked as not part of the plan. It is not counted, and can be restored below.' };
   } catch (e) {
     return failure(e, 'Could not mark the swap; nothing changed.');
@@ -288,7 +310,7 @@ export async function restoreOffer(
 ): Promise<OfferActionResult> {
   try {
     await client.restoreFillOffer(offer.tx_hash);
-    await client.ingestNow().catch(() => undefined);
+    await refreshWithin(() => client.ingestNow());
     return { ok: true, text: 'Restored: the swap is on offer again. It is still not counted until you confirm it.' };
   } catch (e) {
     return failure(e, 'Could not restore the swap; nothing changed.');

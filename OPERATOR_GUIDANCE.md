@@ -196,6 +196,6 @@ Before pushing any PR or proposing a release tag, always execute the full verifi
 ```bash
 make test-brain       # 3 tests passing (WASM invariants & hashing)
 make test-worker      # 407 tests as of v0.8.1 burn-down (381 worker + 26 MCP)
-make test-frontend    # 321 tests as of v0.8.1 burn-down
+make test-frontend    # 324 tests as of v0.8.1 burn-down
 make dist             # Verifies packaging of dist/ binaries and tarballs
 ```

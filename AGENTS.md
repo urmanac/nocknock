@@ -173,7 +173,7 @@ Before pushing any PR or tag:
 ```bash
 make test-brain       # 3 tests (WASM invariants)
 make test-worker      # 407 tests as of v0.8.1 burn-down: 381 worker + 26 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger, collectible rewards, closed positions, burn-down #130-#137)
-make test-frontend    # 321 tests as of v0.8.1 burn-down (staleness, contract, display helpers, charts, surfaces, ledger, collectible rewards, closed positions, burn-down)
+make test-frontend    # 324 tests as of v0.8.1 burn-down (staleness, contract, display helpers, charts, surfaces, ledger, collectible rewards, closed positions, burn-down)
 make dist             # Verifies packaging of dist/ binaries and tarballs
 NOCKNOCK_API_URL=http://chudmax:8081 make test-mcp   # both MCP transports against the deployment
 ```

@@ -23,6 +23,8 @@ import {
   trancheDueHint,
   txUrl,
   type FillOfferClient,
+  refreshWithin,
+  REFRESH_WAIT_MS,
 } from './fillOffers';
 
 afterEach(() => {
@@ -354,3 +356,46 @@ describe('per-fill list', () => {
     expect(fillsForPlan(undefined, 'p')).toEqual([]);
   });
 });
+
+describe('a button never hangs on the refresh after a write (#134)', () => {
+  it('stops waiting for a slow cycle after the limit; the write result still comes back', async () => {
+    vi.useFakeTimers();
+    try {
+      const never = vi.fn(() => new Promise<unknown>(() => {}));
+      const c = {
+        recordAccumulation: vi.fn().mockResolvedValue({
+          duplicate: false,
+          tx_hash: '0x' + 'ab'.repeat(32),
+          usdc_spent: '20',
+          nock_received: '1300',
+          effective_price_usd: '0.0153',
+          block_number: 1,
+          confirmed_at: '2026-11-18T05:00:00+00:00',
+        }),
+        dismissFillOffer: vi.fn(),
+        restoreFillOffer: vi.fn(),
+        ingestNow: never,
+      } as unknown as Parameters<typeof confirmOffer>[1];
+      const pending = confirmOffer({ tx_hash: '0x' + 'ab'.repeat(32) }, c);
+      await vi.advanceTimersByTimeAsync(REFRESH_WAIT_MS);
+      const res = await pending;
+      expect(res.ok).toBe(true);
+      expect(never).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('returns as soon as a quick cycle finishes', async () => {
+    const quick = vi.fn().mockResolvedValue({});
+    const t0 = Date.now();
+    await refreshWithin(quick, 60_000);
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(quick).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed refresh is swallowed', async () => {
+    await expect(refreshWithin(() => Promise.reject(new Error('504')), 1000)).resolves.toBeUndefined();
+  });
+});
+
