@@ -83,6 +83,32 @@ async fn test_a_joined_request_gets_the_shared_cycles_error() {
 }
 
 #[tokio::test]
+async fn test_a_request_joined_to_a_panicked_cycle_is_not_told_an_older_outcome() {
+    // An earlier cycle succeeded. Two requests queue behind a running cycle; the first
+    // runs a cycle that panics. The second must not report the earlier success as its own.
+    let gate = Arc::new(CycleGate::default());
+    gate.run(|| async { Ok(()) }).await.unwrap();
+    let g = gate.clone();
+    let inflight = tokio::spawn(async move { g.run(|| async { tokio::time::sleep(std::time::Duration::from_millis(30)).await; Ok(()) }).await });
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    let g1 = gate.clone();
+    let panicking = tokio::spawn(async move {
+        g1.run_or_join(|| async {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            panic!("unexpected RPC shape")
+        })
+        .await
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    let g2 = gate.clone();
+    let waiter = tokio::spawn(async move { g2.run_or_join(|| async { Ok(()) }).await });
+    inflight.await.unwrap().unwrap();
+    assert!(panicking.await.is_err(), "the cycle panicked");
+    let outcome = waiter.await.unwrap();
+    assert_eq!(outcome.unwrap_err().to_string(), CYCLE_DID_NOT_FINISH);
+}
+
+#[tokio::test]
 async fn test_a_dropped_request_does_not_cancel_its_cycle() {
     // The handler spawns the cycle and awaits its JoinHandle; dropping the handler's
     // future (a client gone, nginx's 60 s timeout) must leave the cycle running.
@@ -189,8 +215,14 @@ fn test_cross_site_writes_are_refused_and_same_host_ones_pass() {
     assert!(refused(None, Some("https://evil.example"), Some("chudmax:8081")));
     // A sandboxed page or a file sends "null".
     assert!(refused(None, Some("null"), Some("chudmax:8081")));
-    // DNS rebinding: the page's name points at the host, but its Origin is its own name.
-    assert!(refused(Some("same-origin"), Some("http://rebind.example:8081"), Some("chudmax:8081")));
+    // An Origin naming another host than the one the request was sent to.
+    assert!(refused(Some("same-origin"), Some("http://other.example:8081"), Some("chudmax:8081")));
+    // Not closed by this guard (a Host allow-list is not part of this patch): DNS
+    // rebinding. The browser sends the attacker's name as Host too, so the two agree.
+    assert!(!refused(Some("same-origin"), Some("http://rebind.example:8081"), Some("rebind.example:8081")));
+    // Not closed either: a page served on another port of the operator's host (Strata on
+    // chudmax:8080, say) is the same host, because nginx forwards Host without the port.
+    assert!(!refused(Some("same-site"), Some("http://chudmax:8080"), Some("chudmax")));
     // An Origin with no Host to compare against.
     assert!(refused(None, Some("http://chudmax:3000"), None));
     // Reads are never refused.
@@ -317,6 +349,38 @@ fn test_stored_quotes_are_pruned_only_where_no_fill_can_use_them() {
     }
 }
 
+#[test]
+fn test_stored_quotes_of_a_tranche_due_for_days_are_bounded() {
+    // Review of #133: rows read after the latest recorded fill (or before the first one)
+    // used to stay forever while a tranche stayed due.
+    let now = DateTime::parse_from_rfc3339("2026-11-17T12:00:00Z").unwrap().with_timezone(&Utc);
+    let window = STORED_QUOTE_RECORDING_WINDOW_HOURS * 60;
+    // One row every 5 minutes for a week, oldest first, all after a fill at block 500.
+    let week = 7 * 24 * 60;
+    let rows: Vec<(i64, i64, DateTime<Utc>)> =
+        (0..week / 5).map(|i| (i, 1000 + i * 150, now - chrono::Duration::minutes(week - i * 5))).collect();
+    for latest_fill in [Some(500), None] {
+        let gone = stored_quotes_to_prune(&rows, latest_fill, &[], now);
+        let kept: Vec<_> = rows.iter().filter(|r| !gone.contains(&r.0)).collect();
+        // Only the rows of the recording window stay.
+        assert!(kept.iter().all(|r| now - r.2 <= chrono::Duration::minutes(window)), "{latest_fill:?}");
+        assert_eq!(kept.len() as i64, window / 5, "{latest_fill:?}");
+        // A buy recorded within the window still finds the row read before it.
+        let latest_before = |rs: &[&(i64, i64, DateTime<Utc>)], b: i64| rs.iter().filter(|r| r.1 < b).max_by_key(|r| r.1).map(|r| r.0);
+        let all: Vec<_> = rows.iter().collect();
+        let newest_block = rows.last().unwrap().1;
+        for buy_block in [newest_block - 100 * 150, newest_block - 3, newest_block + 1, newest_block + 10_000] {
+            assert_eq!(latest_before(&kept, buy_block), latest_before(&all, buy_block), "buy at {buy_block}");
+        }
+    }
+    // A swap on offer three days ago keeps its row; the newest row always stays, however old.
+    let gone = stored_quotes_to_prune(&rows, Some(500), &[rows[100].1 + 1], now);
+    assert!(!gone.contains(&100));
+    let stale: Vec<(i64, i64, DateTime<Utc>)> = vec![(1, 1000, now - chrono::Duration::days(9)), (2, 1100, now - chrono::Duration::days(8))];
+    assert_eq!(stored_quotes_to_prune(&stale, Some(500), &[], now), vec![1]);
+    assert_eq!(stored_quotes_to_prune(&stale, None, &[], now), vec![1]);
+}
+
 // ---------------- #130: a cycle that could not read the plan ledger ----------------
 
 fn fills_at(count: i64, spent: f64) -> PlanFills {
@@ -399,6 +463,60 @@ fn test_an_unread_ledger_cycle_is_not_a_directive_change() {
     assert!(text.contains("is complete"), "{text}");
     // After a restart nothing is remembered: nothing is compared, as on a first boot.
     assert_eq!(notify(bad_base, None, good_action, &waiting), None);
+}
+
+#[test]
+fn test_an_unread_ledger_still_pushes_a_change_outside_the_plan() {
+    // Review of #130: an unread ledger hides only the change its unread plan caused. A
+    // floor lock that starts during the outage is pushed; its end is pushed too.
+    let waiting = build_plan_status(&burndown_plan_cfg(), &fills_at(3, 60.0), &PlanDirective::Waiting { next_due_at: Utc::now() });
+    let good_action = "DCA ON SCHEDULE (4 of 5 next)";
+    let bad = unreadable_plan();
+    let bad_action = plan_advice(&bad, 0.0113).0;
+    let lock_action = format!("DEFENSIVE LOCK (Floor Recovery) · {}", bad_action);
+    let notify = |prev: NotifyBaseline, last: Option<NotifyBaseline>, action: &str, plan: &AccumulationPlanStatus| {
+        let (pa, pp) = notification_baseline(prev, last, action, Some(plan));
+        cycle_notification_with_closed(pa.as_deref(), action, "details", pp.as_ref(), Some(plan), None, &[], None)
+    };
+    let good_base: NotifyBaseline = (Some(good_action.to_string()), Some(waiting.clone()));
+    let bad_base: NotifyBaseline = (Some(bad_action.clone()), Some(bad.clone()));
+    let lock_base: NotifyBaseline = (Some(lock_action.clone()), Some(bad.clone()));
+
+    // A good read, then an unread cycle under a floor lock: the lock is pushed.
+    let text = notify(good_base.clone(), Some(good_base.clone()), &lock_action, &bad).expect("the lock is pushed");
+    assert!(text.contains("DEFENSIVE LOCK"), "{text}");
+    // Unread, then unread with the lock: pushed, against the last read.
+    assert!(notify(bad_base.clone(), Some(good_base.clone()), &lock_action, &bad).is_some());
+    // The lock holds through further unread cycles: pushed once only.
+    assert_eq!(notify(lock_base.clone(), Some(good_base.clone()), &lock_action, &bad), None);
+    // After a restart during the outage the stored cycle is the reference.
+    assert!(notify(bad_base.clone(), None, &lock_action, &bad).is_some());
+    assert_eq!(notify(lock_base.clone(), None, &lock_action, &bad), None);
+    // The ledger is read again under the lock: the operator was told the lock, so the
+    // plan's own part changing is pushed against it.
+    let due = build_plan_status(&burndown_plan_cfg(), &fills_at(3, 60.0), &PlanDirective::TrancheDue { usdc: 20.0, limited_by: None });
+    let text = notify(lock_base.clone(), Some(good_base.clone()), "DEFENSIVE LOCK (Floor Recovery) · DCA TRANCHE DUE (4 of 5)", &due)
+        .expect("pushed");
+    assert!(text.contains("DCA TRANCHE DUE"), "{text}");
+    // A plan-only change under an unread ledger is still silent (DCA due -> the LP
+    // rebuild that stands in for an idle plan).
+    let due_base: NotifyBaseline = (Some("DCA TRANCHE DUE (4 of 5)".to_string()), Some(due.clone()));
+    assert_eq!(notify(due_base.clone(), Some(due_base.clone()), "REBUILD LP TRANCHES (No Net Cash Change)", &bad), None);
+    // After a restart, the ledger read again with no change outside the plan: silent.
+    assert_eq!(notify(bad_base, None, good_action, &waiting), None);
+}
+
+#[test]
+fn test_an_unread_ledger_cycle_with_a_note_does_not_say_directive_unchanged() {
+    let bad = unreadable_plan();
+    let bad_action = plan_advice(&bad, 0.0113).0;
+    let good: NotifyBaseline = (Some("DCA ON SCHEDULE (4 of 5 next)".to_string()), None);
+    let (pa, pp) = notification_baseline(good.clone(), Some(good), &bad_action, Some(&bad));
+    let closed = vec!["Position X closed.".to_string()];
+    let text = cycle_notification_with_closed(pa.as_deref(), &bad_action, "details", pp.as_ref(), Some(&bad), None, &closed, None)
+        .expect("the closing is pushed");
+    assert!(!text.contains("Directive unchanged"), "{text}");
+    assert!(text.contains("the plan ledger was not read this cycle"), "{text}");
 }
 
 // ---------------- #131: sub-cent range bounds keep their digits ----------------

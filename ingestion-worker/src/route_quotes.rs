@@ -1120,6 +1120,12 @@ pub(crate) async fn quote_due_tranche(
     Some(quotes)
 }
 
+/// How late a buy fill detection never offered can be recorded by hash and still find
+/// the quote read before it (issue #133 review). Rows read after the plan's latest
+/// recorded fill (or before its first) are kept this long. It bounds the table while a
+/// tranche stays due for days; it is a retention window, not a plan number.
+pub(crate) const STORED_QUOTE_RECORDING_WINDOW_HOURS: i64 = 24;
+
 /// Which stored quote rows no fill can use any more (issue #133). Pure. `rows` are the
 /// plan's rows as (id, block, quoted_at). A fill's reference is the latest row read
 /// before its block, and only if it was not read before the buy before it
@@ -1127,25 +1133,42 @@ pub(crate) async fn quote_due_tranche(
 /// read before L can serve only a buy below L that is not recorded yet; the ones
 /// NockNock knows of are the swaps still on offer or dismissed (a dismissed one can be
 /// restored), and each keeps the latest row read before its block. Everything else
-/// read before L, and more than `FILL_QUOTE_MAX_AGE_MINUTES` ago, goes. Nothing goes
-/// before the plan's first recorded fill. A buy below L that fill detection never
-/// offered and that is recorded by hash afterwards reads "no quote on record".
+/// read before L, and more than `FILL_QUOTE_MAX_AGE_MINUTES` ago, goes. A buy below L
+/// that fill detection never offered and that is recorded by hash afterwards reads
+/// "no quote on record".
+///
+/// Rows read after L (or with no recorded fill yet) serve the next buy. The newest row
+/// always stays, and so does each swap's row on offer or dismissed; the rest go once
+/// they are more than `STORED_QUOTE_RECORDING_WINDOW_HOURS` old, so a tranche that stays
+/// due for days does not add rows without bound. A buy fill detection never offered,
+/// recorded by hash more than that long after it, reads "no quote on record".
 pub(crate) fn stored_quotes_to_prune(
     rows: &[(i64, i64, DateTime<Utc>)],
     latest_fill_block: Option<i64>,
     open_candidate_blocks: &[i64],
     now: DateTime<Utc>,
 ) -> Vec<i64> {
-    let Some(latest_fill) = latest_fill_block else {
-        return Vec::new();
-    };
-    let keep: std::collections::HashSet<i64> = open_candidate_blocks
+    let mut keep: std::collections::HashSet<i64> = open_candidate_blocks
         .iter()
         .filter_map(|c| rows.iter().filter(|r| r.1 < *c).max_by_key(|r| r.1).map(|r| r.0))
         .collect();
-    let too_old = now - chrono::Duration::minutes(FILL_QUOTE_MAX_AGE_MINUTES);
+    // The newest row the next buy can use (one read before the latest fill cannot).
+    keep.extend(
+        rows.iter()
+            .filter(|r| latest_fill_block.map_or(true, |l| r.1 >= l))
+            .max_by_key(|r| (r.1, r.2))
+            .map(|r| r.0),
+    );
+    let below_fill_too_old = now - chrono::Duration::minutes(FILL_QUOTE_MAX_AGE_MINUTES);
+    let unrecorded_too_old = now - chrono::Duration::hours(STORED_QUOTE_RECORDING_WINDOW_HOURS);
     rows.iter()
-        .filter(|(id, block, quoted_at)| *block < latest_fill && *quoted_at < too_old && !keep.contains(id))
+        .filter(|(id, block, quoted_at)| {
+            let too_old = match latest_fill_block {
+                Some(l) if *block < l => *quoted_at < below_fill_too_old,
+                _ => *quoted_at < unrecorded_too_old,
+            };
+            too_old && !keep.contains(id)
+        })
         .map(|r| r.0)
         .collect()
 }
@@ -1162,9 +1185,6 @@ pub(crate) async fn prune_stored_quotes(state: &Arc<AppState>, plan_id: &str) {
                 .fetch_one(&state.db)
                 .await?
                 .try_get("b")?;
-        let Some(latest) = latest else {
-            return Ok::<u64, sqlx::Error>(0);
-        };
         let open: Vec<i64> = sqlx::query(
             "SELECT block_number FROM accumulation_candidates \
              WHERE wallet = $1 AND state IN ('offered', 'dismissed') AND block_number IS NOT NULL",
@@ -1176,18 +1196,17 @@ pub(crate) async fn prune_stored_quotes(state: &Arc<AppState>, plan_id: &str) {
         .filter_map(|r| r.try_get::<i64, _>("block_number").ok())
         .collect();
         let rows: Vec<(i64, i64, DateTime<Utc>)> = sqlx::query(
-            "SELECT id, block_number, quoted_at FROM accumulation_quotes WHERE plan_id = $1 AND block_number < $2",
+            "SELECT id, block_number, quoted_at FROM accumulation_quotes WHERE plan_id = $1",
         )
         .bind(plan_id)
-        .bind(latest)
         .fetch_all(&state.db)
         .await?
         .iter()
         .filter_map(|r| Some((r.try_get("id").ok()?, r.try_get("block_number").ok()?, r.try_get("quoted_at").ok()?)))
         .collect();
-        let ids = stored_quotes_to_prune(&rows, Some(latest), &open, Utc::now());
+        let ids = stored_quotes_to_prune(&rows, latest, &open, Utc::now());
         if ids.is_empty() {
-            return Ok(0);
+            return Ok::<u64, sqlx::Error>(0);
         }
         Ok(sqlx::query("DELETE FROM accumulation_quotes WHERE id = ANY($1)")
             .bind(&ids)

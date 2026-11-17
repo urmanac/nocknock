@@ -17,7 +17,8 @@ one widening (`accumulation_plan.venue` nullable). No new config key is required
   a newer one already replaced, or push a transition twice. The endpoint runs its cycle
   in a task of its own: a client that disconnects (or nginx's 60 s timeout) no longer
   drops a cycle between the store and its notification. Requests that arrive while a
-  cycle runs wait for it and then share one new cycle.
+  cycle runs wait for it and then share one new cycle. A request joined to a cycle that
+  never finished is told so, never an older cycle's outcome.
 - **#133 LAN API hardening.** A POST is refused with 403 `CROSS_SITE_REFUSED` when its
   `Sec-Fetch-Site` is `cross-site`, or its `Origin` host is not the request's `Host` host
   (ports are not compared, because nginx forwards the host without the port: the
@@ -26,16 +27,23 @@ one widening (`accumulation_plan.venue` nullable). No new config key is required
   /v1/accumulation/quotes/refresh` reads the chain at most once every 10 seconds; inside
   the window it answers with the quotes held (200), or 429 `REFRESH_COOLDOWN` with
   `Retry-After` when it holds none. Stored `accumulation_quotes` rows that no buy can use
-  any more are deleted after each stored quote (this also covers the table growth noted
-  in #136). The Vite dev proxy passes the browser's `Host` through. No authentication was
-  added.
+  any more are deleted after each stored quote, and rows read since the latest recorded
+  buy are kept for 24 hours (plus the newest one and the one before each swap on offer or
+  dismissed), so a tranche due for days no longer grows the table without bound (this
+  also covers the table growth noted in #136). The Vite dev proxy passes the browser's
+  `Host` through. No authentication was added, and the guard does not stop DNS
+  rebinding or a page served on another port of the same host (that needs a Host
+  allow-list).
 - **#130 An unread ledger is unknown progress.** A cycle that cannot read the plan
   ledger reads `DCA BLOCKED (ledger unreadable)` with no "$0.00 of $X" sentence and no
   "(1 of N)"; the plan status carries `progress_unknown: true` and its amounts read
   "unknown"; the dashboard panel, the Lite view and both MCP transports say unknown; the
-  LP rebuild keeps the whole budget liquid meanwhile. That cycle pushes no directive
-  change, and the next good cycle is compared with the last one that read the ledger, so
-  a plan completed just before the outage is announced once.
+  LP rebuild keeps the whole budget liquid meanwhile. That cycle pushes no change of the
+  plan's own part of the directive (a floor lock or another change outside the plan is
+  still pushed), and the next good cycle is compared with what the operator was last
+  told, so a plan completed just before the outage is announced once. The raw JSON keeps
+  `fills`, `tranche_index` and `tranches_total` numeric; with `progress_unknown: true`
+  they are not progress.
 - **#131 Range bounds keep their digits.** Sub-cent `lower_price`/`upper_price` carry six
   significant digits (`0.00000564468`, was `0.00000564`): the Aero CL card reads 154,015 -
   177,158 NOCK per WETH, as the ticks and the Aero app do (was 154,083 - 177,305), and the
@@ -55,7 +63,10 @@ one widening (`accumulation_plan.venue` nullable). No new config key is required
 - **#137 Average-cost chart gaps.** Consecutive backfilled candles one candle period apart
   are no longer gaps: a run of hourly candles is one lighter region with one caption
   ("hourly third-party candles"), only real gaps break the line and count in the footer,
-  and gap labels are thinned so none overprints another.
+  and gap labels are thinned so none overprints another. Each candle is measured against
+  its own period, so daily and hourly candles in one range are each read at their own
+  cadence, and a worker read more than one bucket rule beyond the last candle's own
+  period is a gap.
 
 ### Security — CI hardened for outside contributions (#146)
 - Every action in `ci.yml` is pinned to a full commit SHA; the workflow declares read-only

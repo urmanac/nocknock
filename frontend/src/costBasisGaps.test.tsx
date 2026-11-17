@@ -107,4 +107,41 @@ describe('average cost chart gaps (#137)', () => {
     expect(html.split('no stored price for').length - 1).toBe(chart.gaps.filter((g) => g.labelled).length);
     expect(html.split('hourly third-party candles').length - 1).toBe(1);
   });
+
+  describe('mixed daily and hourly candles (review of #137)', () => {
+    const DAY = 24 * HOUR;
+    const candle = (t: number): SpotRow => ({ t, spot: 0.0118, backfilled: true });
+    const daily = (n: number, from: number) => Array.from({ length: n }, (_, i) => candle(from + i * DAY));
+
+    it('reads each candle against its own period: daily steps are not gaps', () => {
+      const days = daily(20, START - 20 * DAY);
+      const hours = Array.from({ length: 30 }, (_, i) => candle(START + i * HOUR));
+      const { gaps, backfill } = spotChartSeries([...days, ...hours], 900);
+      expect(gaps).toEqual([]);
+      expect(backfill.map((b) => b.caption)).toEqual(['daily third-party candles', 'hourly third-party candles']);
+      // The first hourly candle is a day after the last daily one, so it closes the daily stretch.
+      expect(backfill[0]).toMatchObject({ start: START - 20 * DAY, end: START });
+      expect(backfill[1]).toMatchObject({ start: START + HOUR, end: START + 29 * HOUR });
+    });
+
+    it('still breaks at a two-day hole between hourly candles when daily candles dominate', () => {
+      const days = daily(30, START - 30 * DAY);
+      const hours = [
+        ...Array.from({ length: 5 }, (_, i) => candle(START + i * HOUR)),
+        ...Array.from({ length: 5 }, (_, i) => candle(START + 4 * HOUR + 2 * DAY + i * HOUR)),
+      ];
+      const { gaps } = spotChartSeries([...days, ...hours], 900);
+      expect(gaps.map((g) => g.time)).toEqual(['no stored price for 2d 0h']);
+    });
+
+    it('breaks between the last candle and a worker read that comes well after it', () => {
+      const hours = Array.from({ length: 10 }, (_, i) => candle(START + i * HOUR));
+      const lastCandle = START + 9 * HOUR;
+      const late = { t: lastCandle + 140 * 60_000, spot: 0.0115, backfilled: false };
+      expect(spotChartSeries([...hours, late], 900).gaps.map((g) => g.time)).toEqual(['no stored price for 2h 20m']);
+      // A read inside the last candle's own hour plus one bucket rule is not a gap.
+      const soon = { t: lastCandle + 80 * 60_000, spot: 0.0115, backfilled: false };
+      expect(spotChartSeries([...hours, soon], 900).gaps).toEqual([]);
+    });
+  });
 });

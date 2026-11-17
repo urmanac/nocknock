@@ -21,6 +21,9 @@ pub(crate) fn resolve_high_water_mark_date(prev: Option<(f64, DateTime<Utc>)>, c
 /// the request just recorded), so it waits for the cycle in flight and then either
 /// reuses the result of a cycle that another waiter started meanwhile, or runs one.
 /// However many requests pile up behind one cycle, at most one more cycle runs for them.
+/// What a request joined to a cycle that never returned (it panicked) is told.
+pub(crate) const CYCLE_DID_NOT_FINISH: &str = "the ingestion cycle did not finish";
+
 #[derive(Default)]
 pub(crate) struct CycleGate {
     /// Cycles started, counted while the lock is held.
@@ -38,6 +41,9 @@ impl CycleGate {
     {
         let mut last = self.last.lock().await;
         self.started.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // Until this cycle returns, its outcome is that it did not finish: a cycle that
+        // panics leaves this, never the previous cycle's outcome, for a waiting request.
+        *last = Some(Err(CYCLE_DID_NOT_FINISH.to_string()));
         let result = cycle().await;
         *last = Some(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
         result
@@ -60,6 +66,9 @@ impl CycleGate {
             }
         }
         self.started.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // Until this cycle returns, its outcome is that it did not finish: a cycle that
+        // panics leaves this, never the previous cycle's outcome, for a waiting request.
+        *last = Some(Err(CYCLE_DID_NOT_FINISH.to_string()));
         let result = cycle().await;
         *last = Some(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
         result

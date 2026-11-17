@@ -508,6 +508,10 @@ pub(crate) fn api_router(state: Arc<AppState>) -> axum::Router {
 /// is the operator's own host and passes. Requests without `Origin` and without
 /// `Sec-Fetch-Site` (curl, scripts, MCP clients) pass: they are not a browser acting for
 /// some page. GET and HEAD are never refused; nothing they do changes state.
+///
+/// Not covered: DNS rebinding (the browser then sends the rebound name as Host as well,
+/// so Origin and Host agree) and a page served on another port of the same host. Closing
+/// those needs a Host allow-list, which is not part of this guard.
 pub(crate) fn cross_site_refusal(
     method: &axum::http::Method,
     sec_fetch_site: Option<&str>,

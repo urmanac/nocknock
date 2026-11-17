@@ -18,6 +18,8 @@ info:
     `cross-site`, or when it carries an `Origin` whose host is not the request's `Host`
     host (ports are not compared: nginx forwards the host without its port). Requests
     without `Origin` (curl, scripts, MCP clients) are unaffected, and so is every GET.
+    Not covered: DNS rebinding (Origin and Host then name the same host) and a page
+    served on another port of the same host; closing those needs a Host allow-list.
     The API has no authentication; it is meant for the LAN.
 
 servers:
