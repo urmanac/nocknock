@@ -9,6 +9,13 @@ on:
   pull_request:
     branches: [ main ]
 
+# Every job is read-only unless it says otherwise (only create-release does). This holds
+# even if the repository's default token permission is ever changed. Actions are pinned
+# to full commit SHAs, with the version each SHA was tagged as beside it: a tag or branch
+# can be moved to different code, a commit cannot. See docs/kb/ci-security-audit-2026-11-17.md.
+permissions:
+  contents: read
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
@@ -17,15 +24,16 @@ jobs:
     name: Build & Test WASM Brain
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch, 2026-11-17
         with:
+          toolchain: stable
           targets: wasm32-wasip1
 
       - name: Setup Rust Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: brain -> target
 
@@ -40,7 +48,7 @@ jobs:
           RUSTFLAGS="-C link-arg=--allow-undefined" cargo build --target wasm32-wasip1 --release
 
       - name: Upload Brain Artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nocknock-wasm-brain
           path: brain/target/wasm32-wasip1/release/nocknock_brain.wasm
@@ -49,13 +57,15 @@ jobs:
     name: Build & Test Ingestion Worker
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch, 2026-11-17
+        with:
+          toolchain: stable
 
       - name: Setup Rust Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: ingestion-worker -> target
 
@@ -70,7 +80,7 @@ jobs:
           SQLX_OFFLINE=true cargo build --release
 
       - name: Upload Worker Binary Artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nocknock-worker-binaries-linux-amd64
           path: |
@@ -81,10 +91,10 @@ jobs:
     name: Build & Test Frontend Portal
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -110,7 +120,7 @@ jobs:
           tar -czf nocknock-frontend.tar.gz -C frontend/dist .
 
       - name: Upload Frontend Artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nocknock-frontend-bundle
           path: nocknock-frontend.tar.gz
@@ -123,35 +133,49 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download WASM Brain Artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: nocknock-wasm-brain
           path: ./release-assets
 
       - name: Download Worker Binary
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: nocknock-worker-binaries-linux-amd64
           path: ./release-assets
 
       - name: Download Frontend Bundle
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: nocknock-frontend-bundle
           path: ./release-assets
 
-      - name: Extract Release Notes
+      # The tag name reaches the shell through the environment, never by being pasted into
+      # the script, and anything that is not a plain version tag stops the job: git allows
+      # characters such as ';' and '$' in a tag name.
+      - name: Check the tag name
+        env:
+          TAG_NAME: ${{ github.ref_name }}
         run: |
-          make release-notes TAG="${{ github.ref_name }}" > release_body.md
+          if ! printf '%s' "$TAG_NAME" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Refusing to release: tag name is not a plain version (vX.Y.Z)." >&2
+            exit 1
+          fi
+
+      - name: Extract Release Notes
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          make release-notes TAG="$TAG_NAME" > release_body.md
           if [ ! -s release_body.md ]; then
-            echo "Release ${{ github.ref_name }}" > release_body.md
+            echo "Release $TAG_NAME" > release_body.md
           fi
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           name: Release ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
