@@ -23,6 +23,9 @@ import {
 const MUTED = '#8b949e';
 const TEXT = '#c9d1d9';
 const NOTE = '#fcd34d';
+// Every line of an entry may carry the operator's config id, which can be long and
+// have no space or hyphen in it: let it break anywhere instead of leaving the card.
+const WRAP: CSSProperties = { overflowWrap: 'anywhere' };
 
 export function ClosedPositionsCard({ data }: { data: any | null | undefined }) {
   const closed = closedPositionsOf(data);
@@ -44,7 +47,7 @@ export function ClosedPositionsCard({ data }: { data: any | null | undefined }) 
       {closed.map((c, i) => {
         const seen = closedFirstSeenText(c);
         return (
-          <div key={c.position_id ?? c.config_id ?? i} style={{ fontSize: '0.78rem', lineHeight: 1.6, color: TEXT, marginBottom: 6 }}>
+          <div key={c.position_id ?? c.config_id ?? i} style={{ fontSize: '0.78rem', lineHeight: 1.6, color: TEXT, marginBottom: 6, ...WRAP }}>
             <div style={{ fontWeight: 600 }}>{closedPositionName(c)}</div>
             <div style={{ color: NOTE }}>{closedPositionFact(c)}</div>
             <div style={{ color: MUTED }}>
@@ -76,7 +79,7 @@ export function ClosedPositionsLiteCard({
     <section style={cardStyle} data-testid="closed-positions-lite">
       <div style={labelStyle}>{closedPositionsHeader(closed)}</div>
       {closed.map((c, i) => (
-        <div key={c.position_id ?? c.config_id ?? i} style={{ marginBottom: 6 }}>
+        <div key={c.position_id ?? c.config_id ?? i} style={{ marginBottom: 6, ...WRAP }}>
           <div style={{ fontSize: 13, color: '#e6edf3' }}>{closedPositionName(c)}</div>
           <div style={{ ...subStyle, color: NOTE }}>{closedPositionFact(c)}</div>
           <div style={subStyle}>

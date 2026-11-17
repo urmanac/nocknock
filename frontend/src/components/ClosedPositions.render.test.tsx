@@ -40,6 +40,25 @@ describe('ClosedPositions components (#144)', () => {
     }
   });
 
+  it('a config id with no break in it wraps inside both cards', () => {
+    // An operator-chosen id (synthetic) with no space or hyphen, longer than a phone is wide.
+    const id = 'aero_cl200_weth_nock_second_range_opened_2026_11_17_by_hand';
+    const data = {
+      closed_positions: [{ ...WITHDRAWN_DATA.closed_positions[0], config_id: id, label: `Aero CL #2914490 (${id})` }],
+    };
+    for (const html of [
+      renderToStaticMarkup(<ClosedPositionsCard data={data} />),
+      renderToStaticMarkup(<ClosedPositionsLiteCard data={data} />),
+    ]) {
+      // The name line and the "you can remove its entry (id)" line both carry the id,
+      // and both sit inside the entry's block, which lets a long word break.
+      const entry = html.match(/<div style="[^"]*overflow-wrap:anywhere[^"]*">(<div[^>]*>[^<]*<\/div>)+<\/div>/);
+      expect(entry, html).not.toBeNull();
+      expect(entry![0].split(id).length - 1).toBe(2);
+      expect(html.split(id).length - 1).toBe(2);
+    }
+  });
+
   it('an older snapshot, a loading one and one with nothing closed render nothing at all', () => {
     for (const data of [OLD_DATA, null, undefined, {}, { closed_positions: [] }, { closed_positions: null }]) {
       expect(renderToStaticMarkup(<ClosedPositionsCard data={data} />)).toBe('');
