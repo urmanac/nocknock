@@ -106,6 +106,13 @@ paths:
       tags: [Snapshots]
       summary: Get historical snapshots for time-series charts
       operationId: getHistoricalSnapshots
+      description: |
+        Each row is slimmed for the charts, which read only its figures: the embedded
+        counterfactual keeps its current point, structural channels and the cost-basis
+        prose are dropped, and (v0.8.1, issue #136) `accumulation_plan.route_quotes` is
+        null and `accumulation_plan.fill_detection.offers` and `.dismissed` are empty.
+        Fill detection's status and check times stay. `/snapshot/latest` carries every
+        field in full.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Before'

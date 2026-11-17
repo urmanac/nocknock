@@ -281,6 +281,16 @@ pub(crate) fn slim_historical_payload(data: &mut SnapshotData) {
         cb.whole_stack.includes.clear();
         cb.whole_stack.excludes.clear();
     }
+    // A stale copy of every venue, hop and tried route, and the offer lists, in every
+    // row a due tranche stores (issue #136). Nothing reads them from history; the
+    // latest snapshot carries them. Detection's status and check times stay.
+    if let Some(plan) = dm.accumulation_plan.as_mut() {
+        plan.route_quotes = None;
+        if let Some(fd) = plan.fill_detection.as_mut() {
+            fd.offers.clear();
+            fd.dismissed.clear();
+        }
+    }
 }
 
 pub(crate) async fn get_snapshot_metadata_handler(

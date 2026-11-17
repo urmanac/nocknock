@@ -725,6 +725,64 @@ fn test_historical_rows_keep_the_cost_basis_figures_and_drop_the_repeated_prose(
     };
     slim_historical_payload(&mut old);
     assert_eq!(old.derived_metrics.cost_basis, None);
+
+    // Issue #136: a row stored while a tranche was due drops its route quotes and the
+    // offer lists; detection's status and check times stay, and so do the plan figures.
+    let offer = FillOffer {
+        tx_hash: "0x78376f3c0000000000000000000000000000000000000000000000000000006e31b9".to_string(),
+        confirmed_at: "2026-11-16T03:08:37+00:00".to_string(),
+        block_number: 58_000_000,
+        usdc_spent: "20.000000".to_string(),
+        nock_received: "1780.3600".to_string(),
+        effective_price_usd: "0.011234".to_string(),
+        timing: "early".to_string(),
+        reference_spot_usd: Some("0.01128675".to_string()),
+        reference_spot_source: Some("worker".to_string()),
+        execution_cost_bps: Some(-47),
+    };
+    let mut plan = build_plan_status(
+        &AccumulationPlanConfig {
+            id: "2026-11-reentry".to_string(),
+            budget_usdc: 100.0,
+            tranches: 5,
+            interval_hours: 24.0,
+            starts_at: None,
+            venue: None,
+            max_price_usd: None,
+            pause_when_overextended: true,
+            respect_cash_target: true,
+            cash_reserve_usdc: None,
+        },
+        &PlanFills::default(),
+        &PlanDirective::TrancheDue { usdc: 20.0, limited_by: None },
+    );
+    plan.route_quotes = Some(route_quotes_unavailable("20.00", "no Alchemy RPC key is configured", Some(0.0112867512)));
+    plan.fill_detection = Some(FillDetection {
+        status: "ok".to_string(),
+        detail: None,
+        checked_back_to: Some("2026-11-14T00:00:00+00:00".to_string()),
+        last_checked_at: Some("2026-11-16T04:00:00+00:00".to_string()),
+        offers: vec![offer.clone(); 3],
+        dismissed: vec![offer; 2],
+    });
+    let mut due = SnapshotData {
+        closed_positions: vec![],
+        wallet_balances: vec![],
+        positions: vec![],
+        pool_mechanics: vec![],
+        concentrated_liquidity: vec![],
+        contract_fees: vec![],
+        derived_metrics: DerivedMetrics { accumulation_plan: Some(plan.clone()), ..Default::default() },
+    };
+    let before = serde_json::to_vec(&due).unwrap().len();
+    slim_historical_payload(&mut due);
+    let slim = due.derived_metrics.accumulation_plan.as_ref().unwrap();
+    assert_eq!(slim.route_quotes, None);
+    let fd = slim.fill_detection.as_ref().unwrap();
+    assert!(fd.offers.is_empty() && fd.dismissed.is_empty());
+    assert_eq!((fd.status.as_str(), fd.last_checked_at.as_deref()), ("ok", Some("2026-11-16T04:00:00+00:00")));
+    assert_eq!((slim.status.as_str(), slim.tranche_usdc.as_str(), slim.spent_usdc.as_str()), ("tranche_due", "20.00", "0.00"));
+    assert!(serde_json::to_vec(&due).unwrap().len() < before);
 }
 
 /// Words that would turn a measurement into advice (lore: "Why not buy more now?").
