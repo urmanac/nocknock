@@ -49,7 +49,7 @@ pub(crate) const GAUGE_REWARD_TOKEN: &str = "0xf7c618c1"; // rewardToken()
 /// The deviation matrix row for the AERO pillar: a measured share, status `no_target`.
 pub(crate) const AERO_BUCKET_NAME: &str = "AERO (wallet)";
 
-fn address_word(address: &str) -> String {
+pub(crate) fn address_word(address: &str) -> String {
     format!("{:0>64}", address.trim_start_matches("0x").to_lowercase())
 }
 
@@ -297,7 +297,7 @@ pub(crate) fn aero_statement_for(reads: &AeroReads, position_id: &str) -> Option
 }
 
 /// Stamp each snapshot position with its unclaimed AERO, or with the reason it was not
-/// read. Positions without an entry (not an Aero position, or an unstaked CL NFT) are
+/// read, and with the same read as its collectible reward (#142). Positions without an entry (not an Aero position, or an unstaked CL NFT) are
 /// left exactly as built. Run before build_contract_fees, which prints the statement.
 pub(crate) fn apply_aero_rewards(positions: &mut [Position], reads: &AeroReads) {
     for entry in reads.unclaimed.iter().flatten() {
@@ -306,6 +306,8 @@ pub(crate) fn apply_aero_rewards(positions: &mut [Position], reads: &AeroReads) 
             p.unclaimed_aero = amount;
             p.unclaimed_aero_usd = usd;
             p.unclaimed_aero_note = note;
+            // The same read, structured as collectible earnings (#142).
+            p.collectible_reward = Some(collectible_reward(entry, reads.price_usd));
         }
     }
 }

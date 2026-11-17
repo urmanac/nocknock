@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: NockNock Snapshot Data Model
-  version: 2.6.0
+  version: 2.7.0
   description: Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
   license:
     name: ISC
@@ -297,6 +297,20 @@ components:
             answers earned() in the older token 0x940181a9…8631; its figure is not
             published as AERO). The read is optional: it does not fail the cycle,
             and the value is never published as 0. (v0.6.0, #93)
+        collectible_reward:
+          allOf:
+            - $ref: '#/components/schemas/CollectibleReward'
+          description: >
+            The position's gauge reward stated as collectible earnings: the token,
+            the amount, its USD value, the gauge it is collected from and how. The
+            same read as unclaimed_aero, unclaimed_aero_usd and
+            unclaimed_aero_note, structured so a consumer need not parse a note.
+            Present for every Aero position that can earn a reward, also when the
+            gauge could not be read (status not_read, with the reason). Absent for
+            a position that cannot earn one and on a snapshot from before this
+            field existed; clients then show "not reported", never 0. Not part of
+            amount_usd, fees_usd or total_portfolio_usd. A statement of fact, never
+            advice. (#142)
 
     PositionToken:
       type: object
@@ -467,6 +481,87 @@ components:
           type: string
           description: Estimated gas cost to claim (decimal string)
           example: "5.23"
+        earnings_kind:
+          type: string
+          enum: [gauge_reward]
+          description: >
+            Present, with the value gauge_reward, when this position's reported
+            earnings are its gauge reward: its LP fees are not LP-claimable and the
+            row carries a reward. Absent for a row whose earnings are LP fees. It is
+            never claim_now, claim_recommended or accumulate, which are harvest
+            advice about LP fees and never label AERO. (#142)
+        reward:
+          allOf:
+            - $ref: '#/components/schemas/CollectibleReward'
+          description: >
+            The position's gauge reward, the same object as
+            positions[].collectible_reward, when it has one. Present on a row with
+            LP-claimable fees too; that row's earnings_kind stays absent. (#142)
+        lp_fees_note:
+          type: string
+          description: >
+            The reason alone why this position's LP fees are not LP-claimable, for
+            example "not LP-claimable (staked: swap fees on staked liquidity go to
+            the gauge)", without the AERO statement that amount appends. Absent when
+            the LP fees are claimable. (#142)
+
+    CollectibleReward:
+      type: object
+      required: [status, token_symbol, token_address, collected_in, collect_url]
+      description: >
+        A gauge reward stated as collectible earnings (#142). It says what is there
+        and where it is collected. It never says to claim, sell, hold or accumulate
+        the token, it is not counted in total_portfolio_usd, and no directive,
+        notification or threshold reads it.
+      properties:
+        status:
+          type: string
+          enum: [read, not_read]
+          description: >
+            read when the gauge answered (amount is then present, possibly zero).
+            not_read when it did not, or when the position has no gauge configured;
+            amount and usd are then null and note is the reason. (#142)
+        token_symbol:
+          type: string
+          example: "AERO"
+          description: The reward token. Today always AERO. (#142)
+        token_address:
+          type: string
+          pattern: '^0x[a-fA-F0-9]{40}$'
+          description: The reward token's address, 0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee for AERO. (#142)
+        amount:
+          type: string
+          nullable: true
+          description: >
+            Reward earned and not collected, in the token to 6 decimals (the gauge's
+            earned read). "0.000000" is a read zero. Null when not read, never 0 for
+            something not read. (#142)
+          example: "17.654015"
+        usd:
+          type: string
+          nullable: true
+          description: >
+            amount at the cycle's AERO/USD price, 2 decimals. Null when the reward
+            was not read or AERO could not be priced; "0.00" for a read zero amount,
+            which needs no price. (#142)
+          example: "7.75"
+        gauge:
+          type: string
+          nullable: true
+          pattern: '^0x[a-fA-F0-9]{40}$'
+          description: The gauge the reward is collected from. Null when the position has no gauge configured. (#142)
+        collected_in:
+          type: string
+          example: "the Aero app"
+          description: How the reward is collected. NockNock builds no transaction for it. (#142)
+        collect_url:
+          type: string
+          example: "https://app.aero.xyz"
+          description: The Aero app. Always on app.aero.xyz, never the retired aerodrome.finance. (#142)
+        note:
+          type: string
+          nullable: true
+          description: Why the reward was not read (the text of unclaimed_aero_note). Null when it was read. (#142)
 
     # ============================================================
     # DERIVED METRICS — pre-computed for the "Storyboard Visual Layout"
@@ -1293,6 +1388,38 @@ components:
             (the price could not be read, or a gauge could not), and for a position
             whose gauge is not configured. Null when everything was read.
             (v0.6.0, #93)
+        collectible_rewards_usd:
+          type: string
+          nullable: true
+          description: >
+            Collectible gauge rewards of the tracked staked positions in USD, 2
+            decimals; the sum of positions[].collectible_reward.usd. Null when any
+            gauge was not read or a non-zero reward is unpriced
+            (collectible_rewards_note says which), never a partial sum and never 0
+            for something not read. "0.00" when every gauge answered zero or no
+            staked Aero position is tracked. NOT counted in total_portfolio_usd, and
+            no directive, notification or threshold reads it; BATCH HARVEST counts
+            LP fees only. Absent on a snapshot from before this field existed;
+            clients then show "not reported". (#142)
+          example: "7.84"
+        collectible_rewards_note:
+          type: string
+          nullable: true
+          description: >
+            Why collectible_rewards_usd and total_collectible_usd are null in a
+            live cycle; it names each position whose gauge was not read, or says
+            that the amount has no USD value. Null when they are stated. (#142)
+        total_collectible_usd:
+          type: string
+          nullable: true
+          description: >
+            Collectible LP fees plus collectible gauge rewards, 2 decimals; the sum
+            of the printed total_fees_claimable_usd and collectible_rewards_usd, so
+            the three figures add up to the cent. The two parts stay available
+            separately, and total_fees_claimable_usd keeps meaning LP fees only.
+            Null whenever collectible_rewards_usd is null. NOT counted in
+            total_portfolio_usd and read by no directive. (#142)
+          example: "9.79"
 
     AssetAggregationSeries:
       type: object
@@ -1581,6 +1708,29 @@ components:
             position's AERO is in positions[].unclaimed_aero. Absent when there is
             nothing to say; a snapshot from before #93 carries no note for an Aero
             basic pool, and clients then say its AERO is not reported. (v0.6.0)
+        earnings_kind:
+          type: string
+          enum: [gauge_reward]
+          description: >
+            Present, with the value gauge_reward, when the row's reported earnings
+            are the position's gauge reward (see reward); clients draw it as its own
+            series, apart from LP fees. It appears only beside not_claimable. A row
+            with a fee action (claim_now, claim_recommended, accumulate) carries no
+            reward and no earnings_kind, so no harvest word ever labels AERO.
+            Absent for a row whose earnings are LP fees. (#142)
+        reward:
+          allOf:
+            - $ref: '#/components/schemas/CollectibleReward'
+          description: >
+            The gauge reward this row reports as the position's earnings; its
+            amount, USD value, gauge and how it is collected. claimable_usd stays
+            0.00 for such a row, because it means LP fees. Absent when
+            earnings_kind is absent. (#142)
+        lp_fees_note:
+          type: string
+          description: >
+            With not_claimable, the reason alone for the LP-fee part, without the
+            AERO statement note appends. Absent on a claimable row. (#142)
 
     # ============================================================
     # INPUT TYPES FOR WASM FUNCTIONS

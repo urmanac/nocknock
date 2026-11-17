@@ -174,8 +174,11 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     let mut lp_fee_usd = 0.0f64;
     // ETH/WETH inside tracked LP: the LP part of the ETH pillar (issue #94).
     let mut lp_eth = 0.0f64;
-    // Per-position (address, label, fee_usd, LP-claimable, reason) tuples for the velocity panel.
-    let mut fee_entries: Vec<(String, String, f64, bool, Option<String>)> = Vec::new();
+    // Per-position (address, label, fee_usd, LP-claimable, reason) tuples for the velocity
+    // panel, with what a not-LP-claimable position earns instead (#142): the kind, the
+    // gauge reward and the reason alone.
+    #[allow(clippy::type_complexity)]
+    let mut fee_entries: Vec<(String, String, f64, bool, Option<String>, (Option<String>, Option<CollectibleReward>, Option<String>))> = Vec::new();
     for p in &raw.positions {
         let p0 = leg_usd_price(&p.token0, spot_price, raw.live_eth_price_usd);
         let p1 = leg_usd_price(&p.token1, spot_price, raw.live_eth_price_usd);
@@ -202,6 +205,8 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         // gets no AERO statement: the amount is on the position itself
         // (positions[].unclaimed_aero) and in the pillar lines. With no AERO statement
         // the note is what it was before #93.
+        // The reward as the row's earnings (#142): only on a row with no fee action.
+        let earnings = fee_row_earnings(lp_claimable, fees_note.as_deref(), collectible_reward_for(&raw.aero, &p.position_id));
         let note = fee_row_note(lp_claimable, fees_note, aero_statement_for(&raw.aero, &p.position_id));
         fee_entries.push((
             fee_contract_for(
@@ -214,6 +219,7 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             fee_usd,
             lp_claimable,
             note,
+            earnings,
         ));
     }
 
@@ -251,6 +257,10 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     // NockNock gives no advice about AERO; no directive below reads these figures.
     let aero = aero_pillar(&raw.aero);
     let wallet_aero_usd = aero.wallet_usd.unwrap_or(0.0);
+    // Collectible earnings (#142): LP fees and gauge rewards side by side and their sum.
+    // Reported only. Nothing below reads these: the total, the harvest threshold and the
+    // directive are computed exactly as before.
+    let collectible = collectible_totals(&raw.aero, &aero, total_fees_usd);
 
     // One definition of the portfolio: every pillar, gas and AERO included. Targets,
     // weights, the high-water mark and history all use it.
@@ -624,6 +634,9 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             unclaimed_aero_amount: aero.unclaimed_amount.map(|v| format!("{:.6}", v)),
             unclaimed_aero_usd: aero.unclaimed_usd.map(|v| format!("{:.2}", v)),
             aero_note: aero.note.clone(),
+            collectible_rewards_usd: collectible.rewards_usd.clone(),
+            collectible_rewards_note: collectible.note.clone(),
+            total_collectible_usd: collectible.total_usd.clone(),
         },
         asset_aggregation_series: AssetAggregationSeries {
             time_points: vec![now_str.clone()],
@@ -785,7 +798,7 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: fee_entries
                 .iter()
-                .map(|(addr, name, fee_usd, lp_claimable, note)| FeeCollectionIndex {
+                .map(|(addr, name, fee_usd, lp_claimable, note, (earnings_kind, reward, lp_fees_note))| FeeCollectionIndex {
                     contract_address: addr.clone(),
                     contract_name: name.clone(),
                     claimable_usd: format!("{:.2}", fee_usd),
@@ -802,6 +815,9 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
                         "not_claimable".to_string()
                     },
                     note: note.clone(),
+                    earnings_kind: earnings_kind.clone(),
+                    reward: reward.clone(),
+                    lp_fees_note: lp_fees_note.clone(),
                 })
                 .collect(),
         },

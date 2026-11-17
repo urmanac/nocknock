@@ -70,6 +70,10 @@ mod cost_basis;
 use cost_basis::*;
 mod cost_basis_text;
 use cost_basis_text::*;
+mod rewards;
+use rewards::*;
+mod reward_text;
+use reward_text::*;
 
 // ============================================================
 // Configuration
@@ -679,6 +683,43 @@ struct Position {
     /// is configured, or the gauge read failed. Never shown as 0. (v0.6.0, #93)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     unclaimed_aero_note: Option<String>,
+    /// The position's gauge reward as collectible earnings (#142): the token, the amount,
+    /// its USD value, the gauge it is collected from and how. Present for every Aero
+    /// position that can earn a reward, also when the gauge could not be read (`status`
+    /// is then `not_read` and `note` says why). The same figures as `unclaimed_aero*`,
+    /// structured so a consumer need not parse a note. A statement of fact, never
+    /// advice, and not counted in amount_usd, fees_usd or the portfolio total.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    collectible_reward: Option<CollectibleReward>,
+}
+
+/// A gauge reward stated as collectible earnings (#142). It says what is there and where
+/// it is collected. It never says to claim, sell, hold or accumulate it.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+struct CollectibleReward {
+    /// read | not_read. `not_read` has no amount and no USD value, and `note` says why.
+    status: String,
+    /// "AERO".
+    token_symbol: String,
+    token_address: String,
+    /// Reward earned and not collected, in the token, 6 decimals (gauge `earned`).
+    /// Null when the gauge was not read: never 0 for something not read.
+    #[serde(default)]
+    amount: Option<String>,
+    /// `amount` at the cycle's AERO/USD price, 2 decimals. Null when not read or when
+    /// AERO is unpriced. "0.00" for a read zero amount, which needs no price.
+    #[serde(default)]
+    usd: Option<String>,
+    /// The gauge the reward is collected from. Null when the position has none configured.
+    #[serde(default)]
+    gauge: Option<String>,
+    /// How it is collected: "the Aero app". NockNock builds no transaction for it.
+    collected_in: String,
+    /// The Aero app (app.aero.xyz, never the retired aerodrome.finance).
+    collect_url: String,
+    /// Why the reward was not read. Null when it was.
+    #[serde(default)]
+    note: Option<String>,
 }
 
 /// Per-position NOCK series entry for the asset aggregation chart (v2.0.0;
@@ -773,6 +814,17 @@ struct ContractFee {
     amount_usd: String,
     claimable: bool,
     gas_break_even_usd: String,
+    /// `gauge_reward` when this position's reported earnings are its gauge reward: its
+    /// LP fees are not LP-claimable and it has a `reward`. Absent for a row whose
+    /// earnings are LP fees. Never claim_now, claim_recommended or accumulate. (#142)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    earnings_kind: Option<String>,
+    /// The position's gauge reward (positions[].collectible_reward), when it has one. (#142)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reward: Option<CollectibleReward>,
+    /// The reason alone why the LP fees are not LP-claimable; absent when they are. (#142)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lp_fees_note: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
@@ -1299,10 +1351,25 @@ struct GlobalStatus {
     /// Stated reason whenever an AERO figure above is null in a live cycle (v0.6.0, #93).
     #[serde(default)]
     aero_note: Option<String>,
+    /// Collectible gauge rewards of the tracked staked positions, in USD (#142): the sum
+    /// of positions[].collectible_reward.usd. Null when a gauge was not read or a
+    /// non-zero reward is unpriced (`collectible_rewards_note` says which): never a
+    /// partial sum, never 0 for something not read. NOT in total_portfolio_usd, and no
+    /// directive, notification or threshold reads it.
+    #[serde(default)]
+    collectible_rewards_usd: Option<String>,
+    /// Why `collectible_rewards_usd` and `total_collectible_usd` are null in a live cycle.
+    #[serde(default)]
+    collectible_rewards_note: Option<String>,
+    /// Collectible LP fees (`total_fees_claimable_usd`, which keeps meaning LP fees only)
+    /// plus `collectible_rewards_usd` (#142). Null whenever the rewards part is null.
+    /// A statement of what is collectible; NOT in total_portfolio_usd.
+    #[serde(default)]
+    total_collectible_usd: Option<String>,
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
-const SNAPSHOT_SPEC_VERSION: &str = "2.6.0";
+const SNAPSHOT_SPEC_VERSION: &str = "2.7.0";
 
 /// The gas (wallet ETH + WETH) and ETH pillar figures, each None when it cannot be
 /// measured: unread wallet balances or an unpriced ETH. Never a zero stand-in.
@@ -1425,6 +1492,18 @@ struct FeeCollectionIndex {
     /// position staked in its gauge). Absent otherwise. (v0.6.0, #91)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     note: Option<String>,
+    /// `gauge_reward` when the row's reported earnings are the position's gauge reward
+    /// (`reward`), drawn as its own series. Only ever beside `not_claimable`: a row with
+    /// a fee action (claim_now, claim_recommended, accumulate) carries no reward, so no
+    /// harvest word ever labels AERO. Absent for a row whose earnings are LP fees. (#142)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    earnings_kind: Option<String>,
+    /// The gauge reward: amount, USD, the gauge and how it is collected. (#142)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reward: Option<CollectibleReward>,
+    /// With `not_claimable`: the reason alone, without the AERO statement `note` adds. (#142)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lp_fees_note: Option<String>,
 }
 
 // ============================================================
@@ -1845,6 +1924,41 @@ struct ClaimFeesPayload {
     estimated_gas_usd: Option<String>,
     net_after_gas_usd: Option<String>,
     actions: Vec<ClaimFeeAction>,
+    /// Collectible LP fees: the same figure as `gross_usd`, under its own name (#142).
+    collectible_lp_fees_usd: Option<String>,
+    /// Collectible gauge rewards in USD; null when not totalled (the note says why). (#142)
+    collectible_rewards_usd: Option<String>,
+    collectible_rewards_note: Option<String>,
+    /// LP fees plus gauge rewards; null whenever the rewards part is null. (#142)
+    total_collectible_usd: Option<String>,
+    /// One row per position with a gauge reward (#142). Information only: a row has no
+    /// `to` and no `data`, so nothing here can be sent to a wallet. NockNock builds no
+    /// transaction for a reward; it is collected in the Aero app.
+    rewards: Vec<ClaimRewardRow>,
+}
+
+/// A position's gauge reward in the claim payload (#142): what is collectible, where,
+/// and what collecting it would cost in gas when that call is verified for the gauge.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+struct ClaimRewardRow {
+    position_id: String,
+    label: String,
+    /// read | not_read
+    status: String,
+    token_symbol: String,
+    amount: Option<String>,
+    usd: Option<String>,
+    gauge: Option<String>,
+    collected_in: String,
+    collect_url: String,
+    /// Why the reward was not read; null when it was.
+    note: Option<String>,
+    /// Gas units of the verified claim call, hex, estimated from the wallet. Null unless
+    /// the call is verified for this gauge and the estimate succeeded.
+    gas_estimate: Option<String>,
+    gas_usd: Option<String>,
+    /// The gas statement in words, e.g. why there is no estimate.
+    gas_note: String,
 }
 #[derive(Deserialize, Debug)]
 struct RecordHarvestRequest {
@@ -1896,3 +2010,5 @@ mod tests_quotes;
 mod tests_cost_basis;
 #[cfg(test)]
 mod tests_notify;
+#[cfg(test)]
+mod tests_rewards;

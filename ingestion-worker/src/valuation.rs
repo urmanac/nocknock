@@ -94,6 +94,7 @@ pub(crate) fn build_position_snapshots(raw_positions: &[RawPosition], nock_usd: 
                 unclaimed_aero: None,
                 unclaimed_aero_usd: None,
                 unclaimed_aero_note: None,
+                collectible_reward: None,
             }
         })
         .collect()
@@ -199,7 +200,9 @@ pub(crate) fn build_pool_mechanics(raw_positions: &[RawPosition], nock_usd: f64,
 /// rather than reading as $0 of fees. An Aero CL position carries its own reason
 /// (`fees_note`, stamped by apply_position_facts). The reason is followed by the
 /// position's unclaimed AERO, or by why that was not read (stamped by
-/// apply_aero_rewards, #93): an amount, never advice.
+/// apply_aero_rewards, #93): an amount, never advice. Since #142 the row also carries
+/// that reward structured (`reward`), `earnings_kind` = `gauge_reward` when the reward
+/// is what the position earns, and the reason alone in `lp_fees_note`.
 pub(crate) fn build_contract_fees(positions: &[Position], live_gas_cost_usd: f64, not_lp_claimable: &[String]) -> Vec<ContractFee> {
     positions
         .iter()
@@ -208,6 +211,11 @@ pub(crate) fn build_contract_fees(positions: &[Position], live_gas_cost_usd: f64
             // of `not_lp_claimable`: the note is the position's own statement.
             let not_claimable =
                 p.fees_note.is_some() || not_lp_claimable.iter().any(|id| id == &p.position_id);
+            // What the position earns when its LP fees are not LP-claimable (#142): the
+            // gauge reward, structured. A row with LP-claimable fees keeps its reward
+            // too (this row has no action word), but its earnings kind stays LP fees.
+            let (earnings_kind, _, lp_fees_note) =
+                fee_row_earnings(!not_claimable, p.fees_note.as_deref(), p.collectible_reward.clone());
             ContractFee {
                 contract_address: fee_contract_for(
                     &p.protocol,
@@ -241,6 +249,9 @@ pub(crate) fn build_contract_fees(positions: &[Position], live_gas_cost_usd: f64
                 amount_usd: p.fees_usd.clone(),
                 claimable: !not_claimable && p.fees_usd.parse::<f64>().unwrap_or(0.0) > 0.0,
                 gas_break_even_usd: format!("{:.4}", live_gas_cost_usd),
+                earnings_kind,
+                reward: p.collectible_reward.clone(),
+                lp_fees_note,
             }
         })
         .collect()

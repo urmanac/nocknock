@@ -742,7 +742,7 @@ fn test_staked_position_fees_are_not_lp_claimable_on_every_surface() {
     }));
     let text = format_claim_simulation_text(&both);
     assert!(text.contains("• Estimated Gas: ~$0.0014 USD\n"), "{text}");
-    assert!(text.contains("• Total Gross Claimable: $0.1200 USD\n"), "{text}");
+    assert!(text.contains("• Collectible LP fees: $0.1200 USD\n"), "{text}");
     // Even when a caller forgets to list the id, the note alone keeps it not claimable.
     let fees = build_contract_fees(&snap.positions, 0.0041, &[]);
     assert_eq!(fees[0].amount, AERO_CL_STAKED_FEES_NOTE);

@@ -24,7 +24,7 @@ fn test_fallback_claim_text_states_why_an_aero_cl_position_has_no_fee_figure() {
     assert!(!text.contains("0.000000"), "{text}");
     // Gas and totals come only from the row that can be claimed.
     assert!(text.contains("Estimated Gas: ~$0.0014 USD"), "{text}");
-    assert!(text.contains("Total Gross Claimable: $0.1200 USD"), "{text}");
+    assert!(text.contains("Collectible LP fees: $0.1200 USD"), "{text}");
 }
 
 #[test]

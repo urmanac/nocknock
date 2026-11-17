@@ -59,6 +59,8 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
         aero_pillar_text(data)
     );
     let aero = aero_lines(data);
+    // Collectible earnings (issue #142): LP fees and gauge rewards, labelled, and their sum.
+    let collectible = collectible_earnings_line(data);
     let gas = match (get("wallet_gas_eth"), get("wallet_gas_usd")) {
         (Some(eth), Some(usd)) => format!("{eth} ETH (${usd}), counted in the total; not cash, not deployable"),
         (Some(eth), None) => format!("{eth} ETH (USD value not reported), counted in the total; not cash, not deployable"),
@@ -76,6 +78,7 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
          • Stable Stack: {total_usdc}\n\
          • Gas held (wallet ETH+WETH): {gas}\n\
          {aero}\n\
+         {collectible}\n\
          • High-Water Mark: {hwm}\n\
          {cost_basis}\n\
          • Tactical Directive: {advice}"
@@ -99,6 +102,8 @@ pub fn format_shot_advice_text(data: &serde_json::Value) -> String {
             None => format!("+${v} USD"),
         })
         .unwrap_or_else(|| "unavailable".to_string());
+    // Gauge rewards and the total (issue #142). "Uncollected Claimable Fees" stays LP fees.
+    let collectible = collectible_advice_lines(data);
 
     format!(
         "🎯 Tactical Shot Advice Engine\n\
@@ -107,6 +112,7 @@ pub fn format_shot_advice_text(data: &serde_json::Value) -> String {
          • Decision Matrix Details: {details}\n\
          • Uncollected Claimable Fees: {claimable_usd}\n\
          • Net of two claims' gas: {gas_delta}\n\
+         {collectible}\n\
          • Harvest rule: {HARVEST_RULE_TEXT}"
     )
 }
@@ -194,71 +200,11 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
     )
 }
 
+/// `simulate_claim_fees` from a snapshot alone: no live gas estimate for a reward.
+/// The text is built by reward_text.rs, the one source both transports compile. The
+/// HTTP transport calls that function with its live gas statements (mcp_http.rs); this
+/// form is what the tests and the golden files pin.
+#[cfg(test)]
 pub fn format_claim_simulation_text(data: &serde_json::Value) -> String {
-    let fees = data.get("contract_fees").and_then(|f| f.as_array());
-    let mut details = String::new();
-    let mut total_claimable_usd = 0.0f64;
-    let mut gas_usd: Option<f64> = None;
-    let (mut claimable_rows, mut not_claimable_rows) = (0usize, 0usize);
-
-    if let Some(list) = fees {
-        for fee in list {
-            let symbol = fee.get("fee_token_symbol").and_then(|s| s.as_str()).unwrap_or("Pool");
-            let amount = fee.get("amount").and_then(|a| a.as_str()).unwrap_or("0");
-            let amount_usd = fee.get("amount_usd").and_then(|a| a.as_str()).unwrap_or("0.00");
-            let gas_str = fee.get("gas_break_even_usd").and_then(|g| g.as_str()).unwrap_or_default();
-            if amount.starts_with("not LP-claimable") {
-                // No fee figure to print: an Aero pool whose claimFees() reverts, or an
-                // Aero CL position staked in its gauge. The worker's own reason is
-                // shown; nothing to claim, no gas to count.
-                details.push_str(&format!("  - {symbol}: {amount}\n"));
-                not_claimable_rows += 1;
-                continue;
-            }
-            claimable_rows += 1;
-            match gas_str.parse::<f64>() {
-                Ok(g) => {
-                    // Per-contract break-evens come from the live gas query; take the max
-                    // as the representative claim cost. Never fabricate a constant.
-                    gas_usd = Some(match gas_usd {
-                        Some(acc) => acc.max(g),
-                        None => g,
-                    });
-                    details.push_str(&format!("  - {symbol}: {amount} (~${amount_usd} USD | Gas Est: ${:.4})\n", g));
-                }
-                Err(_) => {
-                    details.push_str(&format!("  - {symbol}: {amount} (~${amount_usd} USD | Gas Est: unavailable)\n"));
-                }
-            }
-            if let Ok(usd_val) = amount_usd.parse::<f64>() {
-                total_claimable_usd += usd_val;
-            }
-        }
-    }
-
-    let (gas_line, net_line) = match gas_usd {
-        Some(g) => (
-            format!("~${:.4} USD", g),
-            format!("${:.4} USD", (total_claimable_usd - g).max(0.0)),
-        ),
-        // Every row is one the LP cannot claim: there is no claim to cost, which is
-        // not the same as a gas estimate that could not be read.
-        None if claimable_rows == 0 && not_claimable_rows > 0 => (
-            "n/a (nothing LP-claimable)".to_string(),
-            "n/a (nothing LP-claimable)".to_string(),
-        ),
-        None => (
-            "unavailable".to_string(),
-            "unknown (live gas estimate unavailable)".to_string(),
-        ),
-    };
-    format!(
-        "⚡ Fee Claim Simulation\n\
-         =======================\n\
-         • Total Gross Claimable: ${:.4} USD\n\
-         • Estimated Gas: {}\n\
-         • Net Accretion if Harvested: {}\n\
-         Pool Breakdown:\n{}",
-        total_claimable_usd, gas_line, net_line, details
-    )
+    claim_simulation_text(data, &[])
 }

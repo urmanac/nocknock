@@ -934,6 +934,75 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ClaimFeeAction'
+        collectible_lp_fees_usd:
+          type: string
+          nullable: true
+          description: Collectible LP fees in USD. The same figure as gross_usd, under its own name. (#142)
+        collectible_rewards_usd:
+          type: string
+          nullable: true
+          description: >
+            Collectible gauge rewards in USD, the snapshot's
+            global_status.collectible_rewards_usd. Null when not totalled (a gauge
+            was not read, or a reward is unpriced); never a partial sum. (#142)
+        collectible_rewards_note:
+          type: string
+          nullable: true
+          description: Why collectible_rewards_usd and total_collectible_usd are null. (#142)
+        total_collectible_usd:
+          type: string
+          nullable: true
+          description: LP fees plus gauge rewards. Null whenever the rewards part is null. (#142)
+        rewards:
+          type: array
+          description: >
+            One row per position with a gauge reward. Information only; a row has
+            no to and no data, so nothing in it can be sent to a wallet. NockNock
+            builds no transaction for a reward. (#142)
+          items:
+            $ref: '#/components/schemas/ClaimRewardRow'
+
+    ClaimRewardRow:
+      type: object
+      required: [position_id, label, status, token_symbol, collected_in, collect_url, gas_note]
+      description: >
+        A position's gauge reward in the claim payload (#142). It states what is
+        collectible and where. It is not an action and carries no calldata.
+      properties:
+        position_id: { type: string }
+        label: { type: string, example: "WETH+NOCK (Aero CL #2914490)" }
+        status:
+          type: string
+          enum: [read, not_read]
+          description: not_read has no amount and no USD value; note says why. (#142)
+        token_symbol: { type: string, example: "AERO" }
+        amount: { type: string, nullable: true, example: "17.654015" }
+        usd: { type: string, nullable: true, example: "7.75" }
+        gauge:
+          type: string
+          nullable: true
+          description: The gauge the reward is collected from. (#142)
+        collected_in: { type: string, example: "the Aero app" }
+        collect_url: { type: string, example: "https://app.aero.xyz" }
+        note: { type: string, nullable: true }
+        gas_estimate:
+          type: string
+          nullable: true
+          description: >
+            Gas units of the claim call, hex, from a read-only eth_estimateGas sent
+            from the tracked wallet at request time. Present only for a gauge whose
+            claim call is verified on-chain (ONCHAIN_INTEGRATION.md section 9) and
+            a reward greater than zero; null otherwise. (#142)
+        gas_usd:
+          type: string
+          nullable: true
+          description: gas_estimate at the live gas price and ETH/USD, 4 decimals; L2 execution gas only. Null when either input is missing. (#142)
+        gas_note:
+          type: string
+          description: >
+            The gas statement in words, for example "gas est. 363527 units
+            (~$0.0059)" or "gas not estimated (claim call not verified for this
+            gauge)". (#142)
 
     ClaimFeeAction:
       type: object
@@ -983,7 +1052,9 @@ components:
             simulation_detail carries the reason. The payload never contains an
             action that claims AERO from a gauge (#93): unclaimed AERO is stated in
             the snapshot, and claiming it is the operator's own act in the Aero
-            app. The action is excluded from
+            app. Since #142 the simulation_detail of a not_claimable action ends
+            with the position's reward and where it is collected, and the payload
+            lists the rewards in its own rewards array. The action is excluded from
             estimated_gas_usd and net_after_gas_usd. unavailable: not simulated or
             the simulation got no answer; (v0.6.0) also an aerodrome-cl position
             that is not in the latest snapshot yet, or whose snapshot row carries

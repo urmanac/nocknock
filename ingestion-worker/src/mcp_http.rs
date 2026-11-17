@@ -1,5 +1,41 @@
 use crate::*;
 
+/// Live gas statements for the rewards in a snapshot, for `simulate_claim_fees`.
+/// Read-only and bounded (REWARD_GAS_BUDGET_MS). Without a wallet or an RPC key every
+/// reward says why it has no estimate; nothing is guessed.
+async fn simulation_reward_gas(state: &AppState, data: &SnapshotData) -> Vec<RewardGas> {
+    let unavailable = |why: &str| -> Vec<RewardGas> {
+        data.positions
+            .iter()
+            .map(|p| match reward_gas_request(p, "") {
+                Ok(_) => RewardGas::Failed(why.to_string()),
+                Err(gas) => gas,
+            })
+            .collect()
+    };
+    let Some(wallet) = state.config.tracked_wallets.first() else {
+        return unavailable("no tracked wallet is configured");
+    };
+    let Some(rpc_url) = request_rpc_url(&state.config.alchemy_api_keys) else {
+        return unavailable("no RPC key is configured");
+    };
+    let eth_price = data
+        .derived_metrics
+        .global_status
+        .eth_price_usd
+        .as_deref()
+        .and_then(|p| p.trim().parse::<f64>().ok());
+    estimate_reward_claim_gas(
+        &state.http_client,
+        &rpc_url,
+        wallet,
+        &data.positions,
+        eth_price,
+        std::time::Duration::from_millis(REWARD_GAS_BUDGET_MS),
+    )
+    .await
+}
+
 pub(crate) async fn mcp_http_handler(
     Extension(state): Extension<Arc<AppState>>,
     headers: HeaderMap,
@@ -66,7 +102,7 @@ pub(crate) async fn mcp_http_handler(
                     },
                     {
                         "name": "get_shot_advice",
-                        "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics.",
+                        "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics, with uncollected LP fees, collectible AERO rewards and their total as separate labelled lines. The harvest rule counts LP fees only.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {},
@@ -75,7 +111,7 @@ pub(crate) async fn mcp_http_handler(
                     },
                     {
                         "name": "simulate_claim_fees",
-                        "description": "Simulates gas expenditure vs uncollected LP fees across the tracked LP positions.",
+                        "description": "Simulates gas expenditure vs uncollected LP fees across the tracked LP positions, and states each staked Aero position's collectible gauge reward: the amount, the gauge it is collected from (in the Aero app) and a gas estimate only where the claim call is verified on-chain. LP fees, AERO rewards and their total are separate labelled figures. Reports amounts only: no advice about AERO, and no transaction is built for a reward.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {},
@@ -101,15 +137,21 @@ pub(crate) async fn mcp_http_handler(
                 .and_then(|n| n.as_str())
                 .unwrap_or_default();
 
-            let latest = state.latest_snapshot.lock().await;
+            // Cloned so the lock is not held across the live gas estimate below.
+            let latest: Option<SnapshotEnvelope> = state.latest_snapshot.lock().await.clone();
             let last_error: Option<String> =
                 state.last_ingest_error.lock().ok().and_then(|slot| slot.clone()).map(|(_, e)| e);
-            let result_text = if let Some(ref env) = *latest {
+            let result_text = if let Some(ref env) = latest {
                 let data_val = serde_json::to_value(&env.data).unwrap_or_default();
                 let body = match tool_name {
                     "get_portfolio_state" => format_portfolio_state_text(&data_val),
                     "get_shot_advice" => format_shot_advice_text(&data_val),
-                    "simulate_claim_fees" => format_claim_simulation_text(&data_val),
+                    // Gauge rewards (#142): the gas of collecting one is estimated now,
+                    // read-only, and only for a claim call proven for that gauge.
+                    "simulate_claim_fees" => {
+                        let gas = simulation_reward_gas(&state, &env.data).await;
+                        claim_simulation_text(&data_val, &gas)
+                    }
                     "get_accumulation_plan" => format_accumulation_plan_text(&data_val),
                     _ => format!("Unknown tool: {tool_name}"),
                 };
