@@ -106,11 +106,22 @@ describe('naming the ranges with no NOCK leg (#151 review)', () => {
 
   it('the not-drawn caption names only ranges on neither chart (#160)', () => {
     // ETH/USDC ranges are drawn on their own USD-per-ETH chart since #160.
-    expect(notDrawnRangesText(POSITIONS)).toBeNull();
-    expect(notDrawnRangesText([NOCK_USDC, GAS_V3])).toBeNull();
-    expect(notDrawnRangesText([...POSITIONS, USDC_AERO])).toBe('1 non-NOCK range not drawn: not priced in NOCK or ETH');
-    expect(notDrawnRangesText([NOCK_USDC, USDC_AERO, { ...USDC_AERO, position_id: 'y' }])).toBe('2 non-NOCK ranges not drawn: not priced in NOCK or ETH');
+    const drawn = [GAS_V3.position_id, GAS_CL.position_id];
+    expect(notDrawnRangesText(POSITIONS, drawn)).toBeNull();
+    expect(notDrawnRangesText([NOCK_USDC, GAS_V3], [GAS_V3.position_id])).toBeNull();
+    expect(notDrawnRangesText([...POSITIONS, USDC_AERO], drawn)).toBe('1 non-NOCK range not drawn: not priced in NOCK or ETH');
+    expect(notDrawnRangesText([NOCK_USDC, USDC_AERO, { ...USDC_AERO, position_id: 'y' }], drawn)).toBe('2 non-NOCK ranges not drawn: not priced in NOCK or ETH');
     expect(notDrawnRangesText([NOCK_USDC, WETH_NOCK])).toBeNull();
+  });
+
+  it('an ETH/USDC range the ETH chart could not draw is named, never dropped silently', () => {
+    // Only the v3 range was drawn (the CL bracket was missing or unusable).
+    expect(notDrawnRangesText(POSITIONS, [GAS_V3.position_id])).toBe('1 ETH/USDC range not drawn: no usable bracket in this snapshot');
+    expect(notDrawnRangesText(POSITIONS)).toBe('2 ETH/USDC ranges not drawn: no usable bracket in this snapshot');
+    // A full-range one is named by the ETH chart instead.
+    expect(notDrawnRangesText([NOCK_USDC, { ...GAS_V3, full_range: true }])).toBeNull();
+    // Mixed: the sentence that covers both.
+    expect(notDrawnRangesText([...POSITIONS, USDC_AERO], [GAS_V3.position_id])).toBe('2 non-NOCK ranges not drawn: not priced in NOCK or ETH');
   });
 
   it('isEthUsdcPair takes ETH or WETH with USDC in either order', () => {

@@ -14,10 +14,14 @@ const OUT_OF_RANGE = '#f59e0b';
 
 const usd = (v: number) => '$' + Math.round(v).toLocaleString('en-US');
 
-/** "$1,480 – $2,951 · IN RANGE · 15.4% to the nearer edge" */
+/** "$1,480 – $2,951 · IN RANGE · 15.4% to the nearer edge" (or "· at an edge") */
 export function ethBracketText(r: EthBracketRow): string {
   const status = r.inRange ? 'IN RANGE' : 'OUT OF RANGE';
-  const dist = r.inRange && r.distance !== null ? ` · ${r.distance.toFixed(1)}% to the nearer edge` : '';
+  // The status is the position's own pool tick; the distance is from the ETH spot of the
+  // price pool, which can sit a few bps across an edge from it. Then say "at an edge".
+  const dist = !r.inRange || r.distance === null
+    ? ''
+    : r.distance < 0.05 ? ' · at an edge' : ` · ${r.distance.toFixed(1)}% to the nearer edge`;
   return `${usd(r.lower)} – ${usd(r.upper)} · ${status}${dist}`;
 }
 

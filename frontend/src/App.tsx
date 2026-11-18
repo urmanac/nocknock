@@ -161,9 +161,9 @@ function Dashboard() {
     ethUsd,
     parseFloat(metrics?.tick_bracket_hypervisor?.current_price || '0'),
   );
-  const notDrawnRanges = notDrawnRangesText(positionsList);
   // The ETH/USDC ranges (#160) get their own axis, USD per ETH: measured, never steered.
   const ethTickData = ethBracketRows(metrics?.tick_bracket_hypervisor?.brackets, positionsList, ethUsd);
+  const notDrawnRanges = notDrawnRangesText(positionsList, ethTickData.map((r) => r.positionId));
   const ethFullRangeCount = fullRangeEthUsdcCount(positionsList);
 
   // Velocity rows (#142): LP fees and gauge rewards are two series, never one figure.

@@ -14,6 +14,8 @@ const cl: EthBracketRow = { positionId: 'aerodrome-cl:base:3449558', name: 'WETH
 it('names each range with its USD-per-ETH span and status', () => {
   expect(ethBracketText(v3)).toBe('$1,480 – $2,951 · IN RANGE · 15.4% to the nearer edge');
   expect(ethBracketText(cl)).toBe('$1,476 – $2,913 · OUT OF RANGE');
+  // In range by its own pool's tick, but the price pool's spot is across the edge.
+  expect(ethBracketText({ ...v3, distance: 0 })).toBe('$1,480 – $2,951 · IN RANGE · at an edge');
   const html = renderToStaticMarkup(<EthBracketChart rows={[v3, cl]} ethUsd={1749.16} ethUsdFromSnapshot fullRangeCount={0} />);
   expect(html).toContain('ETH/USDC ranges (USD per ETH)');
   expect(html).toContain('measured, never steered');

@@ -337,12 +337,23 @@ export function fullRangeEthUsdcCount(positions: any[] | null | undefined): numb
 /**
  * "1 non-NOCK range not drawn: not priced in NOCK or ETH"; null when every range is
  * drawn on one of the two charts. Since #160 ETH/USDC ranges are drawn on their own
- * chart, so only another pair (USDC/AERO, say) is named here.
+ * chart, so they are named here only when they are not: `drawnEthIds` are the ids
+ * `ethBracketRows` drew. A full-range ETH/USDC position is named by the ETH chart, so a
+ * range never disappears from both without a word.
  */
-export function notDrawnRangesText(positions: any[] | null | undefined): string | null {
-  const n = (positions ?? []).filter((p) => p && !hasNockLeg(p) && !isEthUsdcPair(p)).length;
+export function notDrawnRangesText(
+  positions: any[] | null | undefined,
+  drawnEthIds: Array<string | null> = [],
+): string | null {
+  const notDrawn = (positions ?? []).filter((p) => p && !hasNockLeg(p) && !(
+    isEthUsdcPair(p) && (p.full_range || drawnEthIds.includes(p.position_id ?? null))
+  ));
+  const n = notDrawn.length;
   if (n === 0) return null;
-  return `${n} non-NOCK range${n === 1 ? '' : 's'} not drawn: not priced in NOCK or ETH`;
+  const ethOnly = notDrawn.every((p) => isEthUsdcPair(p));
+  return ethOnly
+    ? `${n} ETH/USDC range${n === 1 ? '' : 's'} not drawn: no usable bracket in this snapshot`
+    : `${n} non-NOCK range${n === 1 ? '' : 's'} not drawn: not priced in NOCK or ETH`;
 }
 
 /** Tracked ranges with no NOCK leg: not drawn on the NOCK bracket chart (#152). */
