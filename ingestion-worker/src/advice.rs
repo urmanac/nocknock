@@ -472,7 +472,9 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     let harvest: Option<(String, String)> = (worth_claiming_usd >= 5.00).then(|| {
         // Each position is its own claim, each paying gas: fees over the gas of every claim.
         let gas_efficiency = if gas_cost > 0.0 && worth_claims > 0 {
-            format!("{:.0}x", worth_claiming_usd / (gas_cost * worth_claims as f64))
+            // One decimal below 10x, so 1.5x is never rounded up to read "2x".
+            let ratio = worth_claiming_usd / (gas_cost * worth_claims as f64);
+            if ratio < 10.0 { format!("{:.1}x", ratio) } else { format!("{:.0}x", ratio) }
         } else {
             "unknown".to_string()
         };

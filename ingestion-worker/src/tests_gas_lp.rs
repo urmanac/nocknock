@@ -625,7 +625,7 @@ fn test_batch_harvest_counts_only_fees_worth_claiming() {
     let m = metrics(&with_fees(1.90, 0.5), &PlanContext::none());
     let (a, d) = (&m.global_status.shot_advice_action, &m.global_status.shot_advice_details);
     assert!(a.contains("BATCH HARVEST"), "{a}");
-    assert!(d.contains("Uncollected LP fees ($5.70) have reached the fixed $5.00 harvest threshold (4x gas efficiency over 3 claims)."), "{d}");
+    assert!(d.contains("Uncollected LP fees ($5.70) have reached the fixed $5.00 harvest threshold (3.8x gas efficiency over 3 claims)."), "{d}");
 
     // Only the rows worth claiming count: two at $3.00 with $2.00 gas (claim_recommended)
     // make $6.00 of a $6.10 total; the third, $0.10, is left out of the sum and the count.
@@ -633,5 +633,5 @@ fn test_batch_harvest_counts_only_fees_worth_claiming() {
     raw.positions.iter_mut().find(|p| p.nft_id == 6607225).unwrap().fee1 = 0.10;
     let m = metrics(&raw, &PlanContext::none());
     let d = &m.global_status.shot_advice_details;
-    assert!(d.contains("Uncollected LP fees ($6.00 of $6.10 uncollected) have reached the fixed $5.00 harvest threshold (2x gas efficiency over 2 claims)."), "{d}");
+    assert!(d.contains("Uncollected LP fees ($6.00 of $6.10 uncollected) have reached the fixed $5.00 harvest threshold (1.5x gas efficiency over 2 claims)."), "{d}");
 }

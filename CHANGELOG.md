@@ -110,7 +110,7 @@ Snapshot spec 2.8.2: additive (`TickBracket.position_id`). No config key changes
   still reads `claim_recommended`. BATCH HARVEST now counts only the fees of positions
   whose own row says `claim_now` or `claim_recommended`: many positions each below their
   claim's gas no longer add up to a harvest. Its gas efficiency is those fees over the gas
-  of every claim they take ("4x gas efficiency over 3 claims"; was the total over one
+  of every claim they take ("3.8x gas efficiency over 3 claims", one decimal below 10x so it is never rounded up; was the total over one
   claim's gas), and the text names the uncollected total when some fees are left out.
 
 ### Security — CI hardened for outside contributions (#146)
