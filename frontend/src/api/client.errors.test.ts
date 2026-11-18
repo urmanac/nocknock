@@ -59,6 +59,22 @@ describe('classifyRecordError (record-harvest retry semantics)', () => {
     expect(classifyRecordError(e)).toBe('awaiting_broadcast');
   });
 
+  it('decides by the HTTP status, never by digits in a refusal detail (#156)', () => {
+    const refusal = Object.assign(
+      new Error('the transaction removes more 0x404… principal than it pays the wallet (1234045404 raw units not received); nothing recorded'),
+      { status: 422, code: 'PRINCIPAL_EXCEEDS_INFLOW' },
+    );
+    expect(classifyRecordError(refusal)).toBe('failed');
+    const unreadable = Object.assign(new Error('positions() on 0x4040 was not answered: HTTP 404'), {
+      status: 503,
+      code: 'POSITION_UNREADABLE',
+    });
+    expect(classifyRecordError(unreadable)).toBe('failed');
+    // Without a status (a thrown string, say), only the codes count.
+    expect(classifyRecordError(new Error('RECEIPT_NOT_FOUND'))).toBe('awaiting_broadcast');
+    expect(classifyRecordError(new Error('upstream said 404'))).toBe('failed');
+  });
+
   it('treats anything else as failed', () => {
     expect(classifyRecordError(new Error('DB_ERROR'))).toBe('failed');
     expect(classifyRecordError(Object.assign(new Error('boom'), { status: 500 }))).toBe('failed');

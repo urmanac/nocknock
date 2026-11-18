@@ -23,15 +23,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - a Uniswap v4 liquidity removal (`PRINCIPAL_NOT_SEPARABLE`);
   - an Aero basic pool `Burn` (`PRINCIPAL_NOT_SEPARABLE`);
   - a concentrated pool `Burn` for another owner (`PRINCIPAL_NOT_SEPARABLE`);
-  - principal larger than what the wallet received (`PRINCIPAL_EXCEEDS_INFLOW`).
+  - a decrease not collected in the same transaction, or collected to anyone but the
+    wallet, the position manager or the contract the wallet called (`PRINCIPAL_NOT_SEPARABLE`);
+  - a collect from a position that held no liquidity just before the transaction, whose
+    payout is principal from an earlier decrease (`PRINCIPAL_NOT_SEPARABLE`);
+  - principal larger than what the wallet received (`PRINCIPAL_EXCEEDS_INFLOW`), including
+    principal in a token NockNock does not book, which a zap may have swapped into one it does.
 
   A transaction that returns only principal records nothing (`PRINCIPAL_ONLY`).
   - The fixture is the real withdrawal of v3 WETH/NOCK #6336662
     (`0x06515a23…b778`). Of its 0.103325 ETH and 1,006.81 NOCK, the fees were
     0.000999503 WETH and 101.58 NOCK.
-  - Known limit: liquidity decreased in one transaction and collected in a later one is
-    booked in full by the later one.
+  - Known limit: part of a position's liquidity decreased in one transaction and
+    collected in a later one, while the position still holds liquidity, is booked in
+    full by the later one.
   - Nothing had been misbooked: that withdrawal was held back until this fix.
+- **The cockpit no longer reads "404" in a refusal as "awaiting broadcast" (#156).** A
+  record-harvest failure is classified by its HTTP status. Refusal details now carry
+  addresses and raw amounts, and the digits "404" inside one would have retried a final
+  refusal for ten minutes.
 
 ## [0.8.1] - 2026-11-18
 

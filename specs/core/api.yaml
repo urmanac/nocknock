@@ -611,13 +611,18 @@ paths:
         returned in `principal_excluded`. Principal that cannot be read from the receipt
         is refused with nothing recorded (422 PRINCIPAL_NOT_SEPARABLE): a Uniswap v4
         liquidity removal (negative ModifyLiquidity; the event has no amounts), an Aero
-        basic or v2-style pool Burn, or a concentrated pool Burn for an owner that is not
-        one of those position managers. Principal larger than what the wallet received
-        of that token is refused (422 PRINCIPAL_EXCEEDS_INFLOW). A transaction that only
-        returns principal records nothing (422 PRINCIPAL_ONLY). Known limit: liquidity
-        decreased in one transaction and collected in a later one is booked in full by
-        the later one, whose receipt has no DecreaseLiquidity; the Uniswap and Aero apps
-        do both in one transaction.
+        basic or v2-style pool Burn, a concentrated pool Burn for an owner that is not
+        one of those position managers, a decrease whose principal is not collected in
+        the same transaction to the wallet, the position manager or the contract the
+        wallet called, or a collect from a position that held no liquidity just before
+        the transaction (its payout is principal decreased earlier). Principal larger
+        than what the wallet received of that token is refused (422
+        PRINCIPAL_EXCEEDS_INFLOW); this includes principal in a token NockNock does not
+        book, unless the receipt shows the wallet receiving it. A transaction that only
+        returns principal records nothing (422 PRINCIPAL_ONLY). Known limit: part of a
+        position's liquidity decreased in one transaction and collected in a later one,
+        while the position still holds liquidity, is booked in full by the later one;
+        the Uniswap and Aero apps decrease and collect in one transaction.
         Nothing is recorded without on-chain verification. A 404 RECEIPT_NOT_FOUND
         also covers the Uniswap-app pending-broadcast quirk (approved but not yet
         broadcast): surface "approved, awaiting wallet broadcast" and retry.

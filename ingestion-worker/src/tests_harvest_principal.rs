@@ -79,7 +79,8 @@ fn test_real_withdrawal_today_books_principal_as_fees() {
 
 #[test]
 fn test_real_withdrawal_scan_reads_one_decrease_through_the_v3_npm() {
-    let d = scan_liquidity_decreases(&receipt()).expect("separable");
+    let liq = scan_liquidity_decreases(&receipt()).expect("separable");
+    let d = &liq.decreases;
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].manager, UNISWAP_V3_NPM_BASE);
     assert_eq!(d[0].token_id_word, word(6336662));
@@ -98,9 +99,12 @@ fn test_real_withdrawal_positions_before_give_weth_and_nock() {
 #[test]
 fn test_real_withdrawal_books_only_the_fees() {
     let r = receipt();
-    let d = scan_liquidity_decreases(&r).unwrap();
-    let principal = principal_by_token(&d, &[pair_before()]).unwrap();
-    let split = subtract_principal(rows(&r), &principal).expect("split");
+    let liq = scan_liquidity_decreases(&r).unwrap();
+    // The NPM collected to itself (then unwrapped and swept), at least the principal.
+    assert_eq!(check_decreases_collected(&liq, &r, WALLET), Ok(()));
+    assert!(collect_only_positions(&liq, &r, WALLET).is_empty());
+    let principal = principal_by_token(&liq.decreases, &[pair_before()]).unwrap();
+    let split = subtract_principal(rows(&r), &principal, &wallet_token_inflows(&r, WALLET)).expect("split");
     // Collect − DecreaseLiquidity, per token: 0.000999503373414842 WETH (paid as ETH)
     // and 101.5803568887759685 NOCK.
     assert_eq!(amount(&split.fees, "ETH").as_deref(), Some("999503373414842"));
@@ -141,29 +145,31 @@ fn test_fee_only_claims_have_no_principal() {
         ],
         &[word(0), word(5), word(7)],
     );
-    assert_eq!(scan_liquidity_decreases(&receipt_with(vec![collect])), Ok(vec![]));
+    let liq = scan_liquidity_decreases(&receipt_with(vec![collect])).unwrap();
+    assert!(liq.decreases.is_empty());
+    assert_eq!(liq.collects.len(), 1);
     // A v4 fee claim: a zero-delta ModifyLiquidity.
     let v4 = log(
         "0x498581ff718922c3f8e6a244956af099b2652b2b",
         vec![V4_MODIFY_LIQUIDITY_TOPIC.to_string(), format!("0x{}", word(1)), topic_addr(WALLET)],
         &[word(0), word(0), word(0), word(0)],
     );
-    assert_eq!(scan_liquidity_decreases(&receipt_with(vec![v4])), Ok(vec![]));
+    assert_eq!(scan_liquidity_decreases(&receipt_with(vec![v4])), Ok(ReceiptLiquidity::default()));
     // A CL pool "poke" Burn of zero liquidity by any owner releases nothing.
     let poke = log(
         "0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a",
         vec![CL_POOL_BURN_TOPIC.to_string(), topic_addr("0x1111111111111111111111111111111111111111"), format!("0x{}", word(1)), format!("0x{}", word(2))],
         &[word(0), word(0), word(0)],
     );
-    assert_eq!(scan_liquidity_decreases(&receipt_with(vec![poke])), Ok(vec![]));
+    assert_eq!(scan_liquidity_decreases(&receipt_with(vec![poke])), Ok(ReceiptLiquidity::default()));
     // The real Aero gauge claim used by the #93 tests.
-    assert_eq!(scan_liquidity_decreases(&super::tests_aero_rewards::real_claim_receipt()), Ok(vec![]));
+    assert_eq!(scan_liquidity_decreases(&super::tests_aero_rewards::real_claim_receipt()), Ok(ReceiptLiquidity::default()));
 }
 
 #[test]
 fn test_no_principal_leaves_rows_unchanged() {
     let r = vec![row("USDC", USDC_BASE, 1_234_567, 6), row("NOCK", NOCK_BASE, 5, 16)];
-    let split = subtract_principal(r.clone(), &[]).unwrap();
+    let split = subtract_principal(r.clone(), &[], &[]).unwrap();
     assert_eq!(split.fees, r);
     assert!(split.principal.is_empty());
 }
@@ -213,15 +219,15 @@ fn test_cl_burn_for_an_unknown_owner_is_refused() {
         vec![CL_POOL_BURN_TOPIC.to_string(), topic_addr(AERO_CL_POSITION_MANAGER_BASE), format!("0x{}", word(1)), format!("0x{}", word(2))],
         &[word(5), word(10), word(0)],
     );
-    let d = scan_liquidity_decreases(&receipt_with(vec![known, decrease_log(AERO_CL_POSITION_MANAGER_BASE, 3449558, 10, 0)])).unwrap();
+    let d = scan_liquidity_decreases(&receipt_with(vec![known, decrease_log(AERO_CL_POSITION_MANAGER_BASE, 3449558, 10, 0)])).unwrap().decreases;
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].manager, AERO_CL_POSITION_MANAGER_BASE);
 }
 
 #[test]
 fn test_decrease_from_an_unknown_manager_is_not_read_as_principal() {
-    let d = scan_liquidity_decreases(&receipt_with(vec![decrease_log("0x827922686190790b37229fd06084350E74485b72", 1, 10, 10)])).unwrap();
-    assert!(d.is_empty());
+    let liq = scan_liquidity_decreases(&receipt_with(vec![decrease_log("0x827922686190790b37229fd06084350E74485b72", 1, 10, 10)])).unwrap();
+    assert!(liq.decreases.is_empty());
 }
 
 #[test]
@@ -240,10 +246,10 @@ fn test_unreadable_decrease_is_refused() {
 fn test_principal_exceeding_the_inflow_is_refused() {
     // 100 NOCK principal but the wallet received only 60: paid elsewhere or swapped.
     let p = [PrincipalAmount { token_address: NOCK_BASE.to_lowercase(), amount_raw: 100 }];
-    let e = subtract_principal(vec![row("NOCK", NOCK_BASE, 60, 16)], &p).unwrap_err();
+    let e = subtract_principal(vec![row("NOCK", NOCK_BASE, 60, 16)], &p, &[]).unwrap_err();
     assert_eq!(e.code, "PRINCIPAL_EXCEEDS_INFLOW");
     // Principal of a booked token with no row at all is refused too.
-    let e = subtract_principal(vec![row("USDC", USDC_BASE, 60, 6)], &p).unwrap_err();
+    let e = subtract_principal(vec![row("USDC", USDC_BASE, 60, 6)], &p, &[]).unwrap_err();
     assert_eq!(e.code, "PRINCIPAL_EXCEEDS_INFLOW");
 }
 
@@ -256,20 +262,120 @@ fn test_mismatched_pairs_are_refused() {
 // ---------------------------------------------------------------- arithmetic
 
 #[test]
-fn test_principal_of_an_untracked_token_is_ignored() {
+fn test_principal_of_an_untracked_token_is_left_out_only_if_the_wallet_received_it() {
     let cbbtc = "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf";
     let p = [PrincipalAmount { token_address: cbbtc.to_string(), amount_raw: 5 }];
     let r = vec![row("USDC", USDC_BASE, 9, 6)];
-    let split = subtract_principal(r.clone(), &p).unwrap();
+    // The wallet received the 5 cbBTC: nothing booked changes.
+    let split = subtract_principal(r.clone(), &p, &[(cbbtc.to_string(), 5)]).unwrap();
     assert_eq!(split.fees, r);
     assert!(split.principal.is_empty());
+    // It did not (a zap swapped it, maybe into the USDC): refused, never booked as fees.
+    let e = subtract_principal(r.clone(), &p, &[]).unwrap_err();
+    assert_eq!(e.code, "PRINCIPAL_EXCEEDS_INFLOW");
+    let e = subtract_principal(r, &p, &[(cbbtc.to_string(), 4)]).unwrap_err();
+    assert_eq!(e.code, "PRINCIPAL_EXCEEDS_INFLOW");
+}
+
+#[test]
+fn test_wallet_token_inflows_sum_every_token_to_the_wallet() {
+    let cbbtc = "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf";
+    let t = |token: &str, to: &str, n: u128| {
+        log(token, vec![TRANSFER_EVENT_TOPIC.to_string(), topic_addr(UNISWAP_V3_NPM), topic_addr(to)], &[word(n)])
+    };
+    let r = receipt_with(vec![t(cbbtc, WALLET, 2), t(cbbtc, WALLET, 3), t(cbbtc, "0x1111111111111111111111111111111111111111", 9)]);
+    assert_eq!(wallet_token_inflows(&r, WALLET), vec![(cbbtc.to_string(), 5)]);
+    // The real withdrawal paid the wallet NOCK by Transfer (its ETH came unwrapped).
+    assert_eq!(
+        wallet_token_inflows(&receipt(), WALLET),
+        vec![(NOCK_BASE.to_lowercase(), 10068107081028485540)]
+    );
+}
+
+fn collect_log(manager: &str, token_id: u128, recipient: &str, a0: u128, a1: u128) -> serde_json::Value {
+    log(
+        manager,
+        vec![COLLECT_TOPIC.to_string(), format!("0x{}", word(token_id))],
+        &[topic_addr(recipient).trim_start_matches("0x").to_string(), word(a0), word(a1)],
+    )
+}
+
+#[test]
+fn test_a_decrease_must_be_collected_towards_the_wallet_in_the_same_transaction() {
+    let npm = UNISWAP_V3_NPM_BASE;
+    let other = "0x1111111111111111111111111111111111111111";
+    let router = "0x0fef9e88a7b76bcdbf451780c6774fe32965ee98";
+    let check = |logs: Vec<serde_json::Value>, to: &str| {
+        let mut r = receipt_with(logs);
+        r["to"] = json!(to);
+        let liq = scan_liquidity_decreases(&r).unwrap();
+        check_decreases_collected(&liq, &r, WALLET)
+    };
+    // Collected to the wallet, the manager, the zero address, or the contract called.
+    for to in [WALLET, npm, "0x0000000000000000000000000000000000000000", router] {
+        assert_eq!(check(vec![decrease_log(npm, 7, 10, 20), collect_log(npm, 7, to, 11, 20)], router), Ok(()), "{to}");
+    }
+    // Left owed: no collect, or a collect short of the principal.
+    assert_eq!(check(vec![decrease_log(npm, 7, 10, 20)], npm).unwrap_err().code, "PRINCIPAL_NOT_SEPARABLE");
+    assert_eq!(check(vec![decrease_log(npm, 7, 10, 20), collect_log(npm, 7, WALLET, 10, 19)], npm).unwrap_err().code, "PRINCIPAL_NOT_SEPARABLE");
+    // Collected to someone else, while another position pays the wallet: refused, not
+    // taken out of the other position's fees.
+    let e = check(
+        vec![decrease_log(npm, 7, 10, 20), collect_log(npm, 7, other, 10, 20), collect_log(npm, 8, WALLET, 50, 50)],
+        npm,
+    )
+    .unwrap_err();
+    assert_eq!(e.code, "PRINCIPAL_NOT_SEPARABLE");
+    assert!(e.detail.contains(other), "{}", e.detail);
+    // Another position's collect does not cover this one's principal.
+    assert_eq!(
+        check(vec![decrease_log(npm, 7, 10, 20), collect_log(npm, 8, WALLET, 50, 50)], npm).unwrap_err().code,
+        "PRINCIPAL_NOT_SEPARABLE"
+    );
+    // The contract the wallet called counts only when the wallet called it.
+    let mut r = receipt_with(vec![decrease_log(npm, 7, 10, 20), collect_log(npm, 7, router, 10, 20)]);
+    r["to"] = json!(router);
+    r["from"] = json!(other);
+    let liq = scan_liquidity_decreases(&r).unwrap();
+    assert_eq!(check_decreases_collected(&liq, &r, WALLET).unwrap_err().code, "PRINCIPAL_NOT_SEPARABLE");
+    // Two decreases of one position are summed against its collects.
+    assert_eq!(
+        check(vec![decrease_log(npm, 7, 5, 5), decrease_log(npm, 7, 5, 5), collect_log(npm, 7, WALLET, 10, 10)], npm),
+        Ok(())
+    );
+    assert_eq!(
+        check(vec![decrease_log(npm, 7, 5, 5), decrease_log(npm, 7, 5, 5), collect_log(npm, 7, WALLET, 9, 10)], npm).unwrap_err().code,
+        "PRINCIPAL_NOT_SEPARABLE"
+    );
+}
+
+#[test]
+fn test_collect_only_positions_are_listed_for_the_liquidity_check() {
+    let npm = UNISWAP_V3_NPM_BASE;
+    let r = receipt_with(vec![
+        collect_log(npm, 7, WALLET, 1, 0),
+        collect_log(npm, 7, WALLET, 1, 0),
+        collect_log(npm, 8, "0x1111111111111111111111111111111111111111", 1, 0),
+        collect_log(npm, 9, WALLET, 0, 0),
+        decrease_log(npm, 10, 1, 1),
+        collect_log(npm, 10, WALLET, 2, 2),
+    ]);
+    let liq = scan_liquidity_decreases(&r).unwrap();
+    // 7: listed once. 8: pays someone else. 9: pays nothing. 10: decreased here.
+    assert_eq!(collect_only_positions(&liq, &r, WALLET), vec![(npm.to_string(), word(7))]);
+}
+
+#[test]
+fn test_unreadable_collect_is_refused() {
+    let short = log(UNISWAP_V3_NPM, vec![COLLECT_TOPIC.to_string(), format!("0x{}", word(1))], &[word(1)]);
+    assert_eq!(scan_liquidity_decreases(&receipt_with(vec![short])).unwrap_err().code, "PRINCIPAL_NOT_SEPARABLE");
 }
 
 #[test]
 fn test_weth_principal_comes_from_weth_first_then_eth() {
     let p = [PrincipalAmount { token_address: WETH_BASE.to_lowercase(), amount_raw: 70 }];
     let r = vec![row("ETH", NATIVE_ETH_LEDGER_ADDRESS, 50, 18), row("WETH", WETH_BASE, 40, 18)];
-    let split = subtract_principal(r, &p).unwrap();
+    let split = subtract_principal(r, &p, &[]).unwrap();
     // 40 from the WETH row (gone), 30 from the ETH row (20 left).
     assert_eq!(amount(&split.fees, "WETH"), None);
     assert_eq!(amount(&split.fees, "ETH").as_deref(), Some("20"));
@@ -280,7 +386,7 @@ fn test_weth_principal_comes_from_weth_first_then_eth() {
 #[test]
 fn test_principal_only_leaves_no_fee_rows() {
     let p = [PrincipalAmount { token_address: USDC_BASE.to_lowercase(), amount_raw: 9 }];
-    let split = subtract_principal(vec![row("USDC", USDC_BASE, 9, 6)], &p).unwrap();
+    let split = subtract_principal(vec![row("USDC", USDC_BASE, 9, 6)], &p, &[]).unwrap();
     assert!(split.fees.is_empty());
     assert_eq!(amount(&split.principal, "USDC").as_deref(), Some("9"));
 }
@@ -301,7 +407,7 @@ fn test_two_decreases_sum_per_token_and_aero_is_untouched() {
         PrincipalAmount { token_address: NOCK_BASE.to_lowercase(), amount_raw: 7 },
     ]);
     let r = vec![row("WETH", WETH_BASE, 10, 18), row("NOCK", NOCK_BASE, 7, 16), row("AERO", AERO_BASE, 99, 18)];
-    let split = subtract_principal(r, &p).unwrap();
+    let split = subtract_principal(r, &p, &[]).unwrap();
     assert_eq!(amount(&split.fees, "WETH").as_deref(), Some("3"));
     assert_eq!(amount(&split.fees, "NOCK"), None);
     assert_eq!(amount(&split.fees, "AERO").as_deref(), Some("99"));
@@ -317,4 +423,5 @@ fn test_the_decrease_and_burn_topics_match_the_real_receipt() {
         .collect();
     assert!(topics.iter().any(|t| t == DECREASE_LIQUIDITY_TOPIC));
     assert!(topics.iter().any(|t| t == CL_POOL_BURN_TOPIC));
+    assert!(topics.iter().any(|t| t == COLLECT_TOPIC));
 }

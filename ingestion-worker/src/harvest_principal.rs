@@ -19,12 +19,18 @@
 //! - An Aero basic (or v2-style) pool `Burn`: full-range liquidity returned.
 //! - A concentrated-liquidity pool `Burn` that releases tokens to an owner that is not a
 //!   known position manager: there is no `DecreaseLiquidity` to read it from.
-//! - Principal larger than what the wallet received of that token (it was paid
-//!   elsewhere, swapped, or left uncollected): the split would be a guess.
+//! - A decrease whose principal is not collected in the same transaction, or is
+//!   collected to someone other than the wallet, the position manager or the contract the
+//!   wallet called.
+//! - Principal larger than what the wallet received of that token, including principal
+//!   in a token NockNock does not book (it may have been swapped into one it does).
+//! - A collect from a position that held no liquidity just before the transaction: it
+//!   can only be paying out principal decreased earlier.
 //!
-//! Known limit: liquidity decreased in one transaction and collected in a later one. The
-//! later collect carries the earlier principal and its receipt has no DecreaseLiquidity,
-//! so it is booked in full. Both apps do the two in one transaction.
+//! Known limit: part of a position's liquidity decreased in one transaction and collected
+//! in a later one while the position still holds liquidity. The later collect carries the
+//! earlier principal, its receipt has no DecreaseLiquidity, and fees owed look the same,
+//! so it is booked in full. Both apps decrease and collect in one transaction.
 //!
 //! Event topics were computed with keccak256 (viem) and checked against live Base logs on
 //! 2026-11-18: tx 0x06515a23…b778 (Uniswap v3 NPM) and tx 0x7ba5de12…39cc (Aero CL
@@ -35,6 +41,11 @@ use crate::*;
 /// the same on the Uniswap v3 NPM and the Aero CL (Slipstream) position manager.
 pub(crate) const DECREASE_LIQUIDITY_TOPIC: &str =
     "0x26f6a048ee9138f2c0ce266f322cb99228e8d619ae2bff30c67f8dcf9d2377b4";
+/// `Collect(uint256 indexed tokenId, address recipient, uint256 amount0, uint256 amount1)`,
+/// the same on both position managers. In the Uniswap v3 NPM a zero recipient means the
+/// manager itself (it then unwraps or sweeps to the caller).
+pub(crate) const COLLECT_TOPIC: &str =
+    "0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01";
 /// Uniswap v3 / Slipstream pool
 /// `Burn(address indexed owner, int24 indexed tickLower, int24 indexed tickUpper, uint128 amount, uint256 amount0, uint256 amount1)`.
 pub(crate) const CL_POOL_BURN_TOPIC: &str =
@@ -72,6 +83,24 @@ pub(crate) struct LiquidityDecrease {
     pub(crate) amount1: u128,
 }
 
+/// A collect through a known position manager: what it paid out, and to whom.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct LiquidityCollect {
+    pub(crate) manager: String,
+    pub(crate) token_id_word: String,
+    /// Lowercase, 0x-prefixed.
+    pub(crate) recipient: String,
+    pub(crate) amount0: u128,
+    pub(crate) amount1: u128,
+}
+
+/// The decreases and collects of known position managers in one receipt.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct ReceiptLiquidity {
+    pub(crate) decreases: Vec<LiquidityDecrease>,
+    pub(crate) collects: Vec<LiquidityCollect>,
+}
+
 /// Why a receipt's principal cannot be split from its fees. Nothing is recorded.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PrincipalRefusal {
@@ -106,11 +135,19 @@ fn is_zero_word(word: &str) -> bool {
     word.trim_start_matches("0x").chars().all(|c| c == '0')
 }
 
-/// Scan a receipt for liquidity returned to its owner. Returns the decreases through
-/// known position managers (possibly none: an ordinary fee claim), or a refusal when the
+fn token_id_topic(topics: &[serde_json::Value]) -> Option<String> {
+    topics
+        .get(1)
+        .and_then(|t| t.as_str())
+        .map(|t| t.trim_start_matches("0x").to_lowercase())
+        .filter(|t| t.len() == 64)
+}
+
+/// Scan a receipt for liquidity returned to its owner. Returns the decreases and collects
+/// of known position managers (no decrease: an ordinary fee claim), or a refusal when the
 /// receipt returns principal that cannot be read from it. Pure.
-pub(crate) fn scan_liquidity_decreases(receipt: &serde_json::Value) -> Result<Vec<LiquidityDecrease>, PrincipalRefusal> {
-    let mut out = Vec::new();
+pub(crate) fn scan_liquidity_decreases(receipt: &serde_json::Value) -> Result<ReceiptLiquidity, PrincipalRefusal> {
+    let mut out = ReceiptLiquidity::default();
     let Some(logs) = receipt.get("logs").and_then(|l| l.as_array()) else {
         return Ok(out);
     };
@@ -130,12 +167,7 @@ pub(crate) fn scan_liquidity_decreases(receipt: &serde_json::Value) -> Result<Ve
                 // pool Burn it causes is what is checked below.
                 continue;
             }
-            let token_id_word = topics
-                .get(1)
-                .and_then(|t| t.as_str())
-                .map(|t| t.trim_start_matches("0x").to_lowercase())
-                .filter(|t| t.len() == 64);
-            let (Some(token_id_word), true) = (token_id_word, words.len() == 3) else {
+            let (Some(token_id_word), true) = (token_id_topic(topics), words.len() == 3) else {
                 return Err(PrincipalRefusal::not_separable(format!(
                     "a DecreaseLiquidity event from position manager {address} could not be read"
                 )));
@@ -145,7 +177,23 @@ pub(crate) fn scan_liquidity_decreases(receipt: &serde_json::Value) -> Result<Ve
                     "a DecreaseLiquidity amount from position manager {address} does not fit 128 bits"
                 )));
             };
-            out.push(LiquidityDecrease { manager: address, token_id_word, amount0, amount1 });
+            out.decreases.push(LiquidityDecrease { manager: address, token_id_word, amount0, amount1 });
+        } else if t0.eq_ignore_ascii_case(COLLECT_TOPIC) {
+            if !is_principal_manager(&address) {
+                continue;
+            }
+            let (Some(token_id_word), true) = (token_id_topic(topics), words.len() == 3) else {
+                return Err(PrincipalRefusal::not_separable(format!(
+                    "a Collect event from position manager {address} could not be read"
+                )));
+            };
+            let (Some(amount0), Some(amount1)) = (word_u128(&words[1]), word_u128(&words[2])) else {
+                return Err(PrincipalRefusal::not_separable(format!(
+                    "a Collect amount from position manager {address} does not fit 128 bits"
+                )));
+            };
+            let recipient = format!("0x{}", &words[0][24..]);
+            out.collects.push(LiquidityCollect { manager: address, token_id_word, recipient, amount0, amount1 });
         } else if t0.eq_ignore_ascii_case(CL_POOL_BURN_TOPIC) {
             // Burn(owner, tickLower, tickUpper | amount, amount0, amount1). A Burn owned by
             // a known manager is read from that manager's DecreaseLiquidity instead.
@@ -180,6 +228,120 @@ pub(crate) fn scan_liquidity_decreases(receipt: &serde_json::Value) -> Result<Ve
         }
     }
     Ok(out)
+}
+
+fn same_addr(a: &str, b: &str) -> bool {
+    a.trim().trim_start_matches("0x").eq_ignore_ascii_case(b.trim().trim_start_matches("0x"))
+}
+
+/// Can a collect's recipient be where the wallet's inflow came from? The wallet itself;
+/// the position manager (a zero recipient in the v3 NPM means the manager), which then
+/// unwraps or sweeps; or the contract the wallet itself called (a router collecting on
+/// its behalf). Anywhere else, the collect pays someone other than the wallet.
+fn collect_reaches_wallet(c: &LiquidityCollect, receipt: &serde_json::Value, wallet: &str) -> bool {
+    let zero = "0x0000000000000000000000000000000000000000";
+    let field = |k: &str| receipt.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let wallet_called = same_addr(&field("from"), wallet) && !field("to").is_empty();
+    same_addr(&c.recipient, wallet)
+        || same_addr(&c.recipient, &c.manager)
+        || same_addr(&c.recipient, zero)
+        || (wallet_called && same_addr(&c.recipient, &field("to")))
+}
+
+/// Every decrease's principal must be collected in the same transaction, towards the
+/// wallet: one or more Collects of the same position, all of them reaching the wallet,
+/// paying at least the principal. Otherwise the principal was left owed or paid
+/// elsewhere, and taking it out of the wallet's inflow would take it out of fees. Pure.
+pub(crate) fn check_decreases_collected(
+    liq: &ReceiptLiquidity,
+    receipt: &serde_json::Value,
+    wallet: &str,
+) -> Result<(), PrincipalRefusal> {
+    let mut seen: Vec<(&str, &str)> = Vec::new();
+    for d in &liq.decreases {
+        let key = (d.manager.as_str(), d.token_id_word.as_str());
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        let same = |m: &str, id: &str| same_addr(m, key.0) && id == key.1;
+        let (mut p0, mut p1) = (0u128, 0u128);
+        for x in liq.decreases.iter().filter(|x| same(&x.manager, &x.token_id_word)) {
+            p0 = p0.saturating_add(x.amount0);
+            p1 = p1.saturating_add(x.amount1);
+        }
+        let collects: Vec<&LiquidityCollect> = liq.collects.iter().filter(|c| same(&c.manager, &c.token_id_word)).collect();
+        let position = format!("position 0x{} on {}", key.1.trim_start_matches('0'), key.0);
+        if let Some(c) = collects.iter().find(|c| !collect_reaches_wallet(c, receipt, wallet)) {
+            return Err(PrincipalRefusal::not_separable(format!(
+                "the transaction collects {position} to {}, not to the wallet",
+                c.recipient
+            )));
+        }
+        let (c0, c1) = collects
+            .iter()
+            .fold((0u128, 0u128), |(a, b), c| (a.saturating_add(c.amount0), b.saturating_add(c.amount1)));
+        if collects.is_empty() || c0 < p0 || c1 < p1 {
+            return Err(PrincipalRefusal::not_separable(format!(
+                "the transaction decreases {position} but does not collect its principal in the same transaction"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Collects towards the wallet of positions this transaction did not decrease. The
+/// handler reads each one's liquidity just before the transaction: a position that held
+/// no liquidity can only be paying out principal decreased in an earlier transaction. Pure.
+pub(crate) fn collect_only_positions(
+    liq: &ReceiptLiquidity,
+    receipt: &serde_json::Value,
+    wallet: &str,
+) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for c in &liq.collects {
+        let decreased = liq
+            .decreases
+            .iter()
+            .any(|d| same_addr(&d.manager, &c.manager) && d.token_id_word == c.token_id_word);
+        let paid = c.amount0 > 0 || c.amount1 > 0;
+        let key = (c.manager.clone(), c.token_id_word.clone());
+        if !decreased && paid && collect_reaches_wallet(c, receipt, wallet) && !out.contains(&key) {
+            out.push(key);
+        }
+    }
+    out
+}
+
+/// What the receipt transfers to the wallet, per token (lowercase address), whether or
+/// not NockNock books the token. Pure.
+pub(crate) fn wallet_token_inflows(receipt: &serde_json::Value, wallet: &str) -> Vec<(String, u128)> {
+    let mut out: Vec<(String, u128)> = Vec::new();
+    let wallet_word = format!("000000000000000000000000{}", wallet.trim_start_matches("0x").to_lowercase());
+    let Some(logs) = receipt.get("logs").and_then(|l| l.as_array()) else {
+        return out;
+    };
+    for log in logs {
+        let topics = log.get("topics").and_then(|t| t.as_array()).cloned().unwrap_or_default();
+        let is_transfer = topics.len() == 3
+            && topics[0].as_str().is_some_and(|t| t.eq_ignore_ascii_case(TRANSFER_EVENT_TOPIC))
+            && topics[2].as_str().is_some_and(|t| t.trim_start_matches("0x").eq_ignore_ascii_case(&wallet_word));
+        if !is_transfer {
+            continue;
+        }
+        let words = data_words(log);
+        let (Some(token), Some(amount)) = (
+            log.get("address").and_then(|a| a.as_str()).map(|a| a.to_lowercase()),
+            words.first().and_then(|w| word_u128(w)),
+        ) else {
+            continue;
+        };
+        match out.iter_mut().find(|(t, _)| *t == token) {
+            Some((_, sum)) => *sum = sum.saturating_add(amount),
+            None => out.push((token, amount)),
+        }
+    }
+    out
 }
 
 /// Principal of one token, summed over the transaction's decreases.
@@ -242,12 +404,15 @@ fn is_booked_token(token: &str) -> bool {
 /// Take principal out of the merged ledger rows (one per token, from
 /// `merge_harvest_transfers`). WETH principal is taken from the WETH row first, then
 /// from ETH unwrapped by a position manager (how the Uniswap app pays WETH out).
-/// Principal of a token NockNock does not book has no row and is ignored, as that token
-/// is. Principal of a booked token that exceeds what the wallet received is refused.
-/// Pure.
+/// Principal of a token NockNock does not book has no row: it is left out like that
+/// token, but only if the receipt shows at least that much of it transferred to the
+/// wallet (`unbooked_inflows`, from `wallet_token_inflows`). Otherwise it was swapped,
+/// perhaps into a booked token whose row it would inflate, and the split is refused.
+/// Principal of a booked token that exceeds what the wallet received is refused. Pure.
 pub(crate) fn subtract_principal(
     rows: Vec<ParsedHarvestTransfer>,
     principal: &[PrincipalAmount],
+    unbooked_inflows: &[(String, u128)],
 ) -> Result<FeeSplit, PrincipalRefusal> {
     let mut amounts: Vec<u128> = Vec::with_capacity(rows.len());
     for r in &rows {
@@ -273,7 +438,13 @@ pub(crate) fn subtract_principal(
                 break;
             }
         }
-        if remaining > 0 && is_booked_token(&p.token_address) {
+        let received_unbooked = unbooked_inflows
+            .iter()
+            .find(|(t, _)| same_token(t, &p.token_address))
+            .map(|(_, a)| *a)
+            .unwrap_or(0);
+        let covered = !is_booked_token(&p.token_address) && remaining <= received_unbooked;
+        if remaining > 0 && !covered {
             return Err(PrincipalRefusal {
                 code: "PRINCIPAL_EXCEEDS_INFLOW",
                 detail: format!(

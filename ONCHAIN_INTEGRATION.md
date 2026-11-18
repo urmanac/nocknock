@@ -1469,5 +1469,14 @@ decreased position's tokens are read at the block before the transaction.
 - **A Uniswap v4 or Aero basic liquidity removal.** These are refused, not split.
 - **The legacy Aero CL position manager `0x82792268…5b72`.** It is not listed, so a Burn
   it owns is refused.
-- **Liquidity decreased in one transaction and collected in a later one.** The later
-  collect is booked in full.
+- **A partial decrease collected in a later transaction.** If the position still holds
+  liquidity, the later collect is booked in full. A collect from a position with no
+  liquidity left is refused instead.
+
+**Collect recipients.** In the withdrawal above, the NPM's `Collect` names the NPM itself as
+recipient. It then unwraps the WETH and sweeps the NOCK to the wallet. A decrease counts as
+collected towards the wallet when its position's `Collect` pays at least the principal to
+one of these:
+- the wallet;
+- the position manager, or the zero address, which the v3 NPM reads as itself;
+- the contract the wallet called, such as a router.

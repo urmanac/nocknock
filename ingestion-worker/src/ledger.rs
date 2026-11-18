@@ -610,7 +610,7 @@ pub(crate) async fn record_harvest_handler(
     // Principal is not income (#156). Liquidity removed in this transaction is taken out
     // of what the wallet received before anything is booked; principal that cannot be
     // read from the receipt is refused with nothing recorded.
-    let (transfers, principal_excluded) = match split_principal(&state, &alchemy_url, &receipt, block_number, transfers).await {
+    let (transfers, principal_excluded) = match split_principal(&state, &alchemy_url, &receipt, &wallet, block_number, transfers).await {
         Ok(split) => (split.fees, split.principal),
         Err((status, refusal)) => {
             return (status, Json(json!({ "error": refusal.code, "detail": format!("{}; nothing recorded", refusal.detail) })))
@@ -809,59 +809,72 @@ fn principal_json(principal: &[ParsedHarvestTransfer]) -> serde_json::Value {
 /// ledger rows (#156). Each decreased position's tokens are read from its position
 /// manager's `positions(tokenId)` just before the transaction (the NFT may be burned in
 /// it), falling back to the transaction's own block for a position minted in that block.
-/// An ordinary fee claim has no decrease and passes through unchanged.
+/// A collect from a position that held no liquidity just before is refused: it pays out
+/// principal decreased in an earlier transaction. An ordinary fee claim passes through
+/// unchanged.
 async fn split_principal(
     state: &AppState,
     alchemy_url: &str,
     receipt: &serde_json::Value,
+    wallet: &str,
     block_number: i64,
     rows: Vec<ParsedHarvestTransfer>,
 ) -> std::result::Result<FeeSplit, (StatusCode, PrincipalRefusal)> {
-    let decreases = scan_liquidity_decreases(receipt).map_err(|r| (StatusCode::UNPROCESSABLE_ENTITY, r))?;
-    if decreases.is_empty() {
+    let refused = |r: PrincipalRefusal| (StatusCode::UNPROCESSABLE_ENTITY, r);
+    let liq = scan_liquidity_decreases(receipt).map_err(refused)?;
+    check_decreases_collected(&liq, receipt, wallet).map_err(refused)?;
+    let collect_only = collect_only_positions(&liq, receipt, wallet);
+    if liq.decreases.is_empty() && collect_only.is_empty() {
         return Ok(FeeSplit { fees: rows, principal: Vec::new() });
     }
     let unreadable = |detail: String| {
         (StatusCode::SERVICE_UNAVAILABLE, PrincipalRefusal { code: "POSITION_UNREADABLE", detail })
     };
     let Some(before) = block_before_tag(block_number) else {
-        return Err(unreadable("the transaction's block is unknown, so the decreased position's tokens cannot be read".to_string()));
+        return Err(unreadable("the transaction's block is unknown, so the positions it touches cannot be read".to_string()));
     };
     let at_block = format!("0x{block_number:x}");
-    let mut pairs = Vec::with_capacity(decreases.len());
-    for (i, d) in decreases.iter().enumerate() {
-        let mut decoded = None;
-        for tag in [&before, &at_block] {
-            let payload = json!({
-                "jsonrpc": "2.0",
-                "id": 42 + i as u64,
-                "method": "eth_call",
-                "params": [{ "to": d.manager, "data": positions_calldata(d) }, tag]
-            });
-            match eth_call_allow_revert(&state.http_client, alchemy_url, &payload).await {
-                Ok(Some(hex)) => match decode_v3_positions_return(&hex) {
-                    Ok(p) => {
-                        decoded = Some((p.token0, p.token1));
-                        break;
+    let read_position = |manager: String, token_id_word: String, id: u64| {
+        let (before, at_block) = (before.clone(), at_block.clone());
+        async move {
+            for tag in [&before, &at_block] {
+                let payload = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "method": "eth_call",
+                    "params": [{ "to": manager, "data": format!("{V3_POSITIONS}{token_id_word}") }, tag]
+                });
+                match eth_call_allow_revert(&state.http_client, alchemy_url, &payload).await {
+                    Ok(Some(hex)) => {
+                        return decode_v3_positions_return(&hex)
+                            .map_err(|e| unreadable(format!("positions() on {manager} could not be decoded: {e}")))
                     }
-                    Err(e) => return Err(unreadable(format!("positions() on {} could not be decoded: {e}", d.manager))),
-                },
-                Ok(None) => continue,
-                Err(e) => return Err(unreadable(format!("positions() on {} was not answered: {e}", d.manager))),
+                    Ok(None) => continue,
+                    Err(e) => return Err(unreadable(format!("positions() on {manager} was not answered: {e}"))),
+                }
             }
+            Err(unreadable(format!("positions() on {manager} reverted at and before block {block_number}")))
         }
-        match decoded {
-            Some(pair) => pairs.push(pair),
-            None => {
-                return Err(unreadable(format!(
-                    "positions() on {} reverted at and before block {block_number}",
-                    d.manager
-                )))
-            }
+    };
+    for (i, (manager, token_id_word)) in collect_only.into_iter().enumerate() {
+        let p = read_position(manager.clone(), token_id_word.clone(), 60 + i as u64).await?;
+        if p.liquidity == 0 {
+            return Err(refused(PrincipalRefusal {
+                code: "PRINCIPAL_NOT_SEPARABLE",
+                detail: format!(
+                    "the transaction collects from position 0x{} on {manager}, which held no liquidity just before it: what it pays is principal decreased in an earlier transaction, together with fees",
+                    token_id_word.trim_start_matches('0')
+                ),
+            }));
         }
     }
-    let principal = principal_by_token(&decreases, &pairs).map_err(|r| (StatusCode::UNPROCESSABLE_ENTITY, r))?;
-    subtract_principal(rows, &principal).map_err(|r| (StatusCode::UNPROCESSABLE_ENTITY, r))
+    let mut pairs = Vec::with_capacity(liq.decreases.len());
+    for (i, d) in liq.decreases.iter().enumerate() {
+        let p = read_position(d.manager.clone(), d.token_id_word.clone(), 42 + i as u64).await?;
+        pairs.push((p.token0, p.token1));
+    }
+    let principal = principal_by_token(&liq.decreases, &pairs).map_err(refused)?;
+    subtract_principal(rows, &principal, &wallet_token_inflows(receipt, wallet)).map_err(refused)
 }
 
 /// Koinly custom-CSV rendering of harvest ledger rows: fee claims are tagged
