@@ -1753,6 +1753,22 @@ database_url: "postgresql://localhost/test"
         assert_eq!(recommended_claim_action(0.0, 0.0), "accumulate");
     }
 
+    #[test]
+    fn test_recommended_claim_action_below_gas_accumulates() {
+        // #153: fees worth less than the gas the claim costs never say claim.
+        // The WETH/USDC range #6607225: claimable $0.000674 against $0.0036 gas.
+        assert_eq!(recommended_claim_action(0.0007, 0.0036), "accumulate");
+        assert_eq!(recommended_claim_action(0.000674, 0.0036), "accumulate");
+        // Exactly the gas cost breaks even: moderate recommendation.
+        assert_eq!(recommended_claim_action(0.0036, 0.0036), "claim_recommended");
+        assert_eq!(recommended_claim_action(0.0071, 0.0036), "claim_recommended");
+        // Twice the gas cost or more: claim now.
+        assert_eq!(recommended_claim_action(0.0072, 0.0036), "claim_now");
+        // Gas unknown keeps the moderate recommendation for any positive amount.
+        assert_eq!(recommended_claim_action(0.0007, 0.0), "claim_recommended");
+        assert_eq!(recommended_claim_action(0.0007, -1.0), "claim_recommended");
+    }
+
     fn sample_snapshot_data() -> SnapshotData {
         SnapshotData {
             closed_positions: vec![],

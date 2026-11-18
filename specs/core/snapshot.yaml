@@ -1864,7 +1864,11 @@ components:
           type: string
           enum: [claim_now, claim_recommended, accumulate, not_claimable]
           description: >
-            Gas-economic recommendation. not_claimable marks an Aero pool whose
+            Gas-economic recommendation. With gas_break_even_usd known (> 0):
+            claimable below it is accumulate (a claim would cost more than it
+            returns, #153), from it up to twice it is claim_recommended, twice
+            it or more is claim_now. With gas unknown, any positive claimable is
+            claim_recommended. not_claimable marks an Aero pool whose
             claimFees() reverts: its fees are not LP-claimable; claimable_usd is
             then 0.00 and is not an amount earned. Since v0.6.0 also an
             aerodrome-cl position staked in its gauge (see note). The AERO such a

@@ -117,11 +117,19 @@ pub(crate) fn compute_counterfactual_sync(
 }
 
 /// Claim recommendation computed from live claimable yield vs gas break-even.
-/// The 2x factor mirrors the gas_to_fee margin used elsewhere; gas <= 0 means gas is
-/// unknown (not free), so only a moderate recommendation is possible.
+/// With gas known: below the gas cost a claim loses money, so accumulate (#153); from
+/// the gas cost up to twice it, claim_recommended; at twice the gas cost or more
+/// (the gas_to_fee margin used elsewhere), claim_now. gas <= 0 means gas is unknown
+/// (not free), so only a moderate recommendation is possible for a positive amount.
 pub(crate) fn recommended_claim_action(claimable_usd: f64, gas_break_even_usd: f64) -> &'static str {
-    if gas_break_even_usd > 0.0 && claimable_usd >= 2.0 * gas_break_even_usd {
-        "claim_now"
+    if gas_break_even_usd > 0.0 {
+        if claimable_usd >= 2.0 * gas_break_even_usd {
+            "claim_now"
+        } else if claimable_usd >= gas_break_even_usd {
+            "claim_recommended"
+        } else {
+            "accumulate"
+        }
     } else if claimable_usd > 0.0 {
         "claim_recommended"
     } else {

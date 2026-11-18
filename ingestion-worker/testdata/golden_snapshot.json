@@ -260,7 +260,7 @@
               "contract_name": "Uniswap V3 (WETH/NOCK 1.00%, #6336662)",
               "efficiency_ratio": 0.03,
               "gas_break_even_usd": "0.0050",
-              "recommended_action": "claim_recommended"
+              "recommended_action": "accumulate"
             },
             {
               "claimable_usd": "0.00",
@@ -527,7 +527,7 @@
         }
       ]
     },
-    "state_hash": "1d69b67cb200095621e10f2728ada640572285260043bb1708729faaccbb8903"
+    "state_hash": "cefefe4be08046e36558320b7a4c426b944823240b2d85f6b9867a9f0724a606"
   },
   "from_zero": {
     "mcp_text": {
