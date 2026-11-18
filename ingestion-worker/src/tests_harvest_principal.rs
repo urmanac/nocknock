@@ -480,3 +480,17 @@ fn test_tx_value_wei() {
     assert_eq!(tx_value_wei(&json!({})), None);
     assert_eq!(tx_value_wei(&serde_json::Value::Null), None);
 }
+
+#[test]
+fn test_an_aero_basic_withdrawal_is_named_as_principal_before_the_claim_check() {
+    // Router.removeLiquidity moves the LP token out of the wallet (a 3-topic Transfer)
+    // and the pool Burns. Both checks refuse it; the handler runs the principal scan
+    // first, so the operator is told it returned principal, not that it was a swap.
+    let pool = "0x770fe8fc9248c6382950a86e39a9391b41d59e0a";
+    let r = receipt_with(vec![
+        log(pool, vec![TRANSFER_EVENT_TOPIC.to_string(), topic_addr(WALLET), topic_addr(pool)], &[word(100)]),
+        log(pool, vec![AERO_BASIC_BURN_TOPIC.to_string(), topic_addr(WALLET), topic_addr(WALLET)], &[word(10), word(20)]),
+    ]);
+    assert_eq!(scan_liquidity_decreases(&r).unwrap_err().code, "PRINCIPAL_NOT_SEPARABLE");
+    assert_eq!(check_is_claim(&r, 0, WALLET).unwrap_err().code, "NOT_A_CLAIM");
+}

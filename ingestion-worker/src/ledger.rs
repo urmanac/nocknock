@@ -582,6 +582,16 @@ pub(crate) async fn record_harvest_handler(
         )
             .into_response();
     }
+    // A liquidity removal that cannot be split is named as one (#156) before the claim
+    // check below: an Aero basic withdrawal also pays the LP token out of the wallet, and
+    // "swap or deposit" would be the wrong explanation.
+    if let Err(refusal) = scan_liquidity_decreases(&receipt) {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": refusal.code, "detail": format!("{}; nothing recorded", refusal.detail) })),
+        )
+            .into_response();
+    }
     // A claim only pays the wallet (#157): a swap, deposit or purchase is refused. The
     // ETH it sent is on the transaction, not the receipt.
     let tx_payload = json!({
