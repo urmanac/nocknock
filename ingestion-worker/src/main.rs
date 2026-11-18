@@ -243,7 +243,8 @@ pub struct AccumulationPlanConfig {
     pub respect_cash_target: bool,
     /// Protected cash reserve (operator order, 2026-11-14: "we have lots of cash, we
     /// want to keep it"). The plan never advises a buy that would take the stable
-    /// balance (wallet USDC plus USDC inside LP; never ETH, which is gas) below this
+    /// balance (wallet USDC plus USDC inside NOCK-pair LP, #151; never ETH, which is gas,
+    /// nor USDC inside a range with no NOCK leg) below this
     /// amount, at any price. It binds only while an accumulation_plan is configured;
     /// with no plan NockNock advises no buys at all. Independent of the long-run cash
     /// target. The user sets it; NockNock never chooses it.

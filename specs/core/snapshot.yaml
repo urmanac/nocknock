@@ -13,9 +13,12 @@ info:
       gas-side WETH/USDC range) is measured, never steered (#151). positions_nock
       lists NOCK-pair positions only; lp_rebuild judges NOCK-pair LP only; the
       deviation matrix row the LP target is measured against is "NOCK LP (NOCK-pair
-      positions)", and a no_target "ETH/USDC LP (measured)" row is appended when such
-      ranges hold value. recommended_action says accumulate when claimable is below
-      the known gas cost (#153).
+      positions)", and a no_target "ETH/USDC LP (measured)" row ("Non-NOCK LP
+      (measured)" unless every such range is an ETH-or-WETH / USDC pair) is appended
+      when such ranges hold value. recommended_action says accumulate when claimable
+      is below the known gas cost (#153), and BATCH HARVEST counts only fees whose
+      row says claim_now or claim_recommended.
+    - TickBracket.full_range is documented (optional; emitted since 2.2.0).
 
     2.8.1 (v0.8.1 burn-down, issues #130-#137), every change additive or a widening:
     - AccumulationPlanStatus.progress_unknown (new, optional, absent when false): the
@@ -1717,6 +1720,12 @@ components:
             ETH/USD rate before charting) and WETH per USDC for a range with no NOCK
             leg, which is not a NOCK price at all and is not drawn on a NOCK chart.
             Null for every bracket not denominated like the spot.
+        full_range:
+          type: boolean
+          description: >-
+            True when the position spans every price (2.2.0). Optional: false when
+            absent. lower_price and upper_price are then "0", distance_bps is null and
+            clients do not draw the bracket.
         position_id:
           type: string
           description: >-
@@ -1749,8 +1758,10 @@ components:
             fifth row) have no target (0, status no_target) and are never under
             rebalancing pressure. The LP target (uniswap_lp) is measured against the
             "NOCK LP (NOCK-pair positions)" row (2.8.2, #151; "LP (all tracked
-            positions)" before). Ranges with no NOCK leg are an appended "ETH/USDC LP
-            (measured)" row with no target, present only when they hold value.
+            positions)" before). Ranges with no NOCK leg are an appended row with no
+            target, present only when they hold value: "ETH/USDC LP (measured)" when
+            every such range is an ETH-or-WETH / USDC pair, otherwise "Non-NOCK LP
+            (measured)".
         actual_weight_bps:
           type: integer
           description: Actual allocation in basis points of total_portfolio_usd (gas and wallet AERO included); 0 when the total is 0

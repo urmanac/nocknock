@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bracketPosition, hasNockLeg, nockBracketRows, nonNockRangeCount, positionBracket } from './positions.ts';
+import { bracketPosition, hasNockLeg, nockBracketRows, nonNockRangeCount, nonNockRangeKind, notDrawnRangesText, positionBracket } from './positions.ts';
 
 // Tracked positions on 2026-11-17: two NOCK ranges and the operator's two gas-side
 // WETH/USDC ranges (#151, #152), in config order.
@@ -90,5 +90,24 @@ describe('bracket lookup by position (#152)', () => {
     expect(bracketPosition(BRACKETS_282[3], 0, POSITIONS)).toBe(GAS_CL);
     expect(bracketPosition(B_GAS_V3, 2, POSITIONS)).toBe(GAS_V3);
     expect(bracketPosition({ position_id: 'unknown' }, 0, POSITIONS)).toBeUndefined();
+  });
+});
+
+describe('naming the ranges with no NOCK leg (#151 review)', () => {
+  const USDC_AERO = { position_id: 'uniswap-v3:base:9999001', protocol: 'uniswap-v3', fee_tier_bps: 30, token0: tok('USDC'), token1: tok('AERO') };
+  const USDC_ETH = { position_id: 'x', token0: tok('USDC'), token1: tok('ETH') };
+
+  it('says ETH/USDC only when every non-NOCK range is an ETH-or-WETH / USDC pair', () => {
+    expect(nonNockRangeKind(POSITIONS)).toBe('ETH/USDC');
+    expect(nonNockRangeKind([...POSITIONS, USDC_ETH])).toBe('ETH/USDC');
+    expect(nonNockRangeKind([...POSITIONS, USDC_AERO])).toBe('non-NOCK');
+    expect(nonNockRangeKind([NOCK_USDC, USDC_AERO])).toBe('non-NOCK');
+  });
+
+  it('the chart caption uses the same rule', () => {
+    expect(notDrawnRangesText(POSITIONS)).toBe('2 ETH/USDC ranges not drawn: not priced in NOCK');
+    expect(notDrawnRangesText([NOCK_USDC, GAS_V3])).toBe('1 ETH/USDC range not drawn: not priced in NOCK');
+    expect(notDrawnRangesText([...POSITIONS, USDC_AERO])).toBe('3 non-NOCK ranges not drawn: not priced in NOCK');
+    expect(notDrawnRangesText([NOCK_USDC, WETH_NOCK])).toBeNull();
   });
 });

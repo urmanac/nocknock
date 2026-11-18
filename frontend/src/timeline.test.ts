@@ -405,22 +405,29 @@ describe('LP series keyed by position_id (N15)', () => {
     const now = r.assetSeries.rows[1] as any;
     expect(now[key(V4)]).toBe(9363);
     expect(now[key(AERO)]).toBe(0);
-    expect(key('uniswap-v4:base:3163431') in now).toBe(false);
+    // Retired and never holding NOCK in history: no band at all.
+    expect(r.positionSeriesDefs.some((d) => d.positionId === 'uniswap-v4:base:3163431')).toBe(false);
   });
 
-  it('lists current positions first with their labels, then retired ids', () => {
+  it('lists current positions first with their labels, then retired ids that held NOCK', () => {
+    // The retired #3163432 held NOCK in an earlier row; #3163431 and the Aero pool only
+    // ever read 0, so they get no flat-zero band.
     const defs = buildPositionSeriesDefs(latestData().derived_metrics, LATEST_POSITIONS, [
+      historyRow('2026-11-14T15:00:00Z', { positions: [['uniswap-v4:base:3163432', '4200.00']] }),
       historyRow('2026-11-14T16:14:59Z', { positions: OLD_LIST }),
     ]);
-    expect(defs.map((d) => d.key)).toEqual(['lp0', 'lp1', 'lp2', 'lp3', 'lp4', 'lp5']);
+    expect(defs.map((d) => d.key)).toEqual(['lp0', 'lp1', 'lp2', 'lp3']);
     expect(defs.slice(0, 3).map((d) => [d.positionId, d.retired])).toEqual([[V4, false], [V3, false], [AERO, false]]);
     expect(defs[0].name).toBe('USDC/NOCK v4 · 3%');
-    expect(defs.slice(3).map((d) => d.name)).toEqual([
-      'uniswap-v4 #3163431 (no longer tracked)',
-      'uniswap-v4 #3163432 (no longer tracked)',
-      'aerodrome 0x85f1… (no longer tracked)',
+    expect(defs.slice(3).map((d) => d.name)).toEqual(['uniswap-v4 #3163432 (no longer tracked)']);
+    expect(defs[3].retired).toBe(true);
+  });
+
+  it('keeps a current position whose series reads 0 (it is tracked, not retired)', () => {
+    const defs = buildPositionSeriesDefs(latestData().derived_metrics, LATEST_POSITIONS, [
+      historyRow('2026-11-14T16:14:59Z', { positions: [[AERO, '0']] }),
     ]);
-    expect(defs.slice(3).every((d) => d.retired)).toBe(true);
+    expect(defs.map((d) => d.positionId)).toEqual([V4, V3, AERO]);
   });
 });
 
@@ -443,6 +450,15 @@ describe('positions with no NOCK leg (#151)', () => {
     ]);
     expect(defs.map((d) => d.positionId)).toEqual([V4, V3, AERO]);
     expect(defs.every((d) => !d.retired)).toBe(true);
+  });
+
+  it('drops a retired WETH/USDC range whose pre-2.8.2 history is all 0', () => {
+    const RETIRED_GAS = 'uniswap-v3:base:6600001';
+    const defs = buildPositionSeriesDefs(latestData().derived_metrics, LATEST_POSITIONS, [
+      historyRow('2026-11-17T12:00:00Z', { positions: [[V4, '9363.08'], [RETIRED_GAS, '0']] }),
+      historyRow('2026-11-17T12:05:00Z', { positions: [[V4, '9363.08'], [RETIRED_GAS, '0.00']] }),
+    ]);
+    expect(defs.map((d) => d.positionId)).toEqual([V4, V3, AERO]);
   });
 
   it('keeps an id seen only in history: no current position says it has no NOCK leg', () => {

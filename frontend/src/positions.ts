@@ -247,6 +247,27 @@ export function nockBracketRows(
   return rows;
 }
 
+/**
+ * How to name the tracked ranges with no NOCK leg, the worker's rule
+ * (`non_nock_range_kind`): "ETH/USDC" only when every one of them is an ETH-or-WETH /
+ * USDC pair, otherwise "non-NOCK".
+ */
+export function nonNockRangeKind(positions: any[] | null | undefined): 'ETH/USDC' | 'non-NOCK' {
+  const isEth = (t: any) => t?.symbol === 'ETH' || t?.symbol === 'WETH';
+  const isUsdc = (t: any) => t?.symbol === 'USDC';
+  const allEthUsdc = (positions ?? [])
+    .filter((p) => p && !hasNockLeg(p))
+    .every((p) => (isEth(p.token0) && isUsdc(p.token1)) || (isUsdc(p.token0) && isEth(p.token1)));
+  return allEthUsdc ? 'ETH/USDC' : 'non-NOCK';
+}
+
+/** "2 ETH/USDC ranges not drawn: not priced in NOCK"; null when every range has a NOCK leg. */
+export function notDrawnRangesText(positions: any[] | null | undefined): string | null {
+  const n = nonNockRangeCount(positions);
+  if (n === 0) return null;
+  return `${n} ${nonNockRangeKind(positions)} range${n === 1 ? '' : 's'} not drawn: not priced in NOCK`;
+}
+
 /** Tracked ranges with no NOCK leg: not drawn on the NOCK bracket chart (#152). */
 export function nonNockRangeCount(positions: any[] | null | undefined): number {
   return (positions ?? []).filter((p) => p && !hasNockLeg(p)).length;

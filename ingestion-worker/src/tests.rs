@@ -125,7 +125,7 @@
             raw.pool_liquidity.insert(p, "0".to_string());
         }
         let m = compute_derived_metrics(&raw, 0.0, &OperatorProfile::default(), StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
-        assert_eq!(m.global_status.shot_advice_action, "HOLD & ACCRETE (No Ranged LP Confirmed In Range)");
+        assert_eq!(m.global_status.shot_advice_action, "HOLD & ACCRETE (No Ranged NOCK LP Confirmed In Range)");
     }
 
     #[test]
@@ -503,7 +503,7 @@ database_url: "postgresql://localhost/test"
         let m = metrics_with_plan(&raw, &ctx, &MarketRegime::default());
         assert_eq!(m.global_status.shot_advice_action, "DCA TRANCHE DUE (1 of 5)");
         assert!(m.global_status.shot_advice_details.contains("Buy $20.00 of NOCK"));
-        assert!(m.global_status.shot_advice_details.contains("never spends the stable balance (wallet + LP USDC) below $950.00"));
+        assert!(m.global_status.shot_advice_details.contains("never spends the stable balance (wallet + NOCK LP USDC) below $950.00"));
         assert_eq!(m.accumulation_plan.unwrap().cash_reserve_usdc.as_deref(), Some("950.00"));
     }
 

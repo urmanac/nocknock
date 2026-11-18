@@ -373,9 +373,6 @@ pub(crate) fn lp_positions_summary(raw: &RawOnChainData) -> (String, bool) {
         String::new()
     } else {
         let m = other.len();
-        let all_eth_usdc = other.iter().all(|p| {
-            (is_eth_token(&p.token0) && is_usdc_token(&p.token1)) || (is_usdc_token(&p.token0) && is_eth_token(&p.token1))
-        });
         let in_range = other
             .iter()
             .filter(|p| p.in_range && p.liquidity > 0 && pool_active(p) != Some(false))
@@ -383,7 +380,7 @@ pub(crate) fn lp_positions_summary(raw: &RawOnChainData) -> (String, bool) {
         format!(
             " +{} {} range{}, measured only ({} in range).",
             m,
-            if all_eth_usdc { "ETH/USDC" } else { "non-NOCK" },
+            non_nock_range_kind(&raw.positions),
             if m == 1 { "" } else { "s" },
             in_range
         )

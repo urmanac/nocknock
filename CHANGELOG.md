@@ -86,7 +86,12 @@ Snapshot spec 2.8.2: additive (`TickBracket.position_id`). No config key changes
   tracked positions)"); a no-target "ETH/USDC LP (measured)" row is appended, like Gas
   and AERO, only when such ranges hold value. The engine label and LP summary count NOCK
   ranges ("+2 ETH/USDC ranges, measured only (2 in range)" is said after them); "No LP
-  Tracked" and "LP Empty" read "No NOCK LP Tracked" and "NOCK LP Empty". The plan's
+  Tracked", "LP Empty" and "No Ranged LP Confirmed In Range" read "No NOCK LP Tracked",
+  "NOCK LP Empty" and "No Ranged NOCK LP Confirmed In Range". One rule names those ranges
+  on every surface (summary, matrix row, chart caption): "ETH/USDC" when every one is an
+  ETH-or-WETH / USDC pair, otherwise "non-NOCK" (row "Non-NOCK LP (measured)"). The NOCK
+  stack chart no longer draws a flat-zero "(no longer tracked)" band for a retired id
+  that never held NOCK in history. The plan's
   protected cash reserve and the working-capital note count wallet USDC plus USDC inside
   NOCK-pair ranges only; `total_stable_usd` (the USDC pillar) still counts every USDC
   held. `positions_nock` and the NOCK stack chart list NOCK-pair positions only. Goal 1
@@ -102,7 +107,11 @@ Snapshot spec 2.8.2: additive (`TickBracket.position_id`). No config key changes
 - **#153 No claim below the gas cost.** With gas known, fees worth less than one claim's
   gas read `accumulate` (was `claim_recommended`), from the gas cost up to twice it
   `claim_recommended`, twice or more `claim_now`. With gas unknown a positive amount
-  still reads `claim_recommended`.
+  still reads `claim_recommended`. BATCH HARVEST now counts only the fees of positions
+  whose own row says `claim_now` or `claim_recommended`: many positions each below their
+  claim's gas no longer add up to a harvest. Its gas efficiency is those fees over the gas
+  of every claim they take ("4x gas efficiency over 3 claims"; was the total over one
+  claim's gas), and the text names the uncollected total when some fees are left out.
 
 ### Security — CI hardened for outside contributions (#146)
 - Every action in `ci.yml` is pinned to a full commit SHA; the workflow declares read-only

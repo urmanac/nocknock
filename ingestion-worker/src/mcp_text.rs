@@ -90,7 +90,7 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
 
 /// The harvest rule as the directive engine applies it (derive_metrics precedence):
 /// a floor DEFENSIVE LOCK, a due DCA tranche and a range exit all outrank it.
-pub const HARVEST_RULE_TEXT: &str = "BATCH HARVEST is advised once uncollected LP fees reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).";
+pub const HARVEST_RULE_TEXT: &str = "BATCH HARVEST is advised once the uncollected LP fees worth claiming (positions whose fees cover their own claim's gas) reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).";
 
 pub fn format_shot_advice_text(data: &serde_json::Value) -> String {
     let global = data.pointer("/derived_metrics/global_status");

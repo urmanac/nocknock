@@ -231,7 +231,7 @@ pub(crate) fn plan_advice(ps: &AccumulationPlanStatus, spot_price: f64) -> (Stri
             .unwrap_or_default()
     );
     let progress = match &ps.cash_reserve_usdc {
-        Some(r) => format!("{} The plan never spends the stable balance (wallet + LP USDC) below ${}.", progress, r),
+        Some(r) => format!("{} The plan never spends the stable balance (wallet + NOCK LP USDC) below ${}.", progress, r),
         None => progress,
     };
     let n = format!("{} of {}", ps.tranche_index, ps.tranches_total);

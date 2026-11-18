@@ -258,7 +258,7 @@ fn no_snapshot_text(body: &Value) -> Option<String> {
 }
 
 /// Same text as the worker's HARVEST_RULE_TEXT (main.rs): the directive engine's precedence.
-const HARVEST_RULE_TEXT: &str = "BATCH HARVEST is advised once uncollected LP fees reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).";
+const HARVEST_RULE_TEXT: &str = "BATCH HARVEST is advised once the uncollected LP fees worth claiming (positions whose fees cover their own claim's gas) reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).";
 
 /// Compact plan view for the snapshot-API fallback (the worker's own /v1/mcp gives
 /// the full text and is tried first).

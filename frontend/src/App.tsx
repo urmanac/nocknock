@@ -34,7 +34,7 @@ const SOURCE_LABELS: Record<string, string> = {
   aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
-import { POSITION_COLORS, hasNockLeg, nockBracketRows, nonNockRangeCount, positionBracket, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText } from './positions.ts';
+import { POSITION_COLORS, hasNockLeg, nockBracketRows, notDrawnRangesText, positionBracket, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText } from './positions.ts';
 import { isAeroProtocol, positionFeesText } from './aeroCl.ts';
 import { PositionStakingLine, RangeSideList } from './components/PositionRangeNotes.tsx';
 import { floorState, floorDeltaText, floorSummaryText, regimeLabel, regimeTone } from './floor.ts';
@@ -160,7 +160,7 @@ function Dashboard() {
     ethUsd,
     parseFloat(metrics?.tick_bracket_hypervisor?.current_price || '0'),
   );
-  const notDrawnRanges = nonNockRangeCount(positionsList);
+  const notDrawnRanges = notDrawnRangesText(positionsList);
 
   // Velocity rows (#142): LP fees and gauge rewards are two series, never one figure.
   const gasData = velocityRows(metrics?.velocity_gas_sandbox?.contracts);
@@ -572,11 +572,7 @@ function Dashboard() {
           <RangeSideList positions={positionsList} poolMechanics={rawData?.pool_mechanics} />
           <div style={{ marginTop: 12, fontSize: '0.75rem', color: '#aaa', fontFamily: 'monospace', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span>Spot Price: <strong>${metrics?.tick_bracket_hypervisor?.current_price || '0.00'}</strong></span>
-            {notDrawnRanges > 0 && (
-              <span style={{ color: '#8b949e' }}>
-                {notDrawnRanges} ETH/USDC range{notDrawnRanges === 1 ? '' : 's'} not drawn: not priced in NOCK
-              </span>
-            )}
+            {notDrawnRanges && <span style={{ color: '#8b949e' }}>{notDrawnRanges}</span>}
             {tickData.some((t: any) => t.converted) && (
               <span style={{ color: '#8b949e' }}>ETH-denominated brackets converted to USD @ ${ethUsd ? ethUsd.toFixed(2) : '—'}/ETH ({global?.eth_price_usd ? 'snapshot ETH/USD' : 'pool-derived, older snapshot'})</span>
             )}
@@ -649,7 +645,7 @@ function Dashboard() {
             <span><span style={{ color: '#10b981' }}>■</span> Actual: On Target</span>
             <span><span style={{ color: '#f59e0b' }}>■</span> Actual: Under-Funded</span>
             <span><span style={{ color: '#ef4444' }}>■</span> Actual: Over-Funded</span>
-            <span><span style={{ color: '#8b949e' }}>■</span> Actual: No Target Set (incl. Gas, AERO and ETH/USDC LP: counted, never rebalanced)</span>
+            <span><span style={{ color: '#8b949e' }}>■</span> Actual: No Target Set (incl. Gas, AERO and non-NOCK LP: counted, never rebalanced)</span>
           </div>
         </CanvasPanel>
 

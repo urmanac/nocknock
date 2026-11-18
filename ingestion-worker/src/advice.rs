@@ -119,9 +119,16 @@ pub(crate) fn compute_counterfactual_sync(
 /// The deviation-matrix row the uniswap_lp target weight is measured against: NOCK-pair
 /// positions only (#151).
 pub(crate) const NOCK_LP_BUCKET_NAME: &str = "NOCK LP (NOCK-pair positions)";
-/// The measured, untargeted row for tracked ranges with no NOCK leg (gas-side ETH/USDC
-/// ranges, #151). Present only when such a range holds value.
-pub(crate) const GAS_LP_BUCKET_NAME: &str = "ETH/USDC LP (measured)";
+/// The measured, untargeted row for tracked ranges with no NOCK leg (#151), present only
+/// when such a range holds value. Named by non_nock_range_kind: "ETH/USDC LP (measured)"
+/// when every such range is an ETH/USDC pair (the gas-side ranges), otherwise
+/// "Non-NOCK LP (measured)".
+pub(crate) fn gas_lp_bucket_name(positions: &[RawPosition]) -> &'static str {
+    match non_nock_range_kind(positions) {
+        "ETH/USDC" => "ETH/USDC LP (measured)",
+        _ => "Non-NOCK LP (measured)",
+    }
+}
 
 /// Claim recommendation computed from live claimable yield vs gas break-even.
 /// With gas known: below the gas cost a claim loses money, so accumulate (#153); from
@@ -452,11 +459,27 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     // harvest ledger actually books (USDC, NOCK and WETH/ETH, each valued at the claim's block).
     // AERO is deliberately not named here (#93): this directive is about LP fees, and
     // no directive may read as advice to claim AERO. The ledger books AERO all the same.
-    let harvest: Option<(String, String)> = (total_fees_usd >= 5.00).then(|| {
-        let gas_efficiency = if gas_cost > 0.0 {
-            format!("{:.0}x", total_fees_usd / gas_cost)
+    // Only fees worth claiming count toward the threshold (#153 review): an LP-claimable
+    // row whose own action is claim_now or claim_recommended. A position whose fees are
+    // below its claim's gas would lose money to collect, so its fees never make up the
+    // $5.00, however many such positions there are.
+    let (worth_claiming_usd, worth_claims) = fee_entries
+        .iter()
+        .filter(|(_, _, fee_usd, lp_claimable, _, _)| {
+            *lp_claimable && matches!(recommended_claim_action(*fee_usd, gas_cost), "claim_now" | "claim_recommended")
+        })
+        .fold((0.0f64, 0usize), |(sum, n), (_, _, fee_usd, ..)| (sum + fee_usd, n + 1));
+    let harvest: Option<(String, String)> = (worth_claiming_usd >= 5.00).then(|| {
+        // Each position is its own claim, each paying gas: fees over the gas of every claim.
+        let gas_efficiency = if gas_cost > 0.0 && worth_claims > 0 {
+            format!("{:.0}x", worth_claiming_usd / (gas_cost * worth_claims as f64))
         } else {
             "unknown".to_string()
+        };
+        let of_total = if (total_fees_usd - worth_claiming_usd).abs() >= 0.005 {
+            format!(" of ${:.2} uncollected", total_fees_usd)
+        } else {
+            String::new()
         };
         let r = profile.tax_reserve_ratio * 100.0;
         let booking = if tax_ratio_set {
@@ -471,9 +494,12 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         (
             "BATCH HARVEST SHOT (Execute Claim)".to_string(),
             format!(
-                "Uncollected LP fees (${:.2}) have reached the fixed $5.00 harvest threshold ({} gas efficiency). After harvesting, record the transaction: {}, each valued at the claim's block. Bookkeeping only; nothing moves on-chain.",
-                total_fees_usd,
+                "Uncollected LP fees (${:.2}{}) have reached the fixed $5.00 harvest threshold ({} gas efficiency over {} claim{}). After harvesting, record the transaction: {}, each valued at the claim's block. Bookkeeping only; nothing moves on-chain.",
+                worth_claiming_usd,
+                of_total,
                 gas_efficiency,
+                worth_claims,
+                if worth_claims == 1 { "" } else { "s" },
                 booking
             ),
         )
@@ -613,7 +639,7 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         } else if nock_lp_usd <= 0.0 {
             "HOLD & ACCRETE (NOCK LP Empty)"
         } else {
-            "HOLD & ACCRETE (No Ranged LP Confirmed In Range)"
+            "HOLD & ACCRETE (No Ranged NOCK LP Confirmed In Range)"
         };
         let dip_note = if !plan_configured && dip_zone {
             format!(
@@ -833,7 +859,7 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
                 if gas_lp_usd > 0.0 {
                     let gas_lp_weight = weight(gas_lp_usd);
                     rows.push(AllocationDeviation {
-                        bucket_name: GAS_LP_BUCKET_NAME.to_string(),
+                        bucket_name: gas_lp_bucket_name(&raw.positions).to_string(),
                         target_weight_bps: 0,
                         actual_weight_bps: gas_lp_weight,
                         deviation_bps: gas_lp_weight,

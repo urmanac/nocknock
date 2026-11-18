@@ -514,3 +514,124 @@ fn test_brackets_stay_one_per_position_and_carry_its_id() {
     .unwrap();
     assert_eq!(old.position_id, "");
 }
+
+/// A synthetic USDC/AERO range: a non-NOCK pair that is not ETH/USDC (review of #151).
+/// AERO has no leg price in valuation, so only its USDC is valued.
+fn usdc_aero_range() -> RawPosition {
+    let mut p = gas_range_v3();
+    p.position_id = "uniswap-v3:base:9999001".to_string();
+    p.nft_id = 9999001;
+    p.pool_id = "0x0000000000000000000000000000000000009999".to_string();
+    p.token0 = usdc();
+    p.token1 = PositionTokenInfo { address: AERO_BASE.to_string(), symbol: "AERO".to_string(), decimals: 18 };
+    p.amount0 = 40.0;
+    p.amount1 = 50.0;
+    p.fee1 = 0.0;
+    p
+}
+
+fn profile_without_lp_target() -> OperatorProfile {
+    OperatorProfile { target_weights_bps: TargetWeightsBps { treasury: 8000, uniswap_lp: 0, cash: 500 }, ..profile() }
+}
+
+#[test]
+fn test_hold_label_names_nock_lp_when_only_gas_ranges_are_in_range() {
+    // NOCK ranges out of range, ETH/USDC ranges in range: the label is about NOCK LP and
+    // agrees with the summary, which says the gas ranges are in range.
+    let mut raw = with_gas_ranges();
+    for p in raw.positions.iter_mut().filter(|p| is_nock_pair(p)) {
+        p.in_range = false;
+    }
+    let m = compute_derived_metrics_with_plan(
+        &raw, 0.0, &profile_without_lp_target(), StructuralChannels { channels: vec![] }, &[],
+        &LedgerAggregate::default(), &MarketRegime::default(), &PlanContext::none(),
+    );
+    assert_eq!(m.global_status.shot_advice_action, "HOLD & ACCRETE (No Ranged NOCK LP Confirmed In Range)");
+    assert!(m.global_status.shot_advice_details.contains("+2 ETH/USDC ranges, measured only (2 in range)."), "{}", m.global_status.shot_advice_details);
+}
+
+#[test]
+fn test_non_nock_ranges_are_named_by_one_rule() {
+    // All non-NOCK ranges ETH/USDC: "ETH/USDC" in the summary and the matrix row.
+    let raw = with_gas_ranges();
+    assert_eq!(non_nock_range_kind(&raw.positions), "ETH/USDC");
+    assert_eq!(gas_lp_bucket_name(&raw.positions), "ETH/USDC LP (measured)");
+    // A NOCK-only book has nothing to name; the rule is vacuous and no row is emitted.
+    assert_eq!(non_nock_range_kind(&nock_only().positions), "ETH/USDC");
+
+    // A USDC/AERO range among them: "non-NOCK" everywhere.
+    let mut mixed = with_gas_ranges();
+    mixed.positions.push(usdc_aero_range());
+    mixed.pool_liquidity.insert(usdc_aero_range().position_id, "1000".to_string());
+    assert_eq!(non_nock_range_kind(&mixed.positions), "non-NOCK");
+    let (summary, _) = lp_positions_summary(&mixed);
+    assert!(summary.ends_with(" +3 non-NOCK ranges, measured only (3 in range)."), "{summary}");
+    let m = metrics(&mixed, &PlanContext::none());
+    let names: Vec<&str> = m.portfolio_deviation_matrix.allocations.iter().map(|r| r.bucket_name.as_str()).collect();
+    assert_eq!(names.last(), Some(&"Non-NOCK LP (measured)"));
+    assert!(!names.contains(&"ETH/USDC LP (measured)"));
+
+    // The USDC/AERO range alone.
+    let mut alone = nock_only();
+    alone.positions.push(usdc_aero_range());
+    let (summary, _) = lp_positions_summary(&alone);
+    assert!(summary.ends_with(" +1 non-NOCK range, measured only (1 in range)."), "{summary}");
+    let m = metrics(&alone, &PlanContext::none());
+    assert_eq!(m.portfolio_deviation_matrix.allocations.last().unwrap().bucket_name, "Non-NOCK LP (measured)");
+}
+
+#[test]
+fn test_usdc_token0_bracket_with_no_nock_leg_has_no_distance() {
+    // Before the review's narrowing, any USDC token0 got a distance from the NOCK spot.
+    let mut raw = nock_only();
+    raw.positions.push(usdc_aero_range());
+    let m = metrics(&raw, &PlanContext::none());
+    let b = m.tick_bracket_hypervisor.brackets.iter().find(|b| b.position_id == "uniswap-v3:base:9999001").unwrap();
+    assert!(!b.full_range);
+    assert_eq!(b.distance_bps, None);
+    // The USDC/NOCK bracket keeps its distance.
+    assert!(m.tick_bracket_hypervisor.brackets[0].distance_bps.is_some());
+}
+
+/// Fees on the three LP-claimable positions; the staked Aero range has none to claim.
+fn with_fees(usd_each: f64, gas: f64) -> RawOnChainData {
+    let mut raw = with_gas_ranges();
+    raw.live_gas_cost_usd = gas;
+    for p in raw.positions.iter_mut() {
+        match p.nft_id {
+            3163450 => p.fee0 = usd_each,         // USDC
+            6336662 => p.fee0 = usd_each / ETH_USD, // WETH
+            6607225 => p.fee1 = usd_each,         // USDC
+            _ => {}
+        }
+    }
+    raw
+}
+
+#[test]
+fn test_batch_harvest_counts_only_fees_worth_claiming() {
+    // Three positions with $1.90 each ($5.70 in all) against $2.00 gas per claim: no
+    // single claim pays for itself, so there is no harvest, though the total is over $5.
+    let m = metrics(&with_fees(1.90, 2.0), &PlanContext::none());
+    assert!(usd(&m.global_status.total_fees_claimable_usd) >= 5.0);
+    for r in m.velocity_gas_sandbox.contracts.iter().filter(|r| r.recommended_action != "not_claimable") {
+        assert_eq!(r.recommended_action, "accumulate", "{}", r.contract_name);
+    }
+    assert!(!m.global_status.shot_advice_action.contains("BATCH HARVEST"), "{}", m.global_status.shot_advice_action);
+    assert!(!m.global_status.shot_advice_details.contains("BATCH HARVEST"));
+
+    // The same fees against $0.50 gas: every claim pays (claim_now), and the efficiency
+    // is the fees over the gas of all three claims: 5.70 / (0.50 × 3) = 3.8, "4x".
+    let m = metrics(&with_fees(1.90, 0.5), &PlanContext::none());
+    let (a, d) = (&m.global_status.shot_advice_action, &m.global_status.shot_advice_details);
+    assert!(a.contains("BATCH HARVEST"), "{a}");
+    assert!(d.contains("Uncollected LP fees ($5.70) have reached the fixed $5.00 harvest threshold (4x gas efficiency over 3 claims)."), "{d}");
+
+    // Only the rows worth claiming count: two at $3.00 with $2.00 gas (claim_recommended)
+    // make $6.00 of a $6.10 total; the third, $0.10, is left out of the sum and the count.
+    let mut raw = with_fees(3.0, 2.0);
+    raw.positions.iter_mut().find(|p| p.nft_id == 6607225).unwrap().fee1 = 0.10;
+    let m = metrics(&raw, &PlanContext::none());
+    let d = &m.global_status.shot_advice_details;
+    assert!(d.contains("Uncollected LP fees ($6.00 of $6.10 uncollected) have reached the fixed $5.00 harvest threshold (2x gas efficiency over 2 claims)."), "{d}");
+}
