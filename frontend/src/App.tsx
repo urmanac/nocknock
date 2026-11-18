@@ -34,9 +34,10 @@ const SOURCE_LABELS: Record<string, string> = {
   aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
-import { POSITION_COLORS, hasNockLeg, nockBracketRows, notDrawnRangesText, positionBracket, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText } from './positions.ts';
+import { POSITION_COLORS, ethBracketRows, fullRangeEthUsdcCount, hasNockLeg, nockBracketRows, notDrawnRangesText, positionBracket, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText } from './positions.ts';
 import { isAeroProtocol, positionFeesText } from './aeroCl.ts';
 import { PositionStakingLine, RangeSideList } from './components/PositionRangeNotes.tsx';
+import { EthBracketChart } from './components/EthBracketChart.tsx';
 import { floorState, floorDeltaText, floorSummaryText, regimeLabel, regimeTone } from './floor.ts';
 import { buildChartRows, compositionReadout, syncWindowOrDefault, type ChartSeries, type GapRow } from './timeline.ts';
 import { ethUsdPrice, gasLine, hwmSubtitle, pillarLine } from './pillars.ts';
@@ -161,6 +162,9 @@ function Dashboard() {
     parseFloat(metrics?.tick_bracket_hypervisor?.current_price || '0'),
   );
   const notDrawnRanges = notDrawnRangesText(positionsList);
+  // The ETH/USDC ranges (#160) get their own axis, USD per ETH: measured, never steered.
+  const ethTickData = ethBracketRows(metrics?.tick_bracket_hypervisor?.brackets, positionsList, ethUsd);
+  const ethFullRangeCount = fullRangeEthUsdcCount(positionsList);
 
   // Velocity rows (#142): LP fees and gauge rewards are two series, never one figure.
   const gasData = velocityRows(metrics?.velocity_gas_sandbox?.contracts);
@@ -550,8 +554,9 @@ function Dashboard() {
         </CanvasPanel>
 
         {/* 3. Tick Bracket Hypervisor — Horizontal Ranges (one bar per NOCK range, all
-            brackets converted to USD per NOCK so cross-protocol rows share one axis) */}
-        <CanvasPanel title="Tick Bracket Hypervisor (NOCK ranges)">
+            brackets converted to USD per NOCK so cross-protocol rows share one axis; the
+            ETH/USDC ranges below on their own USD-per-ETH axis, #160) */}
+        <CanvasPanel title={ethTickData.length > 0 ? 'Tick Bracket Hypervisor (NOCK and ETH/USDC ranges)' : 'Tick Bracket Hypervisor (NOCK ranges)'}>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={tickData} layout="vertical" margin={{ top: 10, right: 30, left: 110, bottom: 0 }}>
               <XAxis type="number" tickFormatter={v => '$' + v.toFixed(4)} stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} domain={[0, 'dataMax']} />
@@ -606,6 +611,12 @@ function Dashboard() {
               );
             })()}
           </div>
+          <EthBracketChart
+            rows={ethTickData}
+            ethUsd={ethUsd}
+            ethUsdFromSnapshot={!!global?.eth_price_usd}
+            fullRangeCount={ethFullRangeCount}
+          />
         </CanvasPanel>
 
         {/* 4. Portfolio Deviation Matrix — Bar Chart */}

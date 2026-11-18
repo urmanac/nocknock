@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bracketPosition, hasNockLeg, nockBracketRows, nonNockRangeCount, nonNockRangeKind, notDrawnRangesText, positionBracket } from './positions.ts';
+import { bracketPosition, ethBracketRows, fullRangeEthUsdcCount, hasNockLeg, isEthUsdcPair, nockBracketRows, nonNockRangeCount, nonNockRangeKind, notDrawnRangesText, positionBracket, positionLabel } from './positions.ts';
 
 // Tracked positions on 2026-11-17: two NOCK ranges and the operator's two gas-side
 // WETH/USDC ranges (#151, #152), in config order.
@@ -104,10 +104,86 @@ describe('naming the ranges with no NOCK leg (#151 review)', () => {
     expect(nonNockRangeKind([NOCK_USDC, USDC_AERO])).toBe('non-NOCK');
   });
 
-  it('the chart caption uses the same rule', () => {
-    expect(notDrawnRangesText(POSITIONS)).toBe('2 ETH/USDC ranges not drawn: not priced in NOCK');
-    expect(notDrawnRangesText([NOCK_USDC, GAS_V3])).toBe('1 ETH/USDC range not drawn: not priced in NOCK');
-    expect(notDrawnRangesText([...POSITIONS, USDC_AERO])).toBe('3 non-NOCK ranges not drawn: not priced in NOCK');
+  it('the not-drawn caption names only ranges on neither chart (#160)', () => {
+    // ETH/USDC ranges are drawn on their own USD-per-ETH chart since #160.
+    expect(notDrawnRangesText(POSITIONS)).toBeNull();
+    expect(notDrawnRangesText([NOCK_USDC, GAS_V3])).toBeNull();
+    expect(notDrawnRangesText([...POSITIONS, USDC_AERO])).toBe('1 non-NOCK range not drawn: not priced in NOCK or ETH');
+    expect(notDrawnRangesText([NOCK_USDC, USDC_AERO, { ...USDC_AERO, position_id: 'y' }])).toBe('2 non-NOCK ranges not drawn: not priced in NOCK or ETH');
     expect(notDrawnRangesText([NOCK_USDC, WETH_NOCK])).toBeNull();
+  });
+
+  it('isEthUsdcPair takes ETH or WETH with USDC in either order', () => {
+    expect(isEthUsdcPair(GAS_V3)).toBe(true);
+    expect(isEthUsdcPair(USDC_ETH)).toBe(true);
+    expect(isEthUsdcPair(WETH_NOCK)).toBe(false);
+    expect(isEthUsdcPair(USDC_AERO)).toBe(false);
+    expect(isEthUsdcPair(null)).toBe(false);
+  });
+});
+
+describe('ethBracketRows (#160)', () => {
+  // Live on chudmax, v0.8.2, 2026-11-18: ETH $1,749.16.
+  const ETH_SPOT = 1749.16;
+
+  it('draws both gas-side WETH/USDC ranges in USD per ETH, edges swapped', () => {
+    const rows = ethBracketRows(BRACKETS_282, POSITIONS, ETH_SPOT);
+    expect(rows.map((r) => r.positionId)).toEqual([GAS_V3.position_id, GAS_CL.position_id]);
+    expect(rows.map((r) => r.name)).toEqual([positionLabel(GAS_V3), positionLabel(GAS_CL)]);
+    expect(rows[0].name).toMatch(/WETH\/USDC/);
+    // 1 / 0.000675513 and 1 / 0.000338833: the upper WETH-per-USDC edge is the lower USD edge.
+    expect(rows[0].lower).toBeCloseTo(1480.33, 1);
+    expect(rows[0].upper).toBeCloseTo(2951.31, 1);
+    expect(rows[0].lower).toBeLessThan(rows[0].upper);
+    expect(rows[0].liquidity).toBe(257.19);
+    expect(rows[0].inRange).toBe(true);
+    // Spot is 18.2% above the lower edge, 68.7% below the upper: the nearer edge wins.
+    expect(rows[0].distance).toBeCloseTo((ETH_SPOT - 1 / 0.000675513) / ETH_SPOT * 100, 6);
+    // No NOCK range is drawn here.
+    expect(rows.every((r) => r.lower > 100)).toBe(true);
+  });
+
+  it('a USDC/ETH-ordered bracket is already USDC per ETH', () => {
+    const USDC_WETH = { position_id: 'uniswap-v3:base:7', protocol: 'uniswap-v3', fee_tier_bps: 5, token0: tok('USDC'), token1: tok('WETH') };
+    const b = { position_id: USDC_WETH.position_id, lower_price: '1480', upper_price: '2951', liquidity_usd: '10', in_range: true, full_range: false };
+    const [row] = ethBracketRows([b], [USDC_WETH], ETH_SPOT);
+    expect(row.lower).toBe(1480);
+    expect(row.upper).toBe(2951);
+  });
+
+  it('pairs by id when reordered and by index for an older snapshot', () => {
+    const reordered = [BRACKETS_282[3], BRACKETS_282[0], BRACKETS_282[2]];
+    expect(ethBracketRows(reordered, POSITIONS, ETH_SPOT).map((r) => r.positionId)).toEqual([GAS_CL.position_id, GAS_V3.position_id]);
+    const old = [B_NOCK_USDC, B_WETH_NOCK, B_GAS_V3, B_GAS_CL];
+    expect(ethBracketRows(old, POSITIONS, ETH_SPOT).map((r) => r.liquidity)).toEqual([257.19, 261.94]);
+  });
+
+  it('out of range: distance 0 and the flag kept from the worker', () => {
+    const [row] = ethBracketRows([{ ...BRACKETS_282[2], in_range: false }], POSITIONS, 3200);
+    expect(row.inRange).toBe(false);
+    expect(row.distance).toBe(0);
+  });
+
+  it('without an ETH/USD the bars are still drawn, with no distance', () => {
+    const rows = ethBracketRows(BRACKETS_282, POSITIONS, null);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.distance === null)).toBe(true);
+  });
+
+  it('never draws a made-up edge: full range, zero, missing or non-numeric edges are left out', () => {
+    const bad = [
+      { ...BRACKETS_282[2], full_range: true },
+      { ...BRACKETS_282[3], lower_price: '0' },
+    ];
+    expect(ethBracketRows(bad, POSITIONS, ETH_SPOT)).toEqual([]);
+    expect(ethBracketRows([{ ...BRACKETS_282[2], upper_price: 'n/a' }], POSITIONS, ETH_SPOT)).toEqual([]);
+    expect(ethBracketRows([{ ...BRACKETS_282[2], lower_price: undefined }], POSITIONS, ETH_SPOT)).toEqual([]);
+    expect(ethBracketRows(undefined, POSITIONS, ETH_SPOT)).toEqual([]);
+  });
+
+  it('counts full-range ETH/USDC positions so the chart can name them', () => {
+    expect(fullRangeEthUsdcCount(POSITIONS)).toBe(0);
+    expect(fullRangeEthUsdcCount([...POSITIONS, { ...GAS_V3, position_id: 'z', full_range: true }])).toBe(1);
+    expect(fullRangeEthUsdcCount([{ ...NOCK_USDC, full_range: true }])).toBe(0);
   });
 });
