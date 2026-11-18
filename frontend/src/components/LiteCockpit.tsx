@@ -49,11 +49,18 @@ export type RecordErrorKind = 'recorded' | 'awaiting_broadcast' | 'failed';
  */
 export function classifyRecordError(e: unknown): RecordErrorKind {
   const status = (e as { status?: number })?.status;
-  const msg = e instanceof Error ? e.message : String(e);
-  if (status === 409 || msg.includes('ALREADY_RECORDED')) return 'recorded';
-  if (status === 404 || msg.includes('RECEIPT_NOT_FOUND') || msg.includes('404')) {
-    return 'awaiting_broadcast';
+  const code = (e as { code?: string })?.code;
+  // The HTTP status decides when there is one. Since #156 a refusal's detail can carry
+  // chain data (addresses, raw amounts), so a substring such as '404' in the message
+  // must never turn a final refusal into "awaiting broadcast".
+  if (typeof status === 'number') {
+    if (status === 409) return 'recorded';
+    if (status === 404) return 'awaiting_broadcast';
+    return 'failed';
   }
+  const msg = e instanceof Error ? e.message : String(e);
+  if (code === 'ALREADY_RECORDED' || msg.includes('ALREADY_RECORDED')) return 'recorded';
+  if (code === 'RECEIPT_NOT_FOUND' || msg.includes('RECEIPT_NOT_FOUND')) return 'awaiting_broadcast';
   return 'failed';
 }
 

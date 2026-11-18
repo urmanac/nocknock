@@ -44,6 +44,8 @@ mod advice;
 use advice::*;
 mod ledger;
 use ledger::*;
+mod harvest_principal;
+use harvest_principal::*;
 mod ingest;
 use ingest::*;
 mod api;
@@ -2022,3 +2024,5 @@ mod tests_closed;
 mod tests_burndown;
 #[cfg(test)]
 mod tests_gas_lp;
+#[cfg(test)]
+mod tests_harvest_principal;

@@ -79,7 +79,7 @@ This guide captures the operational rules, environment quirks, toolchain configu
   startup. Functions live in modules: `adapters/` (one file per protocol; `adapters/mod.rs`
   holds every function that branches on the protocol string), `onchain` (one cycle's reads),
   `valuation`, `advice`, `lp_rebuild`, `plan`, `ledger`, `claims`, `market`, `ingest`, `api`,
-  `aero_rewards`, `aero_text`, `rewards`, `reward_text`, `closed`, `closed_text`, `fill_verify`, `fill_detection`, `fill_text`, `route_quotes`, `quote_text`, `cost_basis`, `cost_basis_text`, `rpc`, `evm`, `calldata`, `contracts`, `notify`, `mcp_text`, `mcp_http`, and `tests` (each feature since #91 adds its own `tests_<topic>.rs`; the v0.8.1 burn-down's are in `tests_burndown.rs`).
+  `aero_rewards`, `aero_text`, `harvest_principal`, `rewards`, `reward_text`, `closed`, `closed_text`, `fill_verify`, `fill_detection`, `fill_text`, `route_quotes`, `quote_text`, `cost_basis`, `cost_basis_text`, `rpc`, `evm`, `calldata`, `contracts`, `notify`, `mcp_text`, `mcp_http`, and `tests` (each feature since #91 adds its own `tests_<topic>.rs`; the v0.8.1 burn-down's are in `tests_burndown.rs`).
   The HTTP router is `api::api_router`, with the cross-site write guard (#133); every
   ingestion cycle runs through `ingest::CycleGate`, one at a time (#134).
   `closed` (#144) decides when a configured position's NFT provably does not exist; the

@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Returned liquidity is no longer booked as fee income (#156).** `POST /v1/execute/record-harvest`
+  booked everything a transaction paid the wallet. A "remove liquidity" transaction
+  (`decreaseLiquidity` + `collect` in one multicall, as the Uniswap and Aero apps send it)
+  pays back the position's principal with its fees, so the principal would have been
+  booked as harvest income, which overstates income, the tax reserve and the Koinly
+  export. Now each `DecreaseLiquidity` from the Uniswap v3 NPM or the Aero CL position
+  manager is read as principal: the position's tokens come from `positions(tokenId)` at
+  the block before the transaction (the NFT is often burned in it), and the amounts are
+  taken out of what the wallet received. Only the fees are booked, and the response
+  lists the principal it left out in `principal_excluded`. Principal that cannot be read
+  from the receipt is refused with nothing recorded:
+  - a Uniswap v4 liquidity removal (`PRINCIPAL_NOT_SEPARABLE`);
+  - an Aero basic pool `Burn` (`PRINCIPAL_NOT_SEPARABLE`);
+  - a concentrated pool `Burn` for another owner (`PRINCIPAL_NOT_SEPARABLE`);
+  - a decrease not collected in the same transaction, or collected to anyone but the
+    wallet, the position manager or the contract the wallet called (`PRINCIPAL_NOT_SEPARABLE`);
+  - a collect from a position that held no liquidity just before the transaction, whose
+    payout is principal from an earlier decrease (`PRINCIPAL_NOT_SEPARABLE`);
+  - principal larger than what the wallet received (`PRINCIPAL_EXCEEDS_INFLOW`), including
+    principal in a token NockNock does not book, which a zap may have swapped into one it does.
+
+  A transaction that returns only principal records nothing (`PRINCIPAL_ONLY`).
+  - The fixture is the real withdrawal of v3 WETH/NOCK #6336662
+    (`0x06515a23…b778`). Of its 0.103325 ETH and 1,006.81 NOCK, the fees were
+    0.000999503 WETH and 101.58 NOCK.
+  - Known limit: part of a position's liquidity decreased in one transaction and
+    collected in a later one, while the position still holds liquidity, is booked in
+    full by the later one.
+  - Nothing had been misbooked: that withdrawal was held back until this fix.
+- **A swap is no longer booked as fee income (#157).** `record-harvest` also booked a
+  purchase: the operator's $20 NOCK buy (`0x9092eede…0315`) recorded against a scratch
+  worker became a $20.21 "harvest" of 1,247.58 NOCK. A fee or reward claim only pays the
+  wallet, so a transaction in which the wallet pays out an ERC-20, or which sends ETH, is
+  refused with `NOT_A_CLAIM` and nothing is recorded. A position NFT leaving the wallet
+  (burned on withdrawal, or staked) is not a payment and does not count. A NOCK buy is
+  recorded with `record-accumulation`, as before.
+- **The cockpit no longer reads "404" in a refusal as "awaiting broadcast" (#156).** A
+  record-harvest failure is classified by its HTTP status. Refusal details now carry
+  addresses and raw amounts, and the digits "404" inside one would have retried a final
+  refusal for ten minutes.
+
 ## [0.8.1] - 2026-11-18
 
 A patch release: no new feature, every change makes a number or a surface truer.
