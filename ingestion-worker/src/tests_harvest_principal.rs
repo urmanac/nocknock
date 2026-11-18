@@ -425,3 +425,58 @@ fn test_the_decrease_and_burn_topics_match_the_real_receipt() {
     assert!(topics.iter().any(|t| t == CL_POOL_BURN_TOPIC));
     assert!(topics.iter().any(|t| t == COLLECT_TOPIC));
 }
+
+// ---------------------------------------------------------------- #157: claims only
+
+const SWAP_RECEIPT: &str = include_str!("../testdata/harvest/aero_basic_nock_buy_receipt.json");
+
+#[test]
+fn test_real_nock_buy_is_not_a_claim() {
+    // The operator's $20 NOCK buy on the Aero basic pool (tx 0x9092eede…0315, value 0):
+    // the parser alone books its 1247.58 NOCK as a harvest.
+    let swap: serde_json::Value = serde_json::from_str(SWAP_RECEIPT).unwrap();
+    assert_eq!(amount(&rows(&swap), "NOCK").as_deref(), Some("12475780174985541702"));
+    let e = check_is_claim(&swap, 0, WALLET).unwrap_err();
+    assert_eq!(e.code, "NOT_A_CLAIM");
+    assert!(e.detail.contains("record-accumulation"), "{}", e.detail);
+}
+
+#[test]
+fn test_real_claims_and_withdrawals_are_claims() {
+    assert_eq!(check_is_claim(&receipt(), 0, WALLET), Ok(()));
+    let aero = super::tests_aero_rewards::real_claim_receipt();
+    let claimer = aero["from"].as_str().unwrap().to_string();
+    assert_eq!(check_is_claim(&aero, 0, &claimer), Ok(()));
+}
+
+#[test]
+fn test_sending_eth_is_not_a_claim() {
+    assert_eq!(check_is_claim(&receipt(), 1, WALLET).unwrap_err().code, "NOT_A_CLAIM");
+}
+
+#[test]
+fn test_a_position_nft_leaving_the_wallet_is_still_a_claim() {
+    // ERC-721 Transfer (4 topics) from the wallet to the zero address: the NFT burned on
+    // withdrawal. Only ERC-20 payments out of the wallet make it a swap.
+    let burn = log(
+        UNISWAP_V3_NPM,
+        vec![
+            TRANSFER_EVENT_TOPIC.to_string(),
+            topic_addr(WALLET),
+            topic_addr("0x0000000000000000000000000000000000000000"),
+            format!("0x{}", word(6336662)),
+        ],
+        &[],
+    );
+    assert_eq!(check_is_claim(&receipt_with(vec![burn]), 0, WALLET), Ok(()));
+    let pay = log(USDC_BASE, vec![TRANSFER_EVENT_TOPIC.to_string(), topic_addr(WALLET), topic_addr(UNISWAP_V3_NPM)], &[word(5)]);
+    assert_eq!(check_is_claim(&receipt_with(vec![pay]), 0, WALLET).unwrap_err().code, "NOT_A_CLAIM");
+}
+
+#[test]
+fn test_tx_value_wei() {
+    assert_eq!(tx_value_wei(&json!({ "value": "0x0" })), Some(0));
+    assert_eq!(tx_value_wei(&json!({ "value": "0xde0b6b3a7640000" })), Some(1_000_000_000_000_000_000));
+    assert_eq!(tx_value_wei(&json!({})), None);
+    assert_eq!(tx_value_wei(&serde_json::Value::Null), None);
+}

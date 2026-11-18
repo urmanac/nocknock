@@ -485,3 +485,43 @@ pub(crate) fn positions_calldata(d: &LiquidityDecrease) -> String {
 pub(crate) fn block_before_tag(block_number: i64) -> Option<String> {
     (block_number > 0).then(|| format!("0x{:x}", block_number - 1))
 }
+
+/// A fee or reward claim only pays the wallet (#157). If the receipt shows the wallet
+/// paying out an ERC-20 (a 3-topic `Transfer` from the wallet: a 4-topic ERC-721
+/// `Transfer` is a position NFT moving, burned on withdrawal or staked), or the
+/// transaction sent ETH, it is a swap, a deposit or a purchase, not a claim. Pure.
+pub(crate) fn check_is_claim(receipt: &serde_json::Value, tx_value_wei: u128, wallet: &str) -> Result<(), PrincipalRefusal> {
+    let not_a_claim = |detail: String| PrincipalRefusal { code: "NOT_A_CLAIM", detail };
+    if tx_value_wei > 0 {
+        return Err(not_a_claim(
+            "the transaction sends ETH, so it is a purchase or a deposit, not a fee claim; a NOCK buy is recorded with record-accumulation".to_string(),
+        ));
+    }
+    let wallet_word = format!("000000000000000000000000{}", wallet.trim_start_matches("0x").to_lowercase());
+    let Some(logs) = receipt.get("logs").and_then(|l| l.as_array()) else {
+        return Ok(());
+    };
+    for log in logs {
+        let Some(topics) = log.get("topics").and_then(|t| t.as_array()) else {
+            continue;
+        };
+        let pays_out = topics.len() == 3
+            && topics[0].as_str().is_some_and(|t| t.eq_ignore_ascii_case(TRANSFER_EVENT_TOPIC))
+            && topics[1].as_str().is_some_and(|t| t.trim_start_matches("0x").eq_ignore_ascii_case(&wallet_word));
+        if pays_out {
+            let token = log.get("address").and_then(|a| a.as_str()).unwrap_or("?");
+            return Err(not_a_claim(format!(
+                "the wallet pays out token {token} in this transaction, so it is a swap or a deposit, not a fee claim; a NOCK buy is recorded with record-accumulation"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// The `value` of a transaction from `eth_getTransactionByHash`, in wei. None when the
+/// answer has no readable value. Pure.
+pub(crate) fn tx_value_wei(tx: &serde_json::Value) -> Option<u128> {
+    tx.get("value")
+        .and_then(|v| v.as_str())
+        .and_then(|v| u128::from_str_radix(v.trim_start_matches("0x"), 16).ok())
+}

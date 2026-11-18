@@ -601,6 +601,12 @@ paths:
         row was recorded without a usd_value because the price read at the claim's
         block failed, recording the same transaction again fills it from that block's
         price; such rows are returned in `priced`.
+        Only a claim is recorded (#157). A fee or reward claim only pays the wallet: a
+        transaction in which the wallet pays out an ERC-20 (a 3-topic Transfer from the
+        wallet), or which sends ETH, is a swap, deposit or purchase, and is refused with
+        422 NOT_A_CLAIM. A position NFT leaving the wallet (an ERC-721 Transfer, burned
+        on withdrawal or staked) does not count. A NOCK buy is recorded with
+        /execute/record-accumulation.
         Principal is not income (#156). A transaction that removes liquidity and
         collects in one step pays back the position's principal with its fees. For each
         DecreaseLiquidity emitted by the Uniswap v3 NPM or the Aero CL position manager,
@@ -696,13 +702,15 @@ paths:
         '422':
           description: >
             Invalid platform/hash, reverted transaction, or no tracked transfers; or
+            a transaction that is not a claim (NOT_A_CLAIM, #157); or
             principal that cannot be split from fees (PRINCIPAL_NOT_SEPARABLE,
             PRINCIPAL_EXCEEDS_INFLOW), or a transaction that only returns principal
             (PRINCIPAL_ONLY). Nothing is recorded.
         '503':
           description: >
-            No RPC key configured, or the receipt or a decreased position's tokens could
-            not be read (POSITION_UNREADABLE). Nothing is recorded.
+            No RPC key configured; the receipt or the transaction could not be read
+            (RPC_UNAVAILABLE); or a position the transaction touches could not be read
+            (POSITION_UNREADABLE). Nothing is recorded.
 
   /tax/export:
     get:

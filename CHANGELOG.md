@@ -38,6 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     collected in a later one, while the position still holds liquidity, is booked in
     full by the later one.
   - Nothing had been misbooked: that withdrawal was held back until this fix.
+- **A swap is no longer booked as fee income (#157).** `record-harvest` also booked a
+  purchase: the operator's $20 NOCK buy (`0x9092eede…0315`) recorded against a scratch
+  worker became a $20.21 "harvest" of 1,247.58 NOCK. A fee or reward claim only pays the
+  wallet, so a transaction in which the wallet pays out an ERC-20, or which sends ETH, is
+  refused with `NOT_A_CLAIM` and nothing is recorded. A position NFT leaving the wallet
+  (burned on withdrawal, or staked) is not a payment and does not count. A NOCK buy is
+  recorded with `record-accumulation`, as before.
 - **The cockpit no longer reads "404" in a refusal as "awaiting broadcast" (#156).** A
   record-harvest failure is classified by its HTTP status. Refusal details now carry
   addresses and raw amounts, and the digits "404" inside one would have retried a final

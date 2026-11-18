@@ -1480,3 +1480,10 @@ one of these:
 - the wallet;
 - the position manager, or the zero address, which the v3 NPM reads as itself;
 - the contract the wallet called, such as a router.
+
+**A swap is not a claim (#157).** The operator's NOCK buy `0x9092eede59c13fbb3b301e26d9beb963ad04d4a05090d436d337f16a92880315`
+(block 58906520, sent to the router `0x0fef9e88…` with value 0) pays USDC out of the wallet
+and NOCK in. A claim never pays out, so a 3-topic ERC-20 `Transfer` from the wallet, or a
+transaction `value` above 0, refuses the recording. Withdrawals often burn the position NFT,
+which is a 4-topic ERC-721 `Transfer` from the wallet. That is not a payment and is allowed.
+The receipt is a fixture in `ingestion-worker/testdata/harvest/`.

@@ -582,6 +582,33 @@ pub(crate) async fn record_harvest_handler(
         )
             .into_response();
     }
+    // A claim only pays the wallet (#157): a swap, deposit or purchase is refused. The
+    // ETH it sent is on the transaction, not the receipt.
+    let tx_payload = json!({
+        "jsonrpc": "2.0",
+        "method": "eth_getTransactionByHash",
+        "params": [if req.tx_hash.starts_with("0x") { req.tx_hash.clone() } else { format!("0x{}", req.tx_hash) }],
+        "id": 39
+    });
+    let Some(value_wei) = post_rpc_with_retry(&state.http_client, &alchemy_url, &tx_payload, 2)
+        .await
+        .and_then(|res| res.get("result").cloned())
+        .as_ref()
+        .and_then(tx_value_wei)
+    else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": "RPC_UNAVAILABLE", "detail": "Could not read the transaction's ETH value; not recorded" })),
+        )
+            .into_response();
+    };
+    if let Err(refusal) = check_is_claim(&receipt, value_wei, &wallet) {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": refusal.code, "detail": format!("{}; nothing recorded", refusal.detail) })),
+        )
+            .into_response();
+    }
     // One row per token: several payments of one token in the transaction are summed.
     let transfers = match merge_harvest_transfers(parse_harvest_transfers(&receipt, &wallet)) {
         Ok(t) => t,
