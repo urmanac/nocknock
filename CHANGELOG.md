@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The tick bracket chart draws the ETH/USDC ranges (#160).** The gas-side WETH/USDC
+  ranges, left out of the NOCK chart since #152, get their own chart in the same panel,
+  in USD per ETH. Each range is a bar from its lower to its upper edge, green in range
+  and amber out of range. The ETH spot is a line, and each range has a caption line
+  with its span and its distance to the nearer edge. A WETH/USDC bracket (WETH per USDC)
+  is inverted; a full-range one is named, not drawn. They stay measured, never steered:
+  no target or directive changes. Frontend only: no worker or snapshot change.
+
 ## [0.8.2] - 2026-11-18
 
 A patch release: the harvest ledger books only fees.

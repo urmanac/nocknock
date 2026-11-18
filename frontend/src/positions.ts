@@ -253,19 +253,107 @@ export function nockBracketRows(
  * USDC pair, otherwise "non-NOCK".
  */
 export function nonNockRangeKind(positions: any[] | null | undefined): 'ETH/USDC' | 'non-NOCK' {
-  const isEth = (t: any) => t?.symbol === 'ETH' || t?.symbol === 'WETH';
-  const isUsdc = (t: any) => t?.symbol === 'USDC';
   const allEthUsdc = (positions ?? [])
     .filter((p) => p && !hasNockLeg(p))
-    .every((p) => (isEth(p.token0) && isUsdc(p.token1)) || (isUsdc(p.token0) && isEth(p.token1)));
+    .every((p) => isEthUsdcPair(p));
   return allEthUsdc ? 'ETH/USDC' : 'non-NOCK';
 }
 
-/** "2 ETH/USDC ranges not drawn: not priced in NOCK"; null when every range has a NOCK leg. */
-export function notDrawnRangesText(positions: any[] | null | undefined): string | null {
-  const n = nonNockRangeCount(positions);
+/**
+ * True for a pair of ETH or WETH with USDC, in either order: the ranges drawn on the
+ * ETH/USDC bracket chart (#160). The same symbol rule as `nonNockRangeKind`.
+ */
+export function isEthUsdcPair(pos: { token0?: { symbol?: string } | null; token1?: { symbol?: string } | null } | null | undefined): boolean {
+  const isEth = (t: any) => t?.symbol === 'ETH' || t?.symbol === 'WETH';
+  const isUsdc = (t: any) => t?.symbol === 'USDC';
+  return (isEth(pos?.token0) && isUsdc(pos?.token1)) || (isUsdc(pos?.token0) && isEth(pos?.token1));
+}
+
+export interface EthBracketRow {
+  positionId: string | null;
+  name: string;
+  /** USD (USDC) per ETH. */
+  lower: number;
+  upper: number;
+  liquidity: number;
+  inRange: boolean;
+  /** Percent from the ETH spot to the nearer edge; 0 outside; null without a spot. */
+  distance: number | null;
+}
+
+/**
+ * Rows for the ETH/USDC bracket chart, in USD per ETH (#160). A bracket is token0 per
+ * token1: a WETH/USDC one is WETH per USDC, so it is inverted and its edges swap; a
+ * USDC/WETH one is already USDC per ETH. Pairing is by `position_id` (index for older
+ * snapshots), as for the NOCK chart. Full-range positions have no bracket to draw, and a
+ * bracket with an edge that is not a positive number is left out rather than drawn at a
+ * made-up price. These ranges are measured, never steered (#151).
+ */
+export function ethBracketRows(
+  brackets: any[] | null | undefined,
+  positions: any[] | null | undefined,
+  ethUsd: number | null | undefined,
+): EthBracketRow[] {
+  const list = positions ?? [];
+  const rows: EthBracketRow[] = [];
+  (brackets ?? []).forEach((b: any, i: number) => {
+    const pos = bracketPosition(b, i, list);
+    if (!pos || hasNockLeg(pos) || !isEthUsdcPair(pos)) return;
+    if (b?.full_range || pos.full_range) return;
+    const lo = parseFloat(b?.lower_price);
+    const hi = parseFloat(b?.upper_price);
+    if (!(lo > 0) || !(hi > 0) || !Number.isFinite(lo) || !Number.isFinite(hi)) return;
+    const ethIsToken0 = pos.token0?.symbol === 'ETH' || pos.token0?.symbol === 'WETH';
+    const a = ethIsToken0 ? 1 / lo : lo;
+    const c = ethIsToken0 ? 1 / hi : hi;
+    const lower = Math.min(a, c);
+    const upper = Math.max(a, c);
+    const spot = ethUsd != null && ethUsd > 0 ? ethUsd : null;
+    const distance = spot !== null
+      ? Math.min(Math.max(spot - lower, 0), Math.max(upper - spot, 0)) / spot * 100
+      : null;
+    const liquidity = parseFloat(b?.liquidity_usd);
+    rows.push({
+      positionId: pos.position_id ?? null,
+      name: positionLabel(pos),
+      lower,
+      upper,
+      liquidity: Number.isFinite(liquidity) ? liquidity : 0,
+      inRange: !!b?.in_range,
+      distance,
+    });
+  });
+  return rows;
+}
+
+/**
+ * Tracked ETH-or-WETH / USDC ranges that are full range: no bracket to draw on the
+ * ETH/USDC chart, so the chart says so instead of leaving them out silently (#160).
+ */
+export function fullRangeEthUsdcCount(positions: any[] | null | undefined): number {
+  return (positions ?? []).filter((p) => p && !hasNockLeg(p) && isEthUsdcPair(p) && p.full_range).length;
+}
+
+/**
+ * "1 non-NOCK range not drawn: not priced in NOCK or ETH"; null when every range is
+ * drawn on one of the two charts. Since #160 ETH/USDC ranges are drawn on their own
+ * chart, so they are named here only when they are not: `drawnEthIds` are the ids
+ * `ethBracketRows` drew. A full-range ETH/USDC position is named by the ETH chart, so a
+ * range never disappears from both without a word.
+ */
+export function notDrawnRangesText(
+  positions: any[] | null | undefined,
+  drawnEthIds: Array<string | null> = [],
+): string | null {
+  const notDrawn = (positions ?? []).filter((p) => p && !hasNockLeg(p) && !(
+    isEthUsdcPair(p) && (p.full_range || drawnEthIds.includes(p.position_id ?? null))
+  ));
+  const n = notDrawn.length;
   if (n === 0) return null;
-  return `${n} ${nonNockRangeKind(positions)} range${n === 1 ? '' : 's'} not drawn: not priced in NOCK`;
+  const ethOnly = notDrawn.every((p) => isEthUsdcPair(p));
+  return ethOnly
+    ? `${n} ETH/USDC range${n === 1 ? '' : 's'} not drawn: no usable bracket in this snapshot`
+    : `${n} non-NOCK range${n === 1 ? '' : 's'} not drawn: not priced in NOCK or ETH`;
 }
 
 /** Tracked ranges with no NOCK leg: not drawn on the NOCK bracket chart (#152). */
