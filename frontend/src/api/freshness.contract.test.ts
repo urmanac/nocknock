@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { positionLabel, positionRangeText } from '../positions';
+import { hasNockLeg, positionLabel, positionRangeText } from '../positions';
 
 declare const process: { env: Record<string, string | undefined> };
 
@@ -194,13 +194,24 @@ describe('Freshness Contract', () => {
     // ConcentratedLiquidity is deprecated: worker emits an empty array.
     expect(Array.isArray(data.concentrated_liquidity)).toBe(true);
     expect(data.concentrated_liquidity.length).toBe(0);
-    // Per-position NOCK series replaces tranche_1/2/3_nock.
+    // Per-position NOCK series replaces tranche_1/2/3_nock. Since 2.8.2 (#151) only
+    // positions with a NOCK leg have one.
     const ag = data.derived_metrics?.asset_aggregation_series;
     expect(Array.isArray(ag?.positions_nock)).toBe(true);
-    expect(ag.positions_nock.length).toBe(data.positions.length);
+    expect(ag.positions_nock.length).toBeLessThanOrEqual(data.positions.length);
+    for (const s of ag.positions_nock) {
+      const pos = data.positions.find((p: any) => p.position_id === s.position_id);
+      expect(pos).toBeDefined();
+      expect(hasNockLeg(pos)).toBe(true);
+    }
+    expect(ag.positions_nock.length).toBe(data.positions.filter(hasNockLeg).length);
+    // Brackets: one per position, each naming its position (2.8.2, #152).
+    const brackets = data.derived_metrics?.tick_bracket_hypervisor?.brackets ?? [];
+    expect(brackets.length).toBe(data.positions.length);
+    brackets.forEach((b: any, i: number) => expect(b.position_id).toBe(data.positions[i].position_id));
     expect(ag.tranche_1_nock).toBeUndefined();
     // Meta version: the current snapshot spec (specs/core/snapshot.yaml info.version).
-    expect(latestSnapshot!.meta.version).toBe('2.8.1');
+    expect(latestSnapshot!.meta.version).toBe('2.8.2');
   });
 
   it('2.3.0 pillars partition the total and the wallet reports its gas', () => {

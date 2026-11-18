@@ -1453,7 +1453,7 @@ struct GlobalStatus {
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
-const SNAPSHOT_SPEC_VERSION: &str = "2.8.1";
+const SNAPSHOT_SPEC_VERSION: &str = "2.8.2";
 
 /// The gas (wallet ETH + WETH) and ETH pillar figures, each None when it cannot be
 /// measured: unread wallet balances or an unpriced ETH. Never a zero stand-in.
