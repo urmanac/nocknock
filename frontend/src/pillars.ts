@@ -2,9 +2,11 @@
  * Pure display helpers for the portfolio pillars (snapshot 2.3.0, issue #94; AERO added
  * by issue #93).
  *
- * The total has four pillars: NOCK, USDC, ETH and AERO. ETH is gas: wallet ETH + WETH is
- * counted in the total but is never cash, never deployable and has no target, so it is
- * shown as a pillar line, never as a "Goal". AERO is the wallet's AERO: counted in the
+ * The total has four pillars: NOCK, USDC, ETH and AERO. The ETH pillar is wallet gas
+ * (ETH + WETH) plus the WETH inside tracked LP ranges (WETH/NOCK and the gas-side
+ * WETH/USDC ranges, #151), so it is labelled "ETH (gas + LP WETH)". It is counted in the
+ * total but is never cash, never deployable and has no target, so it is shown as a
+ * pillar line, never as a "Goal". The gas line (gasLine) is wallet ETH + WETH only. AERO is the wallet's AERO: counted in the
  * total, with no target and no advice (AERO still unclaimed in a gauge is not in the
  * total; see aero.ts). Fields an older snapshot lacks render as "—" or "not reported",
  * never as $0.00.
@@ -14,10 +16,15 @@ import { finiteOrNull } from './timeline.ts';
 
 export const NOT_REPORTED = 'not reported (snapshot predates 2.3.0)';
 
+/** The ETH pillar is wallet gas plus the WETH inside LP ranges, not gas alone (#151). */
+export const ETH_PILLAR_LABEL = 'ETH (gas + LP WETH)';
+
 export interface Pillar {
   key: 'NOCK' | 'USDC' | 'ETH' | 'AERO';
+  /** How the pillar line names it. ETH is gas plus the WETH inside LP ranges (#151). */
+  label: string;
   usd: number | null;
-  /** ETH: gas. Counted in the total; never cash, never deployable, no target. */
+  /** ETH: gas and LP WETH. Counted in the total; never cash, never deployable, no target. */
   gas: boolean;
 }
 
@@ -28,18 +35,21 @@ function money(v: number): string {
 /** The four pillars, from the snapshot's own global_status. They add up to the total. */
 export function pillarsFromGlobal(global: any): Pillar[] {
   return [
-    { key: 'NOCK', usd: finiteOrNull(global?.total_native_usd), gas: false },
-    { key: 'USDC', usd: finiteOrNull(global?.total_stable_usd), gas: false },
-    { key: 'ETH', usd: finiteOrNull(global?.total_eth_usd), gas: true },
+    { key: 'NOCK', label: 'NOCK', usd: finiteOrNull(global?.total_native_usd), gas: false },
+    // Every USDC held, including inside ETH/USDC ranges (#151): it is really held.
+    { key: 'USDC', label: 'USDC', usd: finiteOrNull(global?.total_stable_usd), gas: false },
+    // total_eth_usd is wallet gas plus LP WETH (2.3.0); the label says so.
+    { key: 'ETH', label: ETH_PILLAR_LABEL, usd: finiteOrNull(global?.total_eth_usd), gas: true },
     // Wallet AERO (#93). Absent from an older snapshot: null, shown as "—".
-    { key: 'AERO', usd: finiteOrNull(global?.wallet_aero_usd), gas: false },
+    { key: 'AERO', label: 'AERO', usd: finiteOrNull(global?.wallet_aero_usd), gas: false },
   ];
 }
 
-/** "NOCK $1,312.88 · USDC $1,033.71 · ETH $66.98 · AERO $0.57"; a missing pillar reads "—". */
+/** "NOCK $1,312.88 · USDC $1,033.71 · ETH (gas + LP WETH) $66.98 · AERO $0.57"; a
+ *  missing pillar reads "—". */
 export function pillarLine(global: any): string {
   return pillarsFromGlobal(global)
-    .map(p => `${p.key} ${p.usd === null ? '—' : money(p.usd)}`)
+    .map(p => `${p.label} ${p.usd === null ? '—' : money(p.usd)}`)
     .join(' · ');
 }
 

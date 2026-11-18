@@ -13,7 +13,7 @@
  *   (N1: the slimmed counterfactual series in a history row is ~8 h old).
  * - LP series are keyed by position_id, never by array position (N15).
  */
-import { positionLabel, walletNockUnits } from './positions.ts';
+import { hasNockLeg, positionLabel, walletNockUnits } from './positions.ts';
 
 /** The worker's default `sync_window_seconds` (main.rs `default_sync_window`). */
 export const DEFAULT_SYNC_WINDOW_SECONDS = 300;
@@ -258,15 +258,27 @@ export function buildPositionSeriesDefs(
     ids.push(id);
   };
   const latestIds = new Set<string>();
+  // A position tracked now with no NOCK leg (a gas-side WETH/USDC range, #151) has no
+  // NOCK to stack: older snapshots sent it a flat 0 series, which is skipped. An id seen
+  // only in history is kept (labelled as no longer tracked).
+  const noNockLeg = new Set<string>(
+    (positions ?? [])
+      .filter((p: any) => typeof p?.position_id === 'string' && !hasNockLeg(p))
+      .map((p: any) => p.position_id),
+  );
+  const addNock = (id: unknown) => {
+    if (typeof id === 'string' && noNockLeg.has(id)) return;
+    add(id);
+  };
   for (const s of latestMetrics?.asset_aggregation_series?.positions_nock ?? []) {
-    add(s?.position_id);
+    addNock(s?.position_id);
     if (typeof s?.position_id === 'string') latestIds.add(s.position_id);
   }
   for (const p of positions ?? []) {
     if (typeof p?.position_id === 'string') latestIds.add(p.position_id);
   }
   for (const h of history) {
-    for (const s of derivedMetricsOf(h?.data)?.asset_aggregation_series?.positions_nock ?? []) add(s?.position_id);
+    for (const s of derivedMetricsOf(h?.data)?.asset_aggregation_series?.positions_nock ?? []) addNock(s?.position_id);
   }
   return ids.map((id, i) => {
     const pos = (positions ?? []).find((p: any) => p?.position_id === id);

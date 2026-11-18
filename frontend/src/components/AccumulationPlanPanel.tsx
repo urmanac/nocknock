@@ -84,7 +84,7 @@ export function AccumulationPlanPanel({
         lineHeight: 1.6,
       }}
     >
-      <strong style={{ color: '#38bdf8', letterSpacing: 1 }}>REBUILD LP TRANCHES</strong> · LP holds ${lpRebuild.actual_usd}{' '}
+      <strong style={{ color: '#38bdf8', letterSpacing: 1 }}>REBUILD LP TRANCHES</strong> · NOCK LP holds ${lpRebuild.actual_usd}{' '}
       against a ${lpRebuild.target_usd} target ({(lpRebuild.target_weight_bps / 100).toFixed(0)}% of portfolio), $
       {lpRebuild.gap_usd} short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase:
       the stable total is unchanged, only its location moves.

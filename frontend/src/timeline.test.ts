@@ -424,6 +424,36 @@ describe('LP series keyed by position_id (N15)', () => {
   });
 });
 
+describe('positions with no NOCK leg (#151)', () => {
+  const GAS = 'uniswap-v3:base:6607225';
+  const GAS_CL = 'aerodrome-cl:base:3449558';
+  const withGas = [...LATEST_POSITIONS, position(GAS, 'uniswap-v3', 5, 'WETH', 'USDC'), position(GAS_CL, 'aerodrome-cl', 0, 'WETH', 'USDC')];
+
+  it('skips a current WETH/USDC range even when an older snapshot sent it a 0 series', () => {
+    const latest = latestData().derived_metrics;
+    const pre = {
+      ...latest,
+      asset_aggregation_series: {
+        ...latest.asset_aggregation_series,
+        positions_nock: [V4, V3, AERO, GAS, GAS_CL].map((position_id) => ({ position_id, series: ['0'] })),
+      },
+    };
+    const defs = buildPositionSeriesDefs(pre, withGas, [
+      historyRow('2026-11-17T12:00:00Z', { positions: [[V4, '9363.08'], [GAS, '0']] }),
+    ]);
+    expect(defs.map((d) => d.positionId)).toEqual([V4, V3, AERO]);
+    expect(defs.every((d) => !d.retired)).toBe(true);
+  });
+
+  it('keeps an id seen only in history: no current position says it has no NOCK leg', () => {
+    const defs = buildPositionSeriesDefs(latestData().derived_metrics, withGas, [
+      historyRow('2026-11-14T16:14:59Z', { positions: [['uniswap-v4:base:3163431', '5.00']] }),
+    ]);
+    expect(defs.map((d) => d.positionId)).toEqual([V4, V3, AERO, 'uniswap-v4:base:3163431']);
+    expect(defs[3].retired).toBe(true);
+  });
+});
+
 describe('structural channel', () => {
   it('uses real times and breaks at gaps', () => {
     const pts = (vals: string[]) =>

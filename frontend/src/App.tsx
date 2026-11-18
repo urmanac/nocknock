@@ -34,7 +34,7 @@ const SOURCE_LABELS: Record<string, string> = {
   aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
-import { POSITION_COLORS, nockBracketRows, nonNockRangeCount, positionBracket, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText } from './positions.ts';
+import { POSITION_COLORS, hasNockLeg, nockBracketRows, nonNockRangeCount, positionBracket, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText } from './positions.ts';
 import { isAeroProtocol, positionFeesText } from './aeroCl.ts';
 import { PositionStakingLine, RangeSideList } from './components/PositionRangeNotes.tsx';
 import { floorState, floorDeltaText, floorSummaryText, regimeLabel, regimeTone } from './floor.ts';
@@ -129,6 +129,9 @@ function Dashboard() {
   const charts = buildChartRows(history, rawData, syncWindowSeconds, snapshot?.meta?.generated_at);
   const { assetSeries, valueVsBaseline, composition, channel: channelSeries, positionSeriesDefs, spansMultipleDays } = charts;
   const positionsList: any[] = rawData?.positions || [];
+  // Goal 1 counts only the ranges that hold NOCK (#151): a gas-side WETH/USDC range
+  // holds none.
+  const nockLpCount = positionsList.filter(hasNockLeg).length;
   // Built one per position, in the same order: a card's LP-fee reason comes from its row.
   const contractFees: any[] = rawData?.contract_fees || [];
   const compositionHasEth = composition.rows.some((r: any) => r.eth != null);
@@ -354,7 +357,7 @@ function Dashboard() {
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>Goal 1 (NOCK Accretion):</span>
             <span style={styles.shotPillText}>
-              {totalNockVal} NOCK total across the Sovereign Treasury wallet and {positionsList.length} tracked LP position{positionsList.length === 1 ? '' : 's'}. {floorKnown ? `DEFENSIVE LOCK if total < ${floorTargetFormatted}.` : floorNone ? 'No floor configured.' : 'Floor unavailable.'}
+              {totalNockVal} NOCK total across the Sovereign Treasury wallet and {nockLpCount} tracked NOCK LP position{nockLpCount === 1 ? '' : 's'}. {floorKnown ? `DEFENSIVE LOCK if total < ${floorTargetFormatted}.` : floorNone ? 'No floor configured.' : 'Floor unavailable.'}
             </span>
           </div>
           <div style={styles.shotPill}>
@@ -646,7 +649,7 @@ function Dashboard() {
             <span><span style={{ color: '#10b981' }}>■</span> Actual: On Target</span>
             <span><span style={{ color: '#f59e0b' }}>■</span> Actual: Under-Funded</span>
             <span><span style={{ color: '#ef4444' }}>■</span> Actual: Over-Funded</span>
-            <span><span style={{ color: '#8b949e' }}>■</span> Actual: No Target Set (incl. Gas and AERO: counted, never rebalanced)</span>
+            <span><span style={{ color: '#8b949e' }}>■</span> Actual: No Target Set (incl. Gas, AERO and ETH/USDC LP: counted, never rebalanced)</span>
           </div>
         </CanvasPanel>
 
