@@ -111,3 +111,19 @@ v0.8.0 stack review remain open.
     target and REBUILD LP TRANCHES leading.
 - **Not built:** a side-by-side view of what the Uniswap and Aero ranges earn. Today the
   Uniswap range earns LP fees and the Aero range earns AERO, each in its own velocity row.
+
+## v0.8.2: the harvest ledger books only fees (2026-11-18)
+
+- The operator withdrew v3 WETH/NOCK #6336662 (tx `0x06515a23…b778`, block 58831000), and
+  its empty config entry was removed. Recording the withdrawal's fees showed that
+  `record-harvest` booked every inflow: the returned principal (#156) and, found while
+  testing, a NOCK buy (#157) would have been booked as fee income. Nothing had been
+  misbooked: the withdrawal was held back until the fix.
+- PR #158 separates principal read from `DecreaseLiquidity` and `positions()` at the block
+  before, and refuses what it cannot split or what is not a claim. It was verified on a
+  scratch database against the real withdrawal (fees $3.40: 0.000999503 ETH and 101.58
+  NOCK) and the real buy (refused), and through two review rounds that replayed 17 of the
+  wallet's transactions.
+- Released as v0.8.2 at the operator's word, deployed to chudmax, and the withdrawal's
+  fees recorded there.
+

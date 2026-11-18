@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-18
+
+A patch release: the harvest ledger books only fees.
+
+- **Returned liquidity is left out of harvest income (#156).** A withdrawal's principal is
+  separated from its fees, or the transaction is refused with nothing recorded.
+- **A swap is refused as a harvest (#157).** A claim only pays the wallet.
+- **The cockpit classifies a record-harvest failure by its HTTP status.**
+
+Before you upgrade:
+
+- **Nothing new is required in `config.yaml`.**
+- **No database migration.** v0.8.2 runs on a v0.8.1 database and the reverse.
+- **`record-harvest` responses gain `principal_excluded`,** and it may now refuse with
+  `PRINCIPAL_NOT_SEPARABLE`, `PRINCIPAL_EXCEEDS_INFLOW`, `PRINCIPAL_ONLY` or `NOT_A_CLAIM`
+  (422), or `POSITION_UNREADABLE` (503).
+
 ### Fixed
 
 - **Returned liquidity is no longer booked as fee income (#156).** `POST /v1/execute/record-harvest`
