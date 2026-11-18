@@ -132,7 +132,8 @@ export interface RecordAccumulationResponse {
 export interface AccumulationEvent {
   plan_id: string;
   tx_hash: string;
-  venue: string;
+  /** The plan's venue label when recorded; null when it had none (v0.8.1, #132) */
+  venue: string | null;
   usdc_spent: string;
   nock_received: string;
   effective_price_usd: string;

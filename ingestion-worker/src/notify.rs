@@ -293,7 +293,9 @@ pub(crate) fn plan_completion_note(
     if prev.plan_id != next.plan_id || prev.status == "complete" || next.status != "complete" {
         return None;
     }
-    if prev.status == "blocked" && prev.binding_constraint.as_deref() == Some(PLAN_LEDGER_UNREADABLE_REASON) {
+    if prev.progress_unknown
+        || (prev.status == "blocked" && prev.binding_constraint.as_deref() == Some(PLAN_LEDGER_UNREADABLE_REASON))
+    {
         return None;
     }
     Some(format!(
@@ -341,6 +343,99 @@ pub(crate) fn range_exit_note(prev: Option<&RangeTopReading>, next: Option<&Rang
 /// wallet, and a restart starts from None, so the first cycle after it pushes no range
 /// exit of its own (a directive change still does).
 static LAST_RANGE_TOP: std::sync::Mutex<Option<RangeTopReading>> = std::sync::Mutex::new(None);
+
+/// The directive and plan status of the latest stored cycle that read the ledger
+/// (issue #130). In memory only: after a restart the stored snapshot is the baseline.
+pub(crate) type NotifyBaseline = (Option<String>, Option<AccumulationPlanStatus>);
+
+static LAST_LEDGER_READ: std::sync::Mutex<Option<NotifyBaseline>> = std::sync::Mutex::new(None);
+
+pub(crate) fn last_ledger_read_cycle() -> Option<NotifyBaseline> {
+    LAST_LEDGER_READ.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+
+/// Called after a cycle's snapshot is stored, and only for a cycle that read the
+/// ledger, so an unreadable cycle never becomes the baseline.
+pub(crate) fn remember_ledger_read_cycle(action: &str, plan: Option<&AccumulationPlanStatus>) {
+    if !plan_progress_unknown(plan) {
+        *LAST_LEDGER_READ.lock().unwrap_or_else(|p| p.into_inner()) = Some((Some(action.to_string()), plan.cloned()));
+    }
+}
+
+/// The part of a directive the plan ledger does not decide (issue #130): the floor lock,
+/// a range exit, a harvest, an overextension and every other non-plan arm. The plan's own
+/// segment (" · DCA …"), a DCA directive, and the LP rebuild that stands in for an idle
+/// DCA directive are the plan's part and read as "". Pure.
+pub(crate) fn directive_outside_plan(action: &str) -> &str {
+    let head = action.split(" · DCA").next().unwrap_or(action);
+    if head.starts_with("DCA") || head == "REBUILD LP TRANCHES (No Net Cash Change)" {
+        ""
+    } else {
+        head
+    }
+}
+
+/// Whether two directives differ only in their plan part (HOLD variants are one). Pure.
+pub(crate) fn same_outside_plan(a: &str, b: &str) -> bool {
+    !directive_changed(Some(directive_outside_plan(a)), directive_outside_plan(b))
+}
+
+/// What a cycle's notification is decided against (issue #130). Pure.
+/// A cycle that could not read the ledger only hides a change its unread plan caused:
+/// - The directive the operator was last told is the last cycle that read the ledger
+///   (`last_read`), unless a cycle since then pushed a change outside the plan, in which
+///   case it is the previous stored cycle.
+/// - This cycle could not read the ledger: a change outside the plan (a floor lock, a
+///   range exit, ...) is compared against what the operator was last told and pushed; a
+///   change of the plan part alone is not news. No plan baseline (no completion note).
+/// - The previous stored cycle could not read the ledger: compare against what the
+///   operator was last told, so the return to a good read is not pushed as a change and
+///   a plan that completed meanwhile is announced once. After a restart (no `last_read`)
+///   only a change outside the plan is compared, against the stored cycle.
+/// - Otherwise the previous stored cycle, as before.
+pub(crate) fn notification_baseline(
+    prev: NotifyBaseline,
+    last_read: Option<NotifyBaseline>,
+    next_action: &str,
+    next_plan: Option<&AccumulationPlanStatus>,
+) -> NotifyBaseline {
+    let next_unread = plan_progress_unknown(next_plan);
+    let prev_unread = plan_progress_unknown(prev.1.as_ref());
+    if !next_unread && !prev_unread {
+        return prev;
+    }
+    let prev_action = prev.0.clone();
+    // What the operator was last told. A stored cycle that read the ledger is it. After an
+    // unread stored cycle it is the last read, when the two agree outside the plan (the
+    // unread cycles between them pushed nothing); otherwise unknown here.
+    let told: Option<NotifyBaseline> = if !prev_unread {
+        Some(prev)
+    } else {
+        last_read.clone().filter(|lr| match (lr.0.as_deref(), prev_action.as_deref()) {
+            (Some(l), Some(p)) => same_outside_plan(l, p),
+            _ => true,
+        })
+    };
+    let only_outside_plan = |reference: Option<String>| match reference {
+        Some(r) if !same_outside_plan(&r, next_action) => Some(r),
+        Some(_) => Some(next_action.to_string()),
+        None => None,
+    };
+    if next_unread {
+        // What the operator was told, else the stored cycle.
+        let reference = told.and_then(|t| t.0).or(prev_action);
+        return (only_outside_plan(reference), None);
+    }
+    match told {
+        Some(t) => t,
+        // A cycle since the last read pushed a change outside the plan: that is what the
+        // operator was told. The plan baseline stays the last read's, so a completion
+        // meanwhile is announced.
+        None if last_read.is_some() => (prev_action, last_read.and_then(|l| l.1)),
+        // A restart during an outage: no plan baseline, only a change outside the plan.
+        None => (only_outside_plan(prev_action), None),
+    }
+}
 
 pub(crate) fn last_range_top_reading() -> Option<RangeTopReading> {
     LAST_RANGE_TOP.lock().unwrap_or_else(|p| p.into_inner()).clone()
@@ -409,6 +504,13 @@ pub(crate) fn cycle_notification_with_closed(
             next_action,
             notes.join("\n"),
             next_details
+        ),
+        // A cycle that could not read the ledger cannot say its directive is unchanged:
+        // its plan part was not compared (issue #130).
+        (false, false) if plan_progress_unknown(next_plan) => format!(
+            "🛡️ NockNock: {}\nDirective: {} (the plan ledger was not read this cycle)",
+            notes.join("\n"),
+            next_action
         ),
         (false, false) => format!("🛡️ NockNock: {}\nDirective unchanged: {}", notes.join("\n"), next_action),
         (false, true) => return None,

@@ -130,7 +130,7 @@ fn plan_cfg() -> AccumulationPlanConfig {
         tranches: 5,
         interval_hours: 24.0,
         starts_at: None,
-        venue: "Aero".to_string(),
+        venue: Some("Aero".to_string()),
         max_price_usd: None,
         pause_when_overextended: true,
         respect_cash_target: true,
@@ -660,6 +660,8 @@ async fn test_no_call_is_made_without_a_due_tranche_or_an_rpc_key() {
             latest_snapshot: Mutex::new(None),
             last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
             last_ingest_error: std::sync::Mutex::new(None),
+        cycle_gate: CycleGate::default(),
+        quote_refresh_at: std::sync::Mutex::new(None),
         })
     };
     let state = state_with("alchemy_api_keys: [\"YOUR_ALCHEMY_API_KEY\"]\n");
@@ -726,6 +728,8 @@ async fn test_refresh_quotes_the_snapshots_tranche_and_attaches_the_answer() {
         latest_snapshot: Mutex::new(Some(snapshot_with(stale))),
         last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
         last_ingest_error: std::sync::Mutex::new(None),
+        cycle_gate: CycleGate::default(),
+        quote_refresh_at: std::sync::Mutex::new(None),
     });
 
     let (status, body) = body_json(refresh_route_quotes_handler(Extension(state.clone())).await).await;
@@ -1384,6 +1388,8 @@ fn keyless_state(snapshot: Option<SnapshotEnvelope>) -> Arc<AppState> {
         latest_snapshot: Mutex::new(snapshot),
         last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
         last_ingest_error: std::sync::Mutex::new(None),
+        cycle_gate: CycleGate::default(),
+        quote_refresh_at: std::sync::Mutex::new(None),
     })
 }
 

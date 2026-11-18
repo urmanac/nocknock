@@ -79,7 +79,9 @@ This guide captures the operational rules, environment quirks, toolchain configu
   startup. Functions live in modules: `adapters/` (one file per protocol; `adapters/mod.rs`
   holds every function that branches on the protocol string), `onchain` (one cycle's reads),
   `valuation`, `advice`, `lp_rebuild`, `plan`, `ledger`, `claims`, `market`, `ingest`, `api`,
-  `aero_rewards`, `aero_text`, `rewards`, `reward_text`, `closed`, `closed_text`, `fill_verify`, `fill_detection`, `fill_text`, `route_quotes`, `quote_text`, `cost_basis`, `cost_basis_text`, `rpc`, `evm`, `calldata`, `contracts`, `notify`, `mcp_text`, `mcp_http`, and `tests` (each feature since #91 adds its own `tests_<topic>.rs`).
+  `aero_rewards`, `aero_text`, `rewards`, `reward_text`, `closed`, `closed_text`, `fill_verify`, `fill_detection`, `fill_text`, `route_quotes`, `quote_text`, `cost_basis`, `cost_basis_text`, `rpc`, `evm`, `calldata`, `contracts`, `notify`, `mcp_text`, `mcp_http`, and `tests` (each feature since #91 adds its own `tests_<topic>.rs`; the v0.8.1 burn-down's are in `tests_burndown.rs`).
+  The HTTP router is `api::api_router`, with the cross-site write guard (#133); every
+  ingestion cycle runs through `ingest::CycleGate`, one at a time (#134).
   `closed` (#144) decides when a configured position's NFT provably does not exist; the
   allow-list of contract answers is in `adapters/mod.rs`. The proof is read at one current
   block (`closed::fetch_proof_block`, `ProofClock`): never loosen that into reads at
@@ -170,8 +172,8 @@ This guide captures the operational rules, environment quirks, toolchain configu
 Before pushing any PR or tag:
 ```bash
 make test-brain       # 3 tests (WASM invariants)
-make test-worker      # 385 tests as of #144: 359 worker + 26 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger, collectible rewards, closed positions)
-make test-frontend    # 310 tests as of #144 (staleness, contract, display helpers, charts, surfaces, ledger, collectible rewards, closed positions)
+make test-worker      # 407 tests as of v0.8.1 burn-down: 381 worker + 26 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger, collectible rewards, closed positions, burn-down #130-#137)
+make test-frontend    # 324 tests as of v0.8.1 burn-down (staleness, contract, display helpers, charts, surfaces, ledger, collectible rewards, closed positions, burn-down)
 make dist             # Verifies packaging of dist/ binaries and tarballs
 NOCKNOCK_API_URL=http://chudmax:8081 make test-mcp   # both MCP transports against the deployment
 ```

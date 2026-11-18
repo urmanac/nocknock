@@ -1,11 +1,19 @@
 use crate::*;
 
-/// Adaptive-precision price formatting: 5 decimals for readable values, 8 for
-/// sub-cent ones (e.g. ETH-per-NOCK ≈ 0.0000081) so brackets never collapse to
-/// "0.00001".
+/// Significant digits a sub-cent range bound carries (issue #131).
+pub(crate) const SUB_CENT_PRICE_SIG_DIGITS: i32 = 6;
+
+/// Adaptive-precision price formatting for range bounds: 5 decimals for readable
+/// values; a sub-cent one (e.g. WETH per NOCK ≈ 0.0000056) carries
+/// `SUB_CENT_PRICE_SIG_DIGITS` significant digits, so the card's inverted "NOCK per
+/// WETH" and the USD bracket agree with the ticks to the digit they show (issue #131:
+/// 8 decimals left 3 significant digits, and the card read 177,305 where the ticks
+/// give 177,158).
 pub(crate) fn fmt_price(v: f64) -> String {
-    if v != 0.0 && v.abs() < 0.001 {
-        format!("{:.8}", v)
+    if v != 0.0 && v.is_finite() && v.abs() < 0.01 {
+        let magnitude = v.abs().log10().floor() as i32; // -6 for 0.0000056
+        let decimals = (SUB_CENT_PRICE_SIG_DIGITS - 1 - magnitude).max(5) as usize;
+        format!("{:.*}", decimals, v)
     } else {
         format!("{:.5}", v)
     }

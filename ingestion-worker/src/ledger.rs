@@ -318,7 +318,9 @@ pub(crate) async fn record_accumulation_handler(
     )
     .bind(&plan.id)
     .bind(&tx_hash)
-    .bind(&plan.venue)
+    // The column is NOT NULL; a plan without a venue label stores "" and the API
+    // reads it back as null (issue #132).
+    .bind(plan_venue_label(&plan).unwrap_or_default())
     .bind(usdc_raw.to_string())
     .bind(nock_raw.to_string())
     .bind(&usdc_spent)
@@ -392,7 +394,7 @@ pub(crate) async fn accumulation_events_handler(Extension(state): Extension<Arc<
                     json!({
                         "plan_id": r.try_get::<String, _>("plan_id").unwrap_or_default(),
                         "tx_hash": r.try_get::<String, _>("tx_hash").unwrap_or_default(),
-                        "venue": r.try_get::<String, _>("venue").unwrap_or_default(),
+                        "venue": r.try_get::<String, _>("venue").ok().filter(|v| !v.is_empty()),
                         "usdc_spent": r.try_get::<String, _>("usdc_spent").unwrap_or_default(),
                         "nock_received": r.try_get::<String, _>("nock_received").unwrap_or_default(),
                         "effective_price_usd": r.try_get::<String, _>("effective_price_usd").unwrap_or_default(),

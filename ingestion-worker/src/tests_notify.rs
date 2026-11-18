@@ -101,7 +101,7 @@ fn plan() -> AccumulationPlanConfig {
         tranches: 5,
         interval_hours: 24.0,
         starts_at: None,
-        venue: "Aero".to_string(),
+        venue: Some("Aero".to_string()),
         max_price_usd: None,
         pause_when_overextended: true,
         respect_cash_target: true,
@@ -199,7 +199,7 @@ fn test_tranche_becoming_due_changes_the_action_and_notifies() {
     assert_eq!(due.global_status.shot_advice_action, "DCA TRANCHE DUE (2 of 5)");
     let text = pushed(&waiting, &due).expect("a tranche becoming due must notify");
     assert!(text.starts_with("🛡️ NockNock directive change: DCA TRANCHE DUE (2 of 5)\n"), "{text}");
-    assert!(text.contains("Buy $20.00 of NOCK on Aero"), "{text}");
+    assert!(text.contains("Buy $20.00 of NOCK (spot $0.01153; your plan's venue label: Aero)"), "{text}");
     assert!(text.ends_with("\n→ http://host:3000/?view=lite"), "{text}");
     // The cycles before it, and a second cycle while it is still due, push nothing.
     assert!(pushed(&waiting, &waiting).is_none());
@@ -316,6 +316,7 @@ fn test_a_ledger_read_failure_does_not_announce_an_old_completion_again() {
     assert!(!text.contains("is complete:"), "{text}");
     // A plan blocked for any other reason that then completes is a real completion.
     let mut blocked_other = outage_plan.clone();
+    blocked_other.progress_unknown = false;
     blocked_other.binding_constraint = Some("nothing spendable: wallet USDC $0.40 less the $0.00 virtual tax reserve".to_string());
     assert!(plan_completion_note(Some(&blocked_other), Some(done_plan)).is_some());
 }
@@ -445,7 +446,7 @@ fn test_range_exit_with_another_directive_change_is_said_before_the_details() {
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines[0], "🛡️ NockNock directive change: DCA TRANCHE DUE (2 of 5)");
     assert!(lines[1].starts_with("Range exit: spot $0.0415 is at or above the top"), "{text}");
-    assert!(lines[2].starts_with("Buy $20.00 of NOCK on Aero"), "{text}");
+    assert!(lines[2].starts_with("Buy $20.00 of NOCK (spot $0.04147; your plan's venue label: Aero)"), "{text}");
 }
 
 #[test]
@@ -973,6 +974,8 @@ fn state_from_example_config() -> Arc<AppState> {
         latest_snapshot: Mutex::new(None),
         last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
         last_ingest_error: std::sync::Mutex::new(None),
+        cycle_gate: CycleGate::default(),
+        quote_refresh_at: std::sync::Mutex::new(None),
     })
 }
 
@@ -999,4 +1002,98 @@ async fn test_routes_on_an_unconfigured_worker_say_nothing_is_configured() {
         assert_eq!(body["sent"], json!(false));
         assert!(body["message"].as_str().unwrap().starts_with("No notification channel is configured"));
     }
+}
+
+// ---------------- #135: notice order under the LP rebuild bias and a floor lock ----------------
+
+/// One swap on offer, as fill detection reports it (shape of a real Base swap; the
+/// numbers only need to be stated, nothing is valued from them).
+fn one_open_offer() -> FillDetection {
+    FillDetection {
+        status: "ok".to_string(),
+        detail: None,
+        checked_back_to: Some("2026-11-14T00:00:00+00:00".to_string()),
+        last_checked_at: Some("2026-11-16T11:55:00+00:00".to_string()),
+        offers: vec![FillOffer {
+            tx_hash: "0x78376f3c0000000000000000000000000000000000000000000000000000006e31b9".to_string(),
+            confirmed_at: "2026-11-16T03:08:37+00:00".to_string(),
+            block_number: 58_000_000,
+            usdc_spent: "20.000000".to_string(),
+            nock_received: "1780.3600".to_string(),
+            effective_price_usd: "0.011234".to_string(),
+            timing: "early".to_string(),
+            reference_spot_usd: None,
+            reference_spot_source: None,
+            execution_cost_bps: None,
+        }],
+        dismissed: vec![],
+    }
+}
+
+fn metrics_with_offer(raw: &RawOnChainData, profile: &OperatorProfile, ctx: &PlanContext, d: Option<&FillDetection>) -> DerivedMetrics {
+    compute_derived_metrics_with_fills(
+        raw, 0.0, profile, StructuralChannels { channels: vec![] }, &[],
+        &LedgerAggregate::default(), &MarketRegime::default(), ctx, d,
+    )
+}
+
+const NOTICE_START: &str = "A swap that looks like a plan buy was found on-chain and is not counted yet";
+
+#[test]
+fn test_the_offer_notice_leads_once_under_the_lp_rebuild_bias() {
+    // LP under target with a fundable deposit, plan waiting, one swap on offer.
+    let raw = wallet_with_emptied_range(480.0, 60_000.0);
+    let (p, ctx) = (profile(0.0), plan_after(1, BEFORE_DUE));
+    let offer = one_open_offer();
+    let with = metrics_with_offer(&raw, &p, &ctx, Some(&offer));
+    let without = metrics_with_offer(&raw, &p, &ctx, None);
+    // Which directive is chosen does not change.
+    assert_eq!(with.global_status.shot_advice_action, "REBUILD LP TRANCHES (No Net Cash Change)");
+    assert_eq!(with.global_status.shot_advice_action, without.global_status.shot_advice_action);
+    let d = &with.global_status.shot_advice_details;
+    assert!(d.starts_with(NOTICE_START), "{d}");
+    assert_eq!(d.matches("was found on-chain").count(), 1, "{d}");
+    assert!(d.contains("Meanwhile: DCA ON SCHEDULE (2 of 5 next)"), "{d}");
+    // Otherwise the text is the plain directive's, behind the notice.
+    let notice = open_offer_notice(with.accumulation_plan.as_ref().unwrap()).unwrap();
+    assert_eq!(d, &format!("{notice} {}", without.global_status.shot_advice_details));
+    // First, so a push cut at Pushover's 1024 characters still carries it.
+
+    // Below a floor too: the deficit and the recovery path follow the notice.
+    let floor = profile(100_000.0);
+    let locked = metrics_with_offer(&wallet_only(480.0, 1734.6054), &floor, &ctx, Some(&offer));
+    let d = &locked.global_status.shot_advice_details;
+    assert_eq!(locked.global_status.shot_advice_action, "DEFENSIVE LOCK (Floor Recovery) · DCA ON SCHEDULE (2 of 5 next)");
+    assert!(d.starts_with(NOTICE_START), "{d}");
+    assert_eq!(d.matches("was found on-chain").count(), 1, "{d}");
+    assert!(d.contains("Your accumulation plan is the recovery path: Nothing to buy yet"), "{d}");
+}
+
+#[test]
+fn test_the_quote_pointer_follows_the_due_tranche_sentence_not_the_lp_text() {
+    // LP under target and a tranche due with quotes asked for.
+    let raw = wallet_with_emptied_range(480.0, 60_000.0);
+    let m = metrics_with_offer(&raw, &profile(0.0), &plan_after(1, AT_DUE), None);
+    assert_eq!(m.global_status.shot_advice_action, "DCA TRANCHE DUE (2 of 5)");
+    let quotes = route_quotes_unavailable("20.00", "no Alchemy RPC key is configured", None);
+    let d = with_route_quote_pointer(&m.global_status.shot_advice_action, m.global_status.shot_advice_details.clone(), Some(&quotes));
+    let pointer = "Read-only route quotes for this amount on Aero and on Uniswap";
+    let (at_buy, at_pointer, at_lp) = (
+        d.find("Buy $20.00 of NOCK").expect("the tranche sentence"),
+        d.find(pointer).expect("the pointer"),
+        d.find("Standing bias: LP holds").expect("the LP text"),
+    );
+    assert!(at_buy < at_pointer && at_pointer < at_lp, "{d}");
+    // Right after the tranche sentence: nothing but that sentence sits between them.
+    assert!(d[at_buy..at_pointer].trim_end().ends_with(')') || d[at_buy..at_pointer].trim_end().ends_with('.'), "{d}");
+    assert!(!d[at_buy..at_pointer].contains("Plan \""), "{d}");
+    assert!(!d.ends_with("are listed with the plan."), "not at the end after the LP text: {d}");
+    assert_eq!(d.matches(pointer).count(), 1);
+
+    // With an offer as well, the notice still leads and the pointer still follows the
+    // tranche sentence.
+    let with = metrics_with_offer(&raw, &profile(0.0), &plan_after(1, AT_DUE), Some(&one_open_offer()));
+    let d = with_route_quote_pointer(&with.global_status.shot_advice_action, with.global_status.shot_advice_details.clone(), Some(&quotes));
+    assert!(d.starts_with(NOTICE_START), "{d}");
+    assert!(d.find(pointer).unwrap() < d.find("Standing bias").unwrap(), "{d}");
 }

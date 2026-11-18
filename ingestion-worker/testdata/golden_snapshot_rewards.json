@@ -212,8 +212,8 @@
               "full_range": false,
               "in_range": true,
               "liquidity_usd": "179.64",
-              "lower_price": "0.00000564",
-              "upper_price": "0.00000649"
+              "lower_price": "0.00000564468",
+              "upper_price": "0.00000649289"
             }
           ],
           "current_price": "0.01129"
@@ -398,7 +398,7 @@
           "in_range": true,
           "is_price_source": false,
           "liquidity_amount": "57859113596792372851",
-          "lower_price": "0.00000564",
+          "lower_price": "0.00000564468",
           "lower_tick": 73400,
           "network": "base",
           "nft_id": 2914490,
@@ -423,7 +423,7 @@
           "tokens_owed_1": "0.000000",
           "unclaimed_aero": "0.000000",
           "unclaimed_aero_usd": "0.00",
-          "upper_price": "0.00000649",
+          "upper_price": "0.00000649289",
           "upper_tick": 74800,
           "wallet": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
         }
@@ -466,7 +466,7 @@
         }
       ]
     },
-    "state_hash": "99f662625c186cc37c4fb5904c651aac2137dfab552c8da52eb6fae5486ef31b"
+    "state_hash": "ff1099cb3a59ada7abb8a4bf903efa2ed315c563fd2bbb7bb58d15f58b2ee8ef"
   },
   "rewards_collectible_block_58618045": {
     "mcp_text": {
@@ -681,8 +681,8 @@
               "full_range": false,
               "in_range": true,
               "liquidity_usd": "179.64",
-              "lower_price": "0.00000564",
-              "upper_price": "0.00000649"
+              "lower_price": "0.00000564468",
+              "upper_price": "0.00000649289"
             }
           ],
           "current_price": "0.01129"
@@ -867,7 +867,7 @@
           "in_range": true,
           "is_price_source": false,
           "liquidity_amount": "57859113596792372851",
-          "lower_price": "0.00000564",
+          "lower_price": "0.00000564468",
           "lower_tick": 73400,
           "network": "base",
           "nft_id": 2914490,
@@ -892,7 +892,7 @@
           "tokens_owed_1": "0.000000",
           "unclaimed_aero": "17.654015",
           "unclaimed_aero_usd": "7.75",
-          "upper_price": "0.00000649",
+          "upper_price": "0.00000649289",
           "upper_tick": 74800,
           "wallet": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
         }
@@ -935,6 +935,6 @@
         }
       ]
     },
-    "state_hash": "bdf052ddb0fadadb0e13e85f1008a3b526cce683bbd87bb370d89e62162be457"
+    "state_hash": "0e28d312f178f133228825da3f8c7865d4a9cfa255d79a85cd4bb4e9a5d9df75"
   }
 }

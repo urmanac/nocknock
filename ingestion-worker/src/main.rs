@@ -227,9 +227,11 @@ pub struct AccumulationPlanConfig {
     /// First tranche is not due before this instant (default: immediately).
     #[serde(default)]
     pub starts_at: Option<DateTime<Utc>>,
-    /// Where the operator executes (label only in Phase 1).
-    #[serde(default = "default_plan_venue")]
-    pub venue: String,
+    /// The operator's own label for where they buy (label only). Optional with no
+    /// default (issue #132): unset, the advice names no venue, because NockNock never
+    /// chooses one; set, it is shown as the operator's label.
+    #[serde(default)]
+    pub venue: Option<String>,
     /// Optional ceiling: tranches pause while spot is above this price.
     #[serde(default)]
     pub max_price_usd: Option<f64>,
@@ -284,12 +286,6 @@ impl Default for RouteQuotesConfig {
     }
 }
 
-fn default_plan_venue() -> String {
-    // Aerodrome and Velodrome merged into Aero (aero.xyz) on 2026-10-21; see
-    // ONCHAIN_INTEGRATION.md §6. The label is informational: receipt verification
-    // is contract-agnostic.
-    "Aero".to_string()
-}
 
 /// Cost-basis inputs only the operator can supply (issue #98). Optional: without this
 /// section NockNock reports the average cost of the plan's receipt-verified buys and
@@ -1017,7 +1013,10 @@ struct AccumulationPlanStatus {
     plan_id: String,
     /// pending | tranche_due | waiting | paused | blocked | complete | invalid
     status: String,
-    venue: String,
+    /// The operator's venue label from the config, or null when none is set (2.8.1,
+    /// issue #132: no default venue is presented as the operator's).
+    #[serde(default)]
+    venue: Option<String>,
     /// 1-based index of the NEXT tranche (verified fills + 1).
     tranche_index: u32,
     tranches_total: u32,
@@ -1056,6 +1055,12 @@ struct AccumulationPlanStatus {
     /// snapshot row.
     #[serde(default)]
     route_quotes: Option<RouteQuotes>,
+    /// True when this cycle could not read the accumulation ledger (2.8.1, issue #130):
+    /// status is `blocked`, `spent_usdc`, `remaining_usdc` and `acquired_nock` read
+    /// "unknown", and `fills`, `tranche_index` and `tranches_total` are not progress.
+    /// Absent (false) whenever the ledger was read.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    progress_unknown: bool,
 }
 
 /// Quotes for one due tranche, both venues read at the same block (v0.7.0, issue #115).
@@ -1447,7 +1452,7 @@ struct GlobalStatus {
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
-const SNAPSHOT_SPEC_VERSION: &str = "2.8.0";
+const SNAPSHOT_SPEC_VERSION: &str = "2.8.1";
 
 /// The gas (wallet ETH + WETH) and ETH pillar figures, each None when it cannot be
 /// measured: unread wallet balances or an unpriced ETH. Never a zero stand-in.
@@ -1596,6 +1601,10 @@ struct AppState {
     last_sync_duration_ms: std::sync::atomic::AtomicU64,
     /// Error from the most recent ingestion cycle, cleared by the next success (issue #87).
     last_ingest_error: std::sync::Mutex<Option<(DateTime<Utc>, String)>>,
+    /// One ingestion cycle at a time, scheduled or requested (issue #134).
+    cycle_gate: CycleGate,
+    /// When POST /v1/accumulation/quotes/refresh last read the chain (issue #133).
+    quote_refresh_at: std::sync::Mutex<Option<std::time::Instant>>,
 }
 
 // ============================================================
@@ -1695,6 +1704,8 @@ async fn main() -> Result<()> {
         latest_snapshot: Mutex::new(initial_latest),
         last_sync_duration_ms: std::sync::atomic::AtomicU64::new(0),
         last_ingest_error: std::sync::Mutex::new(None),
+        cycle_gate: CycleGate::default(),
+        quote_refresh_at: std::sync::Mutex::new(None),
     });
 
     // Historical price backfill (v0.3.0): heal multi-hour/multi-day gaps left by
@@ -1724,98 +1735,7 @@ async fn main() -> Result<()> {
     });
 
     // Start API server
-    let app = axum::Router::new()
-        .route("/health", axum::routing::get(health_handler))
-        .route("/v1/health", axum::routing::get(health_handler))
-        .route(
-            "/v1/snapshot/latest",
-            axum::routing::get(get_latest_snapshot_handler),
-        )
-        .route(
-            "/v1/snapshot",
-            axum::routing::get(get_latest_snapshot_handler),
-        )
-        .route(
-            "/snapshot",
-            axum::routing::get(get_latest_snapshot_handler),
-        )
-        .route(
-            "/v1/snapshot/historical",
-            axum::routing::get(get_historical_snapshots_handler),
-        )
-        .route(
-            "/v1/snapshot/metadata",
-            axum::routing::get(get_snapshot_metadata_handler),
-        )
-        .route(
-            "/v1/snapshot/:id",
-            axum::routing::get(get_snapshot_by_id_handler),
-        )
-        .route(
-            "/v1/ingest",
-            axum::routing::post(trigger_ingest_handler),
-        )
-        .route(
-            "/v1/mcp",
-            axum::routing::post(mcp_http_handler),
-        )
-        .route(
-            "/mcp",
-            axum::routing::post(mcp_http_handler),
-        )
-        .route(
-            "/v1/execute/claim-fees/payload",
-            axum::routing::get(get_claim_fees_payload_handler),
-        )
-        .route(
-            "/v1/execute/record-harvest",
-            axum::routing::post(record_harvest_handler),
-        )
-        .route(
-            "/v1/execute/record-accumulation",
-            axum::routing::post(record_accumulation_handler),
-        )
-        .route(
-            "/v1/accumulation/events",
-            axum::routing::get(accumulation_events_handler),
-        )
-        .route(
-            "/v1/accumulation/candidates",
-            axum::routing::get(accumulation_candidates_handler),
-        )
-        .route(
-            "/v1/accumulation/candidates/dismiss",
-            axum::routing::post(dismiss_candidate_handler),
-        )
-        .route(
-            "/v1/accumulation/candidates/restore",
-            axum::routing::post(restore_candidate_handler),
-        )
-        .route(
-            "/v1/accumulation/quotes/latest",
-            axum::routing::get(latest_route_quotes_handler),
-        )
-        .route(
-            "/v1/accumulation/quotes/refresh",
-            axum::routing::post(refresh_route_quotes_handler),
-        )
-        .route(
-            "/v1/tax/export",
-            axum::routing::get(tax_export_handler),
-        )
-        .route(
-            "/v1/notifications/status",
-            axum::routing::get(notification_status_handler),
-        )
-        .route(
-            "/v1/notifications/test",
-            axum::routing::post(notification_test_handler),
-        )
-        .route(
-            "/v1/cost-basis/series",
-            axum::routing::get(cost_basis_series_handler),
-        )
-        .layer(Extension(state.clone()));
+    let app = api_router(state.clone());
 
     let port = state.config.port;
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
@@ -2092,3 +2012,5 @@ mod tests_notify;
 mod tests_rewards;
 #[cfg(test)]
 mod tests_closed;
+#[cfg(test)]
+mod tests_burndown;

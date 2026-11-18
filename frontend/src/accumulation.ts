@@ -66,8 +66,14 @@ export const PLAN_STATUS_COLOR: Record<AccumulationPlanStatus['status'], string>
   invalid: '#ef4444',
 };
 
-/** Share of the plan budget already spent, 0–100. */
-export function planProgressPct(plan: Pick<AccumulationPlanStatus, 'spent_usdc' | 'budget_usdc'>): number {
+/**
+ * Share of the plan budget already spent, 0–100. Null when the worker could not read the
+ * ledger this cycle (issue #130): the progress is unknown, not zero.
+ */
+export function planProgressPct(
+  plan: Pick<AccumulationPlanStatus, 'spent_usdc' | 'budget_usdc' | 'progress_unknown'>,
+): number | null {
+  if (plan.progress_unknown) return null;
   const spent = parseFloat(plan.spent_usdc);
   const budget = parseFloat(plan.budget_usdc);
   if (!(budget > 0) || !Number.isFinite(spent)) return 0;

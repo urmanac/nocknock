@@ -351,8 +351,16 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         let lp_target_usd = total_portfolio_usd * (profile.target_weights_bps.uniswap_lp as f64 / 10000.0);
         // USDC that must stay liquid: the cash target, or the tax reserve plus the
         // accumulation plan's unspent budget, whichever is larger.
+        // With the ledger unread the plan's remainder is unknown; the whole budget is
+        // the most it can be, so that is what stays liquid (issue #130).
         let plan_remaining = active_plan
-            .and_then(|p| p.remaining_usdc.parse::<f64>().ok())
+            .and_then(|p| {
+                if p.progress_unknown {
+                    p.budget_usdc.parse::<f64>().ok()
+                } else {
+                    p.remaining_usdc.parse::<f64>().ok()
+                }
+            })
             .unwrap_or(0.0);
         let liquid_floor = cash_target_usd.max(tax_reserve_usd + plan_remaining);
         let floor_tolerance_nock = floor * (profile.lp_floor_tolerance_bps as f64 / 10000.0);

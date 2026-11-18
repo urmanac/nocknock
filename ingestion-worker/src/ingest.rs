@@ -10,8 +10,84 @@ pub(crate) fn resolve_high_water_mark_date(prev: Option<(f64, DateTime<Utc>)>, c
     }
 }
 
-/// Run one ingestion cycle and remember whether it failed, for /health.
+/// One ingestion cycle at a time (issue #134). The scheduled loop and POST /v1/ingest
+/// both run cycles; a cycle reads the plan, then makes network calls (fill detection,
+/// route quotes, cost basis) before it reads the previous directive and stores. Two
+/// interleaved cycles could push a stale directive or announce a transition twice, so
+/// the whole cycle runs under one lock.
+///
+/// `run` waits for the cycle in flight and then runs its own. `run_or_join` serves a
+/// request: it needs a cycle that started after the request arrived (it must see what
+/// the request just recorded), so it waits for the cycle in flight and then either
+/// reuses the result of a cycle that another waiter started meanwhile, or runs one.
+/// However many requests pile up behind one cycle, at most one more cycle runs for them.
+/// What a request joined to a cycle that never returned (it panicked) is told.
+pub(crate) const CYCLE_DID_NOT_FINISH: &str = "the ingestion cycle did not finish";
+
+#[derive(Default)]
+pub(crate) struct CycleGate {
+    /// Cycles started, counted while the lock is held.
+    started: std::sync::atomic::AtomicU64,
+    /// The last cycle's outcome, as text for an error. Held for the whole cycle.
+    last: Mutex<Option<std::result::Result<(), String>>>,
+}
+
+impl CycleGate {
+    /// Run `cycle` once no other cycle is running.
+    pub(crate) async fn run<F, Fut>(&self, cycle: F) -> Result<()>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<()>>,
+    {
+        let mut last = self.last.lock().await;
+        self.started.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // Until this cycle returns, its outcome is that it did not finish: a cycle that
+        // panics leaves this, never the previous cycle's outcome, for a waiting request.
+        *last = Some(Err(CYCLE_DID_NOT_FINISH.to_string()));
+        let result = cycle().await;
+        *last = Some(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+        result
+    }
+
+    /// Like `run`, but a cycle that started after this call (while it waited) answers
+    /// for it instead of a new one.
+    pub(crate) async fn run_or_join<F, Fut>(&self, cycle: F) -> Result<()>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<()>>,
+    {
+        let seen = self.started.load(std::sync::atomic::Ordering::SeqCst);
+        let mut last = self.last.lock().await;
+        // Every cycle counted after `seen` was started after this call and has finished
+        // (the lock is held): its reads are at least as new as this request.
+        if self.started.load(std::sync::atomic::Ordering::SeqCst) > seen {
+            if let Some(outcome) = last.clone() {
+                return outcome.map_err(|e| anyhow::anyhow!(e));
+            }
+        }
+        self.started.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // Until this cycle returns, its outcome is that it did not finish: a cycle that
+        // panics leaves this, never the previous cycle's outcome, for a waiting request.
+        *last = Some(Err(CYCLE_DID_NOT_FINISH.to_string()));
+        let result = cycle().await;
+        *last = Some(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+        result
+    }
+}
+
+/// Run one ingestion cycle and remember whether it failed, for /health. Serialised by
+/// the state's `CycleGate`: it waits for a cycle in flight (issue #134).
 pub(crate) async fn run_cycle_tracked(state: &Arc<AppState>) -> Result<()> {
+    state.cycle_gate.run(|| run_cycle_recorded(state)).await
+}
+
+/// The cycle a POST /v1/ingest asks for: a cycle that started after the request,
+/// shared with every other request that waited for the same one (issue #134).
+pub(crate) async fn run_requested_cycle(state: &Arc<AppState>) -> Result<()> {
+    state.cycle_gate.run_or_join(|| run_cycle_recorded(state)).await
+}
+
+async fn run_cycle_recorded(state: &Arc<AppState>) -> Result<()> {
     let result = run_ingestion_cycle(state).await;
     if let Ok(mut slot) = state.last_ingest_error.lock() {
         *slot = result.as_ref().err().map(|e| (Utc::now(), e.to_string()));
@@ -256,13 +332,17 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // only after this one is stored. A directive change notifies, and so do a plan
     // completing, the price-source range being exited and a tracked position closing
     // (#144). A first cycle with no previous snapshot stays silent.
-    let (prev_directive, prev_plan_status) = match state.latest_snapshot.lock().await.as_ref() {
+    let stored_prev = match state.latest_snapshot.lock().await.as_ref() {
         Some(s) => (
             Some(s.data.derived_metrics.global_status.shot_advice_action.clone()),
             s.data.derived_metrics.accumulation_plan.clone(),
         ),
         None => (None, None),
     };
+    // A cycle that could not read the plan ledger is never the news, nor the baseline
+    // the next good cycle is compared against (issue #130).
+    let (prev_directive, prev_plan_status) =
+        notification_baseline(stored_prev, last_ledger_read_cycle(), &next_directive_action, next_plan_status.as_ref());
     let range_exit = range_exit_note(last_range_top_reading().as_ref(), next_range_top.as_ref());
     let notification = cycle_notification_with_closed(
         prev_directive.as_deref(),
@@ -295,6 +375,7 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // Update in-memory cache
     *state.latest_snapshot.lock().await = Some(envelope);
     remember_range_top_reading(next_range_top);
+    remember_ledger_read_cycle(&next_directive_action, next_plan_status.as_ref());
 
     // Sent after the store: a cycle whose store fails leaves the previous snapshot in
     // place, so the same transition is decided again next cycle and is pushed once, when

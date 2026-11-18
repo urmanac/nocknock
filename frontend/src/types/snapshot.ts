@@ -49,7 +49,11 @@ export interface DerivedMetrics {
 export interface AccumulationPlanStatus {
   plan_id: string;
   status: 'pending' | 'tranche_due' | 'waiting' | 'paused' | 'blocked' | 'complete' | 'invalid';
-  venue: string;
+  /**
+   * The operator's own venue label, or null when none is set (2.8.1, issue #132).
+   * NockNock never chooses a venue.
+   */
+  venue?: string | null;
   /** 1-based index of the next tranche (verified fills + 1) */
   tranche_index: number;
   tranches_total: number;
@@ -81,6 +85,12 @@ export interface AccumulationPlanStatus {
    * in older snapshots. Not part of state_hash.
    */
   route_quotes?: RouteQuotes | null;
+  /**
+   * True when the worker could not read the accumulation ledger this cycle (2.8.1,
+   * issue #130). spent_usdc, remaining_usdc and acquired_nock then read "unknown", and
+   * fills and tranche_index are not progress. Absent when the ledger was read.
+   */
+  progress_unknown?: boolean;
 }
 
 /**

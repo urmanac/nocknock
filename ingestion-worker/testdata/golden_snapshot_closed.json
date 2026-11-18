@@ -245,7 +245,7 @@
               "full_range": false,
               "in_range": true,
               "liquidity_usd": "241.21",
-              "lower_price": "0.00550",
+              "lower_price": "0.00550148",
               "upper_price": "0.04106"
             },
             {
@@ -253,8 +253,8 @@
               "full_range": false,
               "in_range": true,
               "liquidity_usd": "199.46",
-              "lower_price": "0.00000564",
-              "upper_price": "0.00000876"
+              "lower_price": "0.00000564468",
+              "upper_price": "0.00000876435"
             },
             {
               "distance_bps": null,
@@ -406,7 +406,7 @@
           "in_range": true,
           "is_price_source": true,
           "liquidity_amount": "249864729574523",
-          "lower_price": "0.00550",
+          "lower_price": "0.00550148",
           "lower_tick": 262200,
           "network": "base",
           "nft_id": 3163450,
@@ -440,7 +440,7 @@
           "in_range": true,
           "is_price_source": false,
           "liquidity_amount": "18841285041665077684",
-          "lower_price": "0.00000564",
+          "lower_price": "0.00000564468",
           "lower_tick": 70400,
           "network": "base",
           "nft_id": 6336662,
@@ -461,7 +461,7 @@
           },
           "tokens_owed_0": "0.000581",
           "tokens_owed_1": "61.508693",
-          "upper_price": "0.00000876",
+          "upper_price": "0.00000876435",
           "upper_tick": 74800,
           "wallet": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
         },
@@ -551,7 +551,7 @@
         }
       ]
     },
-    "state_hash": "5bb18785f56e10ec1481f4aec6f368a68c1e7422cc680ee90bda18833e20f292"
+    "state_hash": "d5141a8620e10ec3844fefb4fe5049f0d1a097aa3968cd775cd5428481ae117b"
   },
   "v4_price_source_closed_block_58646285": {
     "mcp_text": {
@@ -779,8 +779,8 @@
               "full_range": false,
               "in_range": true,
               "liquidity_usd": "199.46",
-              "lower_price": "0.00000564",
-              "upper_price": "0.00000876"
+              "lower_price": "0.00000564468",
+              "upper_price": "0.00000876435"
             },
             {
               "distance_bps": null,
@@ -900,7 +900,7 @@
           "in_range": true,
           "is_price_source": false,
           "liquidity_amount": "18841285041665077684",
-          "lower_price": "0.00000564",
+          "lower_price": "0.00000564468",
           "lower_tick": 70400,
           "network": "base",
           "nft_id": 6336662,
@@ -921,7 +921,7 @@
           },
           "tokens_owed_0": "0.000581",
           "tokens_owed_1": "61.508693",
-          "upper_price": "0.00000876",
+          "upper_price": "0.00000876435",
           "upper_tick": 74800,
           "wallet": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
         },
@@ -1011,6 +1011,6 @@
         }
       ]
     },
-    "state_hash": "8638758fea995ca191c2a1de1a9393863216592eeef8747d9fe86f43cb870a6a"
+    "state_hash": "490737a8665b37d5672957eec7988f03b0475d0605be98a52ab8e83af7584580"
   }
 }

@@ -195,8 +195,8 @@
               "full_range": false,
               "in_range": true,
               "liquidity_usd": "156.14",
-              "lower_price": "0.00000809",
-              "upper_price": "0.00001474"
+              "lower_price": "0.00000809055",
+              "upper_price": "0.0000147415"
             },
             {
               "distance_bps": 1256,
@@ -211,15 +211,15 @@
               "full_range": false,
               "in_range": true,
               "liquidity_usd": "18.11",
-              "lower_price": "0.00000564",
-              "upper_price": "0.00000876"
+              "lower_price": "0.00000564468",
+              "upper_price": "0.00000876435"
             },
             {
               "distance_bps": -7353,
               "full_range": false,
               "in_range": true,
               "liquidity_usd": "206.94",
-              "lower_price": "0.00550",
+              "lower_price": "0.00550148",
               "upper_price": "0.04106"
             }
           ],
@@ -382,7 +382,7 @@
           "in_range": true,
           "is_price_source": false,
           "liquidity_amount": "8293339594552439540",
-          "lower_price": "0.00000809",
+          "lower_price": "0.00000809055",
           "lower_tick": 65200,
           "network": "base",
           "nft_id": 3163432,
@@ -402,7 +402,7 @@
           },
           "tokens_owed_0": "0.000000",
           "tokens_owed_1": "0.000000",
-          "upper_price": "0.00001474",
+          "upper_price": "0.0000147415",
           "upper_tick": 71200,
           "wallet": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
         },
@@ -450,7 +450,7 @@
           "in_range": true,
           "is_price_source": false,
           "liquidity_amount": "1305339058220032430",
-          "lower_price": "0.00000564",
+          "lower_price": "0.00000564468",
           "lower_tick": 70400,
           "network": "base",
           "nft_id": 6336662,
@@ -471,7 +471,7 @@
           },
           "tokens_owed_0": "0.000000",
           "tokens_owed_1": "0.007988",
-          "upper_price": "0.00000876",
+          "upper_price": "0.00000876435",
           "upper_tick": 74800,
           "wallet": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
         },
@@ -485,7 +485,7 @@
           "in_range": true,
           "is_price_source": false,
           "liquidity_amount": "185454734478733",
-          "lower_price": "0.00550",
+          "lower_price": "0.00550148",
           "lower_tick": 262200,
           "network": "base",
           "nft_id": 3163450,
@@ -527,7 +527,7 @@
         }
       ]
     },
-    "state_hash": "ea511b6741b81abc68eae3d2a88ccb9d489b176bda38075593341e8676abc4d4"
+    "state_hash": "1d69b67cb200095621e10f2728ada640572285260043bb1708729faaccbb8903"
   },
   "from_zero": {
     "mcp_text": {
@@ -698,9 +698,9 @@
   },
   "whole_book_plan_due": {
     "mcp_text": {
-      "get_accumulation_plan": "🪜 Accumulation Plan \"test-plan\" (Aero)\n====================\n• Status: tranche_due\n• Next tranche: 1 of 5 — $100.00 due now (nominal $100.00)\n• Next due at: n/a\n• Progress: $0.00 of $500.00 spent over 0 verified buy(s); $500.00 remaining\n• Acquired: 0.0000 NOCK at average $n/a\n• Lump-sum counterfactual (whole budget at first fill price): n/a NOCK\n• Constraint: n/a\n• Protected cash reserve: $n/a\n• LP rebuild bias: under_target (holds $76.06 of a $423.40 target, $347.34 short). Rebuilding ranges is a reposition: no net cash change.\n   → add 156.01 USDC + 4532 NOCK ($211.70) to v4 USDC/NOCK 3.00% #3163450\n     https://app.uniswap.org/positions/v4/base/3163450\n   → add 65.86 USDC + 5678 NOCK ($135.64) to Aero USDC/NOCK 0.30% (full range)\n     https://app.aero.xyz/deposit/8453-0x85f1aa3a70fedd1c52705c15baed143e675cd626\n   ✗ v4 ETH/NOCK 2.00% #3163432: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions\n   ✗ v4 USDC/NOCK 0.75% #3163431: pool has no in-range liquidity, so its price is frozen; a deposit would sit alone at a stale price\n   ✗ v3 WETH/NOCK 1.00% #6336662: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions",
+      "get_accumulation_plan": "🪜 Accumulation Plan \"test-plan\" (your venue label: Aero)\n====================\n• Status: tranche_due\n• Next tranche: 1 of 5 — $100.00 due now (nominal $100.00)\n• Next due at: n/a\n• Progress: $0.00 of $500.00 spent over 0 verified buy(s); $500.00 remaining\n• Acquired: 0.0000 NOCK at average $n/a\n• Lump-sum counterfactual (whole budget at first fill price): n/a NOCK\n• Constraint: n/a\n• Protected cash reserve: $n/a\n• LP rebuild bias: under_target (holds $76.06 of a $423.40 target, $347.34 short). Rebuilding ranges is a reposition: no net cash change.\n   → add 156.01 USDC + 4532 NOCK ($211.70) to v4 USDC/NOCK 3.00% #3163450\n     https://app.uniswap.org/positions/v4/base/3163450\n   → add 65.86 USDC + 5678 NOCK ($135.64) to Aero USDC/NOCK 0.30% (full range)\n     https://app.aero.xyz/deposit/8453-0x85f1aa3a70fedd1c52705c15baed143e675cd626\n   ✗ v4 ETH/NOCK 2.00% #3163432: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions\n   ✗ v4 USDC/NOCK 0.75% #3163431: pool has no in-range liquidity, so its price is frozen; a deposit would sit alone at a stale price\n   ✗ v3 WETH/NOCK 1.00% #6336662: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions",
       "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $2822.68 USD\n• Pillars: NOCK $1461.67 · USDC $1089.93 · ETH $271.07 · AERO not reported\n• Sovereign NOCK Stack: 118957 NOCK (+18957 above the 100000 NOCK floor)\n• Stable Stack: 1089.93 USDC\n• Gas held (wallet ETH+WETH): 0.114226 ETH ($271.07), counted in the total; not cash, not deployable\n• AERO held (wallet): not reported\n• Unclaimed AERO: not reported\n• AERO/USD: not reported\n• High-Water Mark: $2822.68 USD\n• Cost basis: not reported by this snapshot\n• Tactical Directive: DCA TRANCHE DUE (1 of 5)",
-      "get_shot_advice": "🎯 Tactical Shot Advice Engine\n===============================\n• Recommended Action: DCA TRANCHE DUE (1 of 5)\n• Decision Matrix Details: Buy $100.00 of NOCK on Aero (spot $0.01229). Plan \"test-plan\": $0.00 of $500.00 deployed over 0 verified buy(s). After buying, record the transaction hash so the plan advances. Standing bias: LP holds $76.06 against a $423.40 target (15% of portfolio), $347.34 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. Suggested: add 156.01 USDC + 4532 NOCK ($211.70) to v4 USDC/NOCK 3.00% #3163450 (sells all its NOCK by a 1.99x rise); add 65.86 USDC + 5678 NOCK ($135.64) to Aero USDC/NOCK 0.30% (full range). If every range sold out, 105538 NOCK would remain.\n• Uncollected Claimable Fees: $0.75 USD\n• Net of two claims' gas: +$0.74 USD\n• Harvest rule: BATCH HARVEST is advised once uncollected LP fees reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).",
+      "get_shot_advice": "🎯 Tactical Shot Advice Engine\n===============================\n• Recommended Action: DCA TRANCHE DUE (1 of 5)\n• Decision Matrix Details: Buy $100.00 of NOCK (spot $0.01229; your plan's venue label: Aero). Plan \"test-plan\": $0.00 of $500.00 deployed over 0 verified buy(s). After buying, record the transaction hash so the plan advances. Standing bias: LP holds $76.06 against a $423.40 target (15% of portfolio), $347.34 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. Suggested: add 156.01 USDC + 4532 NOCK ($211.70) to v4 USDC/NOCK 3.00% #3163450 (sells all its NOCK by a 1.99x rise); add 65.86 USDC + 5678 NOCK ($135.64) to Aero USDC/NOCK 0.30% (full range). If every range sold out, 105538 NOCK would remain.\n• Uncollected Claimable Fees: $0.75 USD\n• Net of two claims' gas: +$0.74 USD\n• Harvest rule: BATCH HARVEST is advised once uncollected LP fees reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).",
       "simulate_claim_fees": "⚡ Fee Claim Simulation\n=======================\n• Collectible LP fees: $0.0000 USD\n• Estimated Gas: ~$0.0050 USD\n• Net Accretion if Harvested: $0.0000 USD\nPool Breakdown:\n  - ETH+NOCK (Uniswap V4 #3163432): 0.00000000 ETH + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0050)\n  - USDC+NOCK (Uniswap V4 #3163431): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0050)\n  - WETH+NOCK (Uniswap V3 #6336662): 0.00000000 WETH + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0050)\n  - USDC+NOCK (Uniswap V4 #3163450): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0050)\n  - USDC+NOCK (Aerodrome): not LP-claimable (claimFees() reverts)\n"
     },
     "snapshot": {
@@ -833,7 +833,7 @@
           "rsi_14": "48.2",
           "rsi_14_1d": "55.4",
           "shot_advice_action": "DCA TRANCHE DUE (1 of 5)",
-          "shot_advice_details": "Buy $100.00 of NOCK on Aero (spot $0.01229). Plan \"test-plan\": $0.00 of $500.00 deployed over 0 verified buy(s). After buying, record the transaction hash so the plan advances. Standing bias: LP holds $76.06 against a $423.40 target (15% of portfolio), $347.34 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. Suggested: add 156.01 USDC + 4532 NOCK ($211.70) to v4 USDC/NOCK 3.00% #3163450 (sells all its NOCK by a 1.99x rise); add 65.86 USDC + 5678 NOCK ($135.64) to Aero USDC/NOCK 0.30% (full range). If every range sold out, 105538 NOCK would remain.",
+          "shot_advice_details": "Buy $100.00 of NOCK (spot $0.01229; your plan's venue label: Aero). Plan \"test-plan\": $0.00 of $500.00 deployed over 0 verified buy(s). After buying, record the transaction hash so the plan advances. Standing bias: LP holds $76.06 against a $423.40 target (15% of portfolio), $347.34 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. Suggested: add 156.01 USDC + 4532 NOCK ($211.70) to v4 USDC/NOCK 3.00% #3163450 (sells all its NOCK by a 1.99x rise); add 65.86 USDC + 5678 NOCK ($135.64) to Aero USDC/NOCK 0.30% (full range). If every range sold out, 105538 NOCK would remain.",
           "total_collectible_usd": null,
           "total_eth_amount": "0.114226",
           "total_eth_usd": "271.07",
@@ -1043,8 +1043,8 @@
               "full_range": false,
               "in_range": true,
               "liquidity_usd": "0.00",
-              "lower_price": "0.00000809",
-              "upper_price": "0.00001474"
+              "lower_price": "0.00000809055",
+              "upper_price": "0.0000147415"
             },
             {
               "distance_bps": 3787,
@@ -1059,15 +1059,15 @@
               "full_range": false,
               "in_range": true,
               "liquidity_usd": "0.00",
-              "lower_price": "0.00000564",
-              "upper_price": "0.00000876"
+              "lower_price": "0.00000564468",
+              "upper_price": "0.00000876435"
             },
             {
               "distance_bps": -5524,
               "full_range": false,
               "in_range": true,
               "liquidity_usd": "0.00",
-              "lower_price": "0.00550",
+              "lower_price": "0.00550148",
               "upper_price": "0.04106"
             },
             {
@@ -1271,7 +1271,7 @@
           "in_range": true,
           "is_price_source": false,
           "liquidity_amount": "0",
-          "lower_price": "0.00000809",
+          "lower_price": "0.00000809055",
           "lower_tick": 65200,
           "network": "base",
           "nft_id": 3163432,
@@ -1291,7 +1291,7 @@
           },
           "tokens_owed_0": "0.000000",
           "tokens_owed_1": "0.000000",
-          "upper_price": "0.00001474",
+          "upper_price": "0.0000147415",
           "upper_tick": 71200,
           "wallet": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
         },
@@ -1339,7 +1339,7 @@
           "in_range": true,
           "is_price_source": false,
           "liquidity_amount": "0",
-          "lower_price": "0.00000564",
+          "lower_price": "0.00000564468",
           "lower_tick": 70400,
           "network": "base",
           "nft_id": 6336662,
@@ -1360,7 +1360,7 @@
           },
           "tokens_owed_0": "0.000000",
           "tokens_owed_1": "0.000000",
-          "upper_price": "0.00000876",
+          "upper_price": "0.00000876435",
           "upper_tick": 74800,
           "wallet": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
         },
@@ -1374,7 +1374,7 @@
           "in_range": true,
           "is_price_source": false,
           "liquidity_amount": "0",
-          "lower_price": "0.00550",
+          "lower_price": "0.00550148",
           "lower_tick": 262200,
           "network": "base",
           "nft_id": 3163450,
@@ -1450,6 +1450,6 @@
         }
       ]
     },
-    "state_hash": "c4e0c212ae19ce36c36e9723106cba362d78d3eb4432e5c71ec985e3dbda9a1b"
+    "state_hash": "37cb18d4aff18454315495724681ba86cba4448c21d17262fa2d397350875738"
   }
 }
