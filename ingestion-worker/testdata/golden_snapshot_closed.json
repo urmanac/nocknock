@@ -246,6 +246,7 @@
               "in_range": true,
               "liquidity_usd": "241.21",
               "lower_price": "0.00550148",
+              "position_id": "uniswap-v4:base:3163450",
               "upper_price": "0.04106"
             },
             {
@@ -254,6 +255,7 @@
               "in_range": true,
               "liquidity_usd": "199.46",
               "lower_price": "0.00000564468",
+              "position_id": "uniswap-v3:base:6336662",
               "upper_price": "0.00000876435"
             },
             {
@@ -262,6 +264,7 @@
               "in_range": true,
               "liquidity_usd": "157.55",
               "lower_price": "0",
+              "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
               "upper_price": "0"
             }
           ],
@@ -551,7 +554,7 @@
         }
       ]
     },
-    "state_hash": "21156f1e6af414a688a2cf793a30e4a1b494e2c122db11804447ade2ea81491b"
+    "state_hash": "ada3e15ae0d429d4f917091252e82ed0125cf4bbcb4ea3aad501e49c6e7b2f9f"
   },
   "v4_price_source_closed_block_58646285": {
     "mcp_text": {
@@ -780,6 +783,7 @@
               "in_range": true,
               "liquidity_usd": "199.46",
               "lower_price": "0.00000564468",
+              "position_id": "uniswap-v3:base:6336662",
               "upper_price": "0.00000876435"
             },
             {
@@ -788,6 +792,7 @@
               "in_range": true,
               "liquidity_usd": "157.55",
               "lower_price": "0",
+              "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
               "upper_price": "0"
             }
           ],
@@ -1011,6 +1016,6 @@
         }
       ]
     },
-    "state_hash": "95eb1b0c55fb36561c9f7f4b551902ca123036b4b27a38c7dbdbd7fbe89c2cf0"
+    "state_hash": "aed8c58488d790d65e4edabaf21435f8bd50c8ad464ac2430968a38ecc8552e8"
   }
 }

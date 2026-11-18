@@ -159,6 +159,7 @@
               "in_range": true,
               "liquidity_usd": "180.20",
               "lower_price": "0.00000564468",
+              "position_id": "aerodrome-cl:base:2914490",
               "upper_price": "0.00000649289"
             }
           ],
@@ -287,6 +288,6 @@
         }
       ]
     },
-    "state_hash": "96563c76294d2fe7bf55ac5da0c00b4a1cc3bb9466651d9e00b5eeca93431f6f"
+    "state_hash": "7c82a9d7087e3eb907e4a3898af4d68185523da4de6ed44c765c4f75b41952c8"
   }
 }

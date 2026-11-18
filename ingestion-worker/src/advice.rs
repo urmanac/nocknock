@@ -718,6 +718,9 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         tick_bracket_hypervisor: TickBracketHypervisor {
             current_price: format!("{:.5}", spot_price),
             // Zero-mock: one bracket per tracked position, straight from its live ticks.
+            // Kept one per position, in positions order, for clients that still pair by
+            // index; position_id (#152) lets newer clients pair by id and leave out a
+            // range with no NOCK leg, whose bracket is not a NOCK price.
             brackets: raw
                 .positions
                 .iter()
@@ -735,15 +738,18 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
                         liquidity_usd: format!("{:.2}", pos_usd),
                         in_range: p.in_range,
                         full_range,
-                        // Spot is USD/NOCK; brackets are token0-per-NOCK. Only USD-
-                        // denominated token0 (USDC) yields an honest distance.
+                        // Spot is USD per NOCK; a bracket is token0 per token1, which is
+                        // token0 per NOCK only for a NOCK pair (for WETH/USDC it is WETH
+                        // per USDC, not a NOCK price at all). Only USDC/NOCK yields an
+                        // honest distance.
                         distance_bps: if full_range {
                             None
-                        } else if p.token0.symbol == "USDC" {
+                        } else if is_usdc_token(&p.token0) && is_nock_token(&p.token1) {
                             Some(bracket_distance_bps(spot_price, lower_disp, upper_disp))
                         } else {
                             None
                         },
+                        position_id: p.position_id.clone(),
                     }
                 })
                 .collect(),

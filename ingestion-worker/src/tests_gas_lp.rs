@@ -487,3 +487,30 @@ fn test_mcp_plan_text_says_nock_lp_and_never_zero_short() {
     let text = format_accumulation_plan_text(&on);
     assert!(text.contains("NOCK LP rebuild bias: on_target") && !text.contains("short"), "{text}");
 }
+
+#[test]
+fn test_brackets_stay_one_per_position_and_carry_its_id() {
+    // #152: one bracket per position in positions order (older clients pair by index),
+    // each naming its position so newer clients pair by id and drop non-NOCK ranges.
+    let raw = with_gas_ranges();
+    let m = metrics(&raw, &PlanContext::none());
+    let brackets = &m.tick_bracket_hypervisor.brackets;
+    assert_eq!(brackets.len(), raw.positions.len());
+    for (b, p) in brackets.iter().zip(&raw.positions) {
+        assert_eq!(b.position_id, p.position_id);
+    }
+    // A WETH/USDC bracket is WETH per USDC: never a distance from the NOCK spot.
+    for b in brackets.iter().filter(|b| gas_ids().contains(&b.position_id)) {
+        assert_eq!(b.distance_bps, None);
+        let (lo, hi) = (usd(&b.lower_price), usd(&b.upper_price));
+        assert!(lo > 0.0003 && hi < 0.0007 && lo < hi, "{lo}..{hi}");
+    }
+    // The USDC/NOCK bracket keeps its distance.
+    assert!(brackets[0].distance_bps.is_some());
+    // The field is additive: a pre-2.8.2 bracket without it still deserializes.
+    let old: TickBracket = serde_json::from_value(json!({
+        "lower_price": "0.01", "upper_price": "0.02", "liquidity_usd": "1.00", "in_range": true, "distance_bps": null
+    }))
+    .unwrap();
+    assert_eq!(old.position_id, "");
+}

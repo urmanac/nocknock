@@ -1512,6 +1512,10 @@ struct TickBracket {
     /// and clients should not draw it as a bracket. (2.2.0)
     #[serde(default)]
     full_range: bool,
+    /// The position this bracket belongs to (positions[].position_id), so clients pair
+    /// them by id rather than by array index (2.8.2, #152). Absent in older snapshots.
+    #[serde(default)]
+    position_id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]

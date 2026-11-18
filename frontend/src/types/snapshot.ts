@@ -339,6 +339,11 @@ export interface TickBracket {
   in_range: boolean;
   /** Null when the bracket's denomination differs from the USD/NOCK spot (ETH-pools). */
   distance_bps: number | null;
+  /** True when the position spans every price (2.2.0): no bracket to draw. */
+  full_range?: boolean;
+  /** The position this bracket belongs to (2.8.2, #152). Absent in older snapshots,
+   *  whose brackets are index-aligned with positions. */
+  position_id?: string;
 }
 
 export interface PortfolioDeviationMatrix {

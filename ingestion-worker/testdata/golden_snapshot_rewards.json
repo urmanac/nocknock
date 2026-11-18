@@ -205,6 +205,7 @@
               "in_range": true,
               "liquidity_usd": "63.08",
               "lower_price": "0",
+              "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
               "upper_price": "0"
             },
             {
@@ -213,6 +214,7 @@
               "in_range": true,
               "liquidity_usd": "179.64",
               "lower_price": "0.00000564468",
+              "position_id": "aerodrome-cl:base:2914490",
               "upper_price": "0.00000649289"
             }
           ],
@@ -466,7 +468,7 @@
         }
       ]
     },
-    "state_hash": "ef21f8b3f5084b69d5a31302f23338577517580dbd5280864b17e9ba35e97f12"
+    "state_hash": "7bd5d4a26fd0eb00761aefb7ea7e81b39734891ff9710ba4a4b705b4f4df3448"
   },
   "rewards_collectible_block_58618045": {
     "mcp_text": {
@@ -674,6 +676,7 @@
               "in_range": true,
               "liquidity_usd": "63.08",
               "lower_price": "0",
+              "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
               "upper_price": "0"
             },
             {
@@ -682,6 +685,7 @@
               "in_range": true,
               "liquidity_usd": "179.64",
               "lower_price": "0.00000564468",
+              "position_id": "aerodrome-cl:base:2914490",
               "upper_price": "0.00000649289"
             }
           ],
@@ -935,6 +939,6 @@
         }
       ]
     },
-    "state_hash": "fea8b7c5456ae45a1eb7182d57bdf238bb7d9f61491e9f6414d8b369e6c773c1"
+    "state_hash": "7282d98fea6b603fa98678d71afe4231b2607a630b3a1fc680e4981bb63eba65"
   }
 }

@@ -34,7 +34,7 @@ const SOURCE_LABELS: Record<string, string> = {
   aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
-import { POSITION_COLORS, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText } from './positions.ts';
+import { POSITION_COLORS, nockBracketRows, nonNockRangeCount, positionBracket, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText } from './positions.ts';
 import { isAeroProtocol, positionFeesText } from './aeroCl.ts';
 import { PositionStakingLine, RangeSideList } from './components/PositionRangeNotes.tsx';
 import { floorState, floorDeltaText, floorSummaryText, regimeLabel, regimeTone } from './floor.ts';
@@ -147,37 +147,17 @@ function Dashboard() {
   // NB: pool_mechanics is a sibling of derived_metrics on the snapshot data object.
   const ethUsd = ethUsdPrice(global, rawData?.pool_mechanics);
 
-  const tickData = (metrics?.tick_bracket_hypervisor?.brackets || []).map((b: any, i: number) => {
-    const pos = positionsList[i];
-    // Bracket prices are quoted in token0 units per NOCK (USDC or ETH). ETH-denominated
-    // brackets are converted to USD so every row shares one legible axis; without a live
-    // ETH/USD the row keeps native units (collapsed, honest) instead of a fabricated price.
-    const ethDenominated = pos && ['ETH', 'WETH'].includes(pos.token0?.symbol);
-    const converted = !!ethDenominated && ethUsd != null;
-    const fx = converted ? (ethUsd as number) : 1;
-    const lower = parseFloat(b.lower_price) * fx;
-    const upper = parseFloat(b.upper_price) * fx;
-    const spot = parseFloat(metrics?.tick_bracket_hypervisor?.current_price || '0');
-    // Distance to the nearest bracket edge in the same (USD/NOCK) units; falls back to
-    // the worker's bps when a row stays in native units (its sentinel is meaningless
-    // across denominations).
-    const distance = converted && spot > 0 && lower > 0
-      ? Math.min(Math.max(spot - lower, 0), Math.max(upper - spot, 0)) / spot * 100
-      : (b.distance_bps != null ? b.distance_bps / 100 : null);
-    return {
-      name: positionLabel(pos),
-      lower,
-      upper,
-      displayLower: b.lower_price,
-      displayUpper: b.upper_price,
-      liquidity: parseFloat(b.liquidity_usd),
-      inRange: b.in_range,
-      distance,
-      converted,
-      fullRange: !!b.full_range,
-    };
-    // A full-range position (Aerodrome) has no bracket to draw.
-  }).filter((t: any) => !t.fullRange);
+  // Bracket prices are token0 per token1. The chart is in USD per NOCK: brackets pair
+  // with their positions by position_id (#152; index for older snapshots), a range with
+  // no NOCK leg is left out, and ETH-per-NOCK brackets are converted with the live
+  // ETH/USD (native units, collapsed and honest, when there is none).
+  const tickData = nockBracketRows(
+    metrics?.tick_bracket_hypervisor?.brackets,
+    positionsList,
+    ethUsd,
+    parseFloat(metrics?.tick_bracket_hypervisor?.current_price || '0'),
+  );
+  const notDrawnRanges = nonNockRangeCount(positionsList);
 
   // Velocity rows (#142): LP fees and gauge rewards are two series, never one figure.
   const gasData = velocityRows(metrics?.velocity_gas_sandbox?.contracts);
@@ -566,9 +546,9 @@ function Dashboard() {
           <GapCaption gaps={valueVsBaseline.gaps} />
         </CanvasPanel>
 
-        {/* 3. Tick Bracket Hypervisor — Horizontal Ranges (one bar per tracked position,
-            all brackets converted to USD per NOCK so cross-protocol rows share one axis) */}
-        <CanvasPanel title="Tick Bracket Hypervisor (all tracked positions)">
+        {/* 3. Tick Bracket Hypervisor — Horizontal Ranges (one bar per NOCK range, all
+            brackets converted to USD per NOCK so cross-protocol rows share one axis) */}
+        <CanvasPanel title="Tick Bracket Hypervisor (NOCK ranges)">
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={tickData} layout="vertical" margin={{ top: 10, right: 30, left: 110, bottom: 0 }}>
               <XAxis type="number" tickFormatter={v => '$' + v.toFixed(4)} stroke="#334155" tick={{ fill: '#94a3b8', fontSize: 11 }} domain={[0, 'dataMax']} />
@@ -589,12 +569,17 @@ function Dashboard() {
           <RangeSideList positions={positionsList} poolMechanics={rawData?.pool_mechanics} />
           <div style={{ marginTop: 12, fontSize: '0.75rem', color: '#aaa', fontFamily: 'monospace', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span>Spot Price: <strong>${metrics?.tick_bracket_hypervisor?.current_price || '0.00'}</strong></span>
+            {notDrawnRanges > 0 && (
+              <span style={{ color: '#8b949e' }}>
+                {notDrawnRanges} ETH/USDC range{notDrawnRanges === 1 ? '' : 's'} not drawn: not priced in NOCK
+              </span>
+            )}
             {tickData.some((t: any) => t.converted) && (
               <span style={{ color: '#8b949e' }}>ETH-denominated brackets converted to USD @ ${ethUsd ? ethUsd.toFixed(2) : '—'}/ETH ({global?.eth_price_usd ? 'snapshot ETH/USD' : 'pool-derived, older snapshot'})</span>
             )}
             {(() => {
-              // Brackets are index-aligned with positions; the price source is not
-              // necessarily the first one.
+              // The price source's bracket, by position_id (#152; by index for an
+              // older snapshot). The price source is not necessarily the first one.
               const src = positionsList.find((p: any) => p.is_price_source);
               // #144: the spot can come from the pool of a closed Uniswap v4 entry.
               // There is then no price-source position and no range to state, and
@@ -603,8 +588,8 @@ function Dashboard() {
               if (closedSource) {
                 return <span style={{ color: '#8b949e' }}>{closedSource}</span>;
               }
-              const srcIndex = src ? positionsList.indexOf(src) : 0;
-              const bracket = metrics?.tick_bracket_hypervisor?.brackets?.[srcIndex];
+              const brackets = metrics?.tick_bracket_hypervisor?.brackets || [];
+              const bracket = src ? positionBracket(src, positionsList, brackets) : brackets[0];
               if (bracket?.full_range) {
                 return (
                   <span style={{ color: '#10b981' }}>
