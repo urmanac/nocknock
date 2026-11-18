@@ -85,3 +85,29 @@ called #142 an open pull request.*
 #140 (`make dist` overwrites binaries in place), #142 (this work), #144 (a withdrawn
 position stalls ingestion). #130 to #137 from the
 v0.8.0 stack review remain open.
+
+## Later: #144 merged, the burn-down, gas-side ranges, v0.8.1
+
+*Added with the v0.8.1 release PR.*
+
+- **#144** merged as #149 and deployed. The first outside pull request (#141, fixing #140)
+  arrived and was merged by the operator after the CI audit in
+  `docs/kb/ci-security-audit-2026-11-17.md`. Workflow hardening for #146 was merged as #147,
+  and two lore notes as #148.
+- **The v0.8.1 burn-down,** #130 to #137 in #150, was merged and deployed late on 2026-11-17.
+  - CONFIRM and RECORD BUY wait at most 8 s for the refresh they start, because a single
+    cycle would otherwise make them look stuck.
+  - The cross-site guard ignores ports, so another port on the same host (Strata on :8080)
+    and DNS rebinding are not stopped. Both are left for the v0.9.0 access decision.
+- **Gas-side ranges.** That evening the operator opened two ranges with no NOCK leg:
+  Uniswap v3 ETH/USDC 0.05% #6607225 and Aero CL WETH/USDC #3449558, staked. They hold
+  about $160 of USDC and idle gas ETH, to compare which venue pays better.
+  - A scratch run showed they would be counted as NOCK LP, drawn on the NOCK price chart
+    and recommended for claims below gas.
+  - That was filed as #151 to #153. An audit (29 agents) found the affected places, and
+    an adversarial review (22 agents) checked the fix.
+  - Merged as #154, then deployed with both positions added to the operator's config.
+  - chudmax then read a $3,058 total across 5 positions, with NOCK LP $130 short of its
+    target and REBUILD LP TRANCHES leading.
+- **Not built:** a side-by-side view of what the Uniswap and Aero ranges earn. Today the
+  Uniswap range earns LP fees and the Aero range earns AERO, each in its own velocity row.

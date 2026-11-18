@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-18
+
+A patch release: no new feature, every change makes a number or a surface truer.
+
+- **Collectible gauge rewards (#142).** A staked position's unclaimed AERO is reported as what
+  it earns, not as $0 of fees. Snapshot spec 2.7.0.
+- **A withdrawn position is reported as closed (#144),** proven on-chain, and no longer
+  stalls every ingestion cycle. Snapshot spec 2.8.0.
+- **The v0.8.1 burn-down (#130-#137):** one ingestion cycle at a time, LAN API hardening,
+  "unknown" instead of $0.00 for an unread ledger, and five smaller fixes. Snapshot spec 2.8.1.
+- **Positions with no NOCK leg (#151-#153).** Gas-side ranges such as WETH/USDC are measured,
+  never steered: they count in the totals but not as NOCK LP, and they are not drawn on
+  the NOCK price chart. No claim is recommended below its gas. Snapshot spec 2.8.2.
+- **CI hardened for outside contributions (#146)** and **`make dist` replaces binaries
+  atomically (#140),** the project's first outside contribution (#141, from Görkem Taha).
+- **Lore:** "The gas pump" and "Two trips and a wait" (docs/lore, 2026-11-17).
+
+Before you upgrade:
+
+- **Nothing new is required in `config.yaml`.** An existing config loads unchanged. A
+  position with no NOCK leg can now be tracked like any other (see `config.yaml.example`).
+- **No database migration.** v0.8.1 runs on a v0.8.0 database and the reverse, so going
+  back to v0.8.0 needs no repair.
+- **Expect the directive to move** when you first track a position with no NOCK leg. Its
+  value raises the portfolio total, and with it the NOCK LP target.
+
+### Fixed — `make dist` replaces packaged executables atomically (#140)
+Contributed in #141. Each executable is staged in `dist/` and renamed into place, so
+macOS no longer kills a packaged binary (such as the MCP server a client is running)
+that was overwritten in place. Temporary files are removed if installation fails.
+
+### Docs — lore
+`docs/lore/2026-11-17-the-gas-pump.md` and `docs/lore/2026-11-17-two-trips-and-a-wait.md`.
+
 ### Fixed — v0.8.1 burn-down (#130-#137)
 Eight minor findings of the 2026-11-16 adversarial review, each with a test that fails
 without its fix. Snapshot spec 2.8.1: additive (`accumulation_plan.progress_unknown`) and

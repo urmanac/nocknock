@@ -5,13 +5,13 @@ One entry per working session, newest first. Longer sessions keep their full log
 
 | Dates | Agent | Releases | Log |
 |---|---|---|---|
-| 2026-11-17 | Claude (Fable 5.2) | none tagged: #142 merged as PR #143 and deployed to chudmax from `main`; #144 fix on a local branch | [The Aero CL position goes live; gauge rewards as collectible earnings; the withdrawal that stalled ingestion](docs/kb/session-2026-11-17-aero-cl-collectible-rewards.md) |
+| 2026-11-17 → 2026-11-18 | Claude (Fable 5.2, then Opus 5.5) | v0.8.1 (#142, #144, #130-#137, #151-#153, #146, #140) | [The Aero CL position goes live; gauge rewards as collectible earnings; the withdrawal that stalled ingestion; v0.8.1](docs/kb/session-2026-11-17-aero-cl-collectible-rewards.md) |
 | 2026-11-14 (evening) → 2026-11-16 | Claude (Opus 5.5, then Fable 5.2) | v0.5.2, v0.5.3, v0.8.0 (the v0.6.0–v0.8.0 stack, PRs #120–#126) | [v0.5.2, v0.5.3, and v0.8.0: the v0.6.0–v0.8.0 stack](docs/kb/session-2026-11-15-overnight-stack.md) |
 | 2026-11-14 (afternoon) | Claude (Fable 5.2, then Opus 5.5) | none: planning | [Planning v0.5.1 and v0.5.2, lore, the mining reply](docs/kb/session-2026-11-14-planning-lore-mining.md) |
 | 2026-11-13 → 2026-11-14 | Claude (Opus 5.5, then Fable 5.2) | v0.4.0, v0.5.0 | [On-prem deployment, DCA plan, LP guidance, Aerodrome tranche](docs/kb/session-2026-11-13-chudmax-dca-aerodrome.md) |
 | 2026-10-10 | pi → antigravity (Gemini) | v0.1.0 | Below |
 
-**Headline of the latest session:** the operator's first AERO claim is in the harvest ledger, and gauge rewards are reported as collectible earnings (#142, merged as PR #143 and deployed on 2026-11-17). During that deploy the operator withdrew the Aero CL position (NFT #2914490, burned in Base block 58637717 at 12:18:39Z), and every ingestion cycle failed until its config entry was commented out by hand: issue #144. Its fix, which reports a withdrawn position as closed and keeps ingesting, is on a local branch and is not yet merged or deployed.
+**Headline of the latest session:** v0.8.1, a patch release with no new feature. Gauge rewards are reported as collectible earnings (#142), and a withdrawn position is reported as closed instead of stalling ingestion (#144). The eight findings of the v0.8.0 review are fixed (#130-#137), and positions with no NOCK leg are measured, never steered (#151-#153), so the operator's new gas-side WETH/USDC ranges are tracked. CI is hardened for outside contributions (#146), and the first outside contribution landed (#141, fixing #140). Each change was deployed to chudmax at the operator's word as it merged.
 
 - **Two patches are planned:**
   - **v0.5.1, "Honest numbers":** due before the DCA plan completes around 2026-11-18,
