@@ -601,6 +601,23 @@ paths:
         row was recorded without a usd_value because the price read at the claim's
         block failed, recording the same transaction again fills it from that block's
         price; such rows are returned in `priced`.
+        Principal is not income (#156). A transaction that removes liquidity and
+        collects in one step pays back the position's principal with its fees. For each
+        DecreaseLiquidity emitted by the Uniswap v3 NPM or the Aero CL position manager,
+        the position's token0/token1 are read from positions(tokenId) at the block
+        before the transaction, and the decrease's amounts are taken out of what the
+        wallet received (WETH principal from the WETH row first, then from ETH unwrapped
+        by a position manager). Only the remainder is booked; the principal left out is
+        returned in `principal_excluded`. Principal that cannot be read from the receipt
+        is refused with nothing recorded (422 PRINCIPAL_NOT_SEPARABLE): a Uniswap v4
+        liquidity removal (negative ModifyLiquidity; the event has no amounts), an Aero
+        basic or v2-style pool Burn, or a concentrated pool Burn for an owner that is not
+        one of those position managers. Principal larger than what the wallet received
+        of that token is refused (422 PRINCIPAL_EXCEEDS_INFLOW). A transaction that only
+        returns principal records nothing (422 PRINCIPAL_ONLY). Known limit: liquidity
+        decreased in one transaction and collected in a later one is booked in full by
+        the later one, whose receipt has no DecreaseLiquidity; the Uniswap and Aero apps
+        do both in one transaction.
         Nothing is recorded without on-chain verification. A 404 RECEIPT_NOT_FOUND
         also covers the Uniswap-app pending-broadcast quirk (approved but not yet
         broadcast): surface "approved, awaiting wallet broadcast" and retry.
@@ -655,14 +672,32 @@ paths:
                         amount_human: { type: string }
                         usd_value: { type: string }
                         block_number: { type: integer }
+                  principal_excluded:
+                    type: array
+                    description: >
+                      Liquidity the transaction returned, left out of the ledger: one
+                      entry per ledger row it was taken from. Empty for an ordinary fee
+                      claim. (#156)
+                    items:
+                      type: object
+                      properties:
+                        token_symbol: { type: string }
+                        token_address: { type: string }
+                        amount_human: { type: string }
         '404':
           description: Receipt not found on-chain (may be pending broadcast in the wallet)
         '409':
           description: Transfers already recorded and nothing to fill in (idempotent retry)
         '422':
-          description: Invalid platform/hash, reverted transaction, or no tracked transfers
+          description: >
+            Invalid platform/hash, reverted transaction, or no tracked transfers; or
+            principal that cannot be split from fees (PRINCIPAL_NOT_SEPARABLE,
+            PRINCIPAL_EXCEEDS_INFLOW), or a transaction that only returns principal
+            (PRINCIPAL_ONLY). Nothing is recorded.
         '503':
-          description: No RPC key configured
+          description: >
+            No RPC key configured, or the receipt or a decreased position's tokens could
+            not be read (POSITION_UNREADABLE). Nothing is recorded.
 
   /tax/export:
     get:

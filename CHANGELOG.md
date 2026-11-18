@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Returned liquidity is no longer booked as fee income (#156).** `POST /v1/execute/record-harvest`
+  booked everything a transaction paid the wallet. A "remove liquidity" transaction
+  (`decreaseLiquidity` + `collect` in one multicall, as the Uniswap and Aero apps send it)
+  pays back the position's principal with its fees, so the principal would have been
+  booked as harvest income, which overstates income, the tax reserve and the Koinly
+  export. Now each `DecreaseLiquidity` from the Uniswap v3 NPM or the Aero CL position
+  manager is read as principal: the position's tokens come from `positions(tokenId)` at
+  the block before the transaction (the NFT is often burned in it), and the amounts are
+  taken out of what the wallet received. Only the fees are booked, and the response
+  lists the principal it left out in `principal_excluded`. Principal that cannot be read
+  from the receipt is refused with nothing recorded:
+  - a Uniswap v4 liquidity removal (`PRINCIPAL_NOT_SEPARABLE`);
+  - an Aero basic pool `Burn` (`PRINCIPAL_NOT_SEPARABLE`);
+  - a concentrated pool `Burn` for another owner (`PRINCIPAL_NOT_SEPARABLE`);
+  - principal larger than what the wallet received (`PRINCIPAL_EXCEEDS_INFLOW`).
+
+  A transaction that returns only principal records nothing (`PRINCIPAL_ONLY`).
+  - The fixture is the real withdrawal of v3 WETH/NOCK #6336662
+    (`0x06515a23…b778`). Of its 0.103325 ETH and 1,006.81 NOCK, the fees were
+    0.000999503 WETH and 101.58 NOCK.
+  - Known limit: liquidity decreased in one transaction and collected in a later one is
+    booked in full by the later one.
+  - Nothing had been misbooked: that withdrawal was held back until this fix.
+
 ## [0.8.1] - 2026-11-18
 
 A patch release: no new feature, every change makes a number or a surface truer.

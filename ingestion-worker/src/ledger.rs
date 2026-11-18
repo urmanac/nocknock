@@ -606,6 +606,29 @@ pub(crate) async fn record_harvest_handler(
         .and_then(|b| b.as_str())
         .and_then(|s| i64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
         .unwrap_or(0);
+
+    // Principal is not income (#156). Liquidity removed in this transaction is taken out
+    // of what the wallet received before anything is booked; principal that cannot be
+    // read from the receipt is refused with nothing recorded.
+    let (transfers, principal_excluded) = match split_principal(&state, &alchemy_url, &receipt, block_number, transfers).await {
+        Ok(split) => (split.fees, split.principal),
+        Err((status, refusal)) => {
+            return (status, Json(json!({ "error": refusal.code, "detail": format!("{}; nothing recorded", refusal.detail) })))
+                .into_response();
+        }
+    };
+    if transfers.is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "error": "PRINCIPAL_ONLY",
+                "detail": "The transaction only returns liquidity (principal); it pays no fees, so nothing is recorded",
+                "principal_excluded": principal_json(&principal_excluded),
+            })),
+        )
+            .into_response();
+    }
+
     // Tax-honest confirmed_at: the block timestamp (when the tx actually landed), not
     // the wall clock at recording time — retries after the pending-broadcast quirk can
     // record long after confirmation, which would misdate the Koinly export. Falls back
@@ -764,7 +787,81 @@ pub(crate) async fn record_harvest_handler(
             .into_response();
     }
     // `priced`: rows that were already in the ledger without a USD value and now have one.
-    Json(json!({ "recorded": recorded, "already_present": skipped, "priced": priced })).into_response()
+    // `principal_excluded`: liquidity returned in the transaction, not booked (#156).
+    Json(json!({
+        "recorded": recorded,
+        "already_present": skipped,
+        "priced": priced,
+        "principal_excluded": principal_json(&principal_excluded),
+    }))
+    .into_response()
+}
+
+/// Response shape of the principal a recording left out (#156).
+fn principal_json(principal: &[ParsedHarvestTransfer]) -> serde_json::Value {
+    json!(principal
+        .iter()
+        .map(|p| json!({ "token_symbol": p.token_symbol, "token_address": p.token_address, "amount_human": p.amount_human }))
+        .collect::<Vec<_>>())
+}
+
+/// Take the principal of every liquidity decrease in the receipt out of the merged
+/// ledger rows (#156). Each decreased position's tokens are read from its position
+/// manager's `positions(tokenId)` just before the transaction (the NFT may be burned in
+/// it), falling back to the transaction's own block for a position minted in that block.
+/// An ordinary fee claim has no decrease and passes through unchanged.
+async fn split_principal(
+    state: &AppState,
+    alchemy_url: &str,
+    receipt: &serde_json::Value,
+    block_number: i64,
+    rows: Vec<ParsedHarvestTransfer>,
+) -> std::result::Result<FeeSplit, (StatusCode, PrincipalRefusal)> {
+    let decreases = scan_liquidity_decreases(receipt).map_err(|r| (StatusCode::UNPROCESSABLE_ENTITY, r))?;
+    if decreases.is_empty() {
+        return Ok(FeeSplit { fees: rows, principal: Vec::new() });
+    }
+    let unreadable = |detail: String| {
+        (StatusCode::SERVICE_UNAVAILABLE, PrincipalRefusal { code: "POSITION_UNREADABLE", detail })
+    };
+    let Some(before) = block_before_tag(block_number) else {
+        return Err(unreadable("the transaction's block is unknown, so the decreased position's tokens cannot be read".to_string()));
+    };
+    let at_block = format!("0x{block_number:x}");
+    let mut pairs = Vec::with_capacity(decreases.len());
+    for (i, d) in decreases.iter().enumerate() {
+        let mut decoded = None;
+        for tag in [&before, &at_block] {
+            let payload = json!({
+                "jsonrpc": "2.0",
+                "id": 42 + i as u64,
+                "method": "eth_call",
+                "params": [{ "to": d.manager, "data": positions_calldata(d) }, tag]
+            });
+            match eth_call_allow_revert(&state.http_client, alchemy_url, &payload).await {
+                Ok(Some(hex)) => match decode_v3_positions_return(&hex) {
+                    Ok(p) => {
+                        decoded = Some((p.token0, p.token1));
+                        break;
+                    }
+                    Err(e) => return Err(unreadable(format!("positions() on {} could not be decoded: {e}", d.manager))),
+                },
+                Ok(None) => continue,
+                Err(e) => return Err(unreadable(format!("positions() on {} was not answered: {e}", d.manager))),
+            }
+        }
+        match decoded {
+            Some(pair) => pairs.push(pair),
+            None => {
+                return Err(unreadable(format!(
+                    "positions() on {} reverted at and before block {block_number}",
+                    d.manager
+                )))
+            }
+        }
+    }
+    let principal = principal_by_token(&decreases, &pairs).map_err(|r| (StatusCode::UNPROCESSABLE_ENTITY, r))?;
+    subtract_principal(rows, &principal).map_err(|r| (StatusCode::UNPROCESSABLE_ENTITY, r))
 }
 
 /// Koinly custom-CSV rendering of harvest ledger rows: fee claims are tagged

@@ -110,6 +110,8 @@ export interface RecordHarvestResponse {
     block_number: number;
   }>;
   already_present: number;
+  /** Liquidity the transaction returned, left out of the ledger (#156). */
+  principal_excluded?: Array<{ token_symbol: string; token_address: string; amount_human: string }>;
 }
 
 export interface RecordAccumulationResponse {

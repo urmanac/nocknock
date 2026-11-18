@@ -1427,3 +1427,47 @@ a closed Aero CL position, and the worker does not call its gauge.
   configured; one that is slow by less than the limit loosens the check by that much.
 - **StateView reads for a burned v4 id in its own pool.** The adapter never reaches
   them for a closed NFT, and they were not read for #3229273.
+
+---
+
+## 14. Principal in a Harvest Receipt (issue #156) — Verified Record
+
+Read on Base on 2026-11-18. `record-harvest` takes principal out of a "remove liquidity"
+transaction before booking it (`ingestion-worker/src/harvest_principal.rs`).
+
+**Event topics** (keccak256 computed with viem, then found in live logs):
+
+| Event | Topic | Seen in |
+|---|---|---|
+| `DecreaseLiquidity(uint256 indexed,uint128,uint256,uint256)` | `0x26f6a048…77b4` | Uniswap v3 NPM `0x03a520b3…34f1` and Aero CL position manager `0x4857db57…c60b` |
+| `Collect(uint256 indexed,address,uint256,uint256)` | `0x40d0efd1…8f01` | both managers |
+| pool `Burn(address indexed,int24 indexed,int24 indexed,uint128,uint256,uint256)` | `0x0c396cd9…982c` | v3 and Slipstream pools |
+| Aero basic pool `Burn(address indexed,address indexed,uint256,uint256)` | `0x5d624aa9…6fa2` | refused, not split |
+| v4 `ModifyLiquidity(bytes32 indexed,address indexed,int24,int24,int256,bytes32)` | `0xf208f491…d5ec` | refused when `liquidityDelta` < 0 |
+
+**The operator's withdrawal of v3 WETH/NOCK #6336662.** Tx `0x06515a23413aff3f56dab78c4989229352e80fc48d70f503f94158a70e78b778`,
+block 58831000, sent by the wallet to the NPM. `positions(6336662)` at block 58830999
+gives token0 WETH, token1 NOCK, and liquidity 18841285041665077684, which is the whole of the
+liquidity the transaction decreased.
+
+| | WETH | NOCK |
+|---|---|---|
+| `DecreaseLiquidity`: principal | 0.102325535439356415 | 905.2303512140725855 |
+| `Collect`: principal + fees | 0.103325038812771257 | 1006.8107081028485540 |
+| Booked as fees | 0.000999503373414842 (paid as ETH) | 101.5803568887759685 |
+
+The NPM collects to itself, unwraps the WETH (WETH `Withdrawal`, `src` = NPM) and sends
+ETH, then transfers the NOCK to the wallet. The receipt and the `positions()` answer are
+the fixtures in `ingestion-worker/testdata/harvest/`.
+
+**Aero CL.** Tx `0x7ba5de12ae2fa2c42d53718e15a49ab85832dc578e25673502444a5333fd39cc`
+(block 59100004, a third party's withdrawal) carries the same three topics from the Aero CL
+position manager and its pool, and burns the NFT in the same transaction. That is why a
+decreased position's tokens are read at the block before the transaction.
+
+**Not read:**
+- **A Uniswap v4 or Aero basic liquidity removal.** These are refused, not split.
+- **The legacy Aero CL position manager `0x82792268…5b72`.** It is not listed, so a Burn
+  it owns is refused.
+- **Liquidity decreased in one transaction and collected in a later one.** The later
+  collect is booked in full.
