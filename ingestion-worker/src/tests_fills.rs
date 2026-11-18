@@ -939,7 +939,7 @@ fn test_open_offers_lead_the_advice_when_another_arm_outranks_or_follows_the_pla
     // The plan is complete: detection keeps a waiting swap listed, and the advice says so.
     let spent = PlanFills { count: 5, spent_usdc: 100.0, acquired_nock: 8000.0, last_at: Some(t("2026-11-16T03:30:00Z")), first_price: Some(0.0125) };
     let done_ctx = PlanContext { cfg: Some(plan_cfg()), fills: spent, ledger_unavailable: false, now: t("2026-11-16T04:00:00Z") };
-    check(&funded_raw(), &MarketRegime::default(), &done_ctx, "HOLD & ACCRETE (No LP Tracked)", "complete");
+    check(&funded_raw(), &MarketRegime::default(), &done_ctx, "HOLD & ACCRETE (No NOCK LP Tracked)", "complete");
 
     // The plan's own arms already carry the notice: it is never said twice, including
     // below the floor, where it sits inside the recovery sentence.

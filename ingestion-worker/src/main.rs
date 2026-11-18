@@ -243,7 +243,8 @@ pub struct AccumulationPlanConfig {
     pub respect_cash_target: bool,
     /// Protected cash reserve (operator order, 2026-11-14: "we have lots of cash, we
     /// want to keep it"). The plan never advises a buy that would take the stable
-    /// balance (wallet USDC plus USDC inside LP; never ETH, which is gas) below this
+    /// balance (wallet USDC plus USDC inside NOCK-pair LP, #151; never ETH, which is gas,
+    /// nor USDC inside a range with no NOCK leg) below this
     /// amount, at any price. It binds only while an accumulation_plan is configured;
     /// with no plan NockNock advises no buys at all. Independent of the long-run cash
     /// target. The user sets it; NockNock never chooses it.
@@ -1296,8 +1297,9 @@ struct PlanGuards {
     spot_price: f64,
     /// Liquid USDC in the wallet (USDC inside LP positions cannot be spent).
     wallet_usdc: f64,
-    /// USDC held inside LP positions. Counts toward the protected cash reserve
-    /// (operator decision, 2026-11-14: rebuilding LP is cash-neutral).
+    /// USDC held inside NOCK-pair LP positions. Counts toward the protected cash reserve
+    /// (operator decision, 2026-11-14: rebuilding LP is cash-neutral). USDC inside a
+    /// range with no NOCK leg (a gas-side ETH/USDC range) is left out (#151).
     lp_usdc: f64,
     tax_reserve_usd: f64,
     cash_target_usd: f64,
@@ -1452,7 +1454,7 @@ struct GlobalStatus {
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
-const SNAPSHOT_SPEC_VERSION: &str = "2.8.1";
+const SNAPSHOT_SPEC_VERSION: &str = "2.8.2";
 
 /// The gas (wallet ETH + WETH) and ETH pillar figures, each None when it cannot be
 /// measured: unread wallet balances or an unpriced ETH. Never a zero stand-in.
@@ -1511,6 +1513,10 @@ struct TickBracket {
     /// and clients should not draw it as a bracket. (2.2.0)
     #[serde(default)]
     full_range: bool,
+    /// The position this bracket belongs to (positions[].position_id), so clients pair
+    /// them by id rather than by array index (2.8.2, #152). Absent in older snapshots.
+    #[serde(default)]
+    position_id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
@@ -2014,3 +2020,5 @@ mod tests_rewards;
 mod tests_closed;
 #[cfg(test)]
 mod tests_burndown;
+#[cfg(test)]
+mod tests_gas_lp;

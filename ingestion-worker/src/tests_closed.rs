@@ -1592,10 +1592,11 @@ fn test_closed_positions_need_no_new_config_key_and_are_in_the_spec() {
     let ids = |c: &AppConfig| c.positions.iter().map(|p| (p.id.clone(), p.nft_id, position_key(p))).collect::<Vec<_>>();
     assert_eq!(ids(&example_cfg), ids(&book_without_cl()));
 
-    // 2.8.0 brought closed positions; the v0.8.1 burn-down moved it to 2.8.1.
-    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.8.1");
+    // 2.8.0 brought closed positions; the v0.8.1 burn-down moved it to 2.8.1, and
+    // TickBracket.position_id (#152) to 2.8.2.
+    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.8.2");
     let spec = include_str!("../../specs/core/snapshot.yaml");
-    assert!(spec.contains("  version: 2.8.1"));
+    assert!(spec.contains("  version: 2.8.2"));
     for field in [
         "closed_positions:", "ClosedPosition:", "ClosedEvidence:", "config_id:", "position_manager:", "first_seen_closed_at:",
         "supplies_spot_price:", "closed_positions_count:", "closed_positions_note:",

@@ -1,9 +1,24 @@
 openapi: 3.0.3
 info:
   title: NockNock Snapshot Data Model
-  version: 2.8.1
+  version: 2.8.2
   description: |
     Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
+
+    2.8.2 (positions with no NOCK leg, issues #151-#153), additive:
+    - TickBracket.position_id (new, optional): the position the bracket belongs to.
+      Brackets stay one per position in positions order, so a client that pairs by
+      index still works; pair by id when it is present (#152).
+    - Values and wording only, no schema change: a tracked range with no NOCK leg (a
+      gas-side WETH/USDC range) is measured, never steered (#151). positions_nock
+      lists NOCK-pair positions only; lp_rebuild judges NOCK-pair LP only; the
+      deviation matrix row the LP target is measured against is "NOCK LP (NOCK-pair
+      positions)", and a no_target "ETH/USDC LP (measured)" row ("Non-NOCK LP
+      (measured)" unless every such range is an ETH-or-WETH / USDC pair) is appended
+      when such ranges hold value. recommended_action says accumulate when claimable
+      is below the known gas cost (#153), and BATCH HARVEST counts only fees whose
+      row says claim_now or claim_recommended.
+    - TickBracket.full_range is documented (optional; emitted since 2.2.0).
 
     2.8.1 (v0.8.1 burn-down, issues #130-#137), every change additive or a widening:
     - AccumulationPlanStatus.progress_unknown (new, optional, absent when false): the
@@ -1315,12 +1330,17 @@ components:
       properties:
         status:
           type: string
-          description: no_positions when no LP position is tracked; no_target when no LP target weight is configured (target_weights_bps.uniswap_lp unset or 0). Neither carries suggestions or bias text.
+          description: no_positions when no NOCK-pair LP position is tracked (2.8.2, #151; a range with no NOCK leg is not NOCK LP); no_target when no LP target weight is configured (target_weights_bps.uniswap_lp unset or 0). Neither carries suggestions or bias text.
           enum: [under_target, on_target, over_target, no_positions, no_target]
         target_usd:
           type: string
         actual_usd:
           type: string
+          description: >
+            Value of the NOCK-pair LP positions (2.8.2, #151). A tracked range with
+            no NOCK leg (a gas-side WETH/USDC range) is counted in the total, which
+            sets target_usd, but never in actual_usd, and is never a suggestion or an
+            exclusion.
         gap_usd:
           type: string
           description: target - actual, floored at zero
@@ -1411,7 +1431,10 @@ components:
           description: NOCK only, wallet plus LP, in USD. ETH is its own pillar (total_eth_usd).
         total_stable_usd:
           type: string
-          description: USDC, wallet plus LP, in USD
+          description: >
+            USDC, wallet plus LP, in USD: every USDC held, including inside ranges with
+            no NOCK leg (2.8.2). The accumulation plan's protected cash reserve counts
+            only wallet USDC plus USDC inside NOCK-pair ranges.
         total_fees_accrued_usd:
           type: string
           description: All unclaimed fees across contracts
@@ -1622,7 +1645,10 @@ components:
           description: USD value in active ranges/pools at each point
         positions_nock:
           type: array
-          description: NOCK units per tracked position at each point (replaces the retired tranche_1/2/3_nock series; v2.0.0)
+          description: >
+            NOCK units per tracked NOCK-pair position at each point (replaces the
+            retired tranche_1/2/3_nock series; v2.0.0). Since 2.8.2 (#151) a position
+            with no NOCK leg has no entry; before, it had a flat "0.00" series.
           items:
             type: object
             required: [position_id, series]
@@ -1689,9 +1715,23 @@ components:
           nullable: true
           description: >-
             Signed basis-point distance from the current (USD/NOCK) price to the
-            nearest bracket edge. Null for brackets denominated in a different unit
-            (e.g. ETH-per-NOCK), where a cross-unit distance would be meaningless —
-            clients convert via a live ETH/USD rate before charting.
+            nearest bracket edge, for a USDC/NOCK bracket only. Prices are token0 per
+            token1: ETH per NOCK for a WETH/NOCK range (clients convert via a live
+            ETH/USD rate before charting) and WETH per USDC for a range with no NOCK
+            leg, which is not a NOCK price at all and is not drawn on a NOCK chart.
+            Null for every bracket not denominated like the spot.
+        full_range:
+          type: boolean
+          description: >-
+            True when the position spans every price (2.2.0). Optional: false when
+            absent. lower_price and upper_price are then "0", distance_bps is null and
+            clients do not draw the bracket.
+        position_id:
+          type: string
+          description: >-
+            The position this bracket belongs to (positions[].position_id; 2.8.2,
+            #152). Optional: absent in older snapshots, whose brackets are one per
+            position in positions order.
 
     PortfolioDeviationMatrix:
       type: object
@@ -1709,14 +1749,19 @@ components:
       properties:
         bucket_name:
           type: string
-          example: "Aerodrome NOCK/USDC"
+          example: "NOCK LP (NOCK-pair positions)"
         target_weight_bps:
           type: integer
           description: >
             Target allocation in basis points (targets sum = 10000). The "Gas (wallet
             ETH+WETH)" row (2.3.0) and the "AERO (wallet)" row (v0.6.0, issue 93; the
             fifth row) have no target (0, status no_target) and are never under
-            rebalancing pressure.
+            rebalancing pressure. The LP target (uniswap_lp) is measured against the
+            "NOCK LP (NOCK-pair positions)" row (2.8.2, #151; "LP (all tracked
+            positions)" before). Ranges with no NOCK leg are an appended row with no
+            target, present only when they hold value: "ETH/USDC LP (measured)" when
+            every such range is an ETH-or-WETH / USDC pair, otherwise "Non-NOCK LP
+            (measured)".
         actual_weight_bps:
           type: integer
           description: Actual allocation in basis points of total_portfolio_usd (gas and wallet AERO included); 0 when the total is 0
@@ -1864,7 +1909,11 @@ components:
           type: string
           enum: [claim_now, claim_recommended, accumulate, not_claimable]
           description: >
-            Gas-economic recommendation. not_claimable marks an Aero pool whose
+            Gas-economic recommendation. With gas_break_even_usd known (> 0):
+            claimable below it is accumulate (a claim would cost more than it
+            returns, #153), from it up to twice it is claim_recommended, twice
+            it or more is claim_now. With gas unknown, any positive claimable is
+            claim_recommended. not_claimable marks an Aero pool whose
             claimFees() reverts: its fees are not LP-claimable; claimable_usd is
             then 0.00 and is not an amount earned. Since v0.6.0 also an
             aerodrome-cl position staked in its gauge (see note). The AERO such a

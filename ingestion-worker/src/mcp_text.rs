@@ -90,7 +90,7 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
 
 /// The harvest rule as the directive engine applies it (derive_metrics precedence):
 /// a floor DEFENSIVE LOCK, a due DCA tranche and a range exit all outrank it.
-pub const HARVEST_RULE_TEXT: &str = "BATCH HARVEST is advised once uncollected LP fees reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).";
+pub const HARVEST_RULE_TEXT: &str = "BATCH HARVEST is advised once the uncollected LP fees worth claiming (positions whose fees cover their own claim's gas) reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).";
 
 pub fn format_shot_advice_text(data: &serde_json::Value) -> String {
     let global = data.pointer("/derived_metrics/global_status");
@@ -132,17 +132,34 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
             .unwrap_or_else(|| "n/a".to_string())
     };
     let lp = data.pointer("/derived_metrics/lp_rebuild");
-    let lp_line = if s(lp, "status") == "no_positions" {
-        "• No LP positions are tracked; NockNock suggests deposits only into positions you list under positions:".to_string()
-    } else if s(lp, "status") == "no_target" {
+    // The rebuild judges NOCK-pair LP only (#151); gas-side ETH/USDC ranges are measured.
+    let status = s(lp, "status");
+    let lp_line = if status == "no_positions" {
+        "• No NOCK LP positions are tracked; NockNock suggests deposits only into NOCK positions you list under positions:".to_string()
+    } else if status == "no_target" {
         format!(
-            "• LP holds ${}. No LP target is configured (operator_profile.target_weights_bps.uniswap_lp), so NockNock suggests no rebuild.",
+            "• NOCK LP holds ${}. No LP target is configured (operator_profile.target_weights_bps.uniswap_lp), so NockNock suggests no rebuild.",
             s(lp, "actual_usd")
+        )
+    } else if status == "under_target" {
+        format!(
+            "• NOCK LP rebuild bias: under_target (holds ${} of a ${} target, ${} short). Rebuilding ranges is a reposition: no net cash change.",
+            s(lp, "actual_usd"), s(lp, "target_usd"), s(lp, "gap_usd")
+        )
+    } else if status == "over_target" {
+        // gap_usd is clamped at zero above target; the overage is stated, never "$0.00 short".
+        let over = match (s(lp, "actual_usd").parse::<f64>(), s(lp, "target_usd").parse::<f64>()) {
+            (Ok(a), Ok(t)) => format!(", over target by ${:.2}", (a - t).max(0.0)),
+            _ => String::new(),
+        };
+        format!(
+            "• NOCK LP rebuild bias: over_target (holds ${} of a ${} target{}). NockNock never suggests unwinding a range.",
+            s(lp, "actual_usd"), s(lp, "target_usd"), over
         )
     } else {
         format!(
-            "• LP rebuild bias: {} (holds ${} of a ${} target, ${} short). Rebuilding ranges is a reposition: no net cash change.",
-            s(lp, "status"), s(lp, "actual_usd"), s(lp, "target_usd"), s(lp, "gap_usd")
+            "• NOCK LP rebuild bias: {} (holds ${} of a ${} target, within tolerance).",
+            status, s(lp, "actual_usd"), s(lp, "target_usd")
         )
     };
     let mut lp_line = lp_line;

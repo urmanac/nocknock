@@ -67,7 +67,7 @@ fn test_fallback_plan_text_shows_both_venues_and_the_caveat() {
     assert!(text.contains("it is not a recommendation to buy"), "{text}");
     assert!(!text.contains("aerodrome.finance"));
     // The quotes sit between the plan lines and the LP line.
-    assert!(text.find("• Route quotes").unwrap() < text.find("• LP rebuild bias").unwrap());
+    assert!(text.find("• Route quotes").unwrap() < text.find("• NOCK LP rebuild bias").unwrap());
 }
 
 #[test]

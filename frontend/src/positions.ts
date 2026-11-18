@@ -147,3 +147,128 @@ export function velocityRowText(g: {
   }
   return `${g.name}: ${String(g.action).toUpperCase()} ($${g.claimable} earned / gas $${g.gasBreakEven} — ${Number(g.ratio).toFixed(0)}x ROI)`;
 }
+
+/**
+ * True when a position has a NOCK leg (token0 or token1 is NOCK): the same symbol rule
+ * as the worker's `is_nock_pair` (#151). Only these are NOCK LP. A range with no NOCK
+ * leg (a gas-side WETH/USDC range) is measured, never steered: it is in the totals but
+ * not on the NOCK price chart, the NOCK stack chart or the NOCK goal.
+ */
+export function hasNockLeg(pos: { token0?: { symbol?: string } | null; token1?: { symbol?: string } | null } | null | undefined): boolean {
+  return pos?.token0?.symbol === 'NOCK' || pos?.token1?.symbol === 'NOCK';
+}
+
+/**
+ * The position a tick bracket belongs to (#152). Since 2.8.2 a bracket names its
+ * position (`position_id`); an older snapshot's brackets are one per position, in
+ * positions order, so the index is the fallback.
+ */
+export function bracketPosition<P extends { position_id?: string }>(
+  bracket: { position_id?: string | null; [k: string]: unknown } | null | undefined,
+  index: number,
+  positions: P[],
+): P | undefined {
+  const id = bracket?.position_id;
+  if (id) return positions.find((p) => p.position_id === id);
+  return positions[index];
+}
+
+/** The tick bracket of a position (#152): by id, else by its index in positions. */
+export function positionBracket<B extends { position_id?: string | null; [k: string]: unknown }>(
+  position: { position_id?: string } | null | undefined,
+  positions: Array<{ position_id?: string }>,
+  brackets: B[],
+): B | undefined {
+  if (!position) return undefined;
+  const byId = position.position_id ? brackets.find((b) => b.position_id === position.position_id) : undefined;
+  if (byId) return byId;
+  // An older snapshot's brackets carry no id: they are index-aligned with positions.
+  if (brackets.some((b) => b.position_id)) return undefined;
+  const i = positions.indexOf(position);
+  return i >= 0 ? brackets[i] : undefined;
+}
+
+export interface NockBracketRow {
+  name: string;
+  lower: number;
+  upper: number;
+  displayLower: string;
+  displayUpper: string;
+  liquidity: number;
+  inRange: boolean;
+  distance: number | null;
+  converted: boolean;
+  fullRange: boolean;
+}
+
+/**
+ * Rows for the Tick Bracket Hypervisor, a chart in USD per NOCK (#152). Each bracket is
+ * paired with its position by `position_id` (index for older snapshots). A bracket whose
+ * position has no NOCK leg is left out: its prices are token0 per token1 of another pair
+ * (WETH per USDC), not a NOCK price. A WETH/NOCK bracket is ETH per NOCK and is converted
+ * to USD with the live ETH/USD; without one it keeps native units rather than a made-up
+ * price. Full-range positions have no bracket to draw.
+ */
+export function nockBracketRows(
+  brackets: any[] | null | undefined,
+  positions: any[] | null | undefined,
+  ethUsd: number | null | undefined,
+  spot: number,
+): NockBracketRow[] {
+  const list = positions ?? [];
+  const rows: NockBracketRow[] = [];
+  (brackets ?? []).forEach((b: any, i: number) => {
+    const pos = bracketPosition(b, i, list);
+    if (pos && !hasNockLeg(pos)) return;
+    if (b?.full_range) return;
+    const ethDenominated = !!pos && ['ETH', 'WETH'].includes(pos.token0?.symbol) && pos.token1?.symbol === 'NOCK';
+    const converted = ethDenominated && ethUsd != null;
+    const fx = converted ? (ethUsd as number) : 1;
+    const lower = parseFloat(b.lower_price) * fx;
+    const upper = parseFloat(b.upper_price) * fx;
+    // Distance to the nearest bracket edge in the same (USD/NOCK) units; falls back to
+    // the worker's bps when a row stays in native units.
+    const distance = converted && spot > 0 && lower > 0
+      ? Math.min(Math.max(spot - lower, 0), Math.max(upper - spot, 0)) / spot * 100
+      : (b.distance_bps != null ? b.distance_bps / 100 : null);
+    rows.push({
+      name: positionLabel(pos),
+      lower,
+      upper,
+      displayLower: b.lower_price,
+      displayUpper: b.upper_price,
+      liquidity: parseFloat(b.liquidity_usd),
+      inRange: b.in_range,
+      distance,
+      converted,
+      fullRange: !!b.full_range,
+    });
+  });
+  return rows;
+}
+
+/**
+ * How to name the tracked ranges with no NOCK leg, the worker's rule
+ * (`non_nock_range_kind`): "ETH/USDC" only when every one of them is an ETH-or-WETH /
+ * USDC pair, otherwise "non-NOCK".
+ */
+export function nonNockRangeKind(positions: any[] | null | undefined): 'ETH/USDC' | 'non-NOCK' {
+  const isEth = (t: any) => t?.symbol === 'ETH' || t?.symbol === 'WETH';
+  const isUsdc = (t: any) => t?.symbol === 'USDC';
+  const allEthUsdc = (positions ?? [])
+    .filter((p) => p && !hasNockLeg(p))
+    .every((p) => (isEth(p.token0) && isUsdc(p.token1)) || (isUsdc(p.token0) && isEth(p.token1)));
+  return allEthUsdc ? 'ETH/USDC' : 'non-NOCK';
+}
+
+/** "2 ETH/USDC ranges not drawn: not priced in NOCK"; null when every range has a NOCK leg. */
+export function notDrawnRangesText(positions: any[] | null | undefined): string | null {
+  const n = nonNockRangeCount(positions);
+  if (n === 0) return null;
+  return `${n} ${nonNockRangeKind(positions)} range${n === 1 ? '' : 's'} not drawn: not priced in NOCK`;
+}
+
+/** Tracked ranges with no NOCK leg: not drawn on the NOCK bracket chart (#152). */
+export function nonNockRangeCount(positions: any[] | null | undefined): number {
+  return (positions ?? []).filter((p) => p && !hasNockLeg(p)).length;
+}

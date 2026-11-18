@@ -115,9 +115,10 @@
 7. **Protect the Cash Position (standing order, 2026-11-14)**:
    - "Let's not dilute the cash position overtly — we have lots of cash, we want to keep it. There might be a dip!"
    - Plans carry a `cash_reserve_usdc` floor the engine never advises spending below, at any price. The default 5% cash target is a long-run weight, not permission to spend down to it. Only the operator lowers the reserve.
-   - The reserve counts USDC inside LP positions as well as wallet USDC (operator decision, 2026-11-14), consistent with the LP-rebuild rule above.
+   - The reserve counts USDC inside LP positions as well as wallet USDC (operator decision, 2026-11-14), consistent with the LP-rebuild rule above. Since #151 only USDC inside NOCK-pair ranges counts: USDC in a gas-side ETH/USDC range turns into WETH as ETH falls, so it is no NOCK reserve. The USDC pillar (`total_stable_usd`) still counts every USDC held.
 8. **LP Rebuild Rules (standing orders, 2026-11-14)**:
    - Split the LP target equally across eligible tracked positions unless config sets weights.
+   - The LP target is NOCK LP (#151). A tracked range with no NOCK leg (the operator's gas-side WETH/USDC ranges, opened 2026-11-17) is measured, never steered: it is in valuation and every total, and appears as a no-target "ETH/USDC LP (measured)" row ("Non-NOCK LP (measured)" unless every such range is an ETH-or-WETH / USDC pair), but it never fills or silences the NOCK LP target, is never a rebuild template or exclusion, never makes the engine label "active", is not in plan headroom or `positions_nock`, and is not drawn on the NOCK bracket chart. One predicate decides: token0 or token1 is NOCK (`is_nock_pair` / `hasNockLeg`).
    - "We should not generally aim to fill positions that are out of range." Out-of-range positions are skipped unless config makes an explicit exception.
    - Never suggest a deposit into a pool with no in-range liquidity.
    - Aero tranches live at app.aero.xyz ("We shouldn't refer folks to aerodrome.finance anymore"). Link there, never to the retired Aerodrome app. Staking is left at the Aero app's default. AERO is the fourth pillar (7.11): neither minimized nor maximized. Since v0.6.0 NockNock reads it (#93): the wallet's AERO, and the AERO each staked position has earned in its gauge and not claimed. A value it cannot read is "not read" or "not reported" with the reason, never zero. It states amounts and must not advise claiming, selling, holding or accumulating AERO; what to do with claimed AERO is the operator's decision and no policy for it is built in. A staked position's unclaimed AERO is its earnings, so it is reported as that position's collectible earnings (#142; operator, 2026-11-17: "can we make sure this tranche reports its earnings as collectible too?"): the amount, its USD value and the gauge it is collected from, in the Aero app. "Collectible" states a fact; words such as "should", "worth claiming" or "claim now" must never attach to an AERO reward, and the LP-fee harvest words (claim_now, claim_recommended, accumulate) never label one. LP fees, AERO rewards and their sum are three labelled figures, never one merged number. BATCH HARVEST and every other threshold count LP fees only: no rule for rewards has been set, and setting one is the operator's decision. NockNock builds no transaction for a reward, and prints a gas estimate for collecting one only where the claim call is verified on-chain ([`ONCHAIN_INTEGRATION.md`](ONCHAIN_INTEGRATION.md) §9).
@@ -135,7 +136,7 @@
    - No pillar is the point of the others, and NockNock puts no rebalancing pressure on any of them. LP positions are where the pillars work together, not a fifth pillar. Reasons: [`docs/lore/2026-11-14-four-pillars-no-hurry.md`](docs/lore/2026-11-14-four-pillars-no-hurry.md).
    - The deviation matrix's under/over-funded labels measure against the operator's own targets. They are not instructions.
 12. **Gas Is Not Cash (standing order, 2026-11-14)**:
-   - ETH (and WETH held as gas) pays for transactions. It is counted as the gas pillar, never as cash: the cash reserve is wallet USDC plus USDC inside LP, never ETH.
+   - ETH (and WETH held as gas) pays for transactions. It is counted as the gas pillar, never as cash: the cash reserve is wallet USDC plus USDC inside NOCK-pair LP (#151), never ETH.
    - NockNock never advises spending gas on NOCK, and wallet ETH/WETH does not fund LP rebuild suggestions (#94).
    - NockNock suggests no amount of ETH to hold. With no ETH it says once that every action on Base pays gas in ETH.
 13. **The Wallet Is the Record (operator decision, 2026-11-14)**:
@@ -195,7 +196,7 @@
 Before pushing any PR or proposing a release tag, always execute the full verification battery:
 ```bash
 make test-brain       # 3 tests passing (WASM invariants & hashing)
-make test-worker      # 407 tests as of v0.8.1 burn-down (381 worker + 26 MCP)
-make test-frontend    # 324 tests as of v0.8.1 burn-down
+make test-worker      # 426 tests as of #151 (399 worker + 27 MCP)
+make test-frontend    # 338 tests as of #151
 make dist             # Verifies packaging of dist/ binaries and tarballs
 ```

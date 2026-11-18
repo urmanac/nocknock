@@ -78,6 +78,11 @@ pub(crate) fn lp_rebuild_suggestions(
     let mut excluded = Vec::new();
     let mut eligible: Vec<(&RawPosition, Option<u32>)> = Vec::new();
     for p in &raw.positions {
+        // A range with no NOCK leg (a gas-side ETH/USDC range, #151) is not NOCK LP:
+        // measured, never steered. It is neither a template nor an exclusion.
+        if !is_nock_pair(p) {
+            continue;
+        }
         let rule = raw.rebuild_rules.get(&p.position_id).cloned().unwrap_or_default();
         let mut skip = |reason: &str| {
             excluded.push(LpExclusion {
@@ -171,9 +176,11 @@ pub(crate) fn lp_rebuild_suggestions(
     // are left alone (no unwinding), so the others' shares can add up to more than
     // what LP as a whole is short by; scale them down together so a completed rebuild
     // lands on the LP target instead of overshooting it.
+    // NOCK LP only (#151), the same sum the rebuild status was judged on.
     let lp_now: f64 = raw
         .positions
         .iter()
+        .filter(|p| is_nock_pair(p))
         .map(|p| {
             p.amount0 * leg_usd_price(&p.token0, nock_usd, eth_usd)
                 + p.amount1 * leg_usd_price(&p.token1, nock_usd, eth_usd)
@@ -349,19 +356,44 @@ pub(crate) fn lp_rebuild_status(lp_usd: f64, total_portfolio_usd: f64, target_we
 /// The flag is true only when at least one ranged position holds liquidity, is in
 /// range, and sits on a pool read live this cycle: the only case in which the old
 /// "(Dual Growth Engine Active)" label is a statement of fact.
+///
+/// Only NOCK-pair positions are the NOCK engine (#151). Ranges with no NOCK leg (gas-side
+/// ETH/USDC ranges) are named in a closing clause as measured only, and never make the
+/// engine active.
 pub(crate) fn lp_positions_summary(raw: &RawOnChainData) -> (String, bool) {
-    let n = raw.positions.len();
-    if n == 0 {
-        return ("No LP positions tracked.".to_string(), false);
-    }
     let pool_active = |p: &RawPosition| -> Option<bool> {
         raw.pool_liquidity
             .get(&p.position_id)
             .and_then(|v| v.parse::<u128>().ok())
             .map(|l| l > 0)
     };
-    let full = raw.positions.iter().filter(|p| is_full_range(p.tick_lower, p.tick_upper)).count();
-    let ranged: Vec<&RawPosition> = raw.positions.iter().filter(|p| !is_full_range(p.tick_lower, p.tick_upper)).collect();
+    let nock: Vec<&RawPosition> = raw.positions.iter().filter(|p| is_nock_pair(p)).collect();
+    let other: Vec<&RawPosition> = raw.positions.iter().filter(|p| !is_nock_pair(p)).collect();
+    let other_clause = if other.is_empty() {
+        String::new()
+    } else {
+        let m = other.len();
+        let in_range = other
+            .iter()
+            .filter(|p| p.in_range && p.liquidity > 0 && pool_active(p) != Some(false))
+            .count();
+        format!(
+            " +{} {} range{}, measured only ({} in range).",
+            m,
+            non_nock_range_kind(&raw.positions),
+            if m == 1 { "" } else { "s" },
+            in_range
+        )
+    };
+    let n = nock.len();
+    if n == 0 {
+        if other.is_empty() {
+            return ("No LP positions tracked.".to_string(), false);
+        }
+        return (format!("No NOCK LP positions tracked.{}", other_clause), false);
+    }
+    let full = nock.iter().filter(|p| is_full_range(p.tick_lower, p.tick_upper)).count();
+    let ranged: Vec<&RawPosition> = nock.iter().copied().filter(|p| !is_full_range(p.tick_lower, p.tick_upper)).collect();
     // A ranged position holding no liquidity is empty: neither in nor out of range.
     let empty = ranged.iter().filter(|p| p.liquidity == 0).count();
     let held: Vec<&&RawPosition> = ranged.iter().filter(|p| p.liquidity > 0).collect();
@@ -391,7 +423,14 @@ pub(crate) fn lp_positions_summary(raw: &RawOnChainData) -> (String, bool) {
         parts.push(format!("{} full range", full));
     }
     (
-        format!("{} LP position{} tracked: {}.", n, if n == 1 { "" } else { "s" }, parts.join(", ")),
+        format!(
+            "{} {}LP position{} tracked: {}.{}",
+            n,
+            if other.is_empty() { "" } else { "NOCK " },
+            if n == 1 { "" } else { "s" },
+            parts.join(", "),
+            other_clause
+        ),
         engine_active,
     )
 }
@@ -406,7 +445,7 @@ pub(crate) fn apply_lp_rebuild_bias(action: String, details: String, lp: &LpRebu
         return (action, details);
     }
     let sentence = format!(
-        "LP holds ${} against a ${} target ({:.0}% of portfolio), ${} short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves.",
+        "NOCK LP holds ${} against a ${} target ({:.0}% of portfolio), ${} short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves.",
         lp.actual_usd,
         lp.target_usd,
         lp.target_weight_bps as f64 / 100.0,

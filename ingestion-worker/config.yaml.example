@@ -162,12 +162,14 @@ operator_profile:
   tax_reserve_ratio: 0.40
 
   # Target allocation weights in Portfolio Deviation Matrix (basis points, sum = 10000).
-  # v2.0.0: Aerodrome tranche liquidated — the LP bucket is the aggregate across all
-  # tracked Uniswap positions. Legacy `aerodrome_lp`/`uniswap_v4_lp` keys still parse
-  # but are ignored.
+  # v2.0.0: Aerodrome tranche liquidated — the LP bucket is the aggregate across the
+  # tracked positions. Since #151 the LP target counts NOCK-pair positions only (token0
+  # or token1 is NOCK): a tracked range with no NOCK leg, such as a gas-side WETH/USDC
+  # range, is measured (its own no-target row) and never steered by this weight.
+  # Legacy `aerodrome_lp`/`uniswap_v4_lp` keys still parse but are ignored.
   target_weights_bps:
     treasury: 8000        # 80.00% Sovereign Treasury floor
-    uniswap_lp: 1500      # 15.00% Uniswap LP (all tracked positions)
+    uniswap_lp: 1500      # 15.00% NOCK LP (NOCK-pair positions only)
     cash: 500             #  5.00% Liquid USDC cash & tax escrow buffer
 
 # Optional Model Context Protocol (MCP) Bearer Token for /v1/mcp endpoint

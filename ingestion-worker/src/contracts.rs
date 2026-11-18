@@ -67,6 +67,25 @@ pub(crate) fn is_nock_token(t: &PositionTokenInfo) -> bool {
     t.symbol == "NOCK"
 }
 
+/// A position with a NOCK leg (token0 or token1 is NOCK, by the same symbol rule as
+/// is_nock_token). Only these are NOCK LP: the rebuild target and templates, the NOCK LP
+/// deviation row, the engine label, plan headroom, positions_nock and the brackets the
+/// NOCK chart draws. A position with no NOCK leg (a gas-side WETH/USDC range, #151) is
+/// measured, never steered: valuation and the totals still count it, because it is held.
+pub(crate) fn is_nock_pair(p: &RawPosition) -> bool {
+    is_nock_token(&p.token0) || is_nock_token(&p.token1)
+}
+
+/// How to name the tracked ranges with no NOCK leg, one rule for every surface (#151):
+/// "ETH/USDC" only when every one of them is an ETH-or-WETH / USDC pair, otherwise
+/// "non-NOCK". The frontend's nonNockRangeKind applies the same rule.
+pub(crate) fn non_nock_range_kind(positions: &[RawPosition]) -> &'static str {
+    let all_eth_usdc = positions.iter().filter(|p| !is_nock_pair(p)).all(|p| {
+        (is_eth_token(&p.token0) && is_usdc_token(&p.token1)) || (is_usdc_token(&p.token0) && is_eth_token(&p.token1))
+    });
+    if all_eth_usdc { "ETH/USDC" } else { "non-NOCK" }
+}
+
 pub(crate) fn is_usdc_token(t: &PositionTokenInfo) -> bool {
     t.symbol == "USDC"
 }

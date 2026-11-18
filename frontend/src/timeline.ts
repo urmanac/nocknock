@@ -13,7 +13,7 @@
  *   (N1: the slimmed counterfactual series in a history row is ~8 h old).
  * - LP series are keyed by position_id, never by array position (N15).
  */
-import { positionLabel, walletNockUnits } from './positions.ts';
+import { hasNockLeg, positionLabel, walletNockUnits } from './positions.ts';
 
 /** The worker's default `sync_window_seconds` (main.rs `default_sync_window`). */
 export const DEFAULT_SYNC_WINDOW_SECONDS = 300;
@@ -258,15 +258,42 @@ export function buildPositionSeriesDefs(
     ids.push(id);
   };
   const latestIds = new Set<string>();
+  // A position tracked now with no NOCK leg (a gas-side WETH/USDC range, #151) has no
+  // NOCK to stack: older snapshots sent it a flat 0 series, which is skipped. An id seen
+  // only in history is kept (labelled as no longer tracked) if it ever held NOCK.
+  const noNockLeg = new Set<string>(
+    (positions ?? [])
+      .filter((p: any) => typeof p?.position_id === 'string' && !hasNockLeg(p))
+      .map((p: any) => p.position_id),
+  );
+  const addNock = (id: unknown) => {
+    if (typeof id === 'string' && noNockLeg.has(id)) return;
+    add(id);
+  };
   for (const s of latestMetrics?.asset_aggregation_series?.positions_nock ?? []) {
-    add(s?.position_id);
+    addNock(s?.position_id);
     if (typeof s?.position_id === 'string') latestIds.add(s.position_id);
   }
   for (const p of positions ?? []) {
     if (typeof p?.position_id === 'string') latestIds.add(p.position_id);
   }
+  // A history-only id is kept only if it ever held NOCK: one whose every value is 0 or
+  // missing (an emptied range, or a retired WETH/USDC range that pre-2.8.2 snapshots sent
+  // a flat 0 series) would be a flat-zero "(no longer tracked)" band.
+  const heldNock = new Set<string>();
   for (const h of history) {
-    for (const s of derivedMetricsOf(h?.data)?.asset_aggregation_series?.positions_nock ?? []) add(s?.position_id);
+    for (const s of derivedMetricsOf(h?.data)?.asset_aggregation_series?.positions_nock ?? []) {
+      if (typeof s?.position_id !== 'string') continue;
+      const values: unknown[] = Array.isArray(s?.series) ? s.series : [];
+      if (values.some((v) => { const n = finiteOrNull(v); return n !== null && n !== 0; })) heldNock.add(s.position_id);
+    }
+  }
+  for (const h of history) {
+    for (const s of derivedMetricsOf(h?.data)?.asset_aggregation_series?.positions_nock ?? []) {
+      const id = s?.position_id;
+      if (typeof id === 'string' && !latestIds.has(id) && !heldNock.has(id)) continue;
+      addNock(id);
+    }
   }
   return ids.map((id, i) => {
     const pos = (positions ?? []).find((p: any) => p?.position_id === id);

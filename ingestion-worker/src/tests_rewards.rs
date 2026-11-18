@@ -1197,8 +1197,9 @@ fn test_the_cycle_stamps_the_reward_where_it_stamps_unclaimed_aero() {
     let reads = aero_reads_from(&[uniswap], &HashMap::new(), REAL_AERO_BALANCE_WALLET, price_at_claim(), &|g| panic!("no gauge is read: {g}")).unwrap();
     assert_eq!(collectible_reward_for(&reads, "uniswap-v3:base:2914490"), None);
     // The snapshot spec version moved with the new fields (2.7.0), and again with the
-    // closed positions of #144 (2.8.0), and with the v0.8.1 burn-down (2.8.1).
-    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.8.1");
+    // closed positions of #144 (2.8.0), with the v0.8.1 burn-down (2.8.1), and with
+    // TickBracket.position_id (2.8.2, #152).
+    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.8.2");
 }
 
 // ------------------------------------------------------------------

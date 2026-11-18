@@ -125,7 +125,7 @@
             raw.pool_liquidity.insert(p, "0".to_string());
         }
         let m = compute_derived_metrics(&raw, 0.0, &OperatorProfile::default(), StructuralChannels { channels: vec![] }, &[], &LedgerAggregate::default(), &MarketRegime::default());
-        assert_eq!(m.global_status.shot_advice_action, "HOLD & ACCRETE (No Ranged LP Confirmed In Range)");
+        assert_eq!(m.global_status.shot_advice_action, "HOLD & ACCRETE (No Ranged NOCK LP Confirmed In Range)");
     }
 
     #[test]
@@ -137,7 +137,7 @@
         let fills = PlanFills { count: 5, spent_usdc: 500.0, acquired_nock: 40500.0, last_at: Some(t("2026-11-15T12:00:00Z")), first_price: Some(0.0125) };
         let ctx = PlanContext { cfg: Some(plan_cfg()), fills, ledger_unavailable: false, now: t("2026-11-20T12:00:00Z") };
         let m = metrics_with_plan(&raw, &ctx, &MarketRegime::default());
-        assert_eq!(m.global_status.shot_advice_action, "HOLD & ACCRETE (LP Empty)");
+        assert_eq!(m.global_status.shot_advice_action, "HOLD & ACCRETE (NOCK LP Empty)");
         let d = &m.global_status.shot_advice_details;
         assert!(d.starts_with("Total NOCK held is 115748 (+15748 above the 100000 floor). 4 LP positions tracked: 4 ranged (0 in range, 4 empty). $0.00 of LP fees uncollected. Liquid dry powder: $929.22 (wallet USDC $1053.00 less the larger of the $123.78 cash target and the $0.00 virtual tax reserve)."), "{d}");
         for banned in ["realized", "generating yield", "Uniswap position", "Deploy $", "120,000", "CRITICAL"] {
@@ -172,7 +172,7 @@
 
         // Deviation matrix: Treasury / Uniswap LP / Cash only (no Aerodrome bucket).
         let names: Vec<&str> = metrics.portfolio_deviation_matrix.allocations.iter().map(|a| a.bucket_name.as_str()).collect();
-        assert!(names.iter().any(|n| n.contains("LP (all tracked positions)")));
+        assert!(names.iter().any(|n| n.contains("NOCK LP (NOCK-pair positions)")));
         assert!(!names.iter().any(|n| n.contains("Aerodrome")));
 
         // v3 unclaimed fees surface in contract_fees with the NPM address.
@@ -371,7 +371,7 @@ database_url: "postgresql://localhost/test"
         assert_eq!(metrics.global_status.shot_advice_action, "TAX RESERVE SHORT (No Buy Advised)");
         let d = &metrics.global_status.shot_advice_details;
         assert!(d.contains("the virtual tax reserve ($200.00) exceeds liquid wallet USDC ($10.00)."), "{d}");
-        assert!(d.contains("of USDC inside LP is working capital, not dry powder"), "{d}");
+        assert!(d.contains("of USDC inside NOCK LP is working capital, not dry powder"), "{d}");
         assert!(d.contains("No buy is advised while wallet USDC is below the reserve."), "{d}");
         assert!(!d.contains("60/40"));
         assert!(!d.contains("SWEEP") && !d.contains("sweep"), "{d}");
@@ -503,7 +503,7 @@ database_url: "postgresql://localhost/test"
         let m = metrics_with_plan(&raw, &ctx, &MarketRegime::default());
         assert_eq!(m.global_status.shot_advice_action, "DCA TRANCHE DUE (1 of 5)");
         assert!(m.global_status.shot_advice_details.contains("Buy $20.00 of NOCK"));
-        assert!(m.global_status.shot_advice_details.contains("never spends the stable balance (wallet + LP USDC) below $950.00"));
+        assert!(m.global_status.shot_advice_details.contains("never spends the stable balance (wallet + NOCK LP USDC) below $950.00"));
         assert_eq!(m.accumulation_plan.unwrap().cash_reserve_usdc.as_deref(), Some("950.00"));
     }
 
@@ -717,7 +717,7 @@ database_url: "postgresql://localhost/test"
         let due = PlanContext { cfg: Some(plan_cfg()), fills: PlanFills::default(), ledger_unavailable: false, now: t("2026-11-15T12:00:00Z") };
         let m = metrics_with_plan(&raw, &due, &MarketRegime::default());
         assert!(m.global_status.shot_advice_action.starts_with("DCA TRANCHE DUE"));
-        assert!(m.global_status.shot_advice_details.contains("Standing bias: LP holds $0.00"));
+        assert!(m.global_status.shot_advice_details.contains("Standing bias: NOCK LP holds $0.00"));
         assert_eq!(m.lp_rebuild.status, "under_target");
 
         // Between tranches there is nothing to buy, so the rebuild leads.
@@ -1751,6 +1751,22 @@ database_url: "postgresql://localhost/test"
         // Gas unknown (0) is NOT free gas — never claim_now
         assert_eq!(recommended_claim_action(5.0, 0.0), "claim_recommended");
         assert_eq!(recommended_claim_action(0.0, 0.0), "accumulate");
+    }
+
+    #[test]
+    fn test_recommended_claim_action_below_gas_accumulates() {
+        // #153: fees worth less than the gas the claim costs never say claim.
+        // The WETH/USDC range #6607225: claimable $0.000674 against $0.0036 gas.
+        assert_eq!(recommended_claim_action(0.0007, 0.0036), "accumulate");
+        assert_eq!(recommended_claim_action(0.000674, 0.0036), "accumulate");
+        // Exactly the gas cost breaks even: moderate recommendation.
+        assert_eq!(recommended_claim_action(0.0036, 0.0036), "claim_recommended");
+        assert_eq!(recommended_claim_action(0.0071, 0.0036), "claim_recommended");
+        // Twice the gas cost or more: claim now.
+        assert_eq!(recommended_claim_action(0.0072, 0.0036), "claim_now");
+        // Gas unknown keeps the moderate recommendation for any positive amount.
+        assert_eq!(recommended_claim_action(0.0007, 0.0), "claim_recommended");
+        assert_eq!(recommended_claim_action(0.0007, -1.0), "claim_recommended");
     }
 
     fn sample_snapshot_data() -> SnapshotData {
@@ -3063,7 +3079,7 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
         let text = format_portfolio_state_text(&below);
         assert!(text.contains("100000 below the 100000 NOCK floor") && !text.contains("above"), "{text}");
         let plan = format_accumulation_plan_text(&data);
-        assert!(plan.contains("No accumulation_plan is configured") && plan.contains("No LP positions are tracked"), "{plan}");
+        assert!(plan.contains("No accumulation_plan is configured") && plan.contains("No NOCK LP positions are tracked"), "{plan}");
         assert!(!plan.contains("Rebuilding ranges"));
         let empty = format_shot_advice_text(&json!({}));
         assert!(empty.contains("Recommended Action: unavailable"), "{empty}");

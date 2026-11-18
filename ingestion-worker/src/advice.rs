@@ -116,12 +116,34 @@ pub(crate) fn compute_counterfactual_sync(
     }
 }
 
+/// The deviation-matrix row the uniswap_lp target weight is measured against: NOCK-pair
+/// positions only (#151).
+pub(crate) const NOCK_LP_BUCKET_NAME: &str = "NOCK LP (NOCK-pair positions)";
+/// The measured, untargeted row for tracked ranges with no NOCK leg (#151), present only
+/// when such a range holds value. Named by non_nock_range_kind: "ETH/USDC LP (measured)"
+/// when every such range is an ETH/USDC pair (the gas-side ranges), otherwise
+/// "Non-NOCK LP (measured)".
+pub(crate) fn gas_lp_bucket_name(positions: &[RawPosition]) -> &'static str {
+    match non_nock_range_kind(positions) {
+        "ETH/USDC" => "ETH/USDC LP (measured)",
+        _ => "Non-NOCK LP (measured)",
+    }
+}
+
 /// Claim recommendation computed from live claimable yield vs gas break-even.
-/// The 2x factor mirrors the gas_to_fee margin used elsewhere; gas <= 0 means gas is
-/// unknown (not free), so only a moderate recommendation is possible.
+/// With gas known: below the gas cost a claim loses money, so accumulate (#153); from
+/// the gas cost up to twice it, claim_recommended; at twice the gas cost or more
+/// (the gas_to_fee margin used elsewhere), claim_now. gas <= 0 means gas is unknown
+/// (not free), so only a moderate recommendation is possible for a positive amount.
 pub(crate) fn recommended_claim_action(claimable_usd: f64, gas_break_even_usd: f64) -> &'static str {
-    if gas_break_even_usd > 0.0 && claimable_usd >= 2.0 * gas_break_even_usd {
-        "claim_now"
+    if gas_break_even_usd > 0.0 {
+        if claimable_usd >= 2.0 * gas_break_even_usd {
+            "claim_now"
+        } else if claimable_usd >= gas_break_even_usd {
+            "claim_recommended"
+        } else {
+            "accumulate"
+        }
     } else if claimable_usd > 0.0 {
         "claim_recommended"
     } else {
@@ -168,8 +190,16 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
 
     // 2. LP aggregates across all tracked positions (v2.0.0; replaces tranche 1/2 math).
     let mut lp_nock = 0.0f64;
+    // USDC inside every tracked range (the measured USDC pillar, total_stable_usd) and
+    // inside NOCK-pair ranges only (plan headroom and the working-capital note, #151:
+    // USDC in an ETH range turns into WETH as ETH falls, so it is never NOCK reserve).
     let mut lp_usdc = 0.0f64;
+    let mut nock_lp_usdc = 0.0f64;
     let mut lp_usd = 0.0f64;
+    // LP value split by strategy (#151): NOCK-pair positions are the NOCK LP the target
+    // weight steers; the rest (gas-side ETH/USDC ranges) is measured, never steered.
+    let mut nock_lp_usd = 0.0f64;
+    let mut gas_lp_usd = 0.0f64;
     let mut lp_fee_nock = 0.0f64;
     let mut lp_fee_usd = 0.0f64;
     // ETH/WETH inside tracked LP: the LP part of the ETH pillar (issue #94).
@@ -182,9 +212,14 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     for p in &raw.positions {
         let p0 = leg_usd_price(&p.token0, spot_price, raw.live_eth_price_usd);
         let p1 = leg_usd_price(&p.token1, spot_price, raw.live_eth_price_usd);
-        lp_usd += p.amount0 * p0 + p.amount1 * p1;
-        if is_usdc_token(&p.token0) { lp_usdc += p.amount0; }
-        if is_usdc_token(&p.token1) { lp_usdc += p.amount1; }
+        let pos_usd = p.amount0 * p0 + p.amount1 * p1;
+        lp_usd += pos_usd;
+        let nock_pair = is_nock_pair(p);
+        if nock_pair { nock_lp_usd += pos_usd; } else { gas_lp_usd += pos_usd; }
+        let pos_usdc = if is_usdc_token(&p.token0) { p.amount0 } else { 0.0 }
+            + if is_usdc_token(&p.token1) { p.amount1 } else { 0.0 };
+        lp_usdc += pos_usdc;
+        if nock_pair { nock_lp_usdc += pos_usdc; }
         if is_nock_token(&p.token0) { lp_nock += p.amount0; }
         if is_nock_token(&p.token1) { lp_nock += p.amount1; }
         if is_eth_token(&p.token0) { lp_eth += p.amount0; }
@@ -284,8 +319,10 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     // Cash target (issue #79) and tax reserve overlap: the larger one stays in the wallet.
     let cash_target_usd = total_portfolio_usd * (profile.target_weights_bps.cash as f64 / 10000.0);
     let deployable_usdc = (wallet_usdc - tax_reserve_usd.max(cash_target_usd)).max(0.0);
-    let lp_usdc_note = if lp_usdc >= 0.005 {
-        format!(" The ${:.2} of USDC inside LP is working capital, not dry powder: it stays in its ranges.", lp_usdc)
+    // NOCK-pair USDC only (#151): the USDC in a gas-side ETH range is counted in
+    // total_stable_usd but is not NOCK working capital.
+    let lp_usdc_note = if nock_lp_usdc >= 0.005 {
+        format!(" The ${:.2} of USDC inside NOCK LP is working capital, not dry powder: it stays in its ranges.", nock_lp_usdc)
     } else {
         String::new()
     };
@@ -325,7 +362,8 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             overextended: regime.overextended,
             spot_price,
             wallet_usdc,
-            lp_usdc,
+            // NOCK-pair USDC only (#151): conservative cash-reserve headroom.
+            lp_usdc: nock_lp_usdc,
             tax_reserve_usd,
             cash_target_usd,
         };
@@ -341,10 +379,12 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     // An operator who opts out of the RSI pause keeps buying through an overextension.
     let plan_overrides_cooldown = active_plan.is_some()
         && plan.cfg.as_ref().map_or(false, |c| !c.pause_when_overextended);
-    let mut lp_rebuild = lp_rebuild_status(lp_usd, total_portfolio_usd, profile.target_weights_bps.uniswap_lp);
-    // Nothing tracked: there is no range to rebuild, so no suggestion and no bias text
-    // (a user who never held LP is not told to "re-establish" one).
-    if raw.positions.is_empty() {
+    // The uniswap_lp weight targets NOCK LP only (#151): a gas-side ETH/USDC range is
+    // measured, never steered, so it neither fills nor silences the NOCK LP target.
+    let mut lp_rebuild = lp_rebuild_status(nock_lp_usd, total_portfolio_usd, profile.target_weights_bps.uniswap_lp);
+    // No NOCK range tracked: there is no range to rebuild, so no suggestion and no bias
+    // text (a user who never held NOCK LP is not told to "re-establish" one).
+    if !raw.positions.iter().any(is_nock_pair) {
         lp_rebuild.status = "no_positions".to_string();
     }
     if lp_rebuild.status == "under_target" {
@@ -419,11 +459,29 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     // harvest ledger actually books (USDC, NOCK and WETH/ETH, each valued at the claim's block).
     // AERO is deliberately not named here (#93): this directive is about LP fees, and
     // no directive may read as advice to claim AERO. The ledger books AERO all the same.
-    let harvest: Option<(String, String)> = (total_fees_usd >= 5.00).then(|| {
-        let gas_efficiency = if gas_cost > 0.0 {
-            format!("{:.0}x", total_fees_usd / gas_cost)
+    // Only fees worth claiming count toward the threshold (#153 review): an LP-claimable
+    // row whose own action is claim_now or claim_recommended. A position whose fees are
+    // below its claim's gas would lose money to collect, so its fees never make up the
+    // $5.00, however many such positions there are.
+    let (worth_claiming_usd, worth_claims) = fee_entries
+        .iter()
+        .filter(|(_, _, fee_usd, lp_claimable, _, _)| {
+            *lp_claimable && matches!(recommended_claim_action(*fee_usd, gas_cost), "claim_now" | "claim_recommended")
+        })
+        .fold((0.0f64, 0usize), |(sum, n), (_, _, fee_usd, ..)| (sum + fee_usd, n + 1));
+    let harvest: Option<(String, String)> = (worth_claiming_usd >= 5.00).then(|| {
+        // Each position is its own claim, each paying gas: fees over the gas of every claim.
+        let gas_efficiency = if gas_cost > 0.0 && worth_claims > 0 {
+            // One decimal below 10x, so 1.5x is never rounded up to read "2x".
+            let ratio = worth_claiming_usd / (gas_cost * worth_claims as f64);
+            if ratio < 10.0 { format!("{:.1}x", ratio) } else { format!("{:.0}x", ratio) }
         } else {
             "unknown".to_string()
+        };
+        let of_total = if (total_fees_usd - worth_claiming_usd).abs() >= 0.005 {
+            format!(" of ${:.2} uncollected", total_fees_usd)
+        } else {
+            String::new()
         };
         let r = profile.tax_reserve_ratio * 100.0;
         let booking = if tax_ratio_set {
@@ -438,9 +496,12 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         (
             "BATCH HARVEST SHOT (Execute Claim)".to_string(),
             format!(
-                "Uncollected LP fees (${:.2}) have reached the fixed $5.00 harvest threshold ({} gas efficiency). After harvesting, record the transaction: {}, each valued at the claim's block. Bookkeeping only; nothing moves on-chain.",
-                total_fees_usd,
+                "Uncollected LP fees (${:.2}{}) have reached the fixed $5.00 harvest threshold ({} gas efficiency over {} claim{}). After harvesting, record the transaction: {}, each valued at the claim's block. Bookkeeping only; nothing moves on-chain.",
+                worth_claiming_usd,
+                of_total,
                 gas_efficiency,
+                worth_claims,
+                if worth_claims == 1 { "" } else { "s" },
                 booking
             ),
         )
@@ -575,12 +636,12 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         // it); the parenthetical states only what the positions show.
         let label = if engine_active {
             "HOLD & ACCRETE (Dual Growth Engine Active)"
-        } else if raw.positions.is_empty() {
-            "HOLD & ACCRETE (No LP Tracked)"
-        } else if lp_usd <= 0.0 {
-            "HOLD & ACCRETE (LP Empty)"
+        } else if !raw.positions.iter().any(is_nock_pair) {
+            "HOLD & ACCRETE (No NOCK LP Tracked)"
+        } else if nock_lp_usd <= 0.0 {
+            "HOLD & ACCRETE (NOCK LP Empty)"
         } else {
-            "HOLD & ACCRETE (No Ranged LP Confirmed In Range)"
+            "HOLD & ACCRETE (No Ranged NOCK LP Confirmed In Range)"
         };
         let dip_note = if !plan_configured && dip_zone {
             format!(
@@ -655,9 +716,12 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             safe_haven_series: vec![format!("{:.2}", t3_usd)],
             wallet_nock_series: vec![format!("{:.4}", t3_nock)],
             active_protocol_series: vec![format!("{:.2}", lp_usd)],
+            // NOCK-pair positions only (#151): a range with no NOCK leg has no NOCK
+            // series, and a flat zero would be drawn on the NOCK stack chart.
             positions_nock: raw
                 .positions
                 .iter()
+                .filter(|p| is_nock_pair(p))
                 .map(|p| {
                     let nock_amt = if is_nock_token(&p.token0) {
                         p.amount0
@@ -682,6 +746,9 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         tick_bracket_hypervisor: TickBracketHypervisor {
             current_price: format!("{:.5}", spot_price),
             // Zero-mock: one bracket per tracked position, straight from its live ticks.
+            // Kept one per position, in positions order, for clients that still pair by
+            // index; position_id (#152) lets newer clients pair by id and leave out a
+            // range with no NOCK leg, whose bracket is not a NOCK price.
             brackets: raw
                 .positions
                 .iter()
@@ -699,15 +766,18 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
                         liquidity_usd: format!("{:.2}", pos_usd),
                         in_range: p.in_range,
                         full_range,
-                        // Spot is USD/NOCK; brackets are token0-per-NOCK. Only USD-
-                        // denominated token0 (USDC) yields an honest distance.
+                        // Spot is USD per NOCK; a bracket is token0 per token1, which is
+                        // token0 per NOCK only for a NOCK pair (for WETH/USDC it is WETH
+                        // per USDC, not a NOCK price at all). Only USDC/NOCK yields an
+                        // honest distance.
                         distance_bps: if full_range {
                             None
-                        } else if p.token0.symbol == "USDC" {
+                        } else if is_usdc_token(&p.token0) && is_nock_token(&p.token1) {
                             Some(bracket_distance_bps(spot_price, lower_disp, upper_disp))
                         } else {
                             None
                         },
+                        position_id: p.position_id.clone(),
                     }
                 })
                 .collect(),
@@ -736,7 +806,8 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
                 let t3_weight = weight(t3_usd);
                 let t3_dev = t3_weight - w.treasury;
 
-                let lp_weight = weight(lp_usd);
+                // The LP target is NOCK LP's (#151); gas-side ETH/USDC LP is measured.
+                let lp_weight = weight(nock_lp_usd);
                 let lp_dev = lp_weight - w.uniswap_lp;
 
                 let usdc_weight = weight(wallet_usdc);
@@ -747,7 +818,7 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
                 // Nor has AERO (#93): the fourth pillar is measured, never steered.
                 let aero_weight = weight(wallet_aero_usd);
 
-                vec![
+                let mut rows = vec![
                     AllocationDeviation {
                         bucket_name: "Sovereign Treasury".to_string(),
                         target_weight_bps: w.treasury,
@@ -756,7 +827,7 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
                         status: calc_status(t3_dev, w.treasury),
                     },
                     AllocationDeviation {
-                        bucket_name: "LP (all tracked positions)".to_string(),
+                        bucket_name: NOCK_LP_BUCKET_NAME.to_string(),
                         target_weight_bps: w.uniswap_lp,
                         actual_weight_bps: lp_weight,
                         deviation_bps: lp_dev,
@@ -783,7 +854,21 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
                         deviation_bps: aero_weight,
                         status: "no_target".to_string(),
                     },
-                ]
+                ];
+                // Gas-side ETH/USDC ranges (#151): a measured share with no target, like
+                // gas and AERO, and only when such a range holds value. Appended last so
+                // the other rows keep their order for older clients.
+                if gas_lp_usd > 0.0 {
+                    let gas_lp_weight = weight(gas_lp_usd);
+                    rows.push(AllocationDeviation {
+                        bucket_name: gas_lp_bucket_name(&raw.positions).to_string(),
+                        target_weight_bps: 0,
+                        actual_weight_bps: gas_lp_weight,
+                        deviation_bps: gas_lp_weight,
+                        status: "no_target".to_string(),
+                    });
+                }
+                rows
             },
         },
         structural_channels,

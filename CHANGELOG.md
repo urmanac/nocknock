@@ -71,6 +71,48 @@ one widening (`accumulation_plan.venue` nullable). No new config key is required
   one cycle runs at a time (#134) a requested cycle can wait for the one in flight; the
   recording has already succeeded by then, and the next refresh shows it.
 
+### Fixed — positions with no NOCK leg (#151-#153)
+The operator opened two gas-side WETH/USDC ranges (Uniswap v3 #6607225 and Aero CL
+#3449558, staked). Until now every tracked position had a NOCK leg, and the NOCK-strategy
+figures counted every position. A range with no NOCK leg is now measured, never steered:
+valuation and the totals keep counting it, because it is held. One predicate decides,
+`is_nock_pair` in the worker and `hasNockLeg` in the frontend (token0 or token1 is NOCK).
+Snapshot spec 2.8.2: additive (`TickBracket.position_id`). No config key changes.
+
+- **#151 Not NOCK LP.** The LP rebuild judges NOCK-pair value only: gas-side LP no longer
+  fills the NOCK LP target, silences the rebuild bias or shrinks its suggestions, and a
+  WETH/USDC range is neither a rebuild template nor an exclusion. The deviation matrix
+  row the LP target is measured against is "NOCK LP (NOCK-pair positions)" (was "LP (all
+  tracked positions)"); a no-target "ETH/USDC LP (measured)" row is appended, like Gas
+  and AERO, only when such ranges hold value. The engine label and LP summary count NOCK
+  ranges ("+2 ETH/USDC ranges, measured only (2 in range)" is said after them); "No LP
+  Tracked", "LP Empty" and "No Ranged LP Confirmed In Range" read "No NOCK LP Tracked",
+  "NOCK LP Empty" and "No Ranged NOCK LP Confirmed In Range". One rule names those ranges
+  on every surface (summary, matrix row, chart caption): "ETH/USDC" when every one is an
+  ETH-or-WETH / USDC pair, otherwise "non-NOCK" (row "Non-NOCK LP (measured)"). The NOCK
+  stack chart no longer draws a flat-zero "(no longer tracked)" band for a retired id
+  that never held NOCK in history. The plan's
+  protected cash reserve and the working-capital note count wallet USDC plus USDC inside
+  NOCK-pair ranges only; `total_stable_usd` (the USDC pillar) still counts every USDC
+  held. `positions_nock` and the NOCK stack chart list NOCK-pair positions only. Goal 1
+  counts NOCK-leg positions. The bias text reads "NOCK LP holds"; both MCP transports say
+  "NOCK LP rebuild bias", state an over_target overage and never "$0.00 short". The ETH
+  pillar is labelled "ETH (gas + LP WETH)", which it always was; the gas line stays
+  wallet ETH + WETH.
+- **#152 The NOCK bracket chart draws NOCK ranges.** Each tick bracket names its position
+  (`position_id`); the dashboard pairs them by id (by index for older snapshots), leaves
+  out ranges with no NOCK leg (their brackets are WETH per USDC, which drew as bands at
+  about $0.61-$1.22 "per NOCK") and says how many are not drawn. The worker still sends
+  one bracket per position, in order, so older dashboards keep working.
+- **#153 No claim below the gas cost.** With gas known, fees worth less than one claim's
+  gas read `accumulate` (was `claim_recommended`), from the gas cost up to twice it
+  `claim_recommended`, twice or more `claim_now`. With gas unknown a positive amount
+  still reads `claim_recommended`. BATCH HARVEST now counts only the fees of positions
+  whose own row says `claim_now` or `claim_recommended`: many positions each below their
+  claim's gas no longer add up to a harvest. Its gas efficiency is those fees over the gas
+  of every claim they take ("3.8x gas efficiency over 3 claims", one decimal below 10x so it is never rounded up; was the total over one
+  claim's gas), and the text names the uncollected total when some fees are left out.
+
 ### Security — CI hardened for outside contributions (#146)
 - Every action in `ci.yml` is pinned to a full commit SHA; the workflow declares read-only
   permissions at the top; the release job takes the tag name from the environment and
