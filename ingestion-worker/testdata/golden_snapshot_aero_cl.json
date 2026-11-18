@@ -1,9 +1,9 @@
 {
   "aero_cl_staked_block_58061668": {
     "mcp_text": {
-      "get_accumulation_plan": "🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n• LP rebuild bias: under_target (holds $180.20 of a $323.18 target, $142.98 short). Rebuilding ranges is a reposition: no net cash change.\n   ✗ Aero CL WETH/NOCK 0.97% #2914490: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions",
+      "get_accumulation_plan": "🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n• NOCK LP rebuild bias: under_target (holds $180.20 of a $323.18 target, $142.98 short). Rebuilding ranges is a reposition: no net cash change.\n   ✗ Aero CL WETH/NOCK 0.97% #2914490: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions",
       "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $2154.54 USD\n• Pillars: NOCK $1137.05 · USDC $891.38 · ETH $126.11 · AERO not reported\n• Sovereign NOCK Stack: 100742 NOCK (+742 above the 100000 NOCK floor)\n• Stable Stack: 891.38 USDC\n• Gas held (wallet ETH+WETH): 0.013347 ETH ($24.30), counted in the total; not cash, not deployable\n• AERO held (wallet): not reported\n• Unclaimed AERO: not reported\n• AERO/USD: not reported\n• High-Water Mark: $2154.54 USD\n• Cost basis: not reported by this snapshot\n• Tactical Directive: DIP ZONE (No Buy Plan Configured)",
-      "get_shot_advice": "🎯 Tactical Shot Advice Engine\n===============================\n• Recommended Action: DIP ZONE (No Buy Plan Configured)\n• Decision Matrix Details: Spot $0.01129 is below the $0.020 accumulation line and the wallet holds $891.38 of liquid USDC. Liquid dry powder: $783.66 (wallet USDC $891.38 less the larger of the $107.73 cash target and the $0.00 virtual tax reserve). NockNock does not size buys outside a plan: add an accumulation_plan with your own budget_usdc, tranches and interval_hours and it will pace them. Standing bias: LP holds $180.20 against a $323.18 target (15% of portfolio), $142.98 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. No tracked position is eligible for a deposit right now.\n• Uncollected Claimable Fees: $0.00 USD\n• Net of two claims' gas: -$0.01 USD\n• Harvest rule: BATCH HARVEST is advised once uncollected LP fees reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).",
+      "get_shot_advice": "🎯 Tactical Shot Advice Engine\n===============================\n• Recommended Action: DIP ZONE (No Buy Plan Configured)\n• Decision Matrix Details: Spot $0.01129 is below the $0.020 accumulation line and the wallet holds $891.38 of liquid USDC. Liquid dry powder: $783.66 (wallet USDC $891.38 less the larger of the $107.73 cash target and the $0.00 virtual tax reserve). NockNock does not size buys outside a plan: add an accumulation_plan with your own budget_usdc, tranches and interval_hours and it will pace them. Standing bias: NOCK LP holds $180.20 against a $323.18 target (15% of portfolio), $142.98 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. No tracked position is eligible for a deposit right now.\n• Uncollected Claimable Fees: $0.00 USD\n• Net of two claims' gas: -$0.01 USD\n• Harvest rule: BATCH HARVEST is advised once uncollected LP fees reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).",
       "simulate_claim_fees": "⚡ Fee Claim Simulation\n=======================\n• Collectible LP fees: $0.0000 USD\n• Estimated Gas: n/a (nothing LP-claimable)\n• Net Accretion if Harvested: n/a (nothing LP-claimable)\nPool Breakdown:\n  - WETH+NOCK (Aero CL #2914490): not LP-claimable (staked: swap fees on staked liquidity go to the gauge)\n"
     },
     "snapshot": {
@@ -56,7 +56,7 @@
           "rsi_14": null,
           "rsi_14_1d": null,
           "shot_advice_action": "DIP ZONE (No Buy Plan Configured)",
-          "shot_advice_details": "Spot $0.01129 is below the $0.020 accumulation line and the wallet holds $891.38 of liquid USDC. Liquid dry powder: $783.66 (wallet USDC $891.38 less the larger of the $107.73 cash target and the $0.00 virtual tax reserve). NockNock does not size buys outside a plan: add an accumulation_plan with your own budget_usdc, tranches and interval_hours and it will pace them. Standing bias: LP holds $180.20 against a $323.18 target (15% of portfolio), $142.98 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. No tracked position is eligible for a deposit right now.",
+          "shot_advice_details": "Spot $0.01129 is below the $0.020 accumulation line and the wallet holds $891.38 of liquid USDC. Liquid dry powder: $783.66 (wallet USDC $891.38 less the larger of the $107.73 cash target and the $0.00 virtual tax reserve). NockNock does not size buys outside a plan: add an accumulation_plan with your own budget_usdc, tranches and interval_hours and it will pace them. Standing bias: NOCK LP holds $180.20 against a $323.18 target (15% of portfolio), $142.98 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. No tracked position is eligible for a deposit right now.",
           "total_collectible_usd": null,
           "total_eth_amount": "0.069255",
           "total_eth_usd": "126.11",
@@ -103,7 +103,7 @@
             },
             {
               "actual_weight_bps": 836,
-              "bucket_name": "LP (all tracked positions)",
+              "bucket_name": "NOCK LP (NOCK-pair positions)",
               "deviation_bps": -664,
               "status": "under_funded",
               "target_weight_bps": 1500
@@ -287,6 +287,6 @@
         }
       ]
     },
-    "state_hash": "6dcd35f5f23fa355ef0f40bfd32e0c4b428813d23a63823c9432a52d4c6f76fe"
+    "state_hash": "96563c76294d2fe7bf55ac5da0c00b4a1cc3bb9466651d9e00b5eeca93431f6f"
   }
 }

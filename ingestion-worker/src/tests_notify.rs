@@ -1081,7 +1081,7 @@ fn test_the_quote_pointer_follows_the_due_tranche_sentence_not_the_lp_text() {
     let (at_buy, at_pointer, at_lp) = (
         d.find("Buy $20.00 of NOCK").expect("the tranche sentence"),
         d.find(pointer).expect("the pointer"),
-        d.find("Standing bias: LP holds").expect("the LP text"),
+        d.find("Standing bias: NOCK LP holds").expect("the LP text"),
     );
     assert!(at_buy < at_pointer && at_pointer < at_lp, "{d}");
     // Right after the tranche sentence: nothing but that sentence sits between them.

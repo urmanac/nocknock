@@ -1296,8 +1296,9 @@ struct PlanGuards {
     spot_price: f64,
     /// Liquid USDC in the wallet (USDC inside LP positions cannot be spent).
     wallet_usdc: f64,
-    /// USDC held inside LP positions. Counts toward the protected cash reserve
-    /// (operator decision, 2026-11-14: rebuilding LP is cash-neutral).
+    /// USDC held inside NOCK-pair LP positions. Counts toward the protected cash reserve
+    /// (operator decision, 2026-11-14: rebuilding LP is cash-neutral). USDC inside a
+    /// range with no NOCK leg (a gas-side ETH/USDC range) is left out (#151).
     lp_usdc: f64,
     tax_reserve_usd: f64,
     cash_target_usd: f64,
@@ -2014,3 +2015,5 @@ mod tests_rewards;
 mod tests_closed;
 #[cfg(test)]
 mod tests_burndown;
+#[cfg(test)]
+mod tests_gas_lp;

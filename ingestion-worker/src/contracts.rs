@@ -67,6 +67,15 @@ pub(crate) fn is_nock_token(t: &PositionTokenInfo) -> bool {
     t.symbol == "NOCK"
 }
 
+/// A position with a NOCK leg (token0 or token1 is NOCK, by the same symbol rule as
+/// is_nock_token). Only these are NOCK LP: the rebuild target and templates, the NOCK LP
+/// deviation row, the engine label, plan headroom, positions_nock and the brackets the
+/// NOCK chart draws. A position with no NOCK leg (a gas-side WETH/USDC range, #151) is
+/// measured, never steered: valuation and the totals still count it, because it is held.
+pub(crate) fn is_nock_pair(p: &RawPosition) -> bool {
+    is_nock_token(&p.token0) || is_nock_token(&p.token1)
+}
+
 pub(crate) fn is_usdc_token(t: &PositionTokenInfo) -> bool {
     t.symbol == "USDC"
 }

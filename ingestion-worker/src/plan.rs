@@ -107,13 +107,14 @@ pub(crate) fn plan_directive(
     }
     if let Some(reserve) = cfg.cash_reserve_usdc {
         // The reserve is measured on the whole stable balance: wallet USDC plus USDC
-        // inside LP. Moving USDC into a range therefore does not consume headroom;
-        // buying NOCK with it does.
+        // inside NOCK LP. Moving USDC into a range therefore does not consume headroom;
+        // buying NOCK with it does. USDC in a gas-side ETH/USDC range is not counted
+        // (#151): it turns into WETH as ETH falls, so it is no NOCK reserve.
         let stable = guards.wallet_usdc + guards.lp_usdc;
         cap(
             stable - reserve,
             format!(
-                "stable balance ${:.2} (wallet ${:.2} + LP ${:.2}) less the ${:.2} protected cash reserve",
+                "stable balance ${:.2} (wallet ${:.2} + NOCK LP ${:.2}) less the ${:.2} protected cash reserve",
                 stable, guards.wallet_usdc, guards.lp_usdc, reserve
             ),
         );

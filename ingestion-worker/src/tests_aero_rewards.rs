@@ -840,7 +840,7 @@ fn test_wallet_aero_counts_in_the_one_total_everything_else_uses() {
     // and AERO partition it.
     let rows = &snap.derived_metrics.portfolio_deviation_matrix.allocations;
     let names: Vec<&str> = rows.iter().map(|a| a.bucket_name.as_str()).collect();
-    assert_eq!(names, ["Sovereign Treasury", "LP (all tracked positions)", "Liquid USDC (Escrow/Vault)", "Gas (wallet ETH+WETH)", "AERO (wallet)"]);
+    assert_eq!(names, ["Sovereign Treasury", "NOCK LP (NOCK-pair positions)", "Liquid USDC (Escrow/Vault)", "Gas (wallet ETH+WETH)", "AERO (wallet)"]);
     let weights: i32 = rows.iter().map(|a| a.actual_weight_bps).sum();
     assert!((9996..=10000).contains(&weights), "weights sum to {weights} bps");
     let aero_row = &rows[4];
@@ -910,7 +910,7 @@ fn test_no_advice_about_aero_anywhere() {
     // Nor is a wallet holding gas AND AERO (synthetic balances at the real prices). The
     // emptiness test must not subtract gas and AERO back out of the total: in f64,
     // (gas + aero) - gas - aero often leaves a positive residue, which sent four of
-    // these six wallets to "HOLD & ACCRETE (No LP Tracked)".
+    // these six wallets to "HOLD & ACCRETE (No NOCK LP Tracked)".
     for (eth, weth, aero) in [
         (0.003, 0.0, 1.359979),
         (0.0031, 0.0007, 0.121026),

@@ -266,12 +266,22 @@ fn format_accumulation_plan(data: &Value) -> String {
     let lp = data.pointer("/derived_metrics/lp_rebuild");
     let lp_status = lp.and_then(|l| l.get("status")).and_then(|v| v.as_str()).unwrap_or("n/a");
     let lp_gap = lp.and_then(|l| l.get("gap_usd")).and_then(|v| v.as_str()).unwrap_or("n/a");
+    let lp_num = |k: &str| lp.and_then(|l| l.get(k)).and_then(|v| v.as_str()).and_then(|v| v.parse::<f64>().ok());
+    // The rebuild judges NOCK-pair LP only (#151). Only under_target has a shortfall:
+    // over_target states the overage and on_target no gap, never "$0.00 short".
     let lp_line = if lp_status == "no_positions" {
-        "• No LP positions are tracked; NockNock suggests deposits only into positions you list under positions:".to_string()
+        "• No NOCK LP positions are tracked; NockNock suggests deposits only into NOCK positions you list under positions:".to_string()
     } else if lp_status == "no_target" {
         "• No LP target is configured (operator_profile.target_weights_bps.uniswap_lp), so NockNock suggests no rebuild.".to_string()
+    } else if lp_status == "under_target" {
+        format!("• NOCK LP rebuild bias: under_target (${lp_gap} short of target; rebuilding is a reposition, no net cash change)")
+    } else if lp_status == "over_target" {
+        match (lp_num("actual_usd"), lp_num("target_usd")) {
+            (Some(a), Some(t)) => format!("• NOCK LP rebuild bias: over_target (over target by ${:.2}; NockNock never suggests unwinding a range)", (a - t).max(0.0)),
+            _ => "• NOCK LP rebuild bias: over_target (NockNock never suggests unwinding a range)".to_string(),
+        }
     } else {
-        format!("• LP rebuild bias: {lp_status} (${lp_gap} short of target; rebuilding is a reposition, no net cash change)")
+        format!("• NOCK LP rebuild bias: {lp_status} (within tolerance of target)")
     };
     // Closed positions (issue #144): the worker's own lines, from the same source file.
     let closed = closed_positions_trailer(data);
@@ -522,7 +532,7 @@ mod tests {
 
         let plan = format_accumulation_plan(&data);
         assert!(plan.contains("No accumulation_plan is configured"));
-        assert!(plan.contains("No LP positions are tracked"));
+        assert!(plan.contains("No NOCK LP positions are tracked"));
         assert!(!plan.contains("rebuilding is a reposition"));
 
         let empty = format_shot_advice(&json!({}));
@@ -665,3 +675,8 @@ mod tests_rewards;
 #[cfg(test)]
 #[path = "../mcp_bin_tests_closed.rs"]
 mod tests_closed;
+
+// NOCK LP rebuild wording in the fallback text (issue #151).
+#[cfg(test)]
+#[path = "../mcp_bin_tests_gas_lp.rs"]
+mod tests_gas_lp;
