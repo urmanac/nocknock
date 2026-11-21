@@ -74,6 +74,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1,221.85 USDC + 247.58 NOCK): with the pool fallen into it, it holds 5,551.37 NOCK and
   has net bought 5,303.79 NOCK for $84.35 since its deposit, an average of $0.01590283.
 
+- **The ladder suggestion (#168).** A card at the top of the dashboard and under the
+  directive on the phone, with no input of any kind, states whether a NOCK ladder fits
+  your own rules this cycle. `derived_metrics.ladder_suggestion` (snapshot spec 2.9.0,
+  additive) is a structured top-of-page event (id, tier, what changed, the numbers,
+  the deep link, what you would sign). It is ready when no ladder is tracked (#167),
+  the new setting `operator_profile.ladder_bottom_usd` is set (no default; positive and
+  finite, otherwise reported as invalid) and the standing reserve allows at least
+  $1.00. The range runs from the usable tick at or below spot (so it holds 0 NOCK) down
+  to your bottom, snapped, in the one tracked USDC/NOCK concentrated pool that can hold
+  it (frozen, hooked, dynamic-fee or unread pools are excluded with the reason;
+  NockNock does not choose between several). The USDC is the most the $950 reserve
+  allows when the range is fully converted at its bottom (the simulator's
+  `max_usdc_for_this_range`); the plan budget and the tax reserve are stated, not
+  gates. The card shows a plain headline, a picture on a price axis (spot, each
+  deposit's bar and amount, the bottom line and the reserve's zone), the outcomes in
+  plain words (a fall inside the range, a fall to the bottom, a rise selling nothing),
+  and numbered deposits with their range in USD per NOCK and NOCK per USDC and a link
+  to the Uniswap web app's new-position page that prefills the pair, fee and range,
+  never an amount (the link format is the app's own and undocumented, so the ticks and
+  prices are printed too). Each deposit carries the pool, ticks and the amounts in raw
+  units for the transaction builder that follows. How a minted rung becomes tracked is
+  one isolated field, today the config fallback. Every other status is one line saying
+  which condition fails; with no bottom set it lists candidate bottoms as a measurement,
+  none picked. It shows only on a fresh snapshot, never changes the directive and never
+  pushes. Both MCP transports print it in `get_shot_advice`. The v4 adapter now stamps
+  `positions[].fee_raw` and `hooks` from the poolKeys answer it already reads. On the
+  live book of 2026-11-21: up to $766.32 USDC and 0 NOCK in v4 USDC/NOCK 3% #3163450,
+  ticks 273900 to 276300 ($0.01274292 down to $0.01002405), about 67,800 NOCK if fully
+  converted. The Ladder Simulator panel is no longer rendered on the dashboard
+  (operator: no forms); the what-if stays in `GET /v1/simulate/ladder` and the
+  `simulate_ladder` tool.
+
 ## [0.8.3] - 2026-11-20
 
 A patch release: the protected cash reserve is a standing rule, and dry powder honours it.
