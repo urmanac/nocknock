@@ -308,8 +308,10 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // in the block (`unavailable`); it does not fail the cycle. The NOCK held is this
     // snapshot's own total, which is a whole number of NOCK, and is reported as one.
     let held_nock = derived_metrics.global_status.total_nock_amount.trim().parse::<f64>().ok();
+    // Verified ladder buys (#167) enter the whole-stack basis like plan buys.
+    let ladder_reads = ladder_readings(&raw_data);
     derived_metrics.cost_basis =
-        Some(cost_basis_for_cycle(state, raw_data.spot_price_nock_usd, held_nock).await);
+        Some(cost_basis_for_cycle(state, raw_data.spot_price_nock_usd, held_nock, &ladder_reads).await);
     // Capture directive strings before the metrics move into the snapshot envelope
     let next_directive_action = derived_metrics.global_status.shot_advice_action.clone();
     let next_directive_details = derived_metrics.global_status.shot_advice_details.clone();
@@ -411,6 +413,8 @@ pub(crate) fn cycle_snapshot_data(
     now: &str,
 ) -> (SnapshotData, Vec<String>) {
     let positions = snapshot_positions(&raw_data);
+    // One reading per tracked ladder (#167); empty, and absent from the payload, without one.
+    let ladders = ladder_readings(&raw_data);
     let mut closed_positions = std::mem::take(&mut raw_data.closed_positions);
     stamp_first_seen_closed(&mut closed_positions, prev.map(|p| p.closed_positions.as_slice()), now);
     let prev_live_ids: Option<Vec<String>> =
@@ -423,6 +427,7 @@ pub(crate) fn cycle_snapshot_data(
         concentrated_liquidity: raw_data.concentrated_liquidity,
         contract_fees: raw_data.contract_fees,
         closed_positions,
+        ladders,
         derived_metrics,
     };
     (snapshot_data, closed_notes)

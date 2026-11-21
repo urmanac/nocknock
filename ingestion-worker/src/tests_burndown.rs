@@ -158,6 +158,7 @@ fn envelope(plan: Option<AccumulationPlanStatus>) -> SnapshotEnvelope {
             snapshot_id: Uuid::new_v4(),
         },
         data: SnapshotData {
+            ladders: Vec::new(),
             closed_positions: vec![],
             wallet_balances: vec![],
             positions: vec![],

@@ -103,6 +103,9 @@ pub(crate) fn build_position_snapshots(raw_positions: &[RawPosition], nock_usd: 
                 unclaimed_aero_usd: None,
                 unclaimed_aero_note: None,
                 collectible_reward: None,
+                // Stamped by apply_ladder_roles for a position configured role: ladder (#167).
+                role: None,
+                rung: None,
             }
         })
         .collect()
@@ -153,16 +156,19 @@ pub(crate) fn snapshot_positions_from(
     positions
 }
 
-/// `snapshot_positions_from` over a finished cycle's reads. Pure.
+/// `snapshot_positions_from` over a finished cycle's reads, with each ladder's role
+/// (#167) stamped. Pure.
 pub(crate) fn snapshot_positions(raw: &RawOnChainData) -> Vec<Position> {
-    snapshot_positions_from(
+    let mut positions = snapshot_positions_from(
         &raw.positions,
         raw.spot_price_nock_usd,
         raw.live_eth_price_usd,
         &raw.pool_liquidity,
         &raw.position_facts,
         &raw.aero,
-    )
+    );
+    apply_ladder_roles(&mut positions, &raw.ladders);
+    positions
 }
 
 /// One PoolMechanic per tracked position's pool. volatile_assets carry the tracked

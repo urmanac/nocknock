@@ -1163,6 +1163,7 @@ components:
             existing_ranges_below_bottom_reason: { type: string, nullable: true }
             accumulation_plan_unspent: { type: object, nullable: true, description: Stated, not a gate }
             accumulation_plan_unspent_reason: { type: string, nullable: true }
+            existing_ladders: { type: array, items: { type: string }, description: 'Tracked ladders (#167) among the existing NOCK ranges, by position_id; absent when none is tracked' }
             tax_reserve_usd: { type: object, nullable: true, description: Stated, not a gate }
             reason: { type: string, nullable: true }
         floor_check:

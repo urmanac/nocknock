@@ -68,12 +68,27 @@ pub(crate) fn is_nock_token(t: &PositionTokenInfo) -> bool {
 }
 
 /// A position with a NOCK leg (token0 or token1 is NOCK, by the same symbol rule as
-/// is_nock_token). Only these are NOCK LP: the rebuild target and templates, the NOCK LP
-/// deviation row, the engine label, plan headroom, positions_nock and the brackets the
-/// NOCK chart draws. A position with no NOCK leg (a gas-side WETH/USDC range, #151) is
-/// measured, never steered: valuation and the totals still count it, because it is held.
+/// is_nock_token): it holds NOCK. Consumers that count what is held use this rule, a
+/// tracked ladder (#167) included: plan headroom and the standing reserve (its USDC),
+/// positions_nock, the floor-crossing price (floor_breach.rs) and the brackets the NOCK
+/// chart draws. Consumers that steer NOCK LP use `is_nock_lp` instead. A position with no
+/// NOCK leg (a gas-side WETH/USDC range, #151) is measured, never steered: valuation and
+/// the totals still count it, because it is held.
 pub(crate) fn is_nock_pair(p: &RawPosition) -> bool {
     is_nock_token(&p.token0) || is_nock_token(&p.token1)
+}
+
+/// NOCK LP (#167): a NOCK-pair position that is not a tracked ladder. Its consumers are the
+/// uniswap_lp target and the NOCK LP deviation row, the rebuild templates and exclusions,
+/// lp_now, the engine label and the HOLD label. A ladder is left out of all of them, the
+/// way the #151 gas ranges are.
+pub(crate) fn is_nock_lp(raw: &RawOnChainData, p: &RawPosition) -> bool {
+    is_nock_pair(p) && !raw.ladders.contains_key(&p.position_id)
+}
+
+/// A position configured `role: ladder` (#167).
+pub(crate) fn is_ladder(raw: &RawOnChainData, p: &RawPosition) -> bool {
+    raw.ladders.contains_key(&p.position_id)
 }
 
 /// How to name the tracked ranges with no NOCK leg, one rule for every surface (#151):

@@ -243,11 +243,26 @@ pub(crate) const PLAN_BUYS_EXCLUDES: [&str; 3] = [
 /// `held_nock` are this cycle's reads; None is reported as null. `held_nock` arrives
 /// rounded to a whole NOCK (it is the snapshot's `total_nock_amount`) and is reported
 /// that way: no decimals that were never read.
+#[allow(dead_code)] // ladder-less entry point, used by the tests
 pub(crate) fn compute_cost_basis(
     fills: std::result::Result<&[BasisFill], &str>,
     opening: &OpeningBasisState,
     spot: Option<f64>,
     held_nock: Option<f64>,
+) -> CostBasis {
+    compute_cost_basis_with_ladders(fills, opening, spot, held_nock, &[])
+}
+
+/// As `compute_cost_basis`, with this cycle's tracked ladders (#167). A ladder's net buy
+/// since its receipt-verified deposit enters the whole-stack basis like a plan buy, when
+/// it was deposited after the opening basis's instant (`ladder_buys_for_basis`). With no
+/// ladder the block is exactly what `compute_cost_basis` gives. Pure.
+pub(crate) fn compute_cost_basis_with_ladders(
+    fills: std::result::Result<&[BasisFill], &str>,
+    opening: &OpeningBasisState,
+    spot: Option<f64>,
+    held_nock: Option<f64>,
+    ladders: &[LadderReading],
 ) -> CostBasis {
     let spot = spot.filter(|s| s.is_finite() && *s > 0.0);
     let plan_notes = (
@@ -374,9 +389,50 @@ pub(crate) fn compute_cost_basis(
                         since.add(f);
                         n += 1;
                     }
-                    let (basis_nock, basis_cost) = (o.nock + since.nock, o.cost_usd + since.usdc);
+                    // Tracked ladders (#167): each verified net buy after the opening.
+                    let mut ladder_part = Totals::default();
+                    let mut counted = 0i64;
+                    let mut not_counted: Vec<String> = Vec::new();
+                    for r in ladders {
+                        match ladder_buys_for_basis(r, o.as_of) {
+                            Ok((nock, usdc)) => {
+                                ladder_part.nock += nock;
+                                ladder_part.usdc += usdc;
+                                counted += 1;
+                            }
+                            Err(why) => not_counted.push(why),
+                        }
+                    }
+                    let (basis_nock, basis_cost) =
+                        (o.nock + since.nock + ladder_part.nock, o.cost_usd + since.usdc + ladder_part.usdc);
                     let (value, diff, pct) = at_spot(basis_nock, basis_cost, spot);
                     let as_of = o.as_of.to_rfc3339();
+                    let mut includes = vec![
+                        format!(
+                            "The opening figures entered in config: {} NOCK for ${} as of {as_of}, source: {}. NockNock did not read or check them.",
+                            nock_units(o.nock),
+                            usd(o.cost_usd),
+                            o.source
+                        ),
+                        format!("Every receipt-verified buy confirmed after {as_of}: {n} so far."),
+                    ];
+                    let mut excludes = vec![
+                        format!("Buys confirmed at or before {as_of}: they are taken to be inside the opening figures and are not added again."),
+                        format!("Everything after {as_of} that is not a recorded buy: sells, NOCK that LP ranges sell or buy back, fees earned, transfers in or out, unrecorded buys."),
+                        "Realized gains and losses, and gas paid in ETH.".to_string(),
+                    ];
+                    if !ladders.is_empty() {
+                        includes.push(format!(
+                            "The net NOCK bought by {counted} of {} tracked ladder{} since a receipt-verified deposit after {as_of}: {} NOCK for ${}, measured from each deposit_tx receipt to now.",
+                            ladders.len(),
+                            if ladders.len() == 1 { "" } else { "s" },
+                            nock_units(ladder_part.nock),
+                            usd(ladder_part.usdc)
+                        ));
+                        if !not_counted.is_empty() {
+                            excludes.push(format!("Tracked ladders left out: {}.", not_counted.join("; ")));
+                        }
+                    }
                     WholeStackBasis {
                         status: "ok".to_string(),
                         fills_since: Some(n),
@@ -388,20 +444,14 @@ pub(crate) fn compute_cost_basis(
                         value_at_spot_usd: value,
                         unrealized_usd: diff,
                         unrealized_pct: pct,
-                        includes: vec![
-                            format!(
-                                "The opening figures entered in config: {} NOCK for ${} as of {as_of}, source: {}. NockNock did not read or check them.",
-                                nock_units(o.nock),
-                                usd(o.cost_usd),
-                                o.source
-                            ),
-                            format!("Every receipt-verified buy confirmed after {as_of}: {n} so far."),
-                        ],
-                        excludes: vec![
-                            format!("Buys confirmed at or before {as_of}: they are taken to be inside the opening figures and are not added again."),
-                            format!("Everything after {as_of} that is not a recorded buy: sells, NOCK that LP ranges sell or buy back, fees earned, transfers in or out, unrecorded buys."),
-                            "Realized gains and losses, and gas paid in ETH.".to_string(),
-                        ],
+                        ladder_buys_since: (!ladders.is_empty()).then(|| LadderBuysSince {
+                            ladders_counted: counted,
+                            nock: nock_units(ladder_part.nock),
+                            usdc: usd(ladder_part.usdc),
+                            not_counted,
+                        }),
+                        includes,
+                        excludes,
                         ..opening_fields
                     }
                 }
@@ -689,10 +739,10 @@ pub(crate) async fn load_spot_points(
 
 /// This cycle's cost-basis block. The ledger read is optional to the cycle: when it
 /// fails the block says `unavailable` with the reason and the cycle carries on.
-pub(crate) async fn cost_basis_for_cycle(state: &Arc<AppState>, spot: f64, held_nock: Option<f64>) -> CostBasis {
+pub(crate) async fn cost_basis_for_cycle(state: &Arc<AppState>, spot: f64, held_nock: Option<f64>, ladders: &[LadderReading]) -> CostBasis {
     let opening = resolve_opening_basis(state.config.opening_basis(), Utc::now());
     let fills = load_basis_fills(&state.db).await;
-    compute_cost_basis(fills.as_deref().map_err(|e| e.as_str()), &opening, Some(spot), held_nock)
+    compute_cost_basis_with_ladders(fills.as_deref().map_err(|e| e.as_str()), &opening, Some(spot), held_nock, ladders)
 }
 
 /// GET /v1/cost-basis/series — the chart's data: every verified fill with the running

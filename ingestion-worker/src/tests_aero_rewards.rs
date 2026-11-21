@@ -399,6 +399,7 @@ pub(super) fn snapshot_of(mut raw: RawOnChainData, profile: &OperatorProfile, pr
         &plan,
     );
     SnapshotData {
+        ladders: Vec::new(),
         closed_positions: vec![],
         wallet_balances: raw.wallet_balances,
         positions,

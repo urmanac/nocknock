@@ -12,10 +12,15 @@ pub fn reserve_line(global: Option<&Value>) -> String {
             None => String::new(),
         };
     };
+    // Tracked ladders (#167) are named when they hold USDC; otherwise the line is as before.
+    let what = match get("reserve_ladder_usdc").filter(|l| l.trim().parse::<f64>().map_or(false, |v| v >= 0.005)) {
+        Some(l) => format!("wallet + NOCK LP and ladder USDC (${l} in ladders)"),
+        None => "wallet + NOCK LP USDC".to_string(),
+    };
     let measured = match (get("reserve_stable_usdc"), get("reserve_headroom_usdc")) {
         (Some(stable), Some(h)) => match h.strip_prefix('-') {
-            Some(below) => format!("wallet + NOCK LP USDC ${stable}, ${below} below it"),
-            None => format!("wallet + NOCK LP USDC ${stable}, ${h} above it"),
+            Some(below) => format!("{what} ${stable}, ${below} below it"),
+            None => format!("{what} ${stable}, ${h} above it"),
         },
         _ => "not measured this cycle".to_string(),
     };

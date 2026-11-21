@@ -37,7 +37,8 @@ impl Protocol {
     }
 }
 
-/// An unknown `protocol` is a configuration error, stated before any chain read. Pure.
+/// An unknown `protocol` is a configuration error, stated before any chain read, and so
+/// are the role checks of #167 (ladder_track::validate_role_config). Pure.
 pub(crate) fn validate_positions_config(positions: &[PositionConfig]) -> Result<()> {
     for c in positions {
         if Protocol::parse(&c.protocol).is_none() {
@@ -48,6 +49,9 @@ pub(crate) fn validate_positions_config(positions: &[PositionConfig]) -> Result<
                 SUPPORTED_PROTOCOLS
             ));
         }
+        // role, rung and deposit_tx (#167): an unknown role is refused like an unknown
+        // protocol, and a ladder never carries a key that would steer it.
+        validate_role_config(c)?;
     }
     Ok(())
 }
@@ -137,7 +141,9 @@ pub(crate) fn closed_position_label(cfg: &PositionConfig) -> String {
         (Some(Ok(t0)), Some(Ok(t1))) => format!(" {}/{}", t0.symbol, t1.symbol),
         _ => String::new(),
     };
-    format!("{venue}{pair} #{} ({})", cfg.nft_id, cfg.id)
+    // A ladder (#167) says so: its closing is the operator pulling a rung.
+    let role = if is_ladder_config(cfg) { ", ladder" } else { "" };
+    format!("{venue}{pair} #{} ({}{role})", cfg.nft_id, cfg.id)
 }
 
 /// The pool a closed position's config entry names, lowercase. Pure.

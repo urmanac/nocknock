@@ -1,0 +1,1591 @@
+{
+  "ladders_above_range": {
+    "mcp_text": {
+      "get_accumulation_plan": "🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n• NOCK LP rebuild bias: under_target (holds $220.27 of a $758.73 target, $538.47 short). Rebuilding ranges is a reposition: no net cash change.\n   → add 336.49 USDC + 9774 NOCK ($538.47) to v4 USDC/NOCK 3.00% #3163450\n     https://app.uniswap.org/positions/v4/base/3163450\n   ✗ v3 WETH/NOCK 1.00% #6336662: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions\n• Ladders are not rebuild templates and are not in the NOCK LP target (2 tracked, measured only).",
+      "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $5058.23 USD\n• Pillars: NOCK $2469.47 · USDC $2485.13 · ETH $103.62 · AERO not reported\n• Sovereign NOCK Stack: 119503 NOCK (+19503 above the 100000 NOCK floor)\n• Floor crossing: none. If every range sold out, 115748 NOCK would remain (115748 wallet + 0 uncollected fees), at or above the 100000 NOCK floor. First range to sell out: v3 WETH/NOCK 1.00% #6336662 at NOCK ≥ $0.020733 (1.0033x spot). Each pool moves with spot; WETH/NOCK ranges hold ETH/USD constant. A measurement, not an instruction.\n• Stable Stack: 2485.13 USDC\n• Protected cash reserve: $950.00 (wallet + NOCK LP and ladder USDC ($1303.10 in ladders) $2485.13, $1535.13 above it; liquid dry powder $800.09); kept for buying lower, never drawn by a plan buy\n• Gas held (wallet ETH+WETH): 0.050000 ETH ($90.00), counted in the total; not cash, not deployable\n• AERO held (wallet): not reported\n• Unclaimed AERO: not reported\n• AERO/USD: not reported\n• Ladders (measured, not NOCK LP; counted in the totals, the reserve and the floor-crossing price):\n   – v4 USDC/NOCK 3.00% #3240369 (rung near): $0.00000000 – $0.01720088 (-100.00% / -16.76% of spot); price above the range: all USDC; holds $1226.09 USDC + 0.0000 NOCK\n     against its all-USDC top ($1226.09 USDC): 0.0000 NOCK held, $0.00 converted (0.00%); all NOCK at the bottom: 1709690206954494208.0000 NOCK\n     since deposit (tx 0xafe42fe2…, block 59660587): net -247.5790 NOCK bought for net $-4.24 USDC spent; no average price (it has not net bought NOCK with USDC); uncollected fees $0.00\n   – v4 USDC/NOCK 3.00% #3299001 (rung unset): $0.00678699 – $0.01032932 (-67.16% / -50.01% of spot); price above the range: all USDC; holds $77.00 USDC + 0.0000 NOCK\n     against its all-USDC top ($77.00 USDC): 0.0000 NOCK held, $0.00 converted (0.00%); all NOCK at the bottom: 9196.4045 NOCK\n     since deposit: no_baseline: no deposit_tx is set for this ladder in config.yaml: NockNock has no baseline for what it bought and does not invent one; uncollected fees $0.00\n• High-Water Mark: $5058.23 USD\n• Plan buys average cost: no verified buys recorded yet\n• Whole-stack average cost: $0.016929 per NOCK on 90086.7900 NOCK ($1525.05). Operator-entered opening basis: 90086.7900 NOCK for $1525.05 as of 2026-11-19T00:00:00+00:00, source: test figures; plus 0 verified buy(s) since. Plus the net buys of 0 of 2 tracked ladders since a verified deposit: 0.0000 NOCK for $0.00. At spot $0.020664 the NOCK this basis covers is worth $1861.59: $336.54 above cost (+22.07%). NockNock reads 119503 NOCK held now (wallet plus tracked LP). Not tracked after the as-of: sells, LP rebalancing, fees earned, unrecorded buys.\n• Tactical Directive: REBUILD LP TRANCHES (No Net Cash Change)",
+      "get_shot_advice": "🎯 Tactical Shot Advice Engine\n===============================\n• Recommended Action: REBUILD LP TRANCHES (No Net Cash Change)\n• Decision Matrix Details: NOCK LP holds $220.27 against a $758.73 target (15% of portfolio), $538.47 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. Suggested: add 336.49 USDC + 9774 NOCK ($538.47) to v4 USDC/NOCK 3.00% #3163450 (sells all its NOCK by a 1.99x rise). If every range sold out, 105974 NOCK would remain. Meanwhile: HOLD & ACCRETE (Dual Growth Engine Active) — Total NOCK held is 119503 (+19503 above the 100000 floor). 2 NOCK LP positions tracked: 2 ranged (2 in range). +2 ladders, measured only (2 holding only USDC). $0.00 of LP fees uncollected. Liquid dry powder: $800.09 (wallet USDC $1053.00 less the $252.91 cash target). The $950.00 protected cash reserve is measured on wallet USDC plus the $129.04 of USDC in NOCK LP and the $1303.10 in ladders: $2485.13, $1535.13 above it. The $1432.13 of USDC inside NOCK LP and ladders ($1303.10 of it in ladders) is working capital, not dry powder: it stays in its ranges.\n• Uncollected Claimable Fees: $0.00 USD\n• Net of two claims' gas: -$0.01 USD\n• Harvest rule: BATCH HARVEST is advised once the uncollected LP fees worth claiming (positions whose fees cover their own claim's gas) reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).",
+      "simulate_claim_fees": "⚡ Fee Claim Simulation\n=======================\n• Collectible LP fees: $0.0000 USD\n• Estimated Gas: ~$0.0036 USD\n• Net Accretion if Harvested: $0.0000 USD\nPool Breakdown:\n  - USDC+NOCK (Uniswap V4 #3163450): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n  - WETH+NOCK (Uniswap V3 #6336662): 0.00000000 WETH + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n  - USDC+NOCK (Uniswap V4 #3240369): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n  - USDC+NOCK (Uniswap V4 #3299001): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n"
+    },
+    "snapshot": {
+      "concentrated_liquidity": [],
+      "contract_fees": [
+        {
+          "amount": "0.000000 USDC + 0.00000000 NOCK",
+          "amount_usd": "0.000000",
+          "claimable": false,
+          "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+          "fee_token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee_token_symbol": "USDC+NOCK (Uniswap V4 #3163450)",
+          "gas_break_even_usd": "0.0036"
+        },
+        {
+          "amount": "0.00000000 WETH + 0.00000000 NOCK",
+          "amount_usd": "0.000000",
+          "claimable": false,
+          "contract_address": "0x03a520b32c04bf3beef7beb72e919cf822ed34f1",
+          "fee_token_address": "0x4200000000000000000000000000000000000006",
+          "fee_token_symbol": "WETH+NOCK (Uniswap V3 #6336662)",
+          "gas_break_even_usd": "0.0036"
+        },
+        {
+          "amount": "0.000000 USDC + 0.00000000 NOCK",
+          "amount_usd": "0.000000",
+          "claimable": false,
+          "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+          "fee_token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee_token_symbol": "USDC+NOCK (Uniswap V4 #3240369)",
+          "gas_break_even_usd": "0.0036"
+        },
+        {
+          "amount": "0.000000 USDC + 0.00000000 NOCK",
+          "amount_usd": "0.000000",
+          "claimable": false,
+          "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+          "fee_token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee_token_symbol": "USDC+NOCK (Uniswap V4 #3299001)",
+          "gas_break_even_usd": "0.0036"
+        }
+      ],
+      "derived_metrics": {
+        "accumulation_plan": null,
+        "asset_aggregation_series": {
+          "active_protocol_series": [
+            "1523.36"
+          ],
+          "positions_nock": [
+            {
+              "position_id": "uniswap-v4:base:3163450",
+              "series": [
+                "3748.28"
+              ]
+            },
+            {
+              "position_id": "uniswap-v3:base:6336662",
+              "series": [
+                "7.29"
+              ]
+            },
+            {
+              "position_id": "uniswap-v4:base:3240369",
+              "series": [
+                "0.00"
+              ]
+            },
+            {
+              "position_id": "uniswap-v4:base:3299001",
+              "series": [
+                "0.00"
+              ]
+            }
+          ],
+          "safe_haven_series": [
+            "2391.86"
+          ],
+          "wallet_nock_series": [
+            "115747.8001"
+          ]
+        },
+        "cost_basis": {
+          "plan_buys": {
+            "acquired_nock": null,
+            "avg_cost_usd": null,
+            "excludes": [
+              "NOCK held before the first recorded buy, and any buy that was not recorded.",
+              "Everything that is not a buy: sells, NOCK that LP ranges sell or buy back, fees earned.",
+              "Gas paid in ETH."
+            ],
+            "fills": 0,
+            "first_fill_at": null,
+            "includes": [
+              "Every receipt-verified buy in the accumulation ledger, across all plans: the USDC that left the wallet and the NOCK that entered it in each recorded transaction. Swap fees and price impact are inside those amounts."
+            ],
+            "last_fill_at": null,
+            "plans": [],
+            "reason": null,
+            "spent_usdc": null,
+            "status": "no_fills",
+            "unrealized_pct": null,
+            "unrealized_usd": null,
+            "value_at_spot_usd": null
+          },
+          "spot_price_usd": "0.020664",
+          "whole_stack": {
+            "as_of": "2026-11-19T00:00:00+00:00",
+            "avg_cost_usd": "0.016929",
+            "basis_cost_usd": "1525.05",
+            "basis_nock": "90086.7900",
+            "bought_since_nock": "0.0000",
+            "bought_since_usdc": "0.00",
+            "excludes": [
+              "Buys confirmed at or before 2026-11-19T00:00:00+00:00: they are taken to be inside the opening figures and are not added again.",
+              "Everything after 2026-11-19T00:00:00+00:00 that is not a recorded buy: sells, NOCK that LP ranges sell or buy back, fees earned, transfers in or out, unrecorded buys.",
+              "Realized gains and losses, and gas paid in ETH.",
+              "Tracked ladders left out: uniswap-v4:base:3240369: no net buy since its deposit (-247.5790 NOCK for $-4.24); uniswap-v4:base:3299001: no verified deposit baseline (no_baseline)."
+            ],
+            "fills_since": 0,
+            "held_nock": "119503",
+            "includes": [
+              "The opening figures entered in config: 90086.7900 NOCK for $1525.05 as of 2026-11-19T00:00:00+00:00, source: test figures. NockNock did not read or check them.",
+              "Every receipt-verified buy confirmed after 2026-11-19T00:00:00+00:00: 0 so far.",
+              "The net NOCK bought by 0 of 2 tracked ladders since a receipt-verified deposit after 2026-11-19T00:00:00+00:00: 0.0000 NOCK for $0.00, measured from each deposit_tx receipt to now."
+            ],
+            "ladder_buys_since": {
+              "ladders_counted": 0,
+              "nock": "0.0000",
+              "not_counted": [
+                "uniswap-v4:base:3240369: no net buy since its deposit (-247.5790 NOCK for $-4.24)",
+                "uniswap-v4:base:3299001: no verified deposit baseline (no_baseline)"
+              ],
+              "usdc": "0.00"
+            },
+            "opening_avg_cost_usd": "0.016929",
+            "opening_cost_usd": "1525.05",
+            "opening_nock": "90086.7900",
+            "reason": null,
+            "source": "test figures",
+            "status": "ok",
+            "unrealized_pct": "22.07",
+            "unrealized_usd": "336.54",
+            "value_at_spot_usd": "1861.59"
+          }
+        },
+        "floor_breach": {
+          "assumption": "Each pool is moved by the same multiple from its own current price. WETH/NOCK ranges hold ETH/USD constant (a NOCK/USD multiple is the same NOCK/ETH multiple). Full-range pools follow x*y=k on the wallet's share and never sell out. Uncollected NOCK fees count as held. Gas-side ranges with no NOCK leg hold no NOCK.",
+          "crossing": {
+            "level_nock": "100000",
+            "multiple": null,
+            "pct_above_spot": null,
+            "price_usd": null,
+            "status": "never"
+          },
+          "fees_nock": "0",
+          "first_to_sell_out": "v3 WETH/NOCK 1.00% #6336662",
+          "floor_nock": "100000",
+          "largest_seller": null,
+          "nock_if_all_sold": "115748",
+          "nock_now": "119503",
+          "positions": [
+            {
+              "full_range": false,
+              "label": "v4 USDC/NOCK 3.00% #3163450",
+              "nock_at_crossing": null,
+              "nock_now": "3748",
+              "note": null,
+              "position_id": "uniswap-v4:base:3163450",
+              "sold_out_at_multiple": "1.9867",
+              "sold_out_at_price_usd": "0.041054"
+            },
+            {
+              "full_range": false,
+              "label": "v3 WETH/NOCK 1.00% #6336662",
+              "nock_at_crossing": null,
+              "nock_now": "7",
+              "note": null,
+              "position_id": "uniswap-v3:base:6336662",
+              "sold_out_at_multiple": "1.0033",
+              "sold_out_at_price_usd": "0.020733"
+            },
+            {
+              "full_range": false,
+              "label": "v4 USDC/NOCK 3.00% #3240369",
+              "nock_at_crossing": null,
+              "nock_now": "0",
+              "note": "holds no NOCK at this price",
+              "position_id": "uniswap-v4:base:3240369",
+              "sold_out_at_multiple": null,
+              "sold_out_at_price_usd": null
+            },
+            {
+              "full_range": false,
+              "label": "v4 USDC/NOCK 3.00% #3299001",
+              "nock_at_crossing": null,
+              "nock_now": "0",
+              "note": "holds no NOCK at this price",
+              "position_id": "uniswap-v4:base:3299001",
+              "sold_out_at_multiple": null,
+              "sold_out_at_price_usd": null
+            }
+          ],
+          "reason": null,
+          "spot_price_usd": "0.020664",
+          "status": "never",
+          "tolerated": null,
+          "wallet_nock": "115748"
+        },
+        "global_status": {
+          "aero_note": null,
+          "aero_price_usd": null,
+          "cash_reserve_usdc": "950.00",
+          "collectible_rewards_note": null,
+          "collectible_rewards_usd": null,
+          "dry_powder_usdc": "800.09",
+          "eth_price_usd": "1800.00",
+          "gas_to_fee_delta_usd": "-0.01",
+          "high_water_mark_usd": "5058.23",
+          "lp_floor_tolerance_bps": 0,
+          "lp_nock_budget": "15747.8001",
+          "nock_floor_delta": "19503",
+          "nock_floor_target": "100000",
+          "regime": "unknown",
+          "reserve_headroom_usdc": "1535.13",
+          "reserve_ladder_usdc": "1303.10",
+          "reserve_stable_usdc": "2485.13",
+          "rsi_14": null,
+          "rsi_14_1d": null,
+          "shot_advice_action": "REBUILD LP TRANCHES (No Net Cash Change)",
+          "shot_advice_details": "NOCK LP holds $220.27 against a $758.73 target (15% of portfolio), $538.47 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. Suggested: add 336.49 USDC + 9774 NOCK ($538.47) to v4 USDC/NOCK 3.00% #3163450 (sells all its NOCK by a 1.99x rise). If every range sold out, 105974 NOCK would remain. Meanwhile: HOLD & ACCRETE (Dual Growth Engine Active) — Total NOCK held is 119503 (+19503 above the 100000 floor). 2 NOCK LP positions tracked: 2 ranged (2 in range). +2 ladders, measured only (2 holding only USDC). $0.00 of LP fees uncollected. Liquid dry powder: $800.09 (wallet USDC $1053.00 less the $252.91 cash target). The $950.00 protected cash reserve is measured on wallet USDC plus the $129.04 of USDC in NOCK LP and the $1303.10 in ladders: $2485.13, $1535.13 above it. The $1432.13 of USDC inside NOCK LP and ladders ($1303.10 of it in ladders) is working capital, not dry powder: it stays in its ranges.",
+          "total_collectible_usd": null,
+          "total_eth_amount": "0.057567",
+          "total_eth_usd": "103.62",
+          "total_fees_accrued_usd": "0.00",
+          "total_fees_claimable_usd": "0.00",
+          "total_native_usd": "2469.47",
+          "total_nock_amount": "119503",
+          "total_portfolio_usd": "5058.23",
+          "total_stable_usd": "2485.13",
+          "total_usdc_amount": "2485.13",
+          "unclaimed_aero_amount": null,
+          "unclaimed_aero_usd": null,
+          "wallet_aero_amount": null,
+          "wallet_aero_usd": null,
+          "wallet_gas_eth": "0.050000",
+          "wallet_gas_usd": "90.00"
+        },
+        "lp_rebuild": {
+          "actual_usd": "220.27",
+          "excluded": [
+            {
+              "label": "v3 WETH/NOCK 1.00% #6336662",
+              "nft_id": 6336662,
+              "position_id": "uniswap-v3:base:6336662",
+              "reason": "needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions"
+            }
+          ],
+          "floor_tolerance_nock": "0",
+          "gap_usd": "538.47",
+          "status": "under_target",
+          "suggestions": [
+            {
+              "add_usd": "538.47",
+              "amount0": "336.49",
+              "amount1": "9774",
+              "current_usd": "206.49",
+              "label": "v4 USDC/NOCK 3.00% #3163450",
+              "limited_by": null,
+              "nft_id": 3163450,
+              "nock_sold_out_at_multiple": "1.99",
+              "position_id": "uniswap-v4:base:3163450",
+              "protocol": "uniswap-v4",
+              "target_usd": "744.96",
+              "token0_symbol": "USDC",
+              "token1_symbol": "NOCK",
+              "url": "https://app.uniswap.org/positions/v4/base/3163450"
+            }
+          ],
+          "target_usd": "758.73",
+          "target_weight_bps": 1500,
+          "worst_case_nock": "105974"
+        },
+        "portfolio_deviation_matrix": {
+          "allocations": [
+            {
+              "actual_weight_bps": 4728,
+              "bucket_name": "Sovereign Treasury",
+              "deviation_bps": -3272,
+              "status": "under_funded",
+              "target_weight_bps": 8000
+            },
+            {
+              "actual_weight_bps": 435,
+              "bucket_name": "NOCK LP (NOCK-pair positions)",
+              "deviation_bps": -1065,
+              "status": "under_funded",
+              "target_weight_bps": 1500
+            },
+            {
+              "actual_weight_bps": 2081,
+              "bucket_name": "Liquid USDC (Escrow/Vault)",
+              "deviation_bps": 1581,
+              "status": "over_funded",
+              "target_weight_bps": 500
+            },
+            {
+              "actual_weight_bps": 177,
+              "bucket_name": "Gas (wallet ETH+WETH)",
+              "deviation_bps": 177,
+              "status": "no_target",
+              "target_weight_bps": 0
+            },
+            {
+              "actual_weight_bps": 0,
+              "bucket_name": "AERO (wallet)",
+              "deviation_bps": 0,
+              "status": "no_target",
+              "target_weight_bps": 0
+            },
+            {
+              "actual_weight_bps": 2576,
+              "bucket_name": "NOCK ladders (measured)",
+              "deviation_bps": 2576,
+              "status": "no_target",
+              "target_weight_bps": 0
+            }
+          ]
+        },
+        "sovereign_ledger": {
+          "cumulative_harvested_usd": "0.00",
+          "growth_dry_powder_usd": "0.00",
+          "harvest_count": 0,
+          "last_harvest_at": null,
+          "tax_reserve_ratio": "0.00",
+          "tax_reserve_usd": "0.00",
+          "unpriced_count": 0
+        },
+        "strategy_counterfactual": {
+          "active_portfolio_series": [
+            "5058.23"
+          ],
+          "passive_baseline_series": [
+            "2469.47"
+          ]
+        },
+        "structural_channels": {
+          "channels": []
+        },
+        "tick_bracket_hypervisor": {
+          "brackets": [
+            {
+              "distance_bps": -7338,
+              "full_range": false,
+              "in_range": true,
+              "liquidity_usd": "206.49",
+              "lower_price": "0.00550148",
+              "position_id": "uniswap-v4:base:3163450",
+              "upper_price": "0.04106"
+            },
+            {
+              "distance_bps": null,
+              "full_range": false,
+              "in_range": true,
+              "liquidity_usd": "13.77",
+              "lower_price": "0.00000564468",
+              "position_id": "uniswap-v3:base:6336662",
+              "upper_price": "0.00000876435"
+            },
+            {
+              "distance_bps": -1676,
+              "full_range": false,
+              "in_range": false,
+              "liquidity_usd": "1226.09",
+              "lower_price": "0.0000000000000000000000000000298994",
+              "position_id": "uniswap-v4:base:3240369",
+              "upper_price": "0.01720"
+            },
+            {
+              "distance_bps": -5001,
+              "full_range": false,
+              "in_range": false,
+              "liquidity_usd": "77.00",
+              "lower_price": "0.00678699",
+              "position_id": "uniswap-v4:base:3299001",
+              "upper_price": "0.01033"
+            }
+          ],
+          "current_price": "0.02066"
+        },
+        "total_value_vs_baseline": {
+          "high_water_mark_series": [
+            "5058.23"
+          ],
+          "portfolio_value_series": [
+            "5058.23"
+          ],
+          "token_price_series": [
+            "0.02066"
+          ]
+        },
+        "velocity_gas_sandbox": {
+          "contracts": [
+            {
+              "claimable_usd": "0.00",
+              "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+              "contract_name": "Uniswap V4 (USDC/NOCK 3.00%, #3163450)",
+              "efficiency_ratio": 0.0,
+              "gas_break_even_usd": "0.0036",
+              "recommended_action": "accumulate"
+            },
+            {
+              "claimable_usd": "0.00",
+              "contract_address": "0x03a520b32c04bf3beef7beb72e919cf822ed34f1",
+              "contract_name": "Uniswap V3 (WETH/NOCK 1.00%, #6336662)",
+              "efficiency_ratio": 0.0,
+              "gas_break_even_usd": "0.0036",
+              "recommended_action": "accumulate"
+            },
+            {
+              "claimable_usd": "0.00",
+              "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+              "contract_name": "Uniswap V4 (USDC/NOCK 3.00%, #3240369)",
+              "efficiency_ratio": 0.0,
+              "gas_break_even_usd": "0.0036",
+              "recommended_action": "accumulate"
+            },
+            {
+              "claimable_usd": "0.00",
+              "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+              "contract_name": "Uniswap V4 (USDC/NOCK 3.00%, #3299001)",
+              "efficiency_ratio": 0.0,
+              "gas_break_even_usd": "0.0036",
+              "recommended_action": "accumulate"
+            }
+          ]
+        }
+      },
+      "ladders": [
+        {
+          "config_id": "ladder-near",
+          "fees_usd": "0.00",
+          "high_pct_of_spot": "-16.76",
+          "high_price_usd": "0.01720088",
+          "label": "v4 USDC/NOCK 3.00% #3240369",
+          "low_pct_of_spot": "-100.00",
+          "low_price_usd": "0.00000000",
+          "nock_now": "0.0000",
+          "pool_price_usd": "0.02066445",
+          "position_id": "uniswap-v4:base:3240369",
+          "rung": "near",
+          "rung_note": null,
+          "since_deposit": {
+            "avg_buy_price_usd": null,
+            "current_liquidity": "934864722135742",
+            "deposit_block": 59660587,
+            "deposit_liquidity": "934864722135742",
+            "deposit_tx": "0xafe42fe29de67337d5b489226dbfdf8a8b315e2deabaf6c744b47c2dd9ff7a58",
+            "deposited_at": "2026-11-19T21:08:13+00:00",
+            "deposited_nock": "247.5790",
+            "deposited_usdc": "1221.85",
+            "net_nock_bought": "-247.5790",
+            "net_usdc_spent": "-4.24",
+            "reason": null,
+            "status": "verified"
+          },
+          "spot_price_usd": "0.02066445",
+          "state": "holds_only_usdc",
+          "state_text": "holds only USDC: the price is above the range, so it converts nothing until NOCK falls into it at $0.01720088",
+          "usdc_now": "1226.09",
+          "value_usd": "1226.09",
+          "vs_top": {
+            "converted_pct": "0.00",
+            "curve_avg_price_usd": null,
+            "nock_at_bottom": "1709690206954494208.0000",
+            "nock_held_vs_top": "0.0000",
+            "usdc_at_top": "1226.09",
+            "usdc_converted_vs_top": "0.00"
+          }
+        },
+        {
+          "config_id": "ladder-deep",
+          "fees_usd": "0.00",
+          "high_pct_of_spot": "-50.01",
+          "high_price_usd": "0.01032932",
+          "label": "v4 USDC/NOCK 3.00% #3299001",
+          "low_pct_of_spot": "-67.16",
+          "low_price_usd": "0.00678699",
+          "nock_now": "0.0000",
+          "pool_price_usd": "0.02066445",
+          "position_id": "uniswap-v4:base:3299001",
+          "rung": null,
+          "rung_note": "rung is not set in config.yaml (near or deep): NockNock assumes neither",
+          "since_deposit": {
+            "avg_buy_price_usd": null,
+            "current_liquidity": "400000000000000",
+            "deposit_block": null,
+            "deposit_liquidity": null,
+            "deposit_tx": null,
+            "deposited_at": null,
+            "deposited_nock": null,
+            "deposited_usdc": null,
+            "net_nock_bought": null,
+            "net_usdc_spent": null,
+            "reason": "no deposit_tx is set for this ladder in config.yaml: NockNock has no baseline for what it bought and does not invent one",
+            "status": "no_baseline"
+          },
+          "spot_price_usd": "0.02066445",
+          "state": "holds_only_usdc",
+          "state_text": "holds only USDC: the price is above the range, so it converts nothing until NOCK falls into it at $0.01032932",
+          "usdc_now": "77.00",
+          "value_usd": "77.00",
+          "vs_top": {
+            "converted_pct": "0.00",
+            "curve_avg_price_usd": null,
+            "nock_at_bottom": "9196.4045",
+            "nock_held_vs_top": "0.0000",
+            "usdc_at_top": "77.00",
+            "usdc_converted_vs_top": "0.00"
+          }
+        }
+      ],
+      "pool_mechanics": [
+        {
+          "fee_accrued_usd": "0.000000",
+          "fee_tier_bps": 300,
+          "liquidity_usd": "206.49",
+          "platform": "UniswapV4",
+          "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+          "pool_type": "concentrated",
+          "sqrt_price_x96": "00000000000000000000000000000000000a9d5d9b7b19cc983c088d1f6cd97b",
+          "tick_current": 269065,
+          "volatile_assets": [
+            {
+              "reserve_amount": "129.038249",
+              "reserve_usd": "129.04",
+              "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "token_symbol": "USDC"
+            },
+            {
+              "reserve_amount": "3748.278215",
+              "reserve_usd": "77.46",
+              "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+              "token_symbol": "NOCK"
+            }
+          ]
+        },
+        {
+          "fee_accrued_usd": "0.000000",
+          "fee_tier_bps": 100,
+          "liquidity_usd": "13.77",
+          "platform": "UniswapV3",
+          "pool_id": "0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a",
+          "pool_type": "concentrated",
+          "sqrt_price_x96": "0000000000000000000000000000000000000021d595ed92e90d8945a5ef7766",
+          "tick_current": 70433,
+          "volatile_assets": [
+            {
+              "reserve_amount": "0.007567",
+              "reserve_usd": "13.62",
+              "token_address": "0x4200000000000000000000000000000000000006",
+              "token_symbol": "WETH"
+            },
+            {
+              "reserve_amount": "7.288445",
+              "reserve_usd": "0.15",
+              "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+              "token_symbol": "NOCK"
+            }
+          ]
+        },
+        {
+          "fee_accrued_usd": "0.000000",
+          "fee_tier_bps": 300,
+          "liquidity_usd": "1226.09",
+          "platform": "UniswapV4",
+          "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+          "pool_type": "concentrated",
+          "sqrt_price_x96": "00000000000000000000000000000000000a9d5d9b7b19cc983c088d1f6cd97b",
+          "tick_current": 269065,
+          "volatile_assets": [
+            {
+              "reserve_amount": "1226.094998",
+              "reserve_usd": "1226.09",
+              "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "token_symbol": "USDC"
+            },
+            {
+              "reserve_amount": "0.000000",
+              "reserve_usd": "0.00",
+              "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+              "token_symbol": "NOCK"
+            }
+          ]
+        },
+        {
+          "fee_accrued_usd": "0.000000",
+          "fee_tier_bps": 300,
+          "liquidity_usd": "77.00",
+          "platform": "UniswapV4",
+          "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+          "pool_type": "concentrated",
+          "sqrt_price_x96": "00000000000000000000000000000000000a9d5d9b7b19cc983c088d1f6cd97b",
+          "tick_current": 269065,
+          "volatile_assets": [
+            {
+              "reserve_amount": "77.000291",
+              "reserve_usd": "77.00",
+              "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "token_symbol": "USDC"
+            },
+            {
+              "reserve_amount": "0.000000",
+              "reserve_usd": "0.00",
+              "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+              "token_symbol": "NOCK"
+            }
+          ]
+        }
+      ],
+      "positions": [
+        {
+          "amount0": "129.038249",
+          "amount1": "3748.278215",
+          "amount_usd": "206.49",
+          "fee_tier_bps": 300,
+          "fees_usd": "0.000000",
+          "full_range": false,
+          "in_range": true,
+          "is_price_source": true,
+          "liquidity_amount": "185454734478733",
+          "lower_price": "0.00550148",
+          "lower_tick": 262200,
+          "network": "base",
+          "nft_id": 3163450,
+          "pool_active": true,
+          "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+          "position_id": "uniswap-v4:base:3163450",
+          "protocol": "uniswap-v4",
+          "token0": {
+            "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "decimals": 6,
+            "symbol": "USDC"
+          },
+          "token1": {
+            "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+            "decimals": 16,
+            "symbol": "NOCK"
+          },
+          "tokens_owed_0": "0.000000",
+          "tokens_owed_1": "0.000000",
+          "upper_price": "0.04106",
+          "upper_tick": 282300,
+          "wallet": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
+        },
+        {
+          "amount0": "0.007567",
+          "amount1": "7.288445",
+          "amount_usd": "13.77",
+          "fee_tier_bps": 100,
+          "fees_usd": "0.000000",
+          "full_range": false,
+          "in_range": true,
+          "is_price_source": false,
+          "liquidity_amount": "1305339058220032430",
+          "lower_price": "0.00000564468",
+          "lower_tick": 70400,
+          "network": "base",
+          "nft_id": 6336662,
+          "npm_address": "0x03a520b32c04bf3beef7beb72e919cf822ed34f1",
+          "pool_active": true,
+          "pool_id": "0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a",
+          "position_id": "uniswap-v3:base:6336662",
+          "protocol": "uniswap-v3",
+          "token0": {
+            "address": "0x4200000000000000000000000000000000000006",
+            "decimals": 18,
+            "symbol": "WETH"
+          },
+          "token1": {
+            "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+            "decimals": 16,
+            "symbol": "NOCK"
+          },
+          "tokens_owed_0": "0.000000",
+          "tokens_owed_1": "0.000000",
+          "upper_price": "0.00000876435",
+          "upper_tick": 74800,
+          "wallet": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
+        },
+        {
+          "amount0": "1226.094998",
+          "amount1": "0.000000",
+          "amount_usd": "1226.09",
+          "fee_tier_bps": 300,
+          "fees_usd": "0.000000",
+          "full_range": false,
+          "in_range": false,
+          "is_price_source": false,
+          "liquidity_amount": "934864722135742",
+          "lower_price": "0.0000000000000000000000000000298994",
+          "lower_tick": 270900,
+          "network": "base",
+          "nft_id": 3240369,
+          "pool_active": true,
+          "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+          "position_id": "uniswap-v4:base:3240369",
+          "protocol": "uniswap-v4",
+          "role": "ladder",
+          "rung": "near",
+          "token0": {
+            "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "decimals": 6,
+            "symbol": "USDC"
+          },
+          "token1": {
+            "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+            "decimals": 16,
+            "symbol": "NOCK"
+          },
+          "tokens_owed_0": "0.000000",
+          "tokens_owed_1": "0.000000",
+          "upper_price": "0.01720",
+          "upper_tick": 887100,
+          "wallet": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
+        },
+        {
+          "amount0": "77.000291",
+          "amount1": "0.000000",
+          "amount_usd": "77.00",
+          "fee_tier_bps": 300,
+          "fees_usd": "0.000000",
+          "full_range": false,
+          "in_range": false,
+          "is_price_source": false,
+          "liquidity_amount": "400000000000000",
+          "lower_price": "0.00678699",
+          "lower_tick": 276000,
+          "network": "base",
+          "nft_id": 3299001,
+          "pool_active": true,
+          "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+          "position_id": "uniswap-v4:base:3299001",
+          "protocol": "uniswap-v4",
+          "role": "ladder",
+          "token0": {
+            "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "decimals": 6,
+            "symbol": "USDC"
+          },
+          "token1": {
+            "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+            "decimals": 16,
+            "symbol": "NOCK"
+          },
+          "tokens_owed_0": "0.000000",
+          "tokens_owed_1": "0.000000",
+          "upper_price": "0.01033",
+          "upper_tick": 280200,
+          "wallet": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
+        }
+      ],
+      "wallet_balances": [
+        {
+          "amount": "115747.8001",
+          "amount_usd": "0",
+          "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+          "token_symbol": "NOCK",
+          "wallet_address": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
+        },
+        {
+          "amount": "1053.0",
+          "amount_usd": "1053.0",
+          "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "token_symbol": "USDC",
+          "wallet_address": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
+        }
+      ]
+    },
+    "state_hash": "f27812036feb9bc07415e2a59772b288f4660a146a04d9a9513e2dd324f8a599"
+  },
+  "near_rung_bought_plan_due": {
+    "mcp_text": {
+      "get_accumulation_plan": "🪜 Accumulation Plan \"test-plan\"\n====================\n• Status: tranche_due\n• Next tranche: 1 of 5 — $100.00 due now (nominal $100.00)\n• Next due at: n/a\n• Progress: $0.00 of $500.00 spent over 0 verified buy(s); $500.00 remaining\n• Acquired: 0.0000 NOCK at average $n/a\n• Lump-sum counterfactual (whole budget at first fill price): n/a NOCK\n• Constraint: n/a\n• Protected cash reserve: $950.00\n• NOCK LP rebuild bias: under_target (holds $191.97 of a $651.80 target, $459.82 short). Rebuilding ranges is a reposition: no net cash change.\n   → add 227.27 USDC + 15708 NOCK ($459.82) to v4 USDC/NOCK 3.00% #3163450\n     https://app.uniswap.org/positions/v4/base/3163450\n   ✗ v3 WETH/NOCK 1.00% #6336662: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions\n• Ladders are not rebuild templates and are not in the NOCK LP target (2 tracked, measured only).",
+      "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $4345.32 USD\n• Pillars: NOCK $1886.09 · USDC $2355.60 · ETH $103.62 · AERO not reported\n• Sovereign NOCK Stack: 127395 NOCK (+27395 above the 100000 NOCK floor)\n• Floor crossing: none. If every range sold out, 115748 NOCK would remain (115748 wallet + 0 uncollected fees), at or above the 100000 NOCK floor. First range to sell out: v3 WETH/NOCK 1.00% #6336662 at NOCK ≥ $0.014854 (1.0033x spot). Each pool moves with spot; WETH/NOCK ranges hold ETH/USD constant. A measurement, not an instruction.\n• Stable Stack: 2355.60 USDC\n• Protected cash reserve: $950.00 (wallet + NOCK LP and ladder USDC ($1214.51 in ladders) $2355.60, $1405.60 above it; liquid dry powder $835.73); kept for buying lower, never drawn by a plan buy\n• Gas held (wallet ETH+WETH): 0.050000 ETH ($90.00), counted in the total; not cash, not deployable\n• AERO held (wallet): not reported\n• Unclaimed AERO: not reported\n• AERO/USD: not reported\n• Ladders (measured, not NOCK LP; counted in the totals, the reserve and the floor-crossing price):\n   – v4 USDC/NOCK 3.00% #3240369 (rung near): $0.00000000 – $0.01720088 (-100.00% / +16.18% of spot); in range: converts both ways; holds $1137.51 USDC + 5551.3674 NOCK\n     against its all-USDC top ($1226.09 USDC): 5551.3674 NOCK held, $88.59 converted (7.23%), curve average $0.01595807; all NOCK at the bottom: 1709690206954494208.0000 NOCK\n     since deposit (tx 0xafe42fe2…, block 59660587): net 5303.7885 NOCK bought for net $84.35 USDC spent, average $0.01590283; uncollected fees $0.00\n   – v4 USDC/NOCK 3.00% #3299001 (rung unset): $0.00678699 – $0.01032932 (-54.16% / -30.23% of spot); price above the range: all USDC; holds $77.00 USDC + 0.0000 NOCK\n     against its all-USDC top ($77.00 USDC): 0.0000 NOCK held, $0.00 converted (0.00%); all NOCK at the bottom: 9196.4045 NOCK\n     since deposit: no_baseline: no deposit_tx is set for this ladder in config.yaml: NockNock has no baseline for what it bought and does not invent one; uncollected fees $0.00\n• High-Water Mark: $4345.32 USD\n• Plan buys average cost: no verified buys recorded yet\n• Whole-stack average cost: $0.016872 per NOCK on 95390.5785 NOCK ($1609.40). Operator-entered opening basis: 90086.7900 NOCK for $1525.05 as of 2026-11-19T00:00:00+00:00, source: test figures; plus 0 verified buy(s) since. Plus the net buys of 1 of 2 tracked ladders since a verified deposit: 5303.7885 NOCK for $84.35. At spot $0.014805 the NOCK this basis covers is worth $1412.26: $197.14 below cost (-12.25%). NockNock reads 127395 NOCK held now (wallet plus tracked LP). Not tracked after the as-of: sells, LP rebalancing, fees earned, unrecorded buys.\n• Tactical Directive: DCA TRANCHE DUE (1 of 5)",
+      "get_shot_advice": "🎯 Tactical Shot Advice Engine\n===============================\n• Recommended Action: DCA TRANCHE DUE (1 of 5)\n• Decision Matrix Details: Buy $100.00 of NOCK (spot $0.01481). Plan \"test-plan\": $0.00 of $500.00 deployed over 0 verified buy(s). The plan never spends the stable balance (wallet + NOCK LP and ladder USDC) below $950.00. After buying, record the transaction hash so the plan advances. Standing bias: NOCK LP holds $191.97 against a $651.80 target (15% of portfolio), $459.82 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. Suggested: add 227.27 USDC + 15708 NOCK ($459.82) to v4 USDC/NOCK 3.00% #3163450 (sells all its NOCK by a 2.77x rise). If every range sold out, 100040 NOCK would remain.\n• Uncollected Claimable Fees: $0.00 USD\n• Net of two claims' gas: -$0.01 USD\n• Harvest rule: BATCH HARVEST is advised once the uncollected LP fees worth claiming (positions whose fees cover their own claim's gas) reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).",
+      "simulate_claim_fees": "⚡ Fee Claim Simulation\n=======================\n• Collectible LP fees: $0.0000 USD\n• Estimated Gas: ~$0.0036 USD\n• Net Accretion if Harvested: $0.0000 USD\nPool Breakdown:\n  - USDC+NOCK (Uniswap V4 #3163450): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n  - WETH+NOCK (Uniswap V3 #6336662): 0.00000000 WETH + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n  - USDC+NOCK (Uniswap V4 #3240369): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n  - USDC+NOCK (Uniswap V4 #3299001): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n"
+    },
+    "snapshot": {
+      "concentrated_liquidity": [],
+      "contract_fees": [
+        {
+          "amount": "0.000000 USDC + 0.00000000 NOCK",
+          "amount_usd": "0.000000",
+          "claimable": false,
+          "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+          "fee_token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee_token_symbol": "USDC+NOCK (Uniswap V4 #3163450)",
+          "gas_break_even_usd": "0.0036"
+        },
+        {
+          "amount": "0.00000000 WETH + 0.00000000 NOCK",
+          "amount_usd": "0.000000",
+          "claimable": false,
+          "contract_address": "0x03a520b32c04bf3beef7beb72e919cf822ed34f1",
+          "fee_token_address": "0x4200000000000000000000000000000000000006",
+          "fee_token_symbol": "WETH+NOCK (Uniswap V3 #6336662)",
+          "gas_break_even_usd": "0.0036"
+        },
+        {
+          "amount": "0.000000 USDC + 0.00000000 NOCK",
+          "amount_usd": "0.000000",
+          "claimable": false,
+          "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+          "fee_token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee_token_symbol": "USDC+NOCK (Uniswap V4 #3240369)",
+          "gas_break_even_usd": "0.0036"
+        },
+        {
+          "amount": "0.000000 USDC + 0.00000000 NOCK",
+          "amount_usd": "0.000000",
+          "claimable": false,
+          "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+          "fee_token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "fee_token_symbol": "USDC+NOCK (Uniswap V4 #3299001)",
+          "gas_break_even_usd": "0.0036"
+        }
+      ],
+      "derived_metrics": {
+        "accumulation_plan": {
+          "acquired_nock": "0.0000",
+          "avg_price_usd": null,
+          "binding_constraint": null,
+          "budget_usdc": "500.00",
+          "cash_reserve_usdc": "950.00",
+          "fill_detection": null,
+          "fills": 0,
+          "last_fill_at": null,
+          "lump_sum_nock": null,
+          "next_due_at": null,
+          "nominal_tranche_usdc": "100.00",
+          "plan_id": "test-plan",
+          "remaining_usdc": "500.00",
+          "spent_usdc": "0.00",
+          "status": "tranche_due",
+          "tranche_index": 1,
+          "tranche_usdc": "100.00",
+          "tranches_total": 5,
+          "venue": null
+        },
+        "asset_aggregation_series": {
+          "active_protocol_series": [
+            "1488.67"
+          ],
+          "positions_nock": [
+            {
+              "position_id": "uniswap-v4:base:3163450",
+              "series": [
+                "6088.89"
+              ]
+            },
+            {
+              "position_id": "uniswap-v3:base:6336662",
+              "series": [
+                "7.29"
+              ]
+            },
+            {
+              "position_id": "uniswap-v4:base:3240369",
+              "series": [
+                "5551.37"
+              ]
+            },
+            {
+              "position_id": "uniswap-v4:base:3299001",
+              "series": [
+                "0.00"
+              ]
+            }
+          ],
+          "safe_haven_series": [
+            "1713.65"
+          ],
+          "wallet_nock_series": [
+            "115747.8001"
+          ]
+        },
+        "cost_basis": {
+          "plan_buys": {
+            "acquired_nock": null,
+            "avg_cost_usd": null,
+            "excludes": [
+              "NOCK held before the first recorded buy, and any buy that was not recorded.",
+              "Everything that is not a buy: sells, NOCK that LP ranges sell or buy back, fees earned.",
+              "Gas paid in ETH."
+            ],
+            "fills": 0,
+            "first_fill_at": null,
+            "includes": [
+              "Every receipt-verified buy in the accumulation ledger, across all plans: the USDC that left the wallet and the NOCK that entered it in each recorded transaction. Swap fees and price impact are inside those amounts."
+            ],
+            "last_fill_at": null,
+            "plans": [],
+            "reason": null,
+            "spent_usdc": null,
+            "status": "no_fills",
+            "unrealized_pct": null,
+            "unrealized_usd": null,
+            "value_at_spot_usd": null
+          },
+          "spot_price_usd": "0.014805",
+          "whole_stack": {
+            "as_of": "2026-11-19T00:00:00+00:00",
+            "avg_cost_usd": "0.016872",
+            "basis_cost_usd": "1609.40",
+            "basis_nock": "95390.5785",
+            "bought_since_nock": "0.0000",
+            "bought_since_usdc": "0.00",
+            "excludes": [
+              "Buys confirmed at or before 2026-11-19T00:00:00+00:00: they are taken to be inside the opening figures and are not added again.",
+              "Everything after 2026-11-19T00:00:00+00:00 that is not a recorded buy: sells, NOCK that LP ranges sell or buy back, fees earned, transfers in or out, unrecorded buys.",
+              "Realized gains and losses, and gas paid in ETH.",
+              "Tracked ladders left out: uniswap-v4:base:3299001: no verified deposit baseline (no_baseline)."
+            ],
+            "fills_since": 0,
+            "held_nock": "127395",
+            "includes": [
+              "The opening figures entered in config: 90086.7900 NOCK for $1525.05 as of 2026-11-19T00:00:00+00:00, source: test figures. NockNock did not read or check them.",
+              "Every receipt-verified buy confirmed after 2026-11-19T00:00:00+00:00: 0 so far.",
+              "The net NOCK bought by 1 of 2 tracked ladders since a receipt-verified deposit after 2026-11-19T00:00:00+00:00: 5303.7885 NOCK for $84.35, measured from each deposit_tx receipt to now."
+            ],
+            "ladder_buys_since": {
+              "ladders_counted": 1,
+              "nock": "5303.7885",
+              "not_counted": [
+                "uniswap-v4:base:3299001: no verified deposit baseline (no_baseline)"
+              ],
+              "usdc": "84.35"
+            },
+            "opening_avg_cost_usd": "0.016929",
+            "opening_cost_usd": "1525.05",
+            "opening_nock": "90086.7900",
+            "reason": null,
+            "source": "test figures",
+            "status": "ok",
+            "unrealized_pct": "-12.25",
+            "unrealized_usd": "-197.14",
+            "value_at_spot_usd": "1412.26"
+          }
+        },
+        "floor_breach": {
+          "assumption": "Each pool is moved by the same multiple from its own current price. WETH/NOCK ranges hold ETH/USD constant (a NOCK/USD multiple is the same NOCK/ETH multiple). Full-range pools follow x*y=k on the wallet's share and never sell out. Uncollected NOCK fees count as held. Gas-side ranges with no NOCK leg hold no NOCK.",
+          "crossing": {
+            "level_nock": "100000",
+            "multiple": null,
+            "pct_above_spot": null,
+            "price_usd": null,
+            "status": "never"
+          },
+          "fees_nock": "0",
+          "first_to_sell_out": "v3 WETH/NOCK 1.00% #6336662",
+          "floor_nock": "100000",
+          "largest_seller": null,
+          "nock_if_all_sold": "115748",
+          "nock_now": "127395",
+          "positions": [
+            {
+              "full_range": false,
+              "label": "v4 USDC/NOCK 3.00% #3163450",
+              "nock_at_crossing": null,
+              "nock_now": "6089",
+              "note": null,
+              "position_id": "uniswap-v4:base:3163450",
+              "sold_out_at_multiple": "2.7731",
+              "sold_out_at_price_usd": "0.041055"
+            },
+            {
+              "full_range": false,
+              "label": "v3 WETH/NOCK 1.00% #6336662",
+              "nock_at_crossing": null,
+              "nock_now": "7",
+              "note": null,
+              "position_id": "uniswap-v3:base:6336662",
+              "sold_out_at_multiple": "1.0033",
+              "sold_out_at_price_usd": "0.014854"
+            },
+            {
+              "full_range": false,
+              "label": "v4 USDC/NOCK 3.00% #3240369",
+              "nock_at_crossing": null,
+              "nock_now": "5551",
+              "note": null,
+              "position_id": "uniswap-v4:base:3240369",
+              "sold_out_at_multiple": "1.1618",
+              "sold_out_at_price_usd": "0.017201"
+            },
+            {
+              "full_range": false,
+              "label": "v4 USDC/NOCK 3.00% #3299001",
+              "nock_at_crossing": null,
+              "nock_now": "0",
+              "note": "holds no NOCK at this price",
+              "position_id": "uniswap-v4:base:3299001",
+              "sold_out_at_multiple": null,
+              "sold_out_at_price_usd": null
+            }
+          ],
+          "reason": null,
+          "spot_price_usd": "0.014805",
+          "status": "never",
+          "tolerated": null,
+          "wallet_nock": "115748"
+        },
+        "global_status": {
+          "aero_note": null,
+          "aero_price_usd": null,
+          "cash_reserve_usdc": "950.00",
+          "collectible_rewards_note": null,
+          "collectible_rewards_usd": null,
+          "dry_powder_usdc": "835.73",
+          "eth_price_usd": "1800.00",
+          "gas_to_fee_delta_usd": "-0.01",
+          "high_water_mark_usd": "4345.32",
+          "lp_floor_tolerance_bps": 0,
+          "lp_nock_budget": "15747.8001",
+          "nock_floor_delta": "27395",
+          "nock_floor_target": "100000",
+          "regime": "unknown",
+          "reserve_headroom_usdc": "1405.60",
+          "reserve_ladder_usdc": "1214.51",
+          "reserve_stable_usdc": "2355.60",
+          "rsi_14": null,
+          "rsi_14_1d": null,
+          "shot_advice_action": "DCA TRANCHE DUE (1 of 5)",
+          "shot_advice_details": "Buy $100.00 of NOCK (spot $0.01481). Plan \"test-plan\": $0.00 of $500.00 deployed over 0 verified buy(s). The plan never spends the stable balance (wallet + NOCK LP and ladder USDC) below $950.00. After buying, record the transaction hash so the plan advances. Standing bias: NOCK LP holds $191.97 against a $651.80 target (15% of portfolio), $459.82 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. Suggested: add 227.27 USDC + 15708 NOCK ($459.82) to v4 USDC/NOCK 3.00% #3163450 (sells all its NOCK by a 2.77x rise). If every range sold out, 100040 NOCK would remain.",
+          "total_collectible_usd": null,
+          "total_eth_amount": "0.057567",
+          "total_eth_usd": "103.62",
+          "total_fees_accrued_usd": "0.00",
+          "total_fees_claimable_usd": "0.00",
+          "total_native_usd": "1886.09",
+          "total_nock_amount": "127395",
+          "total_portfolio_usd": "4345.32",
+          "total_stable_usd": "2355.60",
+          "total_usdc_amount": "2355.60",
+          "unclaimed_aero_amount": null,
+          "unclaimed_aero_usd": null,
+          "wallet_aero_amount": null,
+          "wallet_aero_usd": null,
+          "wallet_gas_eth": "0.050000",
+          "wallet_gas_usd": "90.00"
+        },
+        "lp_rebuild": {
+          "actual_usd": "191.97",
+          "excluded": [
+            {
+              "label": "v3 WETH/NOCK 1.00% #6336662",
+              "nft_id": 6336662,
+              "position_id": "uniswap-v3:base:6336662",
+              "reason": "needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions"
+            }
+          ],
+          "floor_tolerance_nock": "0",
+          "gap_usd": "459.82",
+          "status": "under_target",
+          "suggestions": [
+            {
+              "add_usd": "459.82",
+              "amount0": "227.27",
+              "amount1": "15708",
+              "current_usd": "178.24",
+              "label": "v4 USDC/NOCK 3.00% #3163450",
+              "limited_by": null,
+              "nft_id": 3163450,
+              "nock_sold_out_at_multiple": "2.77",
+              "position_id": "uniswap-v4:base:3163450",
+              "protocol": "uniswap-v4",
+              "target_usd": "638.07",
+              "token0_symbol": "USDC",
+              "token1_symbol": "NOCK",
+              "url": "https://app.uniswap.org/positions/v4/base/3163450"
+            }
+          ],
+          "target_usd": "651.80",
+          "target_weight_bps": 1500,
+          "worst_case_nock": "100040"
+        },
+        "portfolio_deviation_matrix": {
+          "allocations": [
+            {
+              "actual_weight_bps": 3943,
+              "bucket_name": "Sovereign Treasury",
+              "deviation_bps": -4057,
+              "status": "under_funded",
+              "target_weight_bps": 8000
+            },
+            {
+              "actual_weight_bps": 441,
+              "bucket_name": "NOCK LP (NOCK-pair positions)",
+              "deviation_bps": -1059,
+              "status": "under_funded",
+              "target_weight_bps": 1500
+            },
+            {
+              "actual_weight_bps": 2423,
+              "bucket_name": "Liquid USDC (Escrow/Vault)",
+              "deviation_bps": 1923,
+              "status": "over_funded",
+              "target_weight_bps": 500
+            },
+            {
+              "actual_weight_bps": 207,
+              "bucket_name": "Gas (wallet ETH+WETH)",
+              "deviation_bps": 207,
+              "status": "no_target",
+              "target_weight_bps": 0
+            },
+            {
+              "actual_weight_bps": 0,
+              "bucket_name": "AERO (wallet)",
+              "deviation_bps": 0,
+              "status": "no_target",
+              "target_weight_bps": 0
+            },
+            {
+              "actual_weight_bps": 2984,
+              "bucket_name": "NOCK ladders (measured)",
+              "deviation_bps": 2984,
+              "status": "no_target",
+              "target_weight_bps": 0
+            }
+          ]
+        },
+        "sovereign_ledger": {
+          "cumulative_harvested_usd": "0.00",
+          "growth_dry_powder_usd": "0.00",
+          "harvest_count": 0,
+          "last_harvest_at": null,
+          "tax_reserve_ratio": "0.00",
+          "tax_reserve_usd": "0.00",
+          "unpriced_count": 0
+        },
+        "strategy_counterfactual": {
+          "active_portfolio_series": [
+            "4345.32"
+          ],
+          "passive_baseline_series": [
+            "1886.09"
+          ]
+        },
+        "structural_channels": {
+          "channels": []
+        },
+        "tick_bracket_hypervisor": {
+          "brackets": [
+            {
+              "distance_bps": -6284,
+              "full_range": false,
+              "in_range": true,
+              "liquidity_usd": "178.24",
+              "lower_price": "0.00550148",
+              "position_id": "uniswap-v4:base:3163450",
+              "upper_price": "0.04106"
+            },
+            {
+              "distance_bps": null,
+              "full_range": false,
+              "in_range": true,
+              "liquidity_usd": "13.73",
+              "lower_price": "0.00000564468",
+              "position_id": "uniswap-v3:base:6336662",
+              "upper_price": "0.00000876435"
+            },
+            {
+              "distance_bps": 1618,
+              "full_range": false,
+              "in_range": true,
+              "liquidity_usd": "1219.69",
+              "lower_price": "0.0000000000000000000000000000298994",
+              "position_id": "uniswap-v4:base:3240369",
+              "upper_price": "0.01720"
+            },
+            {
+              "distance_bps": -3023,
+              "full_range": false,
+              "in_range": false,
+              "liquidity_usd": "77.00",
+              "lower_price": "0.00678699",
+              "position_id": "uniswap-v4:base:3299001",
+              "upper_price": "0.01033"
+            }
+          ],
+          "current_price": "0.01481"
+        },
+        "total_value_vs_baseline": {
+          "high_water_mark_series": [
+            "4345.32"
+          ],
+          "portfolio_value_series": [
+            "4345.32"
+          ],
+          "token_price_series": [
+            "0.01481"
+          ]
+        },
+        "velocity_gas_sandbox": {
+          "contracts": [
+            {
+              "claimable_usd": "0.00",
+              "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+              "contract_name": "Uniswap V4 (USDC/NOCK 3.00%, #3163450)",
+              "efficiency_ratio": 0.0,
+              "gas_break_even_usd": "0.0036",
+              "recommended_action": "accumulate"
+            },
+            {
+              "claimable_usd": "0.00",
+              "contract_address": "0x03a520b32c04bf3beef7beb72e919cf822ed34f1",
+              "contract_name": "Uniswap V3 (WETH/NOCK 1.00%, #6336662)",
+              "efficiency_ratio": 0.0,
+              "gas_break_even_usd": "0.0036",
+              "recommended_action": "accumulate"
+            },
+            {
+              "claimable_usd": "0.00",
+              "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+              "contract_name": "Uniswap V4 (USDC/NOCK 3.00%, #3240369)",
+              "efficiency_ratio": 0.0,
+              "gas_break_even_usd": "0.0036",
+              "recommended_action": "accumulate"
+            },
+            {
+              "claimable_usd": "0.00",
+              "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+              "contract_name": "Uniswap V4 (USDC/NOCK 3.00%, #3299001)",
+              "efficiency_ratio": 0.0,
+              "gas_break_even_usd": "0.0036",
+              "recommended_action": "accumulate"
+            }
+          ]
+        }
+      },
+      "ladders": [
+        {
+          "config_id": "ladder-near",
+          "fees_usd": "0.00",
+          "high_pct_of_spot": "+16.18",
+          "high_price_usd": "0.01720088",
+          "label": "v4 USDC/NOCK 3.00% #3240369",
+          "low_pct_of_spot": "-100.00",
+          "low_price_usd": "0.00000000",
+          "nock_now": "5551.3674",
+          "pool_price_usd": "0.01480505",
+          "position_id": "uniswap-v4:base:3240369",
+          "rung": "near",
+          "rung_note": null,
+          "since_deposit": {
+            "avg_buy_price_usd": "0.01590283",
+            "current_liquidity": "934864722135742",
+            "deposit_block": 59660587,
+            "deposit_liquidity": "934864722135742",
+            "deposit_tx": "0xafe42fe29de67337d5b489226dbfdf8a8b315e2deabaf6c744b47c2dd9ff7a58",
+            "deposited_at": "2026-11-19T21:08:13+00:00",
+            "deposited_nock": "247.5790",
+            "deposited_usdc": "1221.85",
+            "net_nock_bought": "5303.7885",
+            "net_usdc_spent": "84.35",
+            "reason": null,
+            "status": "verified"
+          },
+          "spot_price_usd": "0.01480505",
+          "state": "in_range",
+          "state_text": "in range: it converts USDC to NOCK as the price falls and NOCK back to USDC as it rises",
+          "usdc_now": "1137.51",
+          "value_usd": "1219.69",
+          "vs_top": {
+            "converted_pct": "7.23",
+            "curve_avg_price_usd": "0.01595807",
+            "nock_at_bottom": "1709690206954494208.0000",
+            "nock_held_vs_top": "5551.3674",
+            "usdc_at_top": "1226.09",
+            "usdc_converted_vs_top": "88.59"
+          }
+        },
+        {
+          "config_id": "ladder-deep",
+          "fees_usd": "0.00",
+          "high_pct_of_spot": "-30.23",
+          "high_price_usd": "0.01032932",
+          "label": "v4 USDC/NOCK 3.00% #3299001",
+          "low_pct_of_spot": "-54.16",
+          "low_price_usd": "0.00678699",
+          "nock_now": "0.0000",
+          "pool_price_usd": "0.01480505",
+          "position_id": "uniswap-v4:base:3299001",
+          "rung": null,
+          "rung_note": "rung is not set in config.yaml (near or deep): NockNock assumes neither",
+          "since_deposit": {
+            "avg_buy_price_usd": null,
+            "current_liquidity": "400000000000000",
+            "deposit_block": null,
+            "deposit_liquidity": null,
+            "deposit_tx": null,
+            "deposited_at": null,
+            "deposited_nock": null,
+            "deposited_usdc": null,
+            "net_nock_bought": null,
+            "net_usdc_spent": null,
+            "reason": "no deposit_tx is set for this ladder in config.yaml: NockNock has no baseline for what it bought and does not invent one",
+            "status": "no_baseline"
+          },
+          "spot_price_usd": "0.01480505",
+          "state": "holds_only_usdc",
+          "state_text": "holds only USDC: the price is above the range, so it converts nothing until NOCK falls into it at $0.01032932",
+          "usdc_now": "77.00",
+          "value_usd": "77.00",
+          "vs_top": {
+            "converted_pct": "0.00",
+            "curve_avg_price_usd": null,
+            "nock_at_bottom": "9196.4045",
+            "nock_held_vs_top": "0.0000",
+            "usdc_at_top": "77.00",
+            "usdc_converted_vs_top": "0.00"
+          }
+        }
+      ],
+      "pool_mechanics": [
+        {
+          "fee_accrued_usd": "0.000000",
+          "fee_tier_bps": 300,
+          "liquidity_usd": "178.24",
+          "platform": "UniswapV4",
+          "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+          "pool_type": "concentrated",
+          "sqrt_price_x96": "00000000000000000000000000000000000c8a5ed2f6b1d80000000000000000",
+          "tick_current": 272400,
+          "volatile_assets": [
+            {
+              "reserve_amount": "88.098438",
+              "reserve_usd": "88.10",
+              "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "token_symbol": "USDC"
+            },
+            {
+              "reserve_amount": "6088.887892",
+              "reserve_usd": "90.15",
+              "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+              "token_symbol": "NOCK"
+            }
+          ]
+        },
+        {
+          "fee_accrued_usd": "0.000000",
+          "fee_tier_bps": 100,
+          "liquidity_usd": "13.73",
+          "platform": "UniswapV3",
+          "pool_id": "0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a",
+          "pool_type": "concentrated",
+          "sqrt_price_x96": "0000000000000000000000000000000000000021d595ed92e90d8945a5ef7766",
+          "tick_current": 70433,
+          "volatile_assets": [
+            {
+              "reserve_amount": "0.007567",
+              "reserve_usd": "13.62",
+              "token_address": "0x4200000000000000000000000000000000000006",
+              "token_symbol": "WETH"
+            },
+            {
+              "reserve_amount": "7.288445",
+              "reserve_usd": "0.11",
+              "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+              "token_symbol": "NOCK"
+            }
+          ]
+        },
+        {
+          "fee_accrued_usd": "0.000000",
+          "fee_tier_bps": 300,
+          "liquidity_usd": "1219.69",
+          "platform": "UniswapV4",
+          "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+          "pool_type": "concentrated",
+          "sqrt_price_x96": "00000000000000000000000000000000000c8a5ed2f6b1d80000000000000000",
+          "tick_current": 272400,
+          "volatile_assets": [
+            {
+              "reserve_amount": "1137.505913",
+              "reserve_usd": "1137.51",
+              "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "token_symbol": "USDC"
+            },
+            {
+              "reserve_amount": "5551.367441",
+              "reserve_usd": "82.19",
+              "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+              "token_symbol": "NOCK"
+            }
+          ]
+        },
+        {
+          "fee_accrued_usd": "0.000000",
+          "fee_tier_bps": 300,
+          "liquidity_usd": "77.00",
+          "platform": "UniswapV4",
+          "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+          "pool_type": "concentrated",
+          "sqrt_price_x96": "00000000000000000000000000000000000c8a5ed2f6b1d80000000000000000",
+          "tick_current": 272400,
+          "volatile_assets": [
+            {
+              "reserve_amount": "77.000291",
+              "reserve_usd": "77.00",
+              "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              "token_symbol": "USDC"
+            },
+            {
+              "reserve_amount": "0.000000",
+              "reserve_usd": "0.00",
+              "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+              "token_symbol": "NOCK"
+            }
+          ]
+        }
+      ],
+      "positions": [
+        {
+          "amount0": "88.098438",
+          "amount1": "6088.887892",
+          "amount_usd": "178.24",
+          "fee_tier_bps": 300,
+          "fees_usd": "0.000000",
+          "full_range": false,
+          "in_range": true,
+          "is_price_source": true,
+          "liquidity_amount": "185454734478733",
+          "lower_price": "0.00550148",
+          "lower_tick": 262200,
+          "network": "base",
+          "nft_id": 3163450,
+          "pool_active": true,
+          "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+          "position_id": "uniswap-v4:base:3163450",
+          "protocol": "uniswap-v4",
+          "token0": {
+            "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "decimals": 6,
+            "symbol": "USDC"
+          },
+          "token1": {
+            "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+            "decimals": 16,
+            "symbol": "NOCK"
+          },
+          "tokens_owed_0": "0.000000",
+          "tokens_owed_1": "0.000000",
+          "upper_price": "0.04106",
+          "upper_tick": 282300,
+          "wallet": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
+        },
+        {
+          "amount0": "0.007567",
+          "amount1": "7.288445",
+          "amount_usd": "13.73",
+          "fee_tier_bps": 100,
+          "fees_usd": "0.000000",
+          "full_range": false,
+          "in_range": true,
+          "is_price_source": false,
+          "liquidity_amount": "1305339058220032430",
+          "lower_price": "0.00000564468",
+          "lower_tick": 70400,
+          "network": "base",
+          "nft_id": 6336662,
+          "npm_address": "0x03a520b32c04bf3beef7beb72e919cf822ed34f1",
+          "pool_active": true,
+          "pool_id": "0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a",
+          "position_id": "uniswap-v3:base:6336662",
+          "protocol": "uniswap-v3",
+          "token0": {
+            "address": "0x4200000000000000000000000000000000000006",
+            "decimals": 18,
+            "symbol": "WETH"
+          },
+          "token1": {
+            "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+            "decimals": 16,
+            "symbol": "NOCK"
+          },
+          "tokens_owed_0": "0.000000",
+          "tokens_owed_1": "0.000000",
+          "upper_price": "0.00000876435",
+          "upper_tick": 74800,
+          "wallet": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
+        },
+        {
+          "amount0": "1137.505913",
+          "amount1": "5551.367441",
+          "amount_usd": "1219.69",
+          "fee_tier_bps": 300,
+          "fees_usd": "0.000000",
+          "full_range": false,
+          "in_range": true,
+          "is_price_source": false,
+          "liquidity_amount": "934864722135742",
+          "lower_price": "0.0000000000000000000000000000298994",
+          "lower_tick": 270900,
+          "network": "base",
+          "nft_id": 3240369,
+          "pool_active": true,
+          "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+          "position_id": "uniswap-v4:base:3240369",
+          "protocol": "uniswap-v4",
+          "role": "ladder",
+          "rung": "near",
+          "token0": {
+            "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "decimals": 6,
+            "symbol": "USDC"
+          },
+          "token1": {
+            "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+            "decimals": 16,
+            "symbol": "NOCK"
+          },
+          "tokens_owed_0": "0.000000",
+          "tokens_owed_1": "0.000000",
+          "upper_price": "0.01720",
+          "upper_tick": 887100,
+          "wallet": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
+        },
+        {
+          "amount0": "77.000291",
+          "amount1": "0.000000",
+          "amount_usd": "77.00",
+          "fee_tier_bps": 300,
+          "fees_usd": "0.000000",
+          "full_range": false,
+          "in_range": false,
+          "is_price_source": false,
+          "liquidity_amount": "400000000000000",
+          "lower_price": "0.00678699",
+          "lower_tick": 276000,
+          "network": "base",
+          "nft_id": 3299001,
+          "pool_active": true,
+          "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+          "position_id": "uniswap-v4:base:3299001",
+          "protocol": "uniswap-v4",
+          "role": "ladder",
+          "token0": {
+            "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "decimals": 6,
+            "symbol": "USDC"
+          },
+          "token1": {
+            "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+            "decimals": 16,
+            "symbol": "NOCK"
+          },
+          "tokens_owed_0": "0.000000",
+          "tokens_owed_1": "0.000000",
+          "upper_price": "0.01033",
+          "upper_tick": 280200,
+          "wallet": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
+        }
+      ],
+      "wallet_balances": [
+        {
+          "amount": "115747.8001",
+          "amount_usd": "0",
+          "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+          "token_symbol": "NOCK",
+          "wallet_address": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
+        },
+        {
+          "amount": "1053.0",
+          "amount_usd": "1053.0",
+          "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "token_symbol": "USDC",
+          "wallet_address": "0xee114cc97ec5adeb34ba5645e315b497d8487a45"
+        }
+      ]
+    },
+    "state_hash": "b499b397acaa015d85e562a62b17ba1007ada2e5d89c3934c96d5ac10c2d88bf"
+  }
+}

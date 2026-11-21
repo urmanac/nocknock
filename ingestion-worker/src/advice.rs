@@ -200,6 +200,10 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     // weight steers; the rest (gas-side ETH/USDC ranges) is measured, never steered.
     let mut nock_lp_usd = 0.0f64;
     let mut gas_lp_usd = 0.0f64;
+    // Tracked ladders (#167): NOCK pairs that are not NOCK LP. Counted in every total, the
+    // reserve and the floor-crossing price; left out of the LP target and the rebuild.
+    let mut ladder_usd = 0.0f64;
+    let mut ladder_usdc = 0.0f64;
     let mut lp_fee_nock = 0.0f64;
     let mut lp_fee_usd = 0.0f64;
     // ETH/WETH inside tracked LP: the LP part of the ETH pillar (issue #94).
@@ -214,12 +218,20 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         let p1 = leg_usd_price(&p.token1, spot_price, raw.live_eth_price_usd);
         let pos_usd = p.amount0 * p0 + p.amount1 * p1;
         lp_usd += pos_usd;
-        let nock_pair = is_nock_pair(p);
-        if nock_pair { nock_lp_usd += pos_usd; } else { gas_lp_usd += pos_usd; }
+        let nock_lp = is_nock_lp(raw, p);
+        let ladder = is_ladder(raw, p);
+        if nock_lp {
+            nock_lp_usd += pos_usd;
+        } else if ladder {
+            ladder_usd += pos_usd;
+        } else {
+            gas_lp_usd += pos_usd;
+        }
         let pos_usdc = if is_usdc_token(&p.token0) { p.amount0 } else { 0.0 }
             + if is_usdc_token(&p.token1) { p.amount1 } else { 0.0 };
         lp_usdc += pos_usdc;
-        if nock_pair { nock_lp_usdc += pos_usdc; }
+        if nock_lp { nock_lp_usdc += pos_usdc; }
+        if ladder { ladder_usdc += pos_usdc; }
         if is_nock_token(&p.token0) { lp_nock += p.amount0; }
         if is_nock_token(&p.token1) { lp_nock += p.amount1; }
         if is_eth_token(&p.token0) { lp_eth += p.amount0; }
@@ -320,7 +332,8 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     // NOCK-pair LP, the stable balance a NOCK dip can draw on (gas-side ETH/USDC ranges
     // are left out, #151). Dry powder is never more than the headroom above it. An
     // invalid reserve is named and leaves no dry powder: never "safe" by default.
-    let reserve = standing_reserve(profile.cash_reserve_usdc, wallet_usdc, nock_lp_usdc);
+    // A tracked ladder's USDC (#167) counts too, and is named apart.
+    let reserve = standing_reserve_with_ladders(profile.cash_reserve_usdc, wallet_usdc, nock_lp_usdc, ladder_usdc);
     let deployable_usdc = match &reserve {
         StandingReserve::Unset => wallet_deployable_usdc,
         StandingReserve::Invalid => 0.0,
@@ -328,7 +341,14 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     };
     // NOCK-pair USDC only (#151): the USDC in a gas-side ETH range is counted in
     // total_stable_usd but is not NOCK working capital.
-    let lp_usdc_note = if nock_lp_usdc >= 0.005 {
+    // A tracked ladder's USDC (#167) is working capital too, and is named.
+    let lp_usdc_note = if ladder_usdc >= 0.005 {
+        format!(
+            " The ${:.2} of USDC inside NOCK LP and ladders (${:.2} of it in ladders) is working capital, not dry powder: it stays in its ranges.",
+            nock_lp_usdc + ladder_usdc,
+            ladder_usdc
+        )
+    } else if nock_lp_usdc >= 0.005 {
         format!(" The ${:.2} of USDC inside NOCK LP is working capital, not dry powder: it stays in its ranges.", nock_lp_usdc)
     } else {
         String::new()
@@ -372,6 +392,8 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             wallet_usdc,
             // NOCK-pair USDC only (#151): conservative cash-reserve headroom.
             lp_usdc: nock_lp_usdc,
+            // A tracked ladder's USDC (#167), the same sum the standing reserve reads.
+            ladder_usdc,
             tax_reserve_usd,
             cash_target_usd,
             standing_reserve_usdc: profile.cash_reserve_usdc,
@@ -403,7 +425,9 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     let mut lp_rebuild = lp_rebuild_status(nock_lp_usd, total_portfolio_usd, profile.target_weights_bps.uniswap_lp);
     // No NOCK range tracked: there is no range to rebuild, so no suggestion and no bias
     // text (a user who never held NOCK LP is not told to "re-establish" one).
-    if !raw.positions.iter().any(is_nock_pair) {
+    // A ladder (#167) is not NOCK LP: a wallet whose only NOCK range is a ladder gets no
+    // "re-establish NOCK LP" bias.
+    if !raw.positions.iter().any(|p| is_nock_lp(raw, p)) {
         lp_rebuild.status = "no_positions".to_string();
     }
     if lp_rebuild.status == "under_target" {
@@ -546,7 +570,7 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         match active_plan {
             // The plan stays visible: a tranche transition changes the action, so it notifies.
             Some(ps) => {
-                let (plan_action, plan_details) = plan_advice(ps, spot_price);
+                let (plan_action, plan_details) = plan_advice_with(ps, spot_price, ladder_usdc >= 0.005);
                 (
                     format!("DEFENSIVE LOCK (Floor Recovery) · {}", plan_action),
                     format!("{} Your accumulation plan is the recovery path: {}", deficit, plan_details),
@@ -613,13 +637,13 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             None => ("OVEREXTENDED (Daily RSI ≥ 70, No Buy Advised)".to_string(), cooldown),
         }
     } else if let Some(ps) = plan_leads {
-        plan_advice(ps, spot_price)
+        plan_advice_with(ps, spot_price, ladder_usdc >= 0.005)
     } else if let Some(adv) = exit_or_harvest.clone() {
         // Outranks a plan with nothing due (N11) and every planless arm below, none of
         // which has anything to buy.
         adv
     } else if let Some(ps) = active_plan {
-        plan_advice(ps, spot_price)
+        plan_advice_with(ps, spot_price, ladder_usdc >= 0.005)
     } else if !plan_configured && dip_zone && tax_guardrail_blocked {
         (
             "TAX RESERVE SHORT (No Buy Advised)".to_string(),
@@ -655,7 +679,7 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         // it); the parenthetical states only what the positions show.
         let label = if engine_active {
             "HOLD & ACCRETE (Dual Growth Engine Active)"
-        } else if !raw.positions.iter().any(is_nock_pair) {
+        } else if !raw.positions.iter().any(|p| is_nock_lp(raw, p)) {
             "HOLD & ACCRETE (No NOCK LP Tracked)"
         } else if nock_lp_usd <= 0.0 {
             "HOLD & ACCRETE (NOCK LP Empty)"
@@ -732,6 +756,7 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             cash_reserve_usdc: reserve.amount().map(|r| format!("{:.2}", r)),
             reserve_stable_usdc: reserve.stable().map(|v| format!("{:.2}", v)),
             reserve_headroom_usdc: reserve.headroom().map(|v| format!("{:.2}", v)),
+            reserve_ladder_usdc: reserve.ladder_usdc().filter(|_| !raw.ladders.is_empty()).map(|v| format!("{:.2}", v)),
             dry_powder_usdc: (reserve != StandingReserve::Invalid).then(|| format!("{:.2}", deployable_usdc)),
             reserve_note: (reserve == StandingReserve::Invalid).then(|| RESERVE_INVALID_NOTE.to_string()),
             lp_nock_budget: Some(format!("{:.4}", lp_nock_budget(wallet_nock, floor, profile.lp_floor_tolerance_bps).0 + 0.0)),
@@ -895,6 +920,18 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
                         status: "no_target".to_string(),
                     });
                 }
+                // Tracked ladders (#167): measured, no target, appended after the gas-LP row
+                // and only when a ladder holds value, so the other rows keep their order.
+                if ladder_usd > 0.0 {
+                    let ladder_weight = weight(ladder_usd);
+                    rows.push(AllocationDeviation {
+                        bucket_name: LADDER_BUCKET_NAME.to_string(),
+                        target_weight_bps: 0,
+                        actual_weight_bps: ladder_weight,
+                        deviation_bps: ladder_weight,
+                        status: "no_target".to_string(),
+                    });
+                }
                 rows
             },
         },
@@ -989,8 +1026,9 @@ pub(crate) enum StandingReserve {
     Unset,
     /// Set, but negative or not a number: named, and no dry powder is reported.
     Invalid,
-    /// `stable` is wallet USDC plus USDC inside NOCK-pair LP; `headroom` = stable − amount.
-    Set { amount: f64, nock_lp_usdc: f64, stable: f64, headroom: f64 },
+    /// `stable` is wallet USDC plus USDC inside NOCK LP and inside tracked ladders (#167,
+    /// `ladder_usdc`, 0 with none); `headroom` = stable − amount.
+    Set { amount: f64, nock_lp_usdc: f64, ladder_usdc: f64, stable: f64, headroom: f64 },
 }
 
 impl StandingReserve {
@@ -1003,19 +1041,28 @@ impl StandingReserve {
     pub(crate) fn headroom(&self) -> Option<f64> {
         match self { StandingReserve::Set { headroom, .. } => Some(*headroom), _ => None }
     }
+    pub(crate) fn ladder_usdc(&self) -> Option<f64> {
+        match self { StandingReserve::Set { ladder_usdc, .. } => Some(*ladder_usdc), _ => None }
+    }
 }
 
 /// Reads `operator_profile.cash_reserve_usdc` against this cycle's balances (#162).
 pub(crate) fn standing_reserve(configured: Option<f64>, wallet_usdc: f64, nock_lp_usdc: f64) -> StandingReserve {
+    standing_reserve_with_ladders(configured, wallet_usdc, nock_lp_usdc, 0.0)
+}
+
+/// As `standing_reserve`, with the USDC inside tracked ladders (#167) counted in the stable
+/// balance and kept apart so the text can name it.
+pub(crate) fn standing_reserve_with_ladders(configured: Option<f64>, wallet_usdc: f64, nock_lp_usdc: f64, ladder_usdc: f64) -> StandingReserve {
     match configured {
         None => StandingReserve::Unset,
         Some(r) if !(r >= 0.0) || !r.is_finite() => StandingReserve::Invalid,
         Some(amount) => {
-            let stable = wallet_usdc + nock_lp_usdc;
+            let stable = wallet_usdc + nock_lp_usdc + ladder_usdc;
             // Whole cents, and never -0.00: every surface rounds the headroom the same way
             // and agrees which side of the reserve the balance is on.
             let headroom = ((stable - amount) * 100.0).round() / 100.0 + 0.0;
-            StandingReserve::Set { amount, nock_lp_usdc, stable, headroom }
+            StandingReserve::Set { amount, nock_lp_usdc, ladder_usdc, stable, headroom }
         }
     }
 }
@@ -1027,11 +1074,19 @@ pub(crate) fn reserve_dry_powder_sentence(base: String, reserve: &StandingReserv
     match reserve {
         StandingReserve::Unset => base,
         StandingReserve::Invalid => format!("Liquid dry powder: not reported: {}.", RESERVE_INVALID_NOTE),
-        StandingReserve::Set { amount, nock_lp_usdc, stable, headroom } => {
-            let measured = format!(
-                "The ${:.2} protected cash reserve is measured on wallet USDC plus the ${:.2} of USDC in NOCK LP: ${:.2},",
-                amount, nock_lp_usdc, stable
-            );
+        StandingReserve::Set { amount, nock_lp_usdc, ladder_usdc, stable, headroom } => {
+            // The ladder part (#167) is named only when there is one.
+            let measured = if *ladder_usdc >= 0.005 {
+                format!(
+                    "The ${:.2} protected cash reserve is measured on wallet USDC plus the ${:.2} of USDC in NOCK LP and the ${:.2} in ladders: ${:.2},",
+                    amount, nock_lp_usdc, ladder_usdc, stable
+                )
+            } else {
+                format!(
+                    "The ${:.2} protected cash reserve is measured on wallet USDC plus the ${:.2} of USDC in NOCK LP: ${:.2},",
+                    amount, nock_lp_usdc, stable
+                )
+            };
             if *headroom < 0.0 {
                 let capped = cap_parenthetical(&base, "and nothing while the stable balance is below the reserve");
                 format!("{} {} ${:.2} below it.", capped, measured, -headroom)

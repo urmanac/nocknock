@@ -321,6 +321,9 @@ pub(crate) fn stored_book_from(snapshot_positions: &[Position], pool_mechanics: 
             positions,
             spot_price_nock_usd: spot,
             pool_liquidity,
+            // A tracked ladder (#167) keeps its role: it is an existing NOCK range here,
+            // its USDC in the stable balance and its NOCK in the floor-crossing figure.
+            ladders: ladders_from_snapshot(snapshot_positions),
             ..Default::default()
         },
         problems,
@@ -845,7 +848,7 @@ pub(crate) fn simulate_ladder(env: &SnapshotEnvelope, req: &LadderRequest, now: 
             json!({ "usdc": p.remaining_usdc, "note": Value::Null })
         }
     });
-    let reserve_check = json!({
+    let mut reserve_check = json!({
         "status": status,
         "gate": RESERVE_GATE_NOTE,
         "cash_reserve_usdc": reserve_amount.map(|v| fx(v, 2)),
@@ -1007,6 +1010,12 @@ pub(crate) fn simulate_ladder(env: &SnapshotEnvelope, req: &LadderRequest, now: 
         ),
         None => "unsnapped: no position_id or tick_spacing was given; the app rounds each bound to a usable tick of the pool you choose".to_string(),
     };
+    // Tracked ladders (#167) among the existing NOCK ranges; absent with none.
+    if !raw.ladders.is_empty() {
+        let mut ids: Vec<&String> = raw.ladders.keys().collect();
+        ids.sort();
+        reserve_check["existing_ladders"] = json!(ids);
+    }
     Ok(json!({
         "snapshot": {
             "snapshot_id": env.meta.snapshot_id.to_string(),

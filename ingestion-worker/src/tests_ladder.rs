@@ -163,6 +163,7 @@ pub(crate) fn envelope_of(mut raw: RawOnChainData, profile: &OperatorProfile) ->
             snapshot_id: Uuid::nil(),
         },
         data: SnapshotData {
+            ladders: Vec::new(),
             closed_positions: vec![],
             wallet_balances: raw.wallet_balances,
             positions,
