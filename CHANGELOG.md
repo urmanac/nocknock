@@ -309,6 +309,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     40 untracked NFTs a cycle, in turn, inside a 40-second budget, so dust cannot time it
     out. After a restart both MCP transports say the stored card is not available until
     the first cycle.
+  - *Third review:* a rung burned or sent away keeps standing for its deposit:
+    `tracked_positions` remembers each ladder rung's mint liquidity and the most a cycle
+    read it holding (migration `20261121000013` amended in place: it has never been
+    applied), and a rung whose deposit is not known never freezes the plan. Once a rung
+    is pulled the cap is not offered. The re-read rotation resumes where a time cut
+    stopped it (`position_detection_state.refresh_cursor`), and of two mints of one rung
+    in a cycle only the exact one is tracked.
   - `operator_profile.ladder_rungs` set without `operator_profile.ladder_bottom_usd` is
     now `needs_setting` (OPERATOR_GUIDANCE section 7, `config.yaml.example`).
   - The stored snapshot row keeps the card's rungs, ticks, pools and mints and leaves out

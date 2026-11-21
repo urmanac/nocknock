@@ -141,6 +141,16 @@ async fn store_contract(store: &PositionStore, w: &str, other: &str) {
     assert!(store.insert_tracked_if_absent(&ladder_row(other, 7, Some(100))).await.unwrap());
     assert_eq!(store.tracked(w).await.unwrap().len(), 4);
     assert_eq!(store.tracked(other).await.unwrap().len(), 1);
+    // What a ladder rung stands for (third review of the bottle): the mint's liquidity is
+    // kept once known, the most seen is replaced, and a tap keeps both.
+    let three = v4_position_key("base", 3);
+    assert!(store.record_liquidity(w, &three, Some(1_000_000_000_000_000_000_000), 1_000_000_000_000_000_000_000).await.unwrap());
+    assert!(store.record_liquidity(w, &three, Some(7), 340_282_366_920_938_463_463_374_607_431_768_211_455).await.unwrap(), "a u128's whole range");
+    store.upsert_tracked(&TrackedRow { rung: Some("near".to_string()), deposit_liquidity: None, ..ladder_row(w, 3, Some(50)) }).await.unwrap();
+    let got = store.tracked(w).await.unwrap().into_iter().find(|r| r.nft_id == 3).unwrap();
+    assert_eq!((got.deposit_liquidity, got.max_liquidity_seen), (Some(1_000_000_000_000_000_000_000), Some(u128::MAX)));
+    assert!(!store.record_liquidity(w, "uniswap-v4:base:999", None, 1).await.unwrap(), "no such row");
+    assert!(!store.record_liquidity(other, &three, None, 1).await.unwrap(), "another wallet's key is its own");
     // Untrack removes exactly that row, once.
     assert!(store.delete_tracked(w, &a.position_key).await.unwrap());
     assert!(!store.delete_tracked(w, &a.position_key).await.unwrap());

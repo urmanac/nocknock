@@ -240,7 +240,8 @@ public certificate authority can vouch for the name, see
    older build, read `GET /v1/positions/found` and add each row's `config_entry` under
    `positions:` in `config.yaml` (it carries the NFT id, pool, ticks, role, rung and
    `deposit_tx`), redeploy the secret, and only then remove the migration row. The
-   ladder card's plan is worked out from the tracked rungs (it is not stored), so a rung
+   ladder card's plan is worked out from the tracked rungs; the database keeps only what
+   each rung was deposited with and the most it held (`tracked_positions`). A rung
    left out of `config.yaml` this way is a rung the older card offers again: do not
    deposit from an older build's card until every row is copied.
 
