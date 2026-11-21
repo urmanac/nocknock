@@ -64,8 +64,13 @@ pub fn ladder_statement(l: &Value) -> String {
     };
     let pct = match (s(l, "low_pct_of_spot"), s(l, "high_pct_of_spot")) {
         (Some(a), Some(b)) => format!(" ({a}% / {b}% of spot)"),
-        _ => " (no spot to compare)".to_string(),
+        (Some(a), None) if s(l, "high_price_usd").is_none() => format!(" ({a}% of spot / no top)"),
+        (None, Some(b)) if s(l, "low_price_usd").is_none() => format!(" (no bottom / {b}% of spot)"),
+        _ if s(l, "spot_price_usd").is_none() => " (no spot to compare)".to_string(),
+        _ => String::new(),
     };
+    // A bound at the pool's usable extremes (#167 review): said in words, never a number.
+    let open = s(l, "open_end").map(|o| format!("\n     {o}")).unwrap_or_default();
     let vs = l.get("vs_top");
     let g = |k: &str| vs.and_then(|v| s(v, k)).unwrap_or("?");
     let curve_avg = vs
@@ -73,19 +78,19 @@ pub fn ladder_statement(l: &Value) -> String {
         .map(|a| format!(", curve average ${a}"))
         .unwrap_or_default();
     format!(
-        "   – {label} ({rung}): ${} – ${}{pct}; {}; holds ${} USDC + {} NOCK\n\
-         \u{20}    against its all-USDC top (${} USDC): {} NOCK held, ${} converted ({}%){curve_avg}; all NOCK at the bottom: {} NOCK\n\
+        "   – {label} ({rung}): {} – {}{pct}; {}; holds ${} USDC + {} NOCK{open}\n\
+         \u{20}    against its all-USDC top ({} USDC): {} NOCK held, {} converted ({}%){curve_avg}; all NOCK at the bottom: {}\n\
          \u{20}    {}; uncollected fees ${}\n",
-        s(l, "low_price_usd").unwrap_or("?"),
-        s(l, "high_price_usd").unwrap_or("?"),
+        s(l, "low_price_usd").map(|v| format!("${v}")).unwrap_or_else(|| "no bottom".to_string()),
+        s(l, "high_price_usd").map(|v| format!("${v}")).unwrap_or_else(|| "no top".to_string()),
         ladder_state_words(s(l, "state").unwrap_or("")),
         s(l, "usdc_now").unwrap_or("?"),
         s(l, "nock_now").unwrap_or("?"),
-        g("usdc_at_top"),
+        vs.and_then(|v| s(v, "usdc_at_top")).map(|v| format!("${v}")).unwrap_or_else(|| "not stated".to_string()),
         g("nock_held_vs_top"),
-        g("usdc_converted_vs_top"),
-        vs.and_then(|v| s(v, "converted_pct")).unwrap_or("?"),
-        g("nock_at_bottom"),
+        vs.and_then(|v| s(v, "usdc_converted_vs_top")).map(|v| format!("${v}")).unwrap_or_else(|| "not stated".to_string()),
+        vs.and_then(|v| s(v, "converted_pct")).unwrap_or("—"),
+        vs.and_then(|v| s(v, "nock_at_bottom")).map(|v| format!("{v} NOCK")).unwrap_or_else(|| "not stated (no bottom)".to_string()),
         since_deposit_text(l.get("since_deposit")),
         s(l, "fees_usd").unwrap_or("?"),
     )

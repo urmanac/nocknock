@@ -2,7 +2,7 @@
   "ladders_above_range": {
     "mcp_text": {
       "get_accumulation_plan": "🪜 Accumulation Plan\n====================\n• No accumulation_plan is configured.\n• NOCK LP rebuild bias: under_target (holds $220.27 of a $758.73 target, $538.47 short). Rebuilding ranges is a reposition: no net cash change.\n   → add 336.49 USDC + 9774 NOCK ($538.47) to v4 USDC/NOCK 3.00% #3163450\n     https://app.uniswap.org/positions/v4/base/3163450\n   ✗ v3 WETH/NOCK 1.00% #6336662: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions\n• Ladders are not rebuild templates and are not in the NOCK LP target (2 tracked, measured only).",
-      "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $5058.23 USD\n• Pillars: NOCK $2469.47 · USDC $2485.13 · ETH $103.62 · AERO not reported\n• Sovereign NOCK Stack: 119503 NOCK (+19503 above the 100000 NOCK floor)\n• Floor crossing: none. If every range sold out, 115748 NOCK would remain (115748 wallet + 0 uncollected fees), at or above the 100000 NOCK floor. First range to sell out: v3 WETH/NOCK 1.00% #6336662 at NOCK ≥ $0.020733 (1.0033x spot). Each pool moves with spot; WETH/NOCK ranges hold ETH/USD constant. A measurement, not an instruction.\n• Stable Stack: 2485.13 USDC\n• Protected cash reserve: $950.00 (wallet + NOCK LP and ladder USDC ($1303.10 in ladders) $2485.13, $1535.13 above it; liquid dry powder $800.09); kept for buying lower, never drawn by a plan buy\n• Gas held (wallet ETH+WETH): 0.050000 ETH ($90.00), counted in the total; not cash, not deployable\n• AERO held (wallet): not reported\n• Unclaimed AERO: not reported\n• AERO/USD: not reported\n• Ladders (measured, not NOCK LP; counted in the totals, the reserve and the floor-crossing price):\n   – v4 USDC/NOCK 3.00% #3240369 (rung near): $0.00000000 – $0.01720088 (-100.00% / -16.76% of spot); price above the range: all USDC; holds $1226.09 USDC + 0.0000 NOCK\n     against its all-USDC top ($1226.09 USDC): 0.0000 NOCK held, $0.00 converted (0.00%); all NOCK at the bottom: 1709690206954494208.0000 NOCK\n     since deposit (tx 0xafe42fe2…, block 59660587): net -247.5790 NOCK bought for net $-4.24 USDC spent; no average price (it has not net bought NOCK with USDC); uncollected fees $0.00\n   – v4 USDC/NOCK 3.00% #3299001 (rung unset): $0.00678699 – $0.01032932 (-67.16% / -50.01% of spot); price above the range: all USDC; holds $77.00 USDC + 0.0000 NOCK\n     against its all-USDC top ($77.00 USDC): 0.0000 NOCK held, $0.00 converted (0.00%); all NOCK at the bottom: 9196.4045 NOCK\n     since deposit: no_baseline: no deposit_tx is set for this ladder in config.yaml: NockNock has no baseline for what it bought and does not invent one; uncollected fees $0.00\n• High-Water Mark: $5058.23 USD\n• Plan buys average cost: no verified buys recorded yet\n• Whole-stack average cost: $0.016929 per NOCK on 90086.7900 NOCK ($1525.05). Operator-entered opening basis: 90086.7900 NOCK for $1525.05 as of 2026-11-19T00:00:00+00:00, source: test figures; plus 0 verified buy(s) since. Plus the net buys of 0 of 2 tracked ladders since a verified deposit: 0.0000 NOCK for $0.00. At spot $0.020664 the NOCK this basis covers is worth $1861.59: $336.54 above cost (+22.07%). NockNock reads 119503 NOCK held now (wallet plus tracked LP). Not tracked after the as-of: sells, LP rebalancing, fees earned, unrecorded buys.\n• Tactical Directive: REBUILD LP TRANCHES (No Net Cash Change)",
+      "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $5058.23 USD\n• Pillars: NOCK $2469.47 · USDC $2485.13 · ETH $103.62 · AERO not reported\n• Sovereign NOCK Stack: 119503 NOCK (+19503 above the 100000 NOCK floor)\n• Floor crossing: none. If every range sold out, 115748 NOCK would remain (115748 wallet + 0 uncollected fees), at or above the 100000 NOCK floor. First range to sell out: v3 WETH/NOCK 1.00% #6336662 at NOCK ≥ $0.020733 (1.0033x spot). Each pool moves with spot; WETH/NOCK ranges hold ETH/USD constant. A measurement, not an instruction.\n• Stable Stack: 2485.13 USDC\n• Protected cash reserve: $950.00 (wallet + NOCK LP and ladder USDC ($1303.10 in ladders) $2485.13, $1535.13 above it; liquid dry powder $800.09); kept for buying lower, never drawn by a plan buy\n• Gas held (wallet ETH+WETH): 0.050000 ETH ($90.00), counted in the total; not cash, not deployable\n• AERO held (wallet): not reported\n• Unclaimed AERO: not reported\n• AERO/USD: not reported\n• Ladders (measured, not NOCK LP; counted in the totals, the reserve and the floor-crossing price):\n   – v4 USDC/NOCK 3.00% #3240369 (rung near): no bottom – $0.01720088 (no bottom / -16.76% of spot); price above the range: all USDC; holds $1226.09 USDC + 0.0000 NOCK\n     the bottom reaches the pool's lowest usable price (tick 887100): the range buys all the way down, so no bottom price and no NOCK at the bottom are stated\n     against its all-USDC top ($1226.09 USDC): 0.0000 NOCK held, $0.00 converted (0.00%); all NOCK at the bottom: not stated (no bottom)\n     since deposit (tx 0xafe42fe2…, block 59660587): net -247.5790 NOCK bought for net $-4.24 USDC spent; no average price (it has not net bought NOCK with USDC); uncollected fees $0.00\n   – v4 USDC/NOCK 3.00% #3299001 (rung unset): $0.00678699 – $0.01032932 (-67.16% / -50.01% of spot); price above the range: all USDC; holds $77.00 USDC + 0.0000 NOCK\n     against its all-USDC top ($77.00 USDC): 0.0000 NOCK held, $0.00 converted (0.00%); all NOCK at the bottom: 9196.4045 NOCK\n     since deposit: no_baseline: no deposit_tx is set for this ladder in config.yaml: NockNock has no baseline for what it bought and does not invent one; uncollected fees $0.00\n• High-Water Mark: $5058.23 USD\n• Plan buys average cost: no verified buys recorded yet\n• Whole-stack average cost: $0.016929 per NOCK on 90086.7900 NOCK ($1525.05). Operator-entered opening basis: 90086.7900 NOCK for $1525.05 as of 2026-11-19T00:00:00+00:00, source: test figures; plus 0 verified buy(s) since. Plus the net buys of 0 of 2 tracked ladders since a verified deposit: 0.0000 NOCK for $0.00. At spot $0.020664 the NOCK this basis covers is worth $1861.59: $336.54 above cost (+22.07%). NockNock reads 119503 NOCK held now (wallet plus tracked LP). Not tracked after the as-of: sells, LP rebalancing, fees earned, unrecorded buys.\n• Tactical Directive: REBUILD LP TRANCHES (No Net Cash Change)",
       "get_shot_advice": "🎯 Tactical Shot Advice Engine\n===============================\n• Recommended Action: REBUILD LP TRANCHES (No Net Cash Change)\n• Decision Matrix Details: NOCK LP holds $220.27 against a $758.73 target (15% of portfolio), $538.47 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. Suggested: add 336.49 USDC + 9774 NOCK ($538.47) to v4 USDC/NOCK 3.00% #3163450 (sells all its NOCK by a 1.99x rise). If every range sold out, 105974 NOCK would remain. Meanwhile: HOLD & ACCRETE (Dual Growth Engine Active) — Total NOCK held is 119503 (+19503 above the 100000 floor). 2 NOCK LP positions tracked: 2 ranged (2 in range). +2 ladders, measured only (2 holding only USDC). $0.00 of LP fees uncollected. Liquid dry powder: $800.09 (wallet USDC $1053.00 less the $252.91 cash target). The $950.00 protected cash reserve is measured on wallet USDC plus the $129.04 of USDC in NOCK LP and the $1303.10 in ladders: $2485.13, $1535.13 above it. The $1432.13 of USDC inside NOCK LP and ladders ($1303.10 of it in ladders) is working capital, not dry powder: it stays in its ranges.\n• Uncollected Claimable Fees: $0.00 USD\n• Net of two claims' gas: -$0.01 USD\n• Harvest rule: BATCH HARVEST is advised once the uncollected LP fees worth claiming (positions whose fees cover their own claim's gas) reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).",
       "simulate_claim_fees": "⚡ Fee Claim Simulation\n=======================\n• Collectible LP fees: $0.0000 USD\n• Estimated Gas: ~$0.0036 USD\n• Net Accretion if Harvested: $0.0000 USD\nPool Breakdown:\n  - USDC+NOCK (Uniswap V4 #3163450): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n  - WETH+NOCK (Uniswap V3 #6336662): 0.00000000 WETH + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n  - USDC+NOCK (Uniswap V4 #3240369): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n  - USDC+NOCK (Uniswap V4 #3299001): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n"
     },
@@ -448,9 +448,10 @@
           "high_pct_of_spot": "-16.76",
           "high_price_usd": "0.01720088",
           "label": "v4 USDC/NOCK 3.00% #3240369",
-          "low_pct_of_spot": "-100.00",
-          "low_price_usd": "0.00000000",
+          "low_pct_of_spot": null,
+          "low_price_usd": null,
           "nock_now": "0.0000",
+          "open_end": "the bottom reaches the pool's lowest usable price (tick 887100): the range buys all the way down, so no bottom price and no NOCK at the bottom are stated",
           "pool_price_usd": "0.02066445",
           "position_id": "uniswap-v4:base:3240369",
           "rung": "near",
@@ -477,7 +478,7 @@
           "vs_top": {
             "converted_pct": "0.00",
             "curve_avg_price_usd": null,
-            "nock_at_bottom": "1709690206954494208.0000",
+            "nock_at_bottom": null,
             "nock_held_vs_top": "0.0000",
             "usdc_at_top": "1226.09",
             "usdc_converted_vs_top": "0.00"
@@ -492,6 +493,7 @@
           "low_pct_of_spot": "-67.16",
           "low_price_usd": "0.00678699",
           "nock_now": "0.0000",
+          "open_end": null,
           "pool_price_usd": "0.02066445",
           "position_id": "uniswap-v4:base:3299001",
           "rung": null,
@@ -642,6 +644,7 @@
           "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
           "position_id": "uniswap-v4:base:3163450",
           "protocol": "uniswap-v4",
+          "tick_spacing": 300,
           "token0": {
             "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
             "decimals": 6,
@@ -713,6 +716,7 @@
           "protocol": "uniswap-v4",
           "role": "ladder",
           "rung": "near",
+          "tick_spacing": 300,
           "token0": {
             "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
             "decimals": 6,
@@ -748,6 +752,7 @@
           "position_id": "uniswap-v4:base:3299001",
           "protocol": "uniswap-v4",
           "role": "ladder",
+          "tick_spacing": 300,
           "token0": {
             "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
             "decimals": 6,
@@ -782,12 +787,12 @@
         }
       ]
     },
-    "state_hash": "f27812036feb9bc07415e2a59772b288f4660a146a04d9a9513e2dd324f8a599"
+    "state_hash": "5fb1c31efcf2bd9bd82b6ecaad8a880889426cf18b27ff9a51febd7203f6e83f"
   },
   "near_rung_bought_plan_due": {
     "mcp_text": {
       "get_accumulation_plan": "🪜 Accumulation Plan \"test-plan\"\n====================\n• Status: tranche_due\n• Next tranche: 1 of 5 — $100.00 due now (nominal $100.00)\n• Next due at: n/a\n• Progress: $0.00 of $500.00 spent over 0 verified buy(s); $500.00 remaining\n• Acquired: 0.0000 NOCK at average $n/a\n• Lump-sum counterfactual (whole budget at first fill price): n/a NOCK\n• Constraint: n/a\n• Protected cash reserve: $950.00\n• NOCK LP rebuild bias: under_target (holds $191.97 of a $651.80 target, $459.82 short). Rebuilding ranges is a reposition: no net cash change.\n   → add 227.27 USDC + 15708 NOCK ($459.82) to v4 USDC/NOCK 3.00% #3163450\n     https://app.uniswap.org/positions/v4/base/3163450\n   ✗ v3 WETH/NOCK 1.00% #6336662: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions\n• Ladders are not rebuild templates and are not in the NOCK LP target (2 tracked, measured only).",
-      "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $4345.32 USD\n• Pillars: NOCK $1886.09 · USDC $2355.60 · ETH $103.62 · AERO not reported\n• Sovereign NOCK Stack: 127395 NOCK (+27395 above the 100000 NOCK floor)\n• Floor crossing: none. If every range sold out, 115748 NOCK would remain (115748 wallet + 0 uncollected fees), at or above the 100000 NOCK floor. First range to sell out: v3 WETH/NOCK 1.00% #6336662 at NOCK ≥ $0.014854 (1.0033x spot). Each pool moves with spot; WETH/NOCK ranges hold ETH/USD constant. A measurement, not an instruction.\n• Stable Stack: 2355.60 USDC\n• Protected cash reserve: $950.00 (wallet + NOCK LP and ladder USDC ($1214.51 in ladders) $2355.60, $1405.60 above it; liquid dry powder $835.73); kept for buying lower, never drawn by a plan buy\n• Gas held (wallet ETH+WETH): 0.050000 ETH ($90.00), counted in the total; not cash, not deployable\n• AERO held (wallet): not reported\n• Unclaimed AERO: not reported\n• AERO/USD: not reported\n• Ladders (measured, not NOCK LP; counted in the totals, the reserve and the floor-crossing price):\n   – v4 USDC/NOCK 3.00% #3240369 (rung near): $0.00000000 – $0.01720088 (-100.00% / +16.18% of spot); in range: converts both ways; holds $1137.51 USDC + 5551.3674 NOCK\n     against its all-USDC top ($1226.09 USDC): 5551.3674 NOCK held, $88.59 converted (7.23%), curve average $0.01595807; all NOCK at the bottom: 1709690206954494208.0000 NOCK\n     since deposit (tx 0xafe42fe2…, block 59660587): net 5303.7885 NOCK bought for net $84.35 USDC spent, average $0.01590283; uncollected fees $0.00\n   – v4 USDC/NOCK 3.00% #3299001 (rung unset): $0.00678699 – $0.01032932 (-54.16% / -30.23% of spot); price above the range: all USDC; holds $77.00 USDC + 0.0000 NOCK\n     against its all-USDC top ($77.00 USDC): 0.0000 NOCK held, $0.00 converted (0.00%); all NOCK at the bottom: 9196.4045 NOCK\n     since deposit: no_baseline: no deposit_tx is set for this ladder in config.yaml: NockNock has no baseline for what it bought and does not invent one; uncollected fees $0.00\n• High-Water Mark: $4345.32 USD\n• Plan buys average cost: no verified buys recorded yet\n• Whole-stack average cost: $0.016872 per NOCK on 95390.5785 NOCK ($1609.40). Operator-entered opening basis: 90086.7900 NOCK for $1525.05 as of 2026-11-19T00:00:00+00:00, source: test figures; plus 0 verified buy(s) since. Plus the net buys of 1 of 2 tracked ladders since a verified deposit: 5303.7885 NOCK for $84.35. At spot $0.014805 the NOCK this basis covers is worth $1412.26: $197.14 below cost (-12.25%). NockNock reads 127395 NOCK held now (wallet plus tracked LP). Not tracked after the as-of: sells, LP rebalancing, fees earned, unrecorded buys.\n• Tactical Directive: DCA TRANCHE DUE (1 of 5)",
+      "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $4345.32 USD\n• Pillars: NOCK $1886.09 · USDC $2355.60 · ETH $103.62 · AERO not reported\n• Sovereign NOCK Stack: 127395 NOCK (+27395 above the 100000 NOCK floor)\n• Floor crossing: none. If every range sold out, 115748 NOCK would remain (115748 wallet + 0 uncollected fees), at or above the 100000 NOCK floor. First range to sell out: v3 WETH/NOCK 1.00% #6336662 at NOCK ≥ $0.014854 (1.0033x spot). Each pool moves with spot; WETH/NOCK ranges hold ETH/USD constant. A measurement, not an instruction.\n• Stable Stack: 2355.60 USDC\n• Protected cash reserve: $950.00 (wallet + NOCK LP and ladder USDC ($1214.51 in ladders) $2355.60, $1405.60 above it; liquid dry powder $835.73); kept for buying lower, never drawn by a plan buy\n• Gas held (wallet ETH+WETH): 0.050000 ETH ($90.00), counted in the total; not cash, not deployable\n• AERO held (wallet): not reported\n• Unclaimed AERO: not reported\n• AERO/USD: not reported\n• Ladders (measured, not NOCK LP; counted in the totals, the reserve and the floor-crossing price):\n   – v4 USDC/NOCK 3.00% #3240369 (rung near): no bottom – $0.01720088 (no bottom / +16.18% of spot); in range: converts both ways; holds $1137.51 USDC + 5551.3674 NOCK\n     the bottom reaches the pool's lowest usable price (tick 887100): the range buys all the way down, so no bottom price and no NOCK at the bottom are stated\n     against its all-USDC top ($1226.09 USDC): 5551.3674 NOCK held, $88.59 converted (7.23%), curve average $0.01595807; all NOCK at the bottom: not stated (no bottom)\n     since deposit (tx 0xafe42fe2…, block 59660587): net 5303.7885 NOCK bought for net $84.35 USDC spent, average $0.01590283; uncollected fees $0.00\n   – v4 USDC/NOCK 3.00% #3299001 (rung unset): $0.00678699 – $0.01032932 (-54.16% / -30.23% of spot); price above the range: all USDC; holds $77.00 USDC + 0.0000 NOCK\n     against its all-USDC top ($77.00 USDC): 0.0000 NOCK held, $0.00 converted (0.00%); all NOCK at the bottom: 9196.4045 NOCK\n     since deposit: no_baseline: no deposit_tx is set for this ladder in config.yaml: NockNock has no baseline for what it bought and does not invent one; uncollected fees $0.00\n• High-Water Mark: $4345.32 USD\n• Plan buys average cost: no verified buys recorded yet\n• Whole-stack average cost: $0.016872 per NOCK on 95390.5785 NOCK ($1609.40). Operator-entered opening basis: 90086.7900 NOCK for $1525.05 as of 2026-11-19T00:00:00+00:00, source: test figures; plus 0 verified buy(s) since. Plus the net buys of 1 of 2 tracked ladders since a verified deposit: 5303.7885 NOCK for $84.35. At spot $0.014805 the NOCK this basis covers is worth $1412.26: $197.14 below cost (-12.25%). NockNock reads 127395 NOCK held now (wallet plus tracked LP). Not tracked after the as-of: sells, LP rebalancing, fees earned, unrecorded buys.\n• Tactical Directive: DCA TRANCHE DUE (1 of 5)",
       "get_shot_advice": "🎯 Tactical Shot Advice Engine\n===============================\n• Recommended Action: DCA TRANCHE DUE (1 of 5)\n• Decision Matrix Details: Buy $100.00 of NOCK (spot $0.01481). Plan \"test-plan\": $0.00 of $500.00 deployed over 0 verified buy(s). The plan never spends the stable balance (wallet + NOCK LP and ladder USDC) below $950.00. After buying, record the transaction hash so the plan advances. Standing bias: NOCK LP holds $191.97 against a $651.80 target (15% of portfolio), $459.82 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. Suggested: add 227.27 USDC + 15708 NOCK ($459.82) to v4 USDC/NOCK 3.00% #3163450 (sells all its NOCK by a 2.77x rise). If every range sold out, 100040 NOCK would remain.\n• Uncollected Claimable Fees: $0.00 USD\n• Net of two claims' gas: -$0.01 USD\n• Harvest rule: BATCH HARVEST is advised once the uncollected LP fees worth claiming (positions whose fees cover their own claim's gas) reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).",
       "simulate_claim_fees": "⚡ Fee Claim Simulation\n=======================\n• Collectible LP fees: $0.0000 USD\n• Estimated Gas: ~$0.0036 USD\n• Net Accretion if Harvested: $0.0000 USD\nPool Breakdown:\n  - USDC+NOCK (Uniswap V4 #3163450): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n  - WETH+NOCK (Uniswap V3 #6336662): 0.00000000 WETH + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n  - USDC+NOCK (Uniswap V4 #3240369): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n  - USDC+NOCK (Uniswap V4 #3299001): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0036)\n"
     },
@@ -1252,9 +1257,10 @@
           "high_pct_of_spot": "+16.18",
           "high_price_usd": "0.01720088",
           "label": "v4 USDC/NOCK 3.00% #3240369",
-          "low_pct_of_spot": "-100.00",
-          "low_price_usd": "0.00000000",
+          "low_pct_of_spot": null,
+          "low_price_usd": null,
           "nock_now": "5551.3674",
+          "open_end": "the bottom reaches the pool's lowest usable price (tick 887100): the range buys all the way down, so no bottom price and no NOCK at the bottom are stated",
           "pool_price_usd": "0.01480505",
           "position_id": "uniswap-v4:base:3240369",
           "rung": "near",
@@ -1281,7 +1287,7 @@
           "vs_top": {
             "converted_pct": "7.23",
             "curve_avg_price_usd": "0.01595807",
-            "nock_at_bottom": "1709690206954494208.0000",
+            "nock_at_bottom": null,
             "nock_held_vs_top": "5551.3674",
             "usdc_at_top": "1226.09",
             "usdc_converted_vs_top": "88.59"
@@ -1296,6 +1302,7 @@
           "low_pct_of_spot": "-54.16",
           "low_price_usd": "0.00678699",
           "nock_now": "0.0000",
+          "open_end": null,
           "pool_price_usd": "0.01480505",
           "position_id": "uniswap-v4:base:3299001",
           "rung": null,
@@ -1446,6 +1453,7 @@
           "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
           "position_id": "uniswap-v4:base:3163450",
           "protocol": "uniswap-v4",
+          "tick_spacing": 300,
           "token0": {
             "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
             "decimals": 6,
@@ -1517,6 +1525,7 @@
           "protocol": "uniswap-v4",
           "role": "ladder",
           "rung": "near",
+          "tick_spacing": 300,
           "token0": {
             "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
             "decimals": 6,
@@ -1552,6 +1561,7 @@
           "position_id": "uniswap-v4:base:3299001",
           "protocol": "uniswap-v4",
           "role": "ladder",
+          "tick_spacing": 300,
           "token0": {
             "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
             "decimals": 6,
@@ -1586,6 +1596,6 @@
         }
       ]
     },
-    "state_hash": "b499b397acaa015d85e562a62b17ba1007ada2e5d89c3934c96d5ac10c2d88bf"
+    "state_hash": "02803d0b1c4d45ee0df7aa5757d1d8c0116acfb0edbd59bfb94fe81b80de5e1d"
   }
 }

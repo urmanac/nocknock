@@ -976,7 +976,7 @@ components:
       description: |
         One tracked ladder, measured (2.9.0, issue #167). A USDC/NOCK concentrated range
         the operator deployed; NockNock never steers it.
-      required: [position_id, config_id, label, state, state_text, low_price_usd, high_price_usd, usdc_now, nock_now, fees_usd, vs_top, since_deposit]
+      required: [position_id, config_id, label, state, state_text, usdc_now, nock_now, fees_usd, vs_top, since_deposit]
       properties:
         position_id: { type: string }
         config_id: { type: string, description: The entry's id in config.yaml }
@@ -988,8 +988,9 @@ components:
           enum: [holds_only_usdc, in_range, holds_only_nock, empty, pool_stale]
           description: What the range holds now, by its own pool's tick. Never "out of range" for a ladder above it.
         state_text: { type: string }
-        low_price_usd: { type: string, description: The range's bottom, USD per NOCK, 8 dp }
-        high_price_usd: { type: string, description: The range's top, USD per NOCK, 8 dp }
+        low_price_usd: { type: string, nullable: true, description: "The range's bottom, USD per NOCK, 8 dp. Null when the bottom reaches the pool's usable extremes (open_end)" }
+        high_price_usd: { type: string, nullable: true, description: "The range's top, USD per NOCK, 8 dp. Null when the top reaches the pool's usable extremes (open_end)" }
+        open_end: { type: string, nullable: true, description: "Which bound reaches the pool's usable extremes (within one tick spacing of the lowest or highest usable tick), in words; its price and the amount held there are not stated. Null otherwise" }
         low_pct_of_spot: { type: string, nullable: true, description: Signed percent from spot, null without a spot }
         high_pct_of_spot: { type: string, nullable: true }
         spot_price_usd: { type: string, nullable: true }
@@ -1005,10 +1006,10 @@ components:
             liquidity is unchanged). Holdings, not trades: a range in range converts
             both ways.
           properties:
-            usdc_at_top: { type: string, description: USDC held at or above the top }
-            nock_at_bottom: { type: string, description: NOCK held at or below the bottom }
+            usdc_at_top: { type: string, nullable: true, description: USDC held at or above the top; null when the top is open-ended }
+            nock_at_bottom: { type: string, nullable: true, description: NOCK held at or below the bottom; null when the bottom is open-ended }
             nock_held_vs_top: { type: string, description: NOCK held now (0 at the top) }
-            usdc_converted_vs_top: { type: string, description: usdc_at_top less USDC held now }
+            usdc_converted_vs_top: { type: string, nullable: true, description: usdc_at_top less USDC held now; null with usdc_at_top }
             curve_avg_price_usd: { type: string, nullable: true, description: usdc_converted_vs_top / nock_held_vs_top; null when it holds no NOCK }
             converted_pct: { type: string, nullable: true }
         since_deposit:

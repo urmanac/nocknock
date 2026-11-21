@@ -100,6 +100,10 @@ pub(crate) fn ladder_book() -> RawOnChainData {
     for p in [&near, &deep] {
         raw.pool_liquidity.insert(p.position_id.clone(), "80173935548453779".to_string());
     }
+    // The 3% pool's tick spacing (300), read for v4 positions since #166.
+    for id in [raw.positions[0].position_id.clone(), near.position_id.clone(), deep.position_id.clone()] {
+        raw.position_facts.insert(id, PositionFacts { tick_spacing: Some(300), ..Default::default() });
+    }
     raw.ladders.insert(near.position_id.clone(), tag("ladder-near", Some("near"), Some(MINT_TX)));
     raw.ladders.insert(deep.position_id.clone(), tag("ladder-deep", None, None));
     raw.ladder_baselines.insert(near.position_id.clone(), verified_mint());
@@ -255,24 +259,24 @@ fn test_a_ladder_refuses_every_key_that_would_steer_it() {
 fn test_after_the_read_a_ladder_must_be_a_usdc_nock_concentrated_range() {
     let ladders = |p: &RawPosition| HashMap::from([(p.position_id.clone(), tag("rung", None, None))]);
     let ok = ladder_rung_at(269065);
-    assert!(check_ladder_pairs(&[ok.clone()], &ladders(&ok)).is_ok());
+    assert!(check_ladder_pairs(&[ok.clone()], &ladders(&ok), &HashMap::new()).is_ok());
     // NOCK as token0 passes too.
     let mut flipped = ok.clone();
     std::mem::swap(&mut flipped.token0, &mut flipped.token1);
-    assert!(check_ladder_pairs(&[flipped.clone()], &ladders(&flipped)).is_ok());
+    assert!(check_ladder_pairs(&[flipped.clone()], &ladders(&flipped), &HashMap::new()).is_ok());
     // An untagged WETH/NOCK range is not checked.
-    assert!(check_ladder_pairs(&[weth_nock_v3()], &ladders(&ok)).is_ok());
+    assert!(check_ladder_pairs(&[weth_nock_v3()], &ladders(&ok), &HashMap::new()).is_ok());
     for (token0, token1) in [(weth(), nock()), (weth(), usdc()), (nock(), weth())] {
         let p = RawPosition { token0: token0.clone(), token1: token1.clone(), ..ok.clone() };
-        let e = check_ladder_pairs(&[p.clone()], &ladders(&p)).unwrap_err().to_string();
+        let e = check_ladder_pairs(&[p.clone()], &ladders(&p), &HashMap::new()).unwrap_err().to_string();
         assert_eq!(
             e,
             format!("Configuration error: position 'rung' is role: ladder but is a {}/{} pair. A ladder is a USDC/NOCK range; AERO and ETH ladders are not supported yet (#170). Correct `positions:` in config.yaml", token0.symbol, token1.symbol)
         );
     }
     let full = RawPosition { tick_lower: MIN_TICK, tick_upper: MAX_TICK, ..ok.clone() };
-    let e = check_ladder_pairs(&[full.clone()], &ladders(&full)).unwrap_err().to_string();
-    assert!(e.contains("spans every price (full range)"), "{e}");
+    let e = check_ladder_pairs(&[full.clone()], &ladders(&full), &HashMap::new()).unwrap_err().to_string();
+    assert!(e.contains("spans every price (full range: ticks -887272..887272"), "{e}");
 }
 
 // ------------------------------------------------------------------
@@ -388,9 +392,9 @@ fn test_the_recorded_v3_increase_uses_the_event_amounts_exactly() {
     let mut two = recorded("v3_increase");
     let inc = two["logs"].as_array().unwrap().iter().find(|l| l["topics"][0] == INCREASE_LIQUIDITY_TOPIC).unwrap().clone();
     two["logs"].as_array_mut().unwrap().push(inc);
-    assert_eq!(parse_ladder_deposit(&two, OPERATOR, &v3).unwrap_err(), "the receipt has 2 IncreaseLiquidity events; a ladder deposit has exactly one");
+    assert_eq!(parse_ladder_deposit(&two, OPERATOR, &v3).unwrap_err(), "the receipt has 2 IncreaseLiquidity events from the Uniswap v3 position manager; a ladder deposit has exactly one");
     // The pair check refuses it as a ladder.
-    let e = check_ladder_pairs(&[v3.clone()], &HashMap::from([(v3.position_id.clone(), tag("uniswap-v3-weth-nock", None, None))])).unwrap_err();
+    let e = check_ladder_pairs(&[v3.clone()], &HashMap::from([(v3.position_id.clone(), tag("uniswap-v3-weth-nock", None, None))]), &HashMap::new()).unwrap_err();
     assert!(e.to_string().contains("is a WETH/NOCK pair") && e.to_string().contains("(#170)"));
 }
 
@@ -526,6 +530,7 @@ fn copy_of(raw: &RawOnChainData) -> RawOnChainData {
         wallet_eth: raw.wallet_eth,
         wallet_weth: raw.wallet_weth,
         pool_liquidity: raw.pool_liquidity.clone(),
+        position_facts: raw.position_facts.clone(),
         ladders: raw.ladders.clone(),
         ladder_baselines: raw.ladder_baselines.clone(),
         ..Default::default()
@@ -562,12 +567,12 @@ fn test_the_state_is_what_the_range_holds_in_either_token_order() {
         mraw.positions[3] = mirrored(&deep_at(tick));
         assert_eq!(ladder_state(&mraw, &mraw.positions[3]), want, "mirrored {tick}");
         let m = reading_of(&mraw, "uniswap-v4:base:3299001");
-        assert_eq!((m.low_price_usd.as_str(), m.high_price_usd.as_str()), (plain.low_price_usd.as_str(), plain.high_price_usd.as_str()), "{tick}");
+        assert_eq!((&m.low_price_usd, &m.high_price_usd), (&plain.low_price_usd, &plain.high_price_usd), "{tick}");
         assert_eq!((m.usdc_now.as_str(), m.nock_now.as_str()), (plain.usdc_now.as_str(), plain.nock_now.as_str()), "{tick}");
         assert_eq!(m.vs_top, plain.vs_top, "{tick}");
         if want == "holds_only_nock" {
             assert_eq!(plain.usdc_now, "0.00");
-            assert_eq!(plain.nock_now, plain.vs_top.nock_at_bottom);
+            assert_eq!(Some(plain.nock_now.clone()), plain.vs_top.nock_at_bottom);
             assert_eq!(plain.state_text, "holds only NOCK: the price is below the range's bottom ($0.00678699); a rise back into it sells NOCK for USDC");
         }
     }
@@ -589,22 +594,27 @@ fn test_the_curve_figures_need_no_baseline_and_match_the_range_edges() {
     assert_eq!(near.state, "holds_only_usdc");
     assert_eq!(near.state_text, "holds only USDC: the price is above the range, so it converts nothing until NOCK falls into it at $0.01720088");
     assert_eq!((near.usdc_now.as_str(), near.nock_now.as_str()), ("1226.09", "0.0000"));
+    // Its bottom is the pool's lowest usable price (tick 887100 at spacing 300): no bottom
+    // price and no NOCK at the bottom are stated (a figure beyond any supply).
     assert_eq!(near.vs_top, LadderVsTop {
-        usdc_at_top: "1226.09".to_string(),
-        nock_at_bottom: "1709690206954494208.0000".to_string(),
+        usdc_at_top: Some("1226.09".to_string()),
+        nock_at_bottom: None,
         nock_held_vs_top: "0.0000".to_string(),
-        usdc_converted_vs_top: "0.00".to_string(),
+        usdc_converted_vs_top: Some("0.00".to_string()),
         curve_avg_price_usd: None,
         converted_pct: Some("0.00".to_string()),
     });
-    assert_eq!((near.high_price_usd.as_str(), near.high_pct_of_spot.as_deref(), near.spot_price_usd.as_deref()), ("0.01720088", Some("-16.76"), Some("0.02066445")));
+    assert_eq!((near.low_price_usd.as_deref(), near.low_pct_of_spot.as_deref()), (None, None));
+    assert_eq!(near.open_end.as_deref(), Some("the bottom reaches the pool's lowest usable price (tick 887100): the range buys all the way down, so no bottom price and no NOCK at the bottom are stated"));
+    assert_eq!((near.high_price_usd.as_deref(), near.high_pct_of_spot.as_deref(), near.spot_price_usd.as_deref()), (Some("0.01720088"), Some("-16.76"), Some("0.02066445")));
     // The deep rung's edges are concentrated_amounts_at at its ticks.
     let deep = reading_of(&raw, "uniswap-v4:base:3299001");
     let (sa, sb) = (tick_sqrt_price(276000), tick_sqrt_price(280200));
     let l = 400_000_000_000_000f64;
-    assert_eq!(deep.vs_top.usdc_at_top, format!("{:.2}", concentrated_amounts_at(l, sa, sa, sb).0 / 1e6));
-    assert_eq!(deep.vs_top.nock_at_bottom, format!("{:.4}", concentrated_amounts_at(l, sb, sa, sb).1 / 1e16));
-    assert_eq!((deep.low_price_usd.as_str(), deep.high_price_usd.as_str(), deep.vs_top.usdc_at_top.as_str(), deep.vs_top.nock_at_bottom.as_str()), ("0.00678699", "0.01032932", "77.00", "9196.4045"));
+    assert_eq!(deep.vs_top.usdc_at_top, Some(format!("{:.2}", concentrated_amounts_at(l, sa, sa, sb).0 / 1e6)));
+    assert_eq!(deep.vs_top.nock_at_bottom, Some(format!("{:.4}", concentrated_amounts_at(l, sb, sa, sb).1 / 1e16)));
+    assert_eq!((deep.low_price_usd.as_deref(), deep.high_price_usd.as_deref(), deep.vs_top.usdc_at_top.as_deref(), deep.vs_top.nock_at_bottom.as_deref()), (Some("0.00678699"), Some("0.01032932"), Some("77.00"), Some("9196.4045")));
+    assert_eq!(deep.open_end, None);
     assert_eq!((deep.rung, deep.rung_note.as_deref()), (None, Some(RUNG_UNSET_NOTE)));
     // In range, the curve's average price from the top to the pool price is the geometric
     // mean of the two: sqrt(top x pool price).
@@ -613,11 +623,11 @@ fn test_the_curve_figures_need_no_baseline_and_match_the_range_edges() {
     let r = reading_of(&raw, "uniswap-v4:base:3240369");
     assert_eq!(r.state, "in_range");
     let avg = f(r.vs_top.curve_avg_price_usd.as_deref().unwrap());
-    let geo = (f(&r.high_price_usd) * f(r.pool_price_usd.as_deref().unwrap())).sqrt();
+    let geo = (f(r.high_price_usd.as_deref().unwrap()) * f(r.pool_price_usd.as_deref().unwrap())).sqrt();
     assert!((avg / geo - 1.0).abs() < 1e-6, "{avg} vs {geo}");
     // Holdings, not trades: converted = top less now, held = now.
     assert_eq!(r.vs_top.nock_held_vs_top, r.nock_now);
-    assert!((f(&r.vs_top.usdc_converted_vs_top) - (f(&r.vs_top.usdc_at_top) - f(&r.usdc_now))).abs() <= 0.011);
+    assert!((f(r.vs_top.usdc_converted_vs_top.as_deref().unwrap()) - (f(r.vs_top.usdc_at_top.as_deref().unwrap()) - f(&r.usdc_now))).abs() <= 0.011);
     assert_eq!(r.state_text, "in range: it converts USDC to NOCK as the price falls and NOCK back to USDC as it rises");
 }
 
@@ -714,7 +724,7 @@ fn test_without_a_spot_the_percentages_and_value_are_null() {
     let r = reading_of(&raw, "uniswap-v4:base:3240369");
     assert_eq!((r.low_pct_of_spot, r.high_pct_of_spot, r.spot_price_usd, r.value_usd), (None, None, None, None));
     // The amounts are measured from the position's own pool all the same.
-    assert_eq!((r.usdc_now.as_str(), r.vs_top.usdc_at_top.as_str()), ("1226.09", "1226.09"));
+    assert_eq!((r.usdc_now.as_str(), r.vs_top.usdc_at_top.as_deref()), ("1226.09", Some("1226.09")));
 }
 
 // ------------------------------------------------------------------
@@ -1018,7 +1028,7 @@ fn test_the_mcp_text_states_each_ladder_and_its_baseline() {
     let state = format_portfolio_state_text(&full);
     let block = crate::ladder_track_text::ladders_lines(&full);
     assert!(state.contains(&block) && block.starts_with("• Ladders (measured, not NOCK LP; counted in the totals, the reserve and the floor-crossing price):\n"), "{state}");
-    assert!(block.contains("   – v4 USDC/NOCK 3.00% #3240369 (rung near): $0.00000000 – $0.01720088 (-100.00% / -16.76% of spot); price above the range: all USDC; holds $1226.09 USDC + 0.0000 NOCK\n"), "{block}");
+    assert!(block.contains("   – v4 USDC/NOCK 3.00% #3240369 (rung near): no bottom – $0.01720088 (no bottom / -16.76% of spot); price above the range: all USDC; holds $1226.09 USDC + 0.0000 NOCK\n     the bottom reaches"), "{block}");
     assert!(block.contains("since deposit (tx 0xafe42fe2…, block 59660587): net -247.5790 NOCK bought for net $-4.24 USDC spent; no average price (it has not net bought NOCK with USDC)"), "{block}");
     assert!(block.contains("(rung unset)") && block.contains("since deposit: no_baseline: no deposit_tx is set for this ladder in config.yaml"), "{block}");
     // The plan text says ladders are not in the rebuild.
@@ -1089,4 +1099,91 @@ fn test_the_example_config_documents_role_rung_and_deposit_tx_and_sets_none() {
     let example = load_app_config(path, Some("/nonexistent/config.yaml"), false).unwrap();
     assert!(example.positions.iter().all(|c| c.role.is_none() && c.rung.is_none() && c.deposit_tx.is_none()));
     assert!(validate_positions_config(&example.positions).is_ok());
+}
+
+// ------------------------------------------------------------------
+// Review findings (#167): usable extremes, and one position manager per protocol
+// ------------------------------------------------------------------
+
+#[test]
+fn test_a_full_range_nft_on_the_usable_ticks_is_refused_at_every_spacing() {
+    let base = ladder_rung_at(269065);
+    let ladders = |p: &RawPosition| HashMap::from([(p.position_id.clone(), tag("rung", None, None))]);
+    let facts = |p: &RawPosition, s: i32| HashMap::from([(p.position_id.clone(), PositionFacts { tick_spacing: Some(s), ..Default::default() })]);
+    // What the Uniswap and Aero apps mint for "Full range": the usable extremes.
+    for (spacing, edge) in [(60, 887220), (200, 887200), (300, 887100)] {
+        let full = RawPosition { tick_lower: -edge, tick_upper: edge, ..base.clone() };
+        assert_eq!(ladder_bounds_at_extremes(-edge, edge, Some(spacing)), (true, true), "{spacing}");
+        let e = check_ladder_pairs(&[full.clone()], &ladders(&full), &facts(&full, spacing)).unwrap_err().to_string();
+        assert_eq!(
+            e,
+            format!("Configuration error: position 'rung' is role: ladder but spans every price (full range: ticks {}..{edge} reach the pool's usable extremes at tick spacing {spacing}): a ladder is a concentrated range. Correct `positions:` in config.yaml", -edge)
+        );
+        // One spacing in from the extremes still counts as reaching them; two do not.
+        assert_eq!(ladder_bounds_at_extremes(-edge + spacing, edge - spacing, Some(spacing)), (true, true));
+        assert_eq!(ladder_bounds_at_extremes(-edge + 2 * spacing, edge - 2 * spacing, Some(spacing)), (false, false));
+        // A rung that reaches only one extreme is a ladder (it buys all the way down).
+        let one_sided = RawPosition { tick_lower: 270900 / spacing * spacing, tick_upper: edge, ..base.clone() };
+        assert!(check_ladder_pairs(&[one_sided.clone()], &ladders(&one_sided), &facts(&one_sided, spacing)).is_ok(), "{spacing}");
+    }
+    // Uniswap v3: the spacing comes from the factory's fee table when it was not read.
+    let v3 = RawPosition { protocol: "uniswap-v3".to_string(), fee_tier_bps: 100, tick_lower: -887200, tick_upper: 887200, ..base.clone() };
+    assert_eq!(ladder_tick_spacing(&HashMap::new(), &v3), Some(200));
+    assert!(check_ladder_pairs(&[v3.clone()], &ladders(&v3), &HashMap::new()).unwrap_err().to_string().contains("at tick spacing 200"));
+    assert_eq!(ladder_tick_spacing(&HashMap::new(), &RawPosition { fee_tier_bps: 30, ..v3.clone() }), Some(60));
+    // An unread spacing falls back to 1,000 ticks from MIN_TICK/MAX_TICK, and says so.
+    let unknown = RawPosition { tick_lower: -887000, tick_upper: 887000, ..base.clone() };
+    assert_eq!(ladder_tick_spacing(&HashMap::new(), &unknown), None);
+    let e = check_ladder_pairs(&[unknown.clone()], &ladders(&unknown), &HashMap::new()).unwrap_err().to_string();
+    assert!(e.contains("within 1000 ticks (tick spacing not read)"), "{e}");
+}
+
+#[test]
+fn test_an_open_ended_bound_is_stated_in_words_never_as_a_number() {
+    let raw = ladder_book();
+    let full = serde_json::to_value(&ladder_readings(&raw)).unwrap();
+    let near = &full[0];
+    assert_eq!(near["low_price_usd"], json!(null));
+    assert_eq!(near["vs_top"]["nock_at_bottom"], json!(null));
+    let text = crate::ladder_track_text::ladder_statement(near);
+    assert!(text.contains("(rung near): no bottom – $0.01720088 (no bottom / -16.76% of spot);"), "{text}");
+    assert!(text.contains("\n     the bottom reaches the pool's lowest usable price (tick 887100)"), "{text}");
+    assert!(text.contains("all NOCK at the bottom: not stated (no bottom)"), "{text}");
+    assert!(!text.contains("0.00000000") && !text.contains("1709690206954494208"), "{text}");
+    // NOCK as token0: the same rung mirrored has its bottom at the lowest usable tick.
+    let mut m = copy_of(&raw);
+    m.positions[2] = mirrored(&raw.positions[2]);
+    let r = reading_of(&m, "uniswap-v4:base:3240369");
+    assert_eq!((r.low_price_usd, r.vs_top.nock_at_bottom), (None, None));
+    assert!(r.open_end.unwrap().contains("(tick -887100)"));
+    // A top at the highest usable price: no top, no USDC at the top, no converted figure.
+    let mut top = copy_of(&raw);
+    let mut q = mirrored(&deep_at(277000));
+    q.tick_upper = 887100;
+    top.positions[3] = with_amounts(q);
+    let r = reading_of(&top, "uniswap-v4:base:3299001");
+    assert_eq!((r.high_price_usd.as_deref(), r.vs_top.usdc_at_top.as_deref(), r.vs_top.usdc_converted_vs_top.as_deref(), r.vs_top.converted_pct.as_deref()), (None, None, None, None));
+    assert!(r.open_end.unwrap().starts_with("the top reaches the pool's highest usable price (tick 887100)"));
+}
+
+#[test]
+fn test_an_increase_from_the_other_protocols_position_manager_is_refused() {
+    // The recorded v3 IncreaseLiquidity, emitted as if by the Aero CL manager: for a v3
+    // ladder with the same NFT id and ticks it is another protocol's NFT.
+    let v3 = RawPosition { liquidity: 18_841_285_041_665_077_684, ..weth_nock_v3() };
+    let mut as_cl = recorded("v3_increase");
+    for l in as_cl["logs"].as_array_mut().unwrap() {
+        if l["topics"][0] == INCREASE_LIQUIDITY_TOPIC {
+            l["address"] = json!(AERO_CL_POSITION_MANAGER_BASE);
+        }
+    }
+    assert_eq!(
+        parse_ladder_deposit(&as_cl, OPERATOR, &v3).unwrap_err(),
+        "its IncreaseLiquidity was emitted by another position manager, not the Uniswap v3 position manager: it is another protocol's NFT"
+    );
+    // The same receipt is a deposit for an Aero CL ladder with that NFT id and ticks...
+    let cl = RawPosition { protocol: "aerodrome-cl".to_string(), ..v3.clone() };
+    assert!(parse_ladder_deposit(&as_cl, OPERATOR, &cl).is_ok());
+    // ...and the recorded (v3) receipt is not one for it.
+    assert!(parse_ladder_deposit(&recorded("v3_increase"), OPERATOR, &cl).unwrap_err().contains("not the Aero CL position manager"));
 }

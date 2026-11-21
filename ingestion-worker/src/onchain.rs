@@ -244,7 +244,7 @@ pub(crate) async fn fetch_raw_data_from(
     //     reading). Each must be a USDC/NOCK concentrated range, checked on what was read.
     let ladders: HashMap<String, LadderTag> =
         live_configs.iter().filter(|c| is_ladder_config(c)).map(|c| (position_key(c), ladder_tag(c))).collect();
-    check_ladder_pairs(&raw_positions, &ladders)?;
+    check_ladder_pairs(&raw_positions, &ladders, &position_facts)?;
 
     // 3. NOCK/USD spot from the designated price-source position pool (zero-mock:
     //    fail the cycle when missing or unparseable).

@@ -52,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   defaults; unset `role` keeps its pre-0.9.0 meaning, and any other value fails every
   cycle as a configuration error, as do a ladder that is the price source, an Aero basic
   pool, a ladder that sets a rebuild key or `deposit_url`, and, after the read, a ladder
-  that is not USDC/NOCK). A ladder counts in every total, in the floor-crossing price
+  that is not USDC/NOCK or is full range, including a full-range NFT on the pool's usable ticks). A bound at the usable extremes is stated as open-ended, never as a price. A ladder counts in every total, in the floor-crossing price
   and in the standing reserve, whose stable balance now includes its USDC
   (`global_status.reserve_ladder_usdc` names that part, and the reserve, plan-headroom
   and working-capital sentences say "NOCK LP and ladders"). It is not NOCK LP: no LP

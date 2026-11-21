@@ -142,9 +142,51 @@ pub(crate) fn validate_role_config(c: &PositionConfig) -> Result<()> {
     Ok(())
 }
 
+/// How close to the pool's usable extremes a bound must be to count as reaching it, when
+/// the pool's tick spacing is unknown: 1,000 ticks (a 10.5% price step) is wider than the
+/// spacing of any Uniswap or Aero pool NockNock reads on Base.
+pub(crate) const LADDER_EDGE_TICKS_UNKNOWN_SPACING: i32 = 1000;
+
+/// The tick spacing of a ladder's pool: read for Uniswap v4 and Aero CL (position facts);
+/// for Uniswap v3 the factory's fixed fee-to-spacing table (0.01% 1, 0.05% 10, 0.30% 60,
+/// 1.00% 200). None when neither applies. Pure.
+pub(crate) fn ladder_tick_spacing(facts: &HashMap<String, PositionFacts>, p: &RawPosition) -> Option<i32> {
+    if let Some(s) = facts.get(&p.position_id).and_then(|f| f.tick_spacing).filter(|s| *s > 0) {
+        return Some(s);
+    }
+    match Protocol::parse(&p.protocol) {
+        Some(Protocol::UniswapV3) => match p.fee_tier_bps {
+            1 => Some(1),
+            5 => Some(10),
+            30 => Some(60),
+            100 => Some(200),
+            _ => None,
+        },
+        Some(Protocol::UniswapV4) | Some(Protocol::AeroCl) | Some(Protocol::AeroBasic) | None => None,
+    }
+}
+
+/// Whether each bound reaches the pool's usable extremes (within one tick spacing of the
+/// lowest or highest usable tick): (lower bound at the minimum, upper bound at the
+/// maximum). A full-range NFT made in a Uniswap or Aero app sits on those usable ticks
+/// (±887220 at spacing 60, ±887200 at 200, ±887100 at 300), not on MIN_TICK/MAX_TICK. Pure.
+pub(crate) fn ladder_bounds_at_extremes(tick_lower: i32, tick_upper: i32, spacing: Option<i32>) -> (bool, bool) {
+    let (lo, hi, margin) = match spacing {
+        Some(s) => {
+            let lo = (MIN_TICK as f64 / s as f64).ceil() as i32 * s;
+            let hi = (MAX_TICK as f64 / s as f64).floor() as i32 * s;
+            (lo, hi, s)
+        }
+        None => (MIN_TICK, MAX_TICK, LADDER_EDGE_TICKS_UNKNOWN_SPACING),
+    };
+    (tick_lower <= lo + margin, tick_upper >= hi - margin)
+}
+
 /// After the reads (#167): a ladder must be a USDC/NOCK concentrated range. AERO and ETH
-/// ladders are #170. A failure is a configuration error that fails the cycle. Pure.
-pub(crate) fn check_ladder_pairs(positions: &[RawPosition], ladders: &HashMap<String, LadderTag>) -> Result<()> {
+/// ladders are #170. A range whose two bounds both reach the pool's usable extremes is
+/// full range, and is refused too. A failure is a configuration error that fails the
+/// cycle. Pure.
+pub(crate) fn check_ladder_pairs(positions: &[RawPosition], ladders: &HashMap<String, LadderTag>, facts: &HashMap<String, PositionFacts>) -> Result<()> {
     for p in positions {
         let Some(tag) = ladders.get(&p.position_id) else { continue };
         let usdc_nock = (is_usdc_token(&p.token0) && is_nock_token(&p.token1)) || (is_nock_token(&p.token0) && is_usdc_token(&p.token1));
@@ -156,10 +198,15 @@ pub(crate) fn check_ladder_pairs(positions: &[RawPosition], ladders: &HashMap<St
                 p.token1.symbol
             ));
         }
-        if is_full_range(p.tick_lower, p.tick_upper) {
+        let spacing = ladder_tick_spacing(facts, p);
+        let (at_min, at_max) = ladder_bounds_at_extremes(p.tick_lower, p.tick_upper, spacing);
+        if is_full_range(p.tick_lower, p.tick_upper) || (at_min && at_max) {
             return Err(anyhow::anyhow!(
-                "Configuration error: position '{}' is role: ladder but spans every price (full range): a ladder is a concentrated range. Correct `positions:` in config.yaml",
-                tag.config_id
+                "Configuration error: position '{}' is role: ladder but spans every price (full range: ticks {}..{} reach the pool's usable extremes{}): a ladder is a concentrated range. Correct `positions:` in config.yaml",
+                tag.config_id,
+                p.tick_lower,
+                p.tick_upper,
+                spacing.map(|s| format!(" at tick spacing {s}")).unwrap_or_else(|| format!(", within {LADDER_EDGE_TICKS_UNKNOWN_SPACING} ticks (tick spacing not read)"))
             ));
         }
     }
@@ -364,14 +411,20 @@ pub(crate) fn parse_ladder_deposit(receipt: &serde_json::Value, wallet: &str, p:
             };
             (l, paid(&p.token0.address)?, paid(&p.token1.address)?)
         }
-        Some(Protocol::UniswapV3) | Some(Protocol::AeroCl) => {
-            let managers: Vec<String> = PRINCIPAL_POSITION_MANAGERS.iter().map(|m| lc(m)).collect();
-            let incs: Vec<&serde_json::Value> = logs
-                .iter()
-                .filter(|l| managers.contains(&log_address(l)) && topics_of(l).first().map(String::as_str) == Some(INCREASE_LIQUIDITY_TOPIC))
-                .collect();
+        Some(proto @ (Protocol::UniswapV3 | Protocol::AeroCl)) => {
+            // Only the position manager of this position's protocol: the two managers'
+            // NFT ids are separate namespaces, and the event names neither pool nor ticks.
+            let (manager, name) = match proto {
+                Protocol::UniswapV3 => (UNISWAP_V3_NPM_BASE, "the Uniswap v3 position manager"),
+                _ => (AERO_CL_POSITION_MANAGER_BASE, "the Aero CL position manager"),
+            };
+            let is_inc = |l: &&serde_json::Value| topics_of(l).first().map(String::as_str) == Some(INCREASE_LIQUIDITY_TOPIC);
+            let incs: Vec<&serde_json::Value> = logs.iter().filter(is_inc).filter(|l| log_address(l) == lc(manager)).collect();
+            if incs.is_empty() && logs.iter().filter(is_inc).any(|l| PRINCIPAL_POSITION_MANAGERS.iter().any(|m| log_address(l) == lc(m))) {
+                return Err(format!("its IncreaseLiquidity was emitted by another position manager, not {name}: it is another protocol's NFT"));
+            }
             if incs.len() != 1 {
-                return Err(format!("the receipt has {} IncreaseLiquidity events; a ladder deposit has exactly one", incs.len()));
+                return Err(format!("the receipt has {} IncreaseLiquidity events from {name}; a ladder deposit has exactly one", incs.len()));
             }
             let log = incs[0];
             if topics_of(log).get(1).map(|t| t.trim_start_matches("0x").to_string()) != Some(nft_word) {
@@ -458,14 +511,16 @@ pub(crate) async fn read_ladder_baseline(client: &Client, rpc_url: &str, wallet:
 /// in range converts both ways.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub(crate) struct LadderVsTop {
-    /// USDC the range holds when the price is at or above its top, `{:.2}`.
-    pub(crate) usdc_at_top: String,
-    /// NOCK it holds at or below its bottom, `{:.4}`.
-    pub(crate) nock_at_bottom: String,
+    /// USDC the range holds when the price is at or above its top, `{:.2}`. Null when the
+    /// top reaches the pool's highest usable price (`open_end` says so).
+    pub(crate) usdc_at_top: Option<String>,
+    /// NOCK it holds at or below its bottom, `{:.4}`. Null when the bottom reaches the
+    /// pool's lowest usable price: that amount is not a figure anyone could hold.
+    pub(crate) nock_at_bottom: Option<String>,
     /// NOCK it holds now, against 0 at the top, `{:.4}`.
     pub(crate) nock_held_vs_top: String,
-    /// `usdc_at_top` less the USDC it holds now, `{:.2}`.
-    pub(crate) usdc_converted_vs_top: String,
+    /// `usdc_at_top` less the USDC it holds now, `{:.2}`. Null with `usdc_at_top`.
+    pub(crate) usdc_converted_vs_top: Option<String>,
     /// `usdc_converted_vs_top` / `nock_held_vs_top`: the curve's average price between the
     /// top and the pool price, `{:.8}`. Null when it holds no NOCK.
     pub(crate) curve_avg_price_usd: Option<String>,
@@ -511,9 +566,13 @@ pub(crate) struct LadderReading {
     /// the range holds, not by a direction.
     pub(crate) state: String,
     pub(crate) state_text: String,
-    /// The range's bottom and top in USD per NOCK, `{:.8}`.
-    pub(crate) low_price_usd: String,
-    pub(crate) high_price_usd: String,
+    /// The range's bottom and top in USD per NOCK, `{:.8}`. Null for a bound that reaches
+    /// the pool's usable extremes (`open_end` says which): no price is printed for it.
+    pub(crate) low_price_usd: Option<String>,
+    pub(crate) high_price_usd: Option<String>,
+    /// Set when a bound reaches the pool's usable extremes: which one, in words. Null
+    /// otherwise.
+    pub(crate) open_end: Option<String>,
     /// The bounds against the NOCK/USD spot, signed percent, `{:+.2}`. Null without a spot.
     pub(crate) low_pct_of_spot: Option<String>,
     pub(crate) high_pct_of_spot: Option<String>,
@@ -580,6 +639,23 @@ pub(crate) fn ladder_reading(raw: &RawOnChainData, p: &RawPosition, tag: &Ladder
         (usd_per_nock_at_tick(p, p.tick_lower), usd_per_nock_at_tick(p, p.tick_upper))
     };
     let pct = |v: f64| spot_ok.then(|| signed((v / spot - 1.0) * 100.0, 2)).map(|s| if s.starts_with('-') { s } else { format!("+{s}") });
+    // A bound at the pool's usable extremes is open-ended: its price and the amount held
+    // there are stated as such, never as a number (a NOCK amount beyond any supply).
+    let (at_min, at_max) = ladder_bounds_at_extremes(p.tick_lower, p.tick_upper, ladder_tick_spacing(&raw.position_facts, p));
+    // NOCK token1: the bottom (lowest USD) is the upper tick, the top the lower tick.
+    let (bottom_open, top_open) = if nock_is_1 { (at_max, at_min) } else { (at_min, at_max) };
+    let open_end = match (bottom_open, top_open) {
+        (true, true) => Some("the range spans every usable price: it has no bottom and no top to state".to_string()),
+        (true, false) => Some(format!(
+            "the bottom reaches the pool's lowest usable price (tick {}): the range buys all the way down, so no bottom price and no NOCK at the bottom are stated",
+            if nock_is_1 { p.tick_upper } else { p.tick_lower }
+        )),
+        (false, true) => Some(format!(
+            "the top reaches the pool's highest usable price (tick {}): no top price and no USDC at the top are stated",
+            if nock_is_1 { p.tick_lower } else { p.tick_upper }
+        )),
+        (false, false) => None,
+    };
     // The range at its edges: all token0 at the lower tick, all token1 at the upper.
     let l = p.liquidity as f64;
     let (sa, sb) = (tick_sqrt_price(p.tick_lower), tick_sqrt_price(p.tick_upper));
@@ -599,15 +675,17 @@ pub(crate) fn ladder_reading(raw: &RawOnChainData, p: &RawPosition, tag: &Ladder
     };
     let state = ladder_state(raw, p);
     let state_text = match state {
-        "holds_only_usdc" => format!(
+        "holds_only_usdc" if !top_open => format!(
             "holds only USDC: the price is above the range, so it converts nothing until NOCK falls into it at ${:.8}",
             high
         ),
+        "holds_only_usdc" => "holds only USDC: the price is above the range, so it converts nothing until NOCK falls into it".to_string(),
         "in_range" => "in range: it converts USDC to NOCK as the price falls and NOCK back to USDC as it rises".to_string(),
-        "holds_only_nock" => format!(
+        "holds_only_nock" if !bottom_open => format!(
             "holds only NOCK: the price is below the range's bottom (${:.8}); a rise back into it sells NOCK for USDC",
             low
         ),
+        "holds_only_nock" => "holds only NOCK: the price is below the range's bottom; a rise back into it sells NOCK for USDC".to_string(),
         "empty" => "empty: the NFT holds no liquidity".to_string(),
         _ => "its pool has no in-range liquidity, so the pool price is frozen and the state is not a market reading".to_string(),
     };
@@ -619,10 +697,11 @@ pub(crate) fn ladder_reading(raw: &RawOnChainData, p: &RawPosition, tag: &Ladder
         rung_note: tag.rung.is_none().then(|| RUNG_UNSET_NOTE.to_string()),
         state: state.to_string(),
         state_text,
-        low_price_usd: format!("{:.8}", low),
-        high_price_usd: format!("{:.8}", high),
-        low_pct_of_spot: pct(low),
-        high_pct_of_spot: pct(high),
+        low_price_usd: (!bottom_open).then(|| format!("{:.8}", low)),
+        high_price_usd: (!top_open).then(|| format!("{:.8}", high)),
+        open_end,
+        low_pct_of_spot: if bottom_open { None } else { pct(low) },
+        high_pct_of_spot: if top_open { None } else { pct(high) },
         spot_price_usd: spot_ok.then(|| format!("{:.8}", spot)),
         pool_price_usd: pool_price.map(|v| format!("{:.8}", v)),
         usdc_now: format!("{:.2}", usdc_now),
@@ -630,12 +709,12 @@ pub(crate) fn ladder_reading(raw: &RawOnChainData, p: &RawPosition, tag: &Ladder
         value_usd: spot_ok.then(|| format!("{:.2}", p.amount0 * p0 + p.amount1 * p1)),
         fees_usd: format!("{:.2}", p.fee0 * p0 + p.fee1 * p1),
         vs_top: LadderVsTop {
-            usdc_at_top: format!("{:.2}", usdc_at_top),
-            nock_at_bottom: format!("{:.4}", nock_at_bottom),
+            usdc_at_top: (!top_open).then(|| format!("{:.2}", usdc_at_top)),
+            nock_at_bottom: (!bottom_open).then(|| format!("{:.4}", nock_at_bottom)),
             nock_held_vs_top: format!("{:.4}", nock_now),
-            usdc_converted_vs_top: format!("{:.2}", converted),
-            curve_avg_price_usd: (nock_now > 0.0 && converted > 0.0).then(|| format!("{:.8}", converted / nock_now)),
-            converted_pct: (usdc_at_top > 0.0).then(|| format!("{:.2}", converted / usdc_at_top * 100.0)),
+            usdc_converted_vs_top: (!top_open).then(|| format!("{:.2}", converted)),
+            curve_avg_price_usd: (!top_open && nock_now > 0.0 && converted > 0.0).then(|| format!("{:.8}", converted / nock_now)),
+            converted_pct: (!top_open && usdc_at_top > 0.0).then(|| format!("{:.2}", converted / usdc_at_top * 100.0)),
         },
         since_deposit: since_deposit(raw, p, tag, usdc_now, nock_now),
     }
