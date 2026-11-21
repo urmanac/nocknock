@@ -64,7 +64,7 @@ export const LADDERS_ABOVE: LadderReading[] = [
     "pool_price_usd": "0.02066445",
     "position_id": "uniswap-v4:base:3299001",
     "rung": null,
-    "rung_note": "rung is not set in config.yaml (near or deep): NockNock assumes neither",
+    "rung_note": "rung is not set in config.yaml (cap, near or deep): NockNock assumes none",
     "since_deposit": {
       "avg_buy_price_usd": null,
       "current_liquidity": "400000000000000",
@@ -420,7 +420,7 @@ export const LADDERS_BOUGHT: LadderReading[] = [
     "pool_price_usd": "0.01480505",
     "position_id": "uniswap-v4:base:3299001",
     "rung": null,
-    "rung_note": "rung is not set in config.yaml (near or deep): NockNock assumes neither",
+    "rung_note": "rung is not set in config.yaml (cap, near or deep): NockNock assumes none",
     "since_deposit": {
       "avg_buy_price_usd": null,
       "current_liquidity": "400000000000000",

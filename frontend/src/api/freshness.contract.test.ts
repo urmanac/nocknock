@@ -211,7 +211,7 @@ describe('Freshness Contract', () => {
     brackets.forEach((b: any, i: number) => expect(b.position_id).toBe(data.positions[i].position_id));
     expect(ag.tranche_1_nock).toBeUndefined();
     // Meta version: the current snapshot spec (specs/core/snapshot.yaml info.version).
-    expect(latestSnapshot!.meta.version).toBe('2.9.0');
+    expect(latestSnapshot!.meta.version).toBe('2.10.0');
   });
 
   it('2.9.0 floor_breach is stated, and at spot it is the Floor Health reading (#165)', () => {
@@ -231,6 +231,35 @@ describe('Freshness Contract', () => {
       expect(fb.nock_now).toBe(data.derived_metrics.global_status.total_nock_amount);
       expect(fb.crossing.status).toBe(fb.status);
     }
+  });
+
+  it('2.10.0 fee_yield, active liquidity and the ladder settings keep their contract', () => {
+    if (!latestSnapshot) {
+      console.log('Skipping contract test: backend not reachable in isolated environment');
+      return;
+    }
+    const data = latestSnapshot.data as any;
+    const fy = data.derived_metrics?.fee_yield;
+    // A 2.10.0 worker states the measurement every cycle (possibly unavailable, with why).
+    expect(fy).toBeTruthy();
+    expect(['measured', 'unavailable']).toContain(fy.status);
+    expect([fy.window_days, fy.max_gap_seconds, fy.day_min_seconds, fy.refresh_seconds]).toEqual([30, 7200, 72000, 3600]);
+    if (fy.status === 'unavailable') expect(typeof fy.reason).toBe('string');
+    for (const p of fy.pools ?? []) {
+      expect(['measured', 'no_intervals']).toContain(p.status);
+      for (const d of p.by_day) expect(d.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      if (p.status === 'measured') expect(Number(p.usdc_per_liquidity_day)).toBeGreaterThanOrEqual(0);
+    }
+    // Active liquidity is a decimal string when read, absent when not: never 0 for unknown.
+    for (const m of data.pool_mechanics) {
+      if (m.active_liquidity_raw !== undefined) expect(m.active_liquidity_raw).toMatch(/^\d+$/);
+    }
+    // Operator settings are stated or absent, never defaulted.
+    const gs = data.derived_metrics.global_status;
+    expect(gs.ladder_bottom_usd === undefined || /^\d+\.\d{8}$/.test(gs.ladder_bottom_usd)).toBe(true);
+    expect(gs.ladder_rungs !== undefined && gs.ladder_rungs_note !== undefined).toBe(false);
+    const shape = data.derived_metrics.ladder_shape;
+    if (shape) expect(['computed', 'unavailable']).toContain(shape.status);
   });
 
   it('2.3.0 pillars partition the total and the wallet reports its gas', () => {

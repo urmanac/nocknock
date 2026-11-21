@@ -373,3 +373,23 @@ fn test_fee_yield_spec_documents_the_block() {
     assert!(text.contains("a UTC date"));
     assert!(text.contains("never used"));
 }
+
+// Regenerate only for an intended change:
+//   NOCKNOCK_BLESS_GOLDEN=1 cargo test test_golden_fee_yield
+// The dashboard (frontend/src/feeYield.test.ts) reads this block, so its helpers are
+// pinned to the worker's own output.
+#[test]
+fn test_golden_fee_yield_block_is_byte_identical() {
+    let fy = fee_fixture().data.derived_metrics.fee_yield.unwrap();
+    let doc = json!({
+        "about": "derived_metrics.fee_yield of the #166 fixture with the recorded chudmax history of #3163450 (tests_fee_yield.rs), priced at the fixture's pool price $0.012944.",
+        "fee_yield": fy,
+    });
+    let actual = format!("{}\n", serde_json::to_string_pretty(&doc).unwrap());
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/fee_yield/golden_fee_yield.json");
+    if std::env::var("NOCKNOCK_BLESS_GOLDEN").is_ok() {
+        std::fs::write(path, &actual).unwrap();
+    }
+    let expected = std::fs::read_to_string(path).expect("testdata/fee_yield/golden_fee_yield.json is checked in");
+    assert!(actual == expected, "fee_yield bytes changed; compare {path} with a fresh NOCKNOCK_BLESS_GOLDEN=1 run and `git diff` it");
+}

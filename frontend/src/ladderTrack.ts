@@ -87,7 +87,7 @@ export function ladderRangeLine(r: LadderReading): string {
   return `${low} – ${high}${vs}${open}`;
 }
 
-/** "rung near" or "rung unset". */
+/** "rung cap", "rung near", "rung deep" or "rung unset". */
 export function ladderRungText(r: LadderReading): string {
   return r.rung ? `rung ${r.rung}` : 'rung unset';
 }

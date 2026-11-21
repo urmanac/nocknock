@@ -80,6 +80,8 @@ describe('tracked ladders (#167)', () => {
     const r = near(LADDERS_BOUGHT);
     expect(ladderRungText(r)).toBe('rung near');
     expect(ladderRungText(deep(LADDERS_BOUGHT))).toBe('rung unset');
+    // The bottle's cap (2.10.0) reads like the other rungs.
+    expect(ladderRungText({ ...r, rung: 'cap' })).toBe('rung cap');
     expect(ladderRangeLine(deep(LADDERS_ABOVE))).toBe('$0.00678699 – $0.01032932 (−67.16% / −50.01% of spot)');
     // Its bottom is the pool's lowest usable price: said in words, never $0.00000000.
     expect(ladderRangeLine(r)).toBe("no bottom – $0.01720088 (no bottom / +16.18% of spot); the bottom reaches the pool's lowest usable price (tick 887100): the range buys all the way down, so no bottom price and no NOCK at the bottom are stated");
