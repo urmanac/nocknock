@@ -182,6 +182,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (operator: no forms); the what-if stays in `GET /v1/simulate/ladder` and the
   `simulate_ladder` tool.
 
+- **The ladder card shows your shape: the three-deposit "bottle" (#168 with the rungs
+  of #166).** With `operator_profile.ladder_rungs` set, the ladder suggestion is built
+  from `derived_metrics.ladder_shape` instead of one rung. With no shape set, the card
+  is the single rung above, byte for byte.
+  - *One numbered deposit per rung still to deposit,* numbered as in your shape:
+    "Deposit 1 of 3 (cap): about 86.79 NOCK + $1.23 USDC, in range now", then the near
+    and deep rungs, USDC only. Each states its exact ticks, its bounds in USD per NOCK
+    and in NOCK per USDC (from the ticks), the exact liquidity and raw amounts of its
+    mint (for the transaction builder that follows) and its own Uniswap link, which
+    prefills the pool and the range and never an amount. The amount is printed beside
+    the link, cut (never rounded up) to what is typed.
+  - *The cap states both amounts and its NOCK limit.* The app works out one side from
+    whichever field is typed, so typing the USDC amount can pull more NOCK than the LP
+    NOCK budget. The cap's row says "the NOCK side must not exceed 86.7891 NOCK", names
+    the NOCK field as the one that keeps the limit, and gives the NOCK amount for it.
+  - *The card follows the plan as rungs are deposited.* A tracked ladder no longer hides
+    it. A deployed rung is shown as done with what it holds and is not offered again; a
+    passed rung states its plain reason; a rung over its target says so. The headline
+    counts only what is left ("Ladder: 2 of 3 deposits left, up to $116.09 USDC and
+    about 87 NOCK"), and with every rung deployed the card says the ladder is deployed
+    (new status `ladder_deployed`). When what is left would read the stable balance
+    below the reserve (a tracked rung over its target, or one that matches no rung), no
+    deposit is listed and the card says why.
+  - *What the deposits leave in the wallet,* in the numbers and on the card: "After
+    these deposits your wallet holds about $779 USDC; the $950 reserve counts the $224
+    of USDC inside your existing NOCK ranges. At $0.01 with every rung converted, the
+    stable balance reads $950.00: the wallet's $778.85 plus $171.15 still inside those
+    ranges." (the test fixture's figures).
+  - *The picture* draws one bar per rung on the price axis: the cap across the spot
+    marker, a deployed rung hatched and muted, each label a dollar amount, placed beside
+    a bar too narrow for it so it stays readable on a phone.
+  - *The outcomes, in plain words:* what a fall to the near rung's bottom buys, what a
+    fall to the ladder's bottom buys in total and at what average, and what a rise
+    does (it sells the cap's NOCK, about 87, for about $1.13 of USDC, and nothing else).
+  - *One muted fee line per rung,* from the shape's fee estimate, never without its
+    sample size, the in-range share of stored history and the replay bound; the reason
+    when it is not measured. No rung is ranked. The estimates are left out of the state
+    hash and of stored rows, like the measurement they come from.
+  - Both MCP transports list the same deposits in `get_shot_advice`, and the phone
+    cockpit shows the same headline, outcomes and deposits. Nothing on the card takes
+    typed input, and it still never changes the directive or sends a push.
+
 ## [0.8.3] - 2026-11-20
 
 A patch release: the protected cash reserve is a standing rule, and dry powder honours it.
