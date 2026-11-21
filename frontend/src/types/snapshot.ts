@@ -298,6 +298,14 @@ export interface GlobalStatus {
   dry_powder_usdc?: string;
   /** Why a configured standing reserve is not applied (2.8.3). */
   reserve_note?: string;
+  /** The NOCK that may go into LP: wallet NOCK - floor + the tolerated overage, the
+   *  rebuild's "only N NOCK may go into LP". Signed, 4 dp; measured on wallet NOCK
+   *  (2.9.0, #166). Absent before 2.9.0: unknown, never 0. */
+  lp_nock_budget?: string;
+  /** Why lp_nock_budget is not a plain budget: no floor set, or negative (2.9.0, #166). */
+  lp_nock_budget_note?: string;
+  /** operator_profile.lp_floor_tolerance_bps (2.9.0, #166). */
+  lp_floor_tolerance_bps?: number;
 }
 
 /** A gauge reward stated as collectible earnings (#142): what is there and where it is
@@ -524,7 +532,8 @@ export interface Position {
   pool_active?: boolean | null;
   /** True for a position spanning every price (Aerodrome volatile pool); bounds are not meaningful (2.2.0) */
   full_range?: boolean;
-  /** aerodrome-cl only: the pool's tick spacing, 200 for a CL200 pool (v0.6.0) */
+  /** The pool's tick spacing: aerodrome-cl (200 for a CL200 pool, v0.6.0) and, since
+   *  2.9.0, uniswap-v4 (300 for the 3% pool, #166). Absent when not read. */
   tick_spacing?: number;
   /** aerodrome-cl only: the gauge holding the NFT, when this wallet staked it there (v0.6.0) */
   staked_in_gauge?: string;

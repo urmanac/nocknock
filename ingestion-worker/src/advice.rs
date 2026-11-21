@@ -422,13 +422,13 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             })
             .unwrap_or(0.0);
         let liquid_floor = cash_target_usd.max(tax_reserve_usd + plan_remaining);
-        let floor_tolerance_nock = floor * (profile.lp_floor_tolerance_bps as f64 / 10000.0);
+        let (budget_nock, floor_tolerance_nock) = lp_nock_budget(wallet_nock, floor, profile.lp_floor_tolerance_bps);
         let funds = RebuildFunds {
             // A range sells its NOCK as price rises, so in a large enough rally NOCK
             // placed in LP is converted away entirely. LP may hold the NOCK above the
             // hard floor plus the operator's tolerated overage, which bounds how far
             // below the floor a full sell-out of every range could leave the stack.
-            nock: wallet_nock - floor + floor_tolerance_nock,
+            nock: budget_nock,
             floor_tolerance_nock,
             floor_set: floor > 0.0,
             usdc: wallet_usdc - liquid_floor,
@@ -734,6 +734,9 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             reserve_headroom_usdc: reserve.headroom().map(|v| format!("{:.2}", v)),
             dry_powder_usdc: (reserve != StandingReserve::Invalid).then(|| format!("{:.2}", deployable_usdc)),
             reserve_note: (reserve == StandingReserve::Invalid).then(|| RESERVE_INVALID_NOTE.to_string()),
+            lp_nock_budget: Some(format!("{:.4}", lp_nock_budget(wallet_nock, floor, profile.lp_floor_tolerance_bps).0 + 0.0)),
+            lp_nock_budget_note: lp_nock_budget_note(wallet_nock, floor, profile.lp_floor_tolerance_bps),
+            lp_floor_tolerance_bps: Some(profile.lp_floor_tolerance_bps),
         },
         asset_aggregation_series: AssetAggregationSeries {
             time_points: vec![now_str.clone()],
@@ -944,6 +947,35 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
                 })
                 .collect(),
         },
+    }
+}
+
+/// The NOCK that may go into LP (#166): wallet NOCK less the hard floor plus the tolerated
+/// overage (`lp_floor_tolerance_bps` of the floor). The rebuild's "only N NOCK may go into
+/// LP" figure, and the budget a ladder's NOCK is measured against. Returns (budget,
+/// tolerance in NOCK). Signed: negative when wallet NOCK is below the floor less the
+/// tolerance. Measured on wallet NOCK only; the floor-crossing price (#165) is measured on
+/// total tracked NOCK. With no floor (0) the budget is the wallet's NOCK. Pure.
+pub(crate) fn lp_nock_budget(wallet_nock: f64, floor: f64, tolerance_bps: u32) -> (f64, f64) {
+    let tolerance = floor * (tolerance_bps as f64 / 10000.0);
+    (wallet_nock - floor + tolerance, tolerance)
+}
+
+/// Why `lp_nock_budget` is not the plain "above the floor plus tolerance" reading (#166):
+/// no floor is set, or the budget is negative. None otherwise. Pure.
+pub(crate) fn lp_nock_budget_note(wallet_nock: f64, floor: f64, tolerance_bps: u32) -> Option<String> {
+    let (budget, tolerance) = lp_nock_budget(wallet_nock, floor, tolerance_bps);
+    if !(floor > 0.0) {
+        Some("no treasury_floor_nock is set: the budget is the wallet's NOCK".to_string())
+    } else if budget < 0.0 && tolerance > 0.0 {
+        Some(format!(
+            "none: wallet NOCK is {:.0} below the {:.0} NOCK floor less the {:.0} tolerated below it",
+            -budget, floor, tolerance
+        ))
+    } else if budget < 0.0 {
+        Some(format!("none: wallet NOCK is {:.0} below the {:.0} NOCK floor", -budget, floor))
+    } else {
+        None
     }
 }
 

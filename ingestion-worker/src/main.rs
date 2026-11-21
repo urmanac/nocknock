@@ -84,6 +84,9 @@ use closed_text::*;
 mod floor_breach;
 use floor_breach::*;
 mod floor_breach_text;
+mod ladder;
+use ladder::*;
+mod ladder_text;
 
 // ============================================================
 // Configuration
@@ -677,7 +680,8 @@ struct AeroPillar {
 /// RawPosition rather than in it; stamped onto the snapshot by apply_position_facts.
 #[derive(Debug, Default, Clone, PartialEq)]
 struct PositionFacts {
-    /// Aero CL: the pool's tick spacing (the "200" in CL200).
+    /// The pool's tick spacing: Aero CL (the "200" in CL200) and, since 2.9.0 (#166),
+    /// Uniswap v4 (word 3 of the poolKeys answer the adapter already reads).
     tick_spacing: Option<i32>,
     /// Aero CL: the gauge holding the NFT, when the tracked wallet staked it there.
     staked_in_gauge: Option<String>,
@@ -738,8 +742,9 @@ struct Position {
     /// no range to leave, and lower_price/upper_price are not meaningful. (2.2.0)
     #[serde(default)]
     full_range: bool,
-    /// Aero CL only: the pool's tick spacing, e.g. 200 for a CL200 pool. Absent for
-    /// every other protocol. (v0.6.0, #91)
+    /// The pool's tick spacing, e.g. 200 for an Aero CL200 pool (v0.6.0, #91) or 300 for
+    /// the Uniswap v4 3% pool (2.9.0, #166). Absent for v3 and Aero basic, and whenever it
+    /// was not read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     tick_spacing: Option<i32>,
     /// Aero CL only: the gauge the tracked wallet staked this NFT in. Absent when the
@@ -1568,6 +1573,22 @@ struct GlobalStatus {
     /// or positive. Absent otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reserve_note: Option<String>,
+    /// The NOCK that may go into LP (2.9.0, #166): wallet NOCK − treasury_floor_nock + the
+    /// tolerated overage, the same figure as the rebuild's "only N NOCK may go into LP",
+    /// emitted every cycle, 4 dp, signed. Measured on wallet NOCK (the floor-crossing price
+    /// is measured on total tracked NOCK). With no floor it is the wallet's NOCK. Null in
+    /// a snapshot stored before the field existed: unknown, never 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lp_nock_budget: Option<String>,
+    /// Why `lp_nock_budget` is not a plain budget (2.9.0, #166): no floor is set, or it is
+    /// negative ("none: wallet NOCK is N below ..."). Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lp_nock_budget_note: Option<String>,
+    /// `operator_profile.lp_floor_tolerance_bps` (2.9.0, #166): the parameter of
+    /// `lp_nock_budget` and of `floor_breach.tolerated`, so a what-if over the stored
+    /// snapshot reads it from there and never from config. Null in an older snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lp_floor_tolerance_bps: Option<u32>,
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
@@ -2145,3 +2166,5 @@ mod tests_harvest_principal;
 mod tests_reserve;
 #[cfg(test)]
 mod tests_floor_breach;
+#[cfg(test)]
+mod tests_ladder;

@@ -577,6 +577,68 @@ paths:
         '503':
           description: The accumulation ledger could not be read (LEDGER_UNAVAILABLE); no series is returned
 
+  /simulate/ladder:
+    get:
+      tags: [Snapshots]
+      summary: Ladder simulator, a read-only what-if (v0.9.0, issue #166)
+      operationId: simulateLadder
+      description: |
+        A USDC/NOCK range that is mostly USDC and sits below spot (a "ladder"), worked
+        out from the latest stored snapshot alone (memory, then the database, as
+        /snapshot/latest): no RPC read, no ingestion cycle, nothing signed or sent, and
+        no amount chosen by NockNock. A GET, so the cross-site write guard (#133) lets
+        it through; the route has no write method.
+
+        Every pool moves by the same percentage as spot, each from its own current
+        price, so grid row 0 is the snapshot. Gas-side ranges with no NOCK leg are left
+        out. The reserve gate is the stable balance (wallet USDC less the ladder's, plus
+        the ladder's and the existing NOCK ranges' USDC) at the ladder's own bottom,
+        against GlobalStatus.cash_reserve_usdc; the reading below the bottom (the
+        existing ranges keep converting) and the reading at the top are separate
+        measured fields, and the accumulation plan's unspent budget and the tax reserve
+        are stated, not gates. The NOCK gate is GlobalStatus.lp_nock_budget itself; the
+        rebuild's suggestions are a separate line. The effect on the floor-crossing
+        price is floor_breach recomputed with the ladder added and its NOCK taken from
+        the wallet.
+
+        Snapping: to the tick spacing of the tracked position named by position_id, or
+        to a tick_spacing the caller states; never one taken from a fee tier. A numeric
+        bound goes to the nearest usable tick; high=spot to the usable tick at or below
+        the pool price in USD terms (it holds no NOCK), and both ticks next to spot are
+        listed with their NOCK need. With neither, the range is unsnapped and says so.
+        Percent bounds and high=spot are relative to the ladder pool's own price (spot,
+        unless position_id names another pool).
+      parameters:
+        - { name: usdc, in: query, required: true, schema: { type: number, exclusiveMinimum: true, minimum: 0 }, description: USDC the ladder holds at spot }
+        - { name: nock, in: query, required: false, schema: { type: number, minimum: 0 }, description: NOCK to check against what the range needs (within the larger of 1 NOCK and 10 bps) }
+        - { name: low, in: query, required: false, schema: { type: number, exclusiveMinimum: true, minimum: 0 }, description: Bottom in USD per NOCK; exactly one of low and low_pct }
+        - { name: low_pct, in: query, required: false, schema: { type: number, exclusiveMinimum: true, minimum: -100 }, description: Bottom as percent of the pool price }
+        - { name: high, in: query, required: false, schema: { type: string }, description: 'Top in USD per NOCK, or the word "spot"; exactly one of high and high_pct' }
+        - { name: high_pct, in: query, required: false, schema: { type: number, exclusiveMinimum: true, minimum: -100 }, description: Top as percent of the pool price }
+        - { name: position_id, in: query, required: false, schema: { type: string }, description: A tracked USDC/NOCK concentrated position whose pool and tick spacing the ladder uses }
+        - { name: tick_spacing, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 32767 }, description: A spacing the caller states, instead of position_id }
+        - { name: grid_to_pct, in: query, required: false, schema: { type: number, minimum: -95, maximum: -1, default: -40 } }
+        - { name: grid_step_pct, in: query, required: false, schema: { type: number, minimum: 0.5, maximum: 20, default: 5 }, description: At most 60 rows }
+      responses:
+        '200':
+          description: The simulation. Amounts are strings; a figure that cannot be stated is null with a stated reason.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LadderSimulation'
+        '400':
+          description: INVALID_PARAMETER (an unknown parameter, a missing or non-finite number, low >= high, both low and low_pct, a closed or untracked position_id, ...)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LadderError' }
+        '422':
+          description: LADDER_NOT_SIMULATED; `code` is NOCK_TOO_LITTLE, NOCK_TOO_MUCH, USDC_EXCEEDS_WALLET, RANGE_ABOVE_SPOT, RANGE_TOO_NARROW, RANGE_OUTSIDE_TICKS (an unsnapped bound past MIN_TICK or MAX_TICK, a range that cannot exist), POOL_NOT_SNAPPABLE or SPOT_UNAVAILABLE. A NOCK mismatch carries nock_needed (a measured figure) and the bounds.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LadderError' }
+        '503':
+          description: NO_SNAPSHOT, with the last ingestion error as detail
+
   /execute/record-harvest:
     post:
       tags: [Execution]
@@ -974,6 +1036,156 @@ components:
         state: { type: string, enum: [offered, dismissed] }
         changed: { type: boolean, description: "False when the swap was already in that state" }
         note: { type: string }
+
+    LadderError:
+      type: object
+      required: [error, detail]
+      properties:
+        error: { type: string, enum: [INVALID_PARAMETER, LADDER_NOT_SIMULATED] }
+        code:
+          type: string
+          enum: [NOCK_TOO_LITTLE, NOCK_TOO_MUCH, USDC_EXCEEDS_WALLET, RANGE_ABOVE_SPOT, RANGE_TOO_NARROW, RANGE_OUTSIDE_TICKS, POOL_NOT_SNAPPABLE, SPOT_UNAVAILABLE]
+        detail: { type: string }
+        nock_needed: { type: string, description: NOCK the range needs at the pool price for this USDC, 4 dp }
+        bounds: { $ref: '#/components/schemas/LadderBounds' }
+
+    LadderBounds:
+      type: object
+      properties:
+        low_usd: { type: string }
+        high_usd: { type: string }
+        low_pct: { type: string, description: Percent of the pool price, signed }
+        high_pct: { type: string }
+        tick_lower: { type: integer, nullable: true, description: Null when unsnapped }
+        tick_upper: { type: integer, nullable: true }
+        high_rule: { type: string, description: 'the nearest usable tick | the usable tick at or below the pool price (high = spot) | unsnapped' }
+
+    LadderGridRow:
+      type: object
+      properties:
+        price_usd: { type: string, description: Spot moved by this row's percentage }
+        pool_price_usd: { type: string, description: The ladder pool's price moved by the same percentage }
+        pct_of_spot: { type: string }
+        ladder_nock: { type: string }
+        ladder_nock_acquired: { type: string, description: ladder_nock less the NOCK it holds at spot; negative above spot (sold) }
+        ladder_usdc: { type: string }
+        existing_nock_lp_usdc: { type: string, nullable: true }
+        existing_nock_lp_nock: { type: string, nullable: true }
+        stable_usdc: { type: string, nullable: true, description: Wallet USDC less the ladder's, plus the ladder's and the existing NOCK ranges' USDC }
+        reserve_headroom_usdc: { type: string, nullable: true, description: Null with no valid reserve }
+        total_tracked_nock: { type: string, nullable: true, description: Wallet NOCK less the ladder's, plus the ladder's, the existing ranges' and uncollected NOCK fees }
+        markers: { type: array, items: { type: string, enum: [spot, top, bottom] } }
+
+    LadderSimulation:
+      type: object
+      required: [snapshot, inputs, pool, bounds, sizing, grid, bottom, top, reserve_check, floor_check, assumptions, statement]
+      properties:
+        snapshot:
+          type: object
+          description: The stored snapshot it was worked from, its age and the worker's health
+          properties:
+            snapshot_id: { type: string }
+            generated_at: { type: string, format: date-time }
+            version: { type: string }
+            age_seconds: { type: integer }
+            age_minutes: { type: integer }
+            worker_health: { type: string, enum: [ok, degraded, starting] }
+            spot_usd: { type: string, description: From the price-source pool's sqrtPriceX96, 8 dp }
+            spot_source: { type: string }
+        inputs: { type: object, description: The inputs as given, with the grid depth and step used }
+        pool:
+          type: object
+          properties:
+            position_id: { type: string, nullable: true }
+            label: { type: string }
+            pool_price_usd: { type: string }
+            pool_price_vs_spot_pct: { type: string }
+            tick_spacing: { type: integer, nullable: true }
+            spacing_source: { type: string, nullable: true, enum: [position, caller] }
+            snapped: { type: boolean }
+            note: { type: string }
+        bounds: { $ref: '#/components/schemas/LadderBounds' }
+        top_neighbours:
+          type: array
+          nullable: true
+          description: The usable tick at or below the pool price and the one above it, each with the NOCK this USDC would need with that top; null when unsnapped (top_neighbours_reason)
+          items:
+            type: object
+            properties:
+              tick: { type: integer }
+              price_usd: { type: string }
+              pct_of_spot: { type: string }
+              nock_needed: { type: string, nullable: true }
+              fits_budget: { type: boolean, nullable: true }
+              selected: { type: boolean }
+        top_neighbours_reason: { type: string, nullable: true }
+        sizing:
+          type: object
+          properties:
+            liquidity_raw: { type: string }
+            liquidity_human: { type: string }
+            usdc_at_spot: { type: string }
+            nock_needed_at_spot: { type: string }
+            nock_given: { type: string, nullable: true }
+            nock_check: { type: string, enum: [not_given, matches] }
+        grid: { type: array, items: { $ref: '#/components/schemas/LadderGridRow' } }
+        bottom:
+          type: object
+          properties:
+            price_usd: { type: string }
+            pct_of_spot: { type: string }
+            nock_held: { type: string }
+            nock_bought: { type: string }
+            avg_buy_price_usd: { type: string, nullable: true, description: 'usdc / nock_bought: the geometric mean sqrt(low x min(pool price, high))' }
+        top:
+          type: object
+          properties:
+            price_usd: { type: string }
+            pct_of_spot: { type: string }
+            multiple_of_spot: { type: string }
+            usdc_held: { type: string }
+            out_of_range_above_now: { type: boolean }
+            avg_sell_price_usd: { type: string, nullable: true }
+        reserve_check:
+          type: object
+          properties:
+            status: { type: string, enum: [holds, breached, not_configured, invalid, unknown] }
+            gate: { type: string }
+            cash_reserve_usdc: { type: string, nullable: true }
+            stable_at_spot_usdc: { type: string, nullable: true }
+            headroom_at_spot_usdc: { type: string, nullable: true }
+            existing_ranges_usdc_at_bottom: { type: string, nullable: true }
+            stable_at_bottom_usdc: { type: string, nullable: true }
+            margin_usdc: { type: string, nullable: true }
+            max_usdc_for_this_range: { type: string, nullable: true, description: The most USDC this range takes with the stable balance at its bottom still at the reserve (whole cents, at most wallet USDC) }
+            at_top: { type: object, description: 'Out of range above: the ladder is all USDC (read at spot when the top is at or below it)' }
+            existing_ranges_below_bottom: { type: object, nullable: true, description: The grid's lowest row below the bottom; a measurement, not the gate }
+            existing_ranges_below_bottom_reason: { type: string, nullable: true }
+            accumulation_plan_unspent: { type: object, nullable: true, description: Stated, not a gate }
+            accumulation_plan_unspent_reason: { type: string, nullable: true }
+            tax_reserve_usd: { type: object, nullable: true, description: Stated, not a gate }
+            reason: { type: string, nullable: true }
+        floor_check:
+          type: object
+          properties:
+            status: { type: string, enum: [fits, exceeds, unknown] }
+            lp_nock_budget: { type: string, nullable: true, description: Signed }
+            budget_note: { type: string, nullable: true }
+            nock_needed: { type: string }
+            rebuild_suggested_nock: { type: string }
+            rebuild_note: { type: string }
+            max_usdc_within_budget: { type: string, nullable: true }
+            floor_breach_effect:
+              type: object
+              properties:
+                status: { type: string, enum: [none, lowers, raises, unchanged, changes, no_floor, unknown] }
+                before: { type: object, nullable: true, description: "floor_breach status, crossing, tolerated, reason and nock_now (tracked NOCK at spot; equal before and after: the ladder's NOCK moves from the wallet into the range)" }
+                after: { type: object, nullable: true }
+                reason: { type: string }
+                assumption: { type: string, nullable: true }
+            reason: { type: string, nullable: true }
+        assumptions: { type: array, items: { type: string } }
+        statement: { type: string }
 
     ClaimFeesPayload:
       type: object

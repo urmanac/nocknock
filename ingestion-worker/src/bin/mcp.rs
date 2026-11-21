@@ -22,6 +22,10 @@ mod cost_basis_text;
 // The floor-crossing price line (issue #165), shared with the worker's mcp_text.
 #[path = "../floor_breach_text.rs"]
 mod floor_breach_text;
+// The ladder simulator (issue #166): its text, its tools/list entry and its arguments,
+// one file for both transports.
+#[path = "../ladder_text.rs"]
+mod ladder_text;
 
 /// Worker base URL when NOCKNOCK_API_URL is unset. Point the variable at a remote
 /// deployment (e.g. `http://chudmax:8081`) to read it instead of a local worker.
@@ -135,7 +139,8 @@ async fn main() -> Result<()> {
                                     "properties": {},
                                     "required": []
                                 }
-                            }
+                            },
+                            ladder_text::simulate_ladder_tool()
                         ]
                     }
                 });
@@ -149,8 +154,9 @@ async fn main() -> Result<()> {
                     .and_then(|n| n.as_str())
                     .unwrap_or_default();
 
-                let result_text = handle_tool_call(&client, tool_name).await;
-                let resp = json!({
+                let args = req.get("params").and_then(|p| p.get("arguments"));
+                let (result_text, is_error) = handle_tool_call(&client, tool_name, args).await;
+                let mut resp = json!({
                     "jsonrpc": "2.0",
                     "id": id,
                     "result": {
@@ -162,6 +168,9 @@ async fn main() -> Result<()> {
                         ]
                     }
                 });
+                if is_error {
+                    resp["result"]["isError"] = json!(true);
+                }
                 writeln!(handle, "{}", resp)?;
                 handle.flush()?;
             }
@@ -185,9 +194,9 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn handle_tool_call(client: &Client, tool_name: &str) -> String {
-    // 1. Try local Tier 1 HTTP MCP endpoint first
-    let mcp_payload = json!({
+/// The /v1/mcp request for one tool call: the tool's `arguments` are forwarded (#166). Pure.
+fn forwarded_call(tool_name: &str, args: Option<&Value>) -> Value {
+    let mut payload = json!({
         "jsonrpc": "2.0",
         "id": 1,
         "method": "tools/call",
@@ -195,14 +204,65 @@ async fn handle_tool_call(client: &Client, tool_name: &str) -> String {
             "name": tool_name
         }
     });
+    if let Some(a) = args.filter(|a| !a.is_null()) {
+        payload["params"]["arguments"] = a.clone();
+    }
+    payload
+}
+
+/// The text and isError of a /v1/mcp answer, or None when it carries no text. Pure.
+fn forwarded_result(mcp_val: &Value) -> Option<(String, bool)> {
+    let text = mcp_val.pointer("/result/content/0/text").and_then(|t| t.as_str())?;
+    let is_error = mcp_val.pointer("/result/isError").and_then(|v| v.as_bool()).unwrap_or(false);
+    Some((text.to_string(), is_error))
+}
+
+/// The ladder's fallback text from a GET /v1/simulate/ladder answer (#166): the worker's
+/// own simulation, formatted by the same file; never a local computation. None when the
+/// answer is not one of the endpoint's own. Pure.
+fn ladder_fallback_text(status: u16, body: &Value) -> Option<(String, bool)> {
+    match status {
+        200 => Some((ladder_text::ladder_text(body), false)),
+        400 | 422 => Some((ladder_text::ladder_error_text(body), true)),
+        503 => no_snapshot_text(body).map(|t| (t, true)),
+        _ => None,
+    }
+}
+
+async fn handle_tool_call(client: &Client, tool_name: &str, args: Option<&Value>) -> (String, bool) {
+    // 1. Try local Tier 1 HTTP MCP endpoint first
+    let mcp_payload = forwarded_call(tool_name, args);
     if let Ok(resp) = client.post(format!("{}/v1/mcp", api_base())).json(&mcp_payload).timeout(Duration::from_secs(2)).send().await {
         if resp.status().is_success() {
             if let Ok(mcp_val) = resp.json::<Value>().await {
-                if let Some(text) = mcp_val.pointer("/result/content/0/text").and_then(|t| t.as_str()) {
-                    return text.to_string();
+                if let Some(answer) = forwarded_result(&mcp_val) {
+                    return answer;
                 }
             }
         }
+    }
+
+    // The ladder's fallback is the worker's own GET endpoint (#166).
+    if tool_name == "simulate_ladder" {
+        let query = match ladder_text::ladder_query_from_args(args) {
+            Ok(q) => q,
+            Err(body) => return (ladder_text::ladder_error_text(&body), true),
+        };
+        if let Ok(resp) = client
+            .get(format!("{}/v1/simulate/ladder", api_base()))
+            .query(&query)
+            .timeout(Duration::from_secs(2))
+            .send()
+            .await
+        {
+            let status = resp.status().as_u16();
+            if let Ok(body) = resp.json::<Value>().await {
+                if let Some(answer) = ladder_fallback_text(status, &body) {
+                    return answer;
+                }
+            }
+        }
+        return (zero_db_fallback_text(tool_name, &api_base()), true);
     }
 
     // Fallback: try snapshot API
@@ -216,20 +276,20 @@ async fn handle_tool_call(client: &Client, tool_name: &str) -> String {
                         "get_shot_advice" => format_shot_advice(data),
                         "simulate_claim_fees" => format_claim_simulation(data),
                         "get_accumulation_plan" => format_accumulation_plan(data),
-                        _ => return format!("Unknown tool: {tool_name}"),
+                        _ => return (format!("Unknown tool: {tool_name}"), false),
                     };
                     let health = worker_health(client).await;
-                    return format!("{body}\n{}", snapshot_source_line(&snap, health.as_deref()));
+                    return (format!("{body}\n{}", snapshot_source_line(&snap, health.as_deref())), false);
                 }
             } else if let Some(text) = no_snapshot_text(&snap) {
                 // The worker is up but has no snapshot yet: report its stated cause.
-                return text;
+                return (text, false);
             }
         }
     }
 
     // 2. Worker unreachable: report that, and nothing NockNock has not read through it.
-    zero_db_fallback_text(tool_name, &api_base())
+    (zero_db_fallback_text(tool_name, &api_base()), false)
 }
 
 /// The worker's /health verdict ("ok", "degraded", "starting"), if it answers.
@@ -450,6 +510,7 @@ fn zero_db_fallback_text(tool_name: &str, api_base: &str) -> String {
         "get_shot_advice" => "🎯 Tactical Shot Advice Engine (worker unreachable)",
         "simulate_claim_fees" => "⚡ Fee Claim Simulation (worker unreachable)",
         "get_accumulation_plan" => "🪜 Accumulation Plan (worker unreachable)",
+        "simulate_ladder" => "🧮 Ladder Simulation (worker unreachable)",
         _ => return format!("Unknown tool: {tool_name}"),
     };
     format!(
@@ -711,6 +772,10 @@ mod tests_closed;
 mod tests_gas_lp;
 
 // The floor-crossing price line (issue #165), against the worker's golden text.
+#[cfg(test)]
+#[path = "../mcp_bin_tests_ladder.rs"]
+mod tests_ladder;
+
 #[cfg(test)]
 #[path = "../mcp_bin_tests_floor_breach.rs"]
 mod tests_floor_breach;

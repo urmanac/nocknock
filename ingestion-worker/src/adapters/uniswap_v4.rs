@@ -26,17 +26,28 @@ fn v4_pool_config(pos: &PositionConfig) -> Result<(String, String, String)> {
     Ok((pool_id, currency0, currency1))
 }
 
+/// The fee tier and tick spacing of a recorded poolKeys answer (#166): word 2 is the fee
+/// in hundredths of a basis point, word 3 the int24 tickSpacing. The spacing is None when
+/// the answer is too short to carry it or it is not a positive integer: unknown, never a
+/// spacing guessed from the fee tier. Pure.
+pub(crate) fn v4_pool_key_fee_and_spacing(clean: &str) -> (u32, Option<i32>) {
+    let fee = clean.get(128..192).and_then(|w| parse_hex_word_u128(w).ok()).unwrap_or(0) as u64;
+    let spacing = clean.get(192..256).and_then(|w| parse_hex_word_i32(w).ok()).filter(|s| *s > 0);
+    ((fee / 100) as u32, spacing)
+}
+
 /// poolKeys(bytes25) -> (currency0, currency1, fee, tickSpacing, hooks): validates the
-/// config's declared currency ordering and supplies the fee tier in basis points. It is
-/// a read of the pool key, not of the NFT.
-async fn fetch_v4_pool_fee_bps(
+/// config's declared currency ordering and supplies the fee tier in basis points and the
+/// pool's tick spacing (#166; None when not read). It is a read of the pool key, not of
+/// the NFT.
+async fn fetch_v4_pool_key(
     http_client: &Client,
     alchemy_url: &str,
     pos: &PositionConfig,
     pool_id: &str,
     currency0: &str,
     currency1: &str,
-) -> Result<u32> {
+) -> Result<(u32, Option<i32>)> {
     let pk_payload = json!({
         "jsonrpc": "2.0",
         "method": "eth_call",
@@ -47,13 +58,13 @@ async fn fetch_v4_pool_fee_bps(
         "id": 50
     });
     let mut fee_tier_bps = 0u32;
+    let mut tick_spacing: Option<i32> = None;
     if let Some(res_json) = post_rpc_with_retry(http_client, alchemy_url, &pk_payload, 2).await {
         if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
             let clean = hex_str.trim_start_matches("0x");
             if clean.len() >= 160 {
                 let c0 = clean[24..64].to_lowercase();
                 let c1 = clean[88..128].to_lowercase();
-                let fee = parse_hex_word_u128(&clean[128..192]).unwrap_or(0) as u64;
                 if c0 != currency0 || c1 != currency1 {
                     return Err(anyhow::anyhow!(
                         "position {}: poolKeys currency ordering (0x{}, 0x{}) does not match config ({}, {}); re-run discovery",
@@ -64,7 +75,8 @@ async fn fetch_v4_pool_fee_bps(
                         pos.currency1.as_deref().unwrap_or("")
                     ));
                 }
-                fee_tier_bps = (fee / 100) as u32; // fee is in hundredths of a basis point
+                // fee is in hundredths of a basis point
+                (fee_tier_bps, tick_spacing) = v4_pool_key_fee_and_spacing(clean);
             }
         }
     }
@@ -74,7 +86,7 @@ async fn fetch_v4_pool_fee_bps(
             pos.id
         ));
     }
-    Ok(fee_tier_bps)
+    Ok((fee_tier_bps, tick_spacing))
 }
 
 /// StateView getSlot0(bytes32) -> (sqrtPriceX96, tick, ...). A read of the pool.
@@ -115,7 +127,8 @@ pub(crate) async fn fetch_v4_closed_price_pool(
     wallet: &str,
 ) -> Result<ClosedPricePool> {
     let (pool_id, currency0, currency1) = v4_pool_config(pos)?;
-    let fee_tier_bps = fetch_v4_pool_fee_bps(http_client, alchemy_url, pos, &pool_id, &currency0, &currency1).await?;
+    // The spacing is not needed for a price read.
+    let (fee_tier_bps, _) = fetch_v4_pool_key(http_client, alchemy_url, pos, &pool_id, &currency0, &currency1).await?;
     let (sqrt_price_x96, tick) = fetch_v4_slot0(http_client, alchemy_url, &pos.id, &pool_id).await?;
     Ok(ClosedPricePool(RawPosition {
         position_id: position_key(pos),
@@ -149,7 +162,7 @@ pub(crate) async fn fetch_v4_position(
     pos: &PositionConfig,
     wallet: &str,
     clock: ProofClock,
-) -> Result<PositionRead<RawPosition>> {
+) -> Result<PositionRead<(RawPosition, PositionFacts)>> {
     let (pool_id, currency0, currency1) = v4_pool_config(pos)?;
     let tick_lower = pos
         .tick_lower
@@ -159,8 +172,10 @@ pub(crate) async fn fetch_v4_position(
         .ok_or_else(|| anyhow::anyhow!("position {} missing tick_upper in config", pos.id))?;
 
     // 0. poolKeys(bytes25) -> (currency0, currency1, fee, tickSpacing, hooks);
-    //    validates the config's declared currency ordering and supplies the fee tier.
-    let fee_tier_bps = fetch_v4_pool_fee_bps(http_client, alchemy_url, pos, &pool_id, &currency0, &currency1).await?;
+    //    validates the config's declared currency ordering and supplies the fee tier
+    //    and the pool's tick spacing (#166), from the same answer.
+    let (fee_tier_bps, tick_spacing) =
+        fetch_v4_pool_key(http_client, alchemy_url, pos, &pool_id, &currency0, &currency1).await?;
 
     // 1. getPositionLiquidity(uint256)
     let liq_payload = json!({
@@ -318,7 +333,8 @@ pub(crate) async fn fetch_v4_position(
         pos.id, pos.nft_id, liquidity, tick, tick_lower <= tick && tick <= tick_upper, fee0_raw, fee1_raw
     );
 
-    Ok(PositionRead::Live(RawPosition {
+    let facts = PositionFacts { tick_spacing, ..Default::default() };
+    Ok(PositionRead::Live((RawPosition {
         position_id: format!("uniswap-v4:{}:{}", pos.network, pos.nft_id),
         network: pos.network.clone(),
         protocol: "uniswap-v4".to_string(),
@@ -340,5 +356,5 @@ pub(crate) async fn fetch_v4_position(
         fee1: fee1_raw as f64 / dec1,
         in_range: tick_lower <= tick && tick <= tick_upper,
         is_price_source: pos.is_price_source,
-    }))
+    }, facts)))
 }

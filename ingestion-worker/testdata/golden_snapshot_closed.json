@@ -179,6 +179,9 @@
           "eth_price_usd": "1820.59",
           "gas_to_fee_delta_usd": "1.97",
           "high_water_mark_usd": "2991.44",
+          "lp_floor_tolerance_bps": 0,
+          "lp_nock_budget": "-8642.1797",
+          "lp_nock_budget_note": "none: wallet NOCK is 8642 below the 100000 NOCK floor",
           "nock_floor_delta": "7115",
           "nock_floor_target": "100000",
           "regime": "unknown",
@@ -471,6 +474,7 @@
           "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
           "position_id": "uniswap-v4:base:3163450",
           "protocol": "uniswap-v4",
+          "tick_spacing": 300,
           "token0": {
             "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
             "decimals": 6,
@@ -608,7 +612,7 @@
         }
       ]
     },
-    "state_hash": "cd5e3951bc6fa87d4d4109279f58a31ffcc71002a3c3bbe40885fbb06c79bef3"
+    "state_hash": "19849d82507f89c583702282fe2c812ce1bbfdb25cd2a9d12ea9c1016493b90d"
   },
   "v4_price_source_closed_block_58646285": {
     "mcp_text": {
@@ -766,6 +770,9 @@
           "eth_price_usd": "1820.59",
           "gas_to_fee_delta_usd": "1.97",
           "high_water_mark_usd": "2750.23",
+          "lp_floor_tolerance_bps": 0,
+          "lp_nock_budget": "-8642.1797",
+          "lp_nock_budget_note": "none: wallet NOCK is 8642 below the 100000 NOCK floor",
           "nock_floor_delta": "-999",
           "nock_floor_target": "100000",
           "regime": "unknown",
@@ -1114,6 +1121,6 @@
         }
       ]
     },
-    "state_hash": "f42e6671aa467b53b94e5343efc48c89c677c423df724875f8e16dbc8b88f84f"
+    "state_hash": "ccbae0d5352bec30527f8cdf6ef2efcfc5ca3193a5dcd990f55bb519ae01181e"
   }
 }

@@ -127,7 +127,10 @@ pub(crate) async fn mcp_http_handler(
                             "properties": {},
                             "required": []
                         }
-                    }
+                    },
+                    // The first tool that takes arguments (#166); one definition for both
+                    // transports, in ladder_text.rs.
+                    ladder_text::simulate_ladder_tool()
                 ]
             }
         }),
@@ -142,6 +145,29 @@ pub(crate) async fn mcp_http_handler(
             let latest: Option<SnapshotEnvelope> = state.latest_snapshot.lock().await.clone();
             let last_error: Option<String> =
                 state.last_ingest_error.lock().ok().and_then(|slot| slot.clone()).map(|(_, e)| e);
+            // The ladder simulator (#166) takes arguments, reads the same in-memory
+            // snapshot, carries its own source line and reports isError.
+            if tool_name == "simulate_ladder" {
+                let args = payload.get("params").and_then(|p| p.get("arguments"));
+                let (text, is_error) = match &latest {
+                    Some(env) => {
+                        let now = Utc::now();
+                        let lag = now.signed_duration_since(env.meta.generated_at).num_seconds().max(0);
+                        let health = health_status(true, lag, state.config.sync_window_seconds as i64, last_error.is_some());
+                        simulate_ladder_mcp(args, env, now, health)
+                    }
+                    None => (no_snapshot_mcp_text(last_error.as_deref()), true),
+                };
+                let response = json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {
+                        "content": [{ "type": "text", "text": text }],
+                        "isError": is_error
+                    }
+                });
+                return (StatusCode::OK, Json(response));
+            }
             let result_text = if let Some(ref env) = latest {
                 let data_val = serde_json::to_value(&env.data).unwrap_or_default();
                 let body = match tool_name {

@@ -134,6 +134,9 @@
           "eth_price_usd": "1811.33",
           "gas_to_fee_delta_usd": "-0.01",
           "high_water_mark_usd": "2217.50",
+          "lp_floor_tolerance_bps": 0,
+          "lp_nock_budget": "-6203.5414",
+          "lp_nock_budget_note": "none: wallet NOCK is 6204 below the 100000 NOCK floor",
           "nock_floor_delta": "3433",
           "nock_floor_target": "100000",
           "regime": "unknown",
@@ -512,7 +515,7 @@
         }
       ]
     },
-    "state_hash": "fece22672d0a8267c0b6afddf3112cc9d572ee04574c6d703b178160a60fdf62"
+    "state_hash": "c1d90d161f6083bfb218fa2c6be93f7b53ec0032759393f1159d52286d9b6bd2"
   },
   "aero_unclaimed_block_58077673": {
     "mcp_text": {
@@ -649,6 +652,9 @@
           "eth_price_usd": "1811.33",
           "gas_to_fee_delta_usd": "-0.01",
           "high_water_mark_usd": "2216.93",
+          "lp_floor_tolerance_bps": 0,
+          "lp_nock_budget": "-6203.5414",
+          "lp_nock_budget_note": "none: wallet NOCK is 6204 below the 100000 NOCK floor",
           "nock_floor_delta": "3433",
           "nock_floor_target": "100000",
           "regime": "unknown",
@@ -1027,6 +1033,6 @@
         }
       ]
     },
-    "state_hash": "2da5da7eb91ebacc3831a9d97c66ed9400c1ebe71ec52d92d19a79eb9f1d322e"
+    "state_hash": "b6c9c8cd8c21022ce323eded759bbd460a4043fd7e5938a2bf0712de0420a4aa"
   }
 }

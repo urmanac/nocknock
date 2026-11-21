@@ -59,35 +59,7 @@ pub(crate) async fn get_latest_snapshot_handler(
     headers: HeaderMap,
 ) -> impl IntoResponse {
     let mut latest = state.latest_snapshot.lock().await;
-
-    if latest.is_none() {
-        use sqlx::Row;
-        if let Ok(Some(r)) = sqlx::query(
-            "SELECT snapshot_id, generated_at, state_hash, version, data FROM snapshots ORDER BY generated_at DESC LIMIT 1"
-        ).fetch_optional(&state.db).await {
-            if let (Ok(sid), Ok(gen), Ok(sh), Ok(ver), Ok(dv)) = (
-                r.try_get::<uuid::Uuid, _>("snapshot_id"),
-                r.try_get::<DateTime<Utc>, _>("generated_at"),
-                r.try_get::<String, _>("state_hash"),
-                r.try_get::<String, _>("version"),
-                r.try_get::<serde_json::Value, _>("data"),
-            ) {
-                if let Ok(mut data) = serde_json::from_value::<SnapshotData>(dv) {
-                    // Stored quotes are not current ones (issue #115).
-                    forget_stored_route_quotes(&mut data);
-                    *latest = Some(SnapshotEnvelope {
-                        meta: SnapshotMeta {
-                            generated_at: gen,
-                            state_hash: sh,
-                            version: ver,
-                            snapshot_id: sid,
-                        },
-                        data,
-                    });
-                }
-            }
-        }
-    }
+    load_latest_snapshot_if_empty(&mut latest, &state.db).await;
 
     if let Some(envelope) = &*latest {
         // Check If-None-Match for 304
@@ -119,6 +91,40 @@ pub(crate) async fn get_latest_snapshot_handler(
             HeaderMap::new(),
             Json(no_snapshot_body(last_error.as_ref().map(|(_, e)| e.as_str()))),
         )
+    }
+}
+
+/// Fill the in-memory latest snapshot from the database when it is empty (a worker that
+/// restarted and has not finished a cycle). The one load /v1/snapshot/latest and
+/// /v1/simulate/ladder (#166) share; the MCP tools read memory only, as before.
+pub(crate) async fn load_latest_snapshot_if_empty(latest: &mut Option<SnapshotEnvelope>, db: &PgPool) {
+    if latest.is_none() {
+        use sqlx::Row;
+        if let Ok(Some(r)) = sqlx::query(
+            "SELECT snapshot_id, generated_at, state_hash, version, data FROM snapshots ORDER BY generated_at DESC LIMIT 1"
+        ).fetch_optional(db).await {
+            if let (Ok(sid), Ok(gen), Ok(sh), Ok(ver), Ok(dv)) = (
+                r.try_get::<uuid::Uuid, _>("snapshot_id"),
+                r.try_get::<DateTime<Utc>, _>("generated_at"),
+                r.try_get::<String, _>("state_hash"),
+                r.try_get::<String, _>("version"),
+                r.try_get::<serde_json::Value, _>("data"),
+            ) {
+                if let Ok(mut data) = serde_json::from_value::<SnapshotData>(dv) {
+                    // Stored quotes are not current ones (issue #115).
+                    forget_stored_route_quotes(&mut data);
+                    *latest = Some(SnapshotEnvelope {
+                        meta: SnapshotMeta {
+                            generated_at: gen,
+                            state_hash: sh,
+                            version: ver,
+                            snapshot_id: sid,
+                        },
+                        data,
+                    });
+                }
+            }
+        }
     }
 }
 
@@ -487,6 +493,12 @@ pub(crate) fn api_router(state: Arc<AppState>) -> axum::Router {
         .route(
             "/v1/cost-basis/series",
             axum::routing::get(cost_basis_series_handler),
+        )
+        // Read-only what-if over the stored snapshot (#166): a GET, so the cross-site
+        // guard lets it through, and the route has no write method to refuse.
+        .route(
+            "/v1/simulate/ladder",
+            axum::routing::get(simulate_ladder_handler),
         )
         .layer(axum::middleware::from_fn(refuse_cross_site_writes))
         .layer(Extension(state))

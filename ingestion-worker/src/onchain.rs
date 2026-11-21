@@ -172,7 +172,16 @@ pub(crate) async fn fetch_raw_data_from(
     for pos in &config.positions {
         let read: PositionRead<RawPosition> = match Protocol::parse(&pos.protocol) {
             Some(Protocol::UniswapV4) => {
-                fetch_v4_position(http_client, alchemy_url, pos, wallet_addr, proof_clock).await?
+                // The pool's tick spacing (#166) travels as a position fact, like Aero CL's.
+                match fetch_v4_position(http_client, alchemy_url, pos, wallet_addr, proof_clock).await? {
+                    PositionRead::Live((raw, facts)) => {
+                        if facts != PositionFacts::default() {
+                            position_facts.insert(raw.position_id.clone(), facts);
+                        }
+                        PositionRead::Live(raw)
+                    }
+                    PositionRead::Closed(proof) => PositionRead::Closed(proof),
+                }
             }
             Some(Protocol::UniswapV3) => {
                 fetch_v3_position(http_client, alchemy_url, pos, wallet_addr, proof_clock).await?

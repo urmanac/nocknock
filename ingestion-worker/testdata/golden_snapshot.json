@@ -111,6 +111,9 @@
           "eth_price_usd": "2373.14",
           "gas_to_fee_delta_usd": "-0.01",
           "high_water_mark_usd": "2886.53",
+          "lp_floor_tolerance_bps": 0,
+          "lp_nock_budget": "110648.0751",
+          "lp_nock_budget_note": "no treasury_floor_nock is set: the budget is the wallet's NOCK",
           "nock_floor_delta": "122052",
           "nock_floor_target": "0",
           "regime": "unknown",
@@ -548,7 +551,7 @@
         }
       ]
     },
-    "state_hash": "de02468e1682b52c90fa1dfa330cb99b564b2b7d569c516cf03058d9dfd89993"
+    "state_hash": "2ebaccecbd2e1c2db10d88a81da1d9245c0a842d148ec0f30b9c46b465772dd1"
   },
   "from_zero": {
     "mcp_text": {
@@ -600,6 +603,9 @@
           "eth_price_usd": "3000.00",
           "gas_to_fee_delta_usd": "-0.01",
           "high_water_mark_usd": "500.00",
+          "lp_floor_tolerance_bps": 0,
+          "lp_nock_budget": "0.0000",
+          "lp_nock_budget_note": "no treasury_floor_nock is set: the budget is the wallet's NOCK",
           "nock_floor_delta": "0",
           "nock_floor_target": "0",
           "regime": "unknown",
@@ -732,7 +738,7 @@
         }
       ]
     },
-    "state_hash": "b09610159e4573a30a11d11776889f8637bdc8cd8075fb56dbba66ee58565f5e"
+    "state_hash": "d1662d2e36bf6ce392c814a9501342d8598903203b0e989d79b611b148752f91"
   },
   "whole_book_plan_due": {
     "mcp_text": {
@@ -939,6 +945,8 @@
           "eth_price_usd": "2373.14",
           "gas_to_fee_delta_usd": "0.74",
           "high_water_mark_usd": "2822.68",
+          "lp_floor_tolerance_bps": 0,
+          "lp_nock_budget": "15747.8001",
           "nock_floor_delta": "18957",
           "nock_floor_target": "100000",
           "regime": "normal",
@@ -1567,6 +1575,6 @@
         }
       ]
     },
-    "state_hash": "7854055c682fa2f07a716661c9c5ed66f1e0411a92cf7de3ae4f4504474e2b66"
+    "state_hash": "3008f3c73846e9989249757b9420f66ff5b8609ae4dcb1b9dd95b8abe3efc2e1"
   }
 }
