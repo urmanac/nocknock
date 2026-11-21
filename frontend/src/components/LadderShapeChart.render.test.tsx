@@ -160,3 +160,10 @@ describe('compact ladder rows never overflow (#169)', () => {
     expect(html).toMatch(/<section style="[^"]*overflow-wrap:anywhere[^"]*" data-testid="ladders-lite"/);
   });
 });
+
+describe('the ladder shape on a wide screen (v0.9.1)', () => {
+  it('stops growing at 1.25x its drawn width, so its text keeps a readable size', () => {
+    const html = renderToStaticMarkup(<LadderShapeChart data={live} />);
+    expect(html).toMatch(/data-testid="ladder-shape-svg"[^>]*max-width:800px/);
+  });
+});

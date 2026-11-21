@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-21
+
+A display patch for v0.9.0's ladder cards and the ladder shape chart.
+
+### Fixed
+
+- **Position cards no longer run into each other.** A card's badge rows now wrap, and a
+  card can no longer grow past its grid column, so "LADDER · CAP" and "● LADDER ABOVE
+  RANGE (ALL USDC)" stay inside their card at any width.
+- **The ladder shape chart keeps a readable size on a wide screen.** It scaled with the
+  window, so its labels grew to about three times their size; it now stops at 800 px wide.
+
+No worker, protocol, snapshot or database change: v0.9.1 runs on a v0.9.0 database and the
+reverse.
+
 ## [0.9.0] - 2026-11-21
 
 The ladder track: NockNock now measures, suggests, tracks and maintains a mostly-USDC

@@ -1113,9 +1113,14 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid #30363d',
     borderRadius: 10,
     padding: 14,
+    // A grid child defaults to min-width: auto, so one long badge widened the card past
+    // its column into the next card (v0.9.1). Text that cannot fit wraps inside it.
+    minWidth: 0,
+    overflowWrap: 'anywhere' as const,
   },
   positionCardTop: {
     display: 'flex',
+    flexWrap: 'wrap' as const,
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 8,
@@ -1129,9 +1134,11 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 999,
     padding: '3px 8px',
     whiteSpace: 'nowrap' as const,
+    maxWidth: '100%',
   },
   positionCardMid: {
     display: 'flex',
+    flexWrap: 'wrap' as const,
     alignItems: 'baseline',
     justifyContent: 'space-between',
     marginBottom: 6,
@@ -1144,7 +1151,10 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 1,
     borderRadius: 999,
     padding: '3px 8px',
-    whiteSpace: 'nowrap' as const,
+    // The longest ladder pill ("● LADDER IN RANGE (CONVERTS BOTH WAYS)") is wider than a
+    // 280 px card: it wraps inside the card instead of running out of it (v0.9.1).
+    whiteSpace: 'normal' as const,
+    maxWidth: '100%',
   },
   positionCardMeta: { fontSize: '0.72rem', color: '#8b949e', lineHeight: 1.6 },
 };
