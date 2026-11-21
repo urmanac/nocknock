@@ -5,8 +5,11 @@
  * - LadderLiteCard: one muted line per ladder in the Lite cockpit.
  *
  * Both render nothing when the snapshot lists no ladder, so every other snapshot looks
- * exactly as it did. Facts only, no button: a ladder is measured, never steered, and its
- * maintenance (#169) is not here. The wording lives in ../ladderTrack.ts and is unit-tested.
+ * exactly as it did. Facts only, no button: a ladder is measured, never steered. Each rung
+ * carries its maintenance line (#169, derived_metrics.ladder_maintenance): the rule's
+ * status against the operator's restraint settings, quietly; a move or pull that every
+ * gate allows is also at the top of the page. The wording lives in ../ladderTrack.ts and
+ * ../events.ts and is unit-tested.
  */
 import type { CSSProperties } from 'react';
 import {
@@ -21,6 +24,7 @@ import {
   ladderStatus,
   laddersOf,
 } from '../ladderTrack';
+import { maintenanceFor, maintenanceLine, maintenanceOf } from '../events';
 
 const MUTED = '#8b949e';
 const TEXT = '#c9d1d9';
@@ -33,6 +37,7 @@ const TONE: Record<string, CSSProperties> = {
 
 export function LaddersCard({ data }: { data: any | null | undefined }) {
   const ladders = laddersOf(data);
+  const maintenance = maintenanceOf(data);
   if (ladders.length === 0) return null;
   return (
     <div
@@ -60,6 +65,14 @@ export function LaddersCard({ data }: { data: any | null | undefined }) {
             <div style={{ color: MUTED }}>{ladderCurveLine(r)}</div>
             <div style={since.verified ? undefined : { color: MUTED }}>{since.text}</div>
             <div style={{ color: MUTED }}>Uncollected fees: ${r.fees_usd}</div>
+            {(() => {
+              const m = maintenanceFor(maintenance, r.position_id);
+              return m ? (
+                <div data-testid="ladder-maintenance" style={{ color: m.status === 'suggested' ? '#fbbf24' : MUTED }}>
+                  {maintenanceLine(m)}
+                </div>
+              ) : null;
+            })()}
           </div>
         );
       })}
@@ -80,15 +93,20 @@ export function LadderLiteCard({
   subStyle?: CSSProperties;
 }) {
   const ladders = laddersOf(data);
+  const maintenance = maintenanceOf(data);
   if (ladders.length === 0) return null;
   return (
     <section style={cardStyle} data-testid="ladders-lite">
       <div style={labelStyle}>{LADDERS_TITLE}</div>
-      {ladders.map((r) => (
-        <div key={r.position_id} style={{ ...subStyle, marginBottom: 4, ...WRAP }}>
-          {ladderLiteLine(r)}
-        </div>
-      ))}
+      {ladders.map((r) => {
+        const m = maintenanceFor(maintenance, r.position_id);
+        return (
+          <div key={r.position_id} style={{ ...subStyle, marginBottom: 4, ...WRAP }}>
+            {ladderLiteLine(r)}
+            {m ? <div data-testid="ladder-maintenance-lite">{maintenanceLine(m)}</div> : null}
+          </div>
+        );
+      })}
     </section>
   );
 }

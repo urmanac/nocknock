@@ -19,6 +19,7 @@ import { LadderSuggestionLiteCard } from './LadderSuggestionCard';
 import { ladderSuggestionOf } from '../ladderSuggestion';
 import { FoundPositionsLiteCard } from './FoundPositions';
 import { positionDetectionOf } from '../foundPositions';
+import { TopOfPageLiteEvents } from './TopOfPage';
 
 const card: React.CSSProperties = {
   background: '#161b22',
@@ -94,6 +95,11 @@ export function LiteStatusCard() {
 
   return (
     <>
+      {/* The top of the page (#169): every top-tier call to action, above the directive,
+          so a push about one lands on its card. */}
+      {snapshot ? (
+        <TopOfPageLiteEvents data={snapshot.data} syncStatus={now?.syncStatus ?? freshness.syncStatus} cardStyle={card} labelStyle={label} />
+      ) : null}
       <section style={{ ...card, borderLeft: `3px solid ${color}` }}>
         <div style={label}>DIRECTIVE</div>
         <div style={{ fontSize: 16, fontWeight: 700, color: '#f0f6fc', lineHeight: 1.4, marginBottom: 6 }}>{view.action}</div>

@@ -51,6 +51,7 @@ import { LaddersCard } from './components/Ladders';
 import { isLadder, isNockLp, ladderCountClause, ladderReadingFor, laddersOf } from './ladderTrack';
 import { FloorBreachNote } from './components/FloorBreachNote.tsx';
 import { LadderSuggestionCard } from './components/LadderSuggestionCard';
+import { TopOfPageEvents } from './components/TopOfPage';
 import { ladderSuggestionOf } from './ladderSuggestion';
 import { FoundPositionsCard } from './components/FoundPositions';
 import { positionDetectionOf } from './foundPositions';
@@ -252,6 +253,10 @@ function Dashboard() {
           </div>
           </div>
         </div>
+
+        {/* The top of the page (#169): every top-tier call to action, first under the
+            title row. Quiet ones stay where they are below. No input. */}
+        <TopOfPageEvents data={rawData} syncStatus={freshness.syncStatus} />
 
         {/* The ladder suggestion (#168): the top-of-page ladder surface, under the title
             row and above the stat tiles. No input. */}
