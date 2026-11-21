@@ -103,7 +103,7 @@ pub(crate) async fn mcp_http_handler(
                     },
                     {
                         "name": "get_shot_advice",
-                        "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics, with uncollected LP fees, collectible AERO rewards and their total as separate labelled lines. The harvest rule counts LP fees only. Also states the ladder suggestion (#168): whether a NOCK ladder fits your bottom setting and standing reserve, its range, the most USDC the reserve allows and the deposit link (no amount prefilled), as a measurement shown only on a fresh snapshot.",
+                        "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics, with uncollected LP fees, collectible AERO rewards and their total as separate labelled lines. The harvest rule counts LP fees only. Also states the ladder suggestion (#168): whether a NOCK ladder fits your bottom setting and standing reserve, its range, the most USDC the reserve allows and the deposit link (no amount prefilled), as a measurement shown only on a fresh snapshot. With a ladder shape set (operator_profile.ladder_rungs) it lists one numbered deposit per rung still to deposit, each with its exact amounts and its own link, and states each rung already deployed.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {},

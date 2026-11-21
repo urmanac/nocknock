@@ -14,7 +14,7 @@ fn f(v: &Value, ptr: &str) -> f64 {
 
 /// The poolKeys facts a 2.9.0 cycle now stamps on the v4 position (#168), as the recorded
 /// answer in testdata/closed/cycle_fixture.json states them.
-fn with_pool_key(mut env: SnapshotEnvelope) -> SnapshotEnvelope {
+pub(crate) fn with_pool_key(mut env: SnapshotEnvelope) -> SnapshotEnvelope {
     for p in env.data.positions.iter_mut().filter(|p| p.protocol == "uniswap-v4") {
         p.fee_raw = Some(30000);
         p.hooks = Some(ZERO_HOOKS.to_string());
@@ -24,7 +24,7 @@ fn with_pool_key(mut env: SnapshotEnvelope) -> SnapshotEnvelope {
 
 /// The operator's live snapshot from chudmax (2026-11-21T04:04Z), before the cycle read
 /// fee_raw and hooks; the pool key is added as the cycle now reads it.
-fn live() -> SnapshotEnvelope {
+pub(crate) fn live() -> SnapshotEnvelope {
     let env: SnapshotEnvelope =
         serde_json::from_str(include_str!("../testdata/ladder_suggest/live_snapshot_2026-11-21.json")).expect("live snapshot parses");
     with_pool_key(env)
@@ -39,7 +39,7 @@ fn suggest(env: &SnapshotEnvelope, bottom: Option<f64>) -> Value {
     ladder_suggestion(env, Ok(bottom))
 }
 
-fn text(env: &SnapshotEnvelope, l: &Value, health: Option<&str>) -> String {
+pub(crate) fn text(env: &SnapshotEnvelope, l: &Value, health: Option<&str>) -> String {
     let mut data = serde_json::to_value(&env.data).unwrap();
     data["derived_metrics"]["ladder_suggestion"] = l.clone();
     crate::ladder_suggest_text::ladder_suggestion_lines(&data, health)
@@ -532,36 +532,46 @@ fn test_ladder_suggest_wording_is_a_measurement() {
     for want in ["ready", "needs_setting", "bottom_at_or_above_top", "price_at_or_below_bottom", "invalid", "ladder_tracked", "no_target_pool", "no_headroom", "several_pools"] {
         assert!(statuses.contains(want), "{want} not covered: {statuses:?}");
     }
+    for (env, l) in every_status() {
+        assert_measurement_wording(&env, &l);
+    }
+}
+
+/// The wording rules for one card, in its fields and in the text both MCP transports print:
+/// no advice words, and no sentence that opens with an imperative. Also used for the
+/// states of a configured shape (tests_ladder_bottle.rs).
+pub(crate) fn assert_measurement_wording(env: &SnapshotEnvelope, l: &Value) {
     let banned = ["should", "recommend", "you must", "you need to", "buy now", "deposit $", "please", "we suggest", "make sure"];
     // An imperative opens a sentence: "Set your …", "Deposit 765 USDC …". "Deposit 1 of 2"
     // is a list label, and NockNock's own steps ("NockNock signs …") are statements.
-    let imperatives = ["set", "add", "put", "buy", "sell", "deposit", "move", "withdraw", "open", "go", "use", "type", "enter", "click", "tap", "edit", "run", "consider"];
-    for (env, l) in every_status() {
-        // The fields a person reads (status words like "set" are data, not prose).
-        let mut prose: Vec<String> = ["/headline", "/reason", "/sentence", "/what_changed", "/statement", "/after_deposit/text"]
-            .iter()
-            .filter_map(|p| l.pointer(p).and_then(|v| v.as_str()).map(|v| v.to_string()))
-            .collect();
-        for arr in ["/outcomes", "/stated/lines", "/assumptions", "/rungs", "/excluded"] {
-            for x in l.pointer(arr).and_then(|v| v.as_array()).into_iter().flatten() {
-                for p in ["/text", "/would_sign", "/reason", ""] {
-                    if let Some(v) = (if p.is_empty() { Some(x) } else { x.pointer(p) }).and_then(|v| v.as_str()) {
-                        prose.push(v.to_string());
-                    }
+    let imperatives = [
+        "set", "add", "put", "buy", "sell", "deposit", "move", "withdraw", "open", "go", "use", "type", "enter", "click", "tap", "edit", "run", "consider", "read",
+        "keep", "sign", "send",
+    ];
+    // The fields a person reads (status words like "set" are data, not prose).
+    let mut prose: Vec<String> = ["/headline", "/reason", "/sentence", "/what_changed", "/statement", "/after_deposit/text", "/wallet_after/text"]
+        .iter()
+        .filter_map(|p| l.pointer(p).and_then(|v| v.as_str()).map(|v| v.to_string()))
+        .collect();
+    for arr in ["/outcomes", "/stated/lines", "/assumptions", "/rungs", "/excluded", "/shape/rungs", "/picture/bars"] {
+        for x in l.pointer(arr).and_then(|v| v.as_array()).into_iter().flatten() {
+            for p in ["/text", "/would_sign", "/reason", "/summary", "/deep_link/amount_to_enter", "/nock_limit/text", "/label", "/cap/note", ""] {
+                if let Some(v) = (if p.is_empty() { Some(x) } else { x.pointer(p) }).and_then(|v| v.as_str()) {
+                    prose.push(v.to_string());
                 }
             }
         }
-        for t in [prose.join("\n"), text(&env, &l, Some("ok"))] {
-            let low = t.to_lowercase();
-            for bad in banned {
-                assert!(!low.contains(bad), "'{bad}' in {} text: {t}", s(&l, "/status"));
-            }
-            for sentence in low.split(|c| c == '.' || c == '\n' || c == ':' || c == '"').map(|x| x.trim_start_matches(|c: char| c == ' ' || c == '-' || c == '•')) {
-                let mut words = sentence.split_whitespace();
-                let (Some(first), second) = (words.next(), words.next()) else { continue };
-                let list_label = first == "deposit" && second.map_or(false, |w| w == "link" || w.chars().all(|c| c.is_ascii_digit()));
-                assert!(list_label || !imperatives.contains(&first), "imperative '{sentence}' in {} text", s(&l, "/status"));
-            }
+    }
+    for t in [prose.join("\n"), text(env, l, Some("ok"))] {
+        let low = t.to_lowercase();
+        for bad in banned {
+            assert!(!low.contains(bad), "'{bad}' in {} text: {t}", s(l, "/status"));
+        }
+        for sentence in low.split(|c| c == '.' || c == '\n' || c == ':' || c == '"').map(|x| x.trim_start_matches(|c: char| c == ' ' || c == '-' || c == '•')) {
+            let mut words = sentence.split_whitespace();
+            let (Some(first), second) = (words.next(), words.next()) else { continue };
+            let list_label = first == "deposit" && second.map_or(false, |w| w == "link" || w.chars().all(|c| c.is_ascii_digit()));
+            assert!(list_label || !imperatives.contains(&first), "imperative '{sentence}' in {} text", s(l, "/status"));
         }
     }
 }

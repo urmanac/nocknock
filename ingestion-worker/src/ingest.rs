@@ -465,7 +465,7 @@ pub(crate) fn canonical_state_json(data: &SnapshotData) -> serde_json::Value {
 }
 
 pub(crate) fn strip_volatile_time_fields(value: &mut serde_json::Value) {
-    const VOLATILE_KEYS: [&str; 12] = [
+    const VOLATILE_KEYS: [&str; 13] = [
         // Route quotes for a due tranche (issue #115): contract reads at a stated
         // block, fresh every cycle. They say nothing about the wallet's state.
         "route_quotes",
@@ -477,6 +477,9 @@ pub(crate) fn strip_volatile_time_fields(value: &mut serde_json::Value) {
         // The configured ladder shape (2.10.0): worked out from the hashed state and the
         // fee measurement, so it adds nothing to the state.
         "ladder_shape",
+        // A rung's fee estimate on the ladder suggestion: the same measurement, re-measured
+        // at most hourly. The rest of the suggestion follows from the hashed state.
+        "fee_estimate",
         // Fill detection's check time (issue #118): fresh every cycle, no state.
         "last_checked_at",
         "updated_at",
@@ -599,5 +602,15 @@ pub(crate) fn slim_stored_data(data: &mut serde_json::Value) {
             }
         }
         shape.insert("detail_note".to_string(), serde_json::json!(format!("the grid, the full fee estimates, the floor-crossing detail, round trips and notes are {STORED_DETAIL_NOTE}")));
+    }
+    // The ladder suggestion's fee estimates are outside the state hash (re-measured
+    // hourly), so a stored row would keep whichever one it was first stored with: it
+    // states that they are left out instead.
+    if let Some(rungs) = data.pointer_mut("/derived_metrics/ladder_suggestion/rungs").and_then(|r| r.as_array_mut()) {
+        for r in rungs {
+            if r.get("fee_estimate").map_or(false, |f| f.is_object()) {
+                r["fee_estimate"] = serde_json::json!({ "status": "unavailable", "reason": format!("the fee estimate is {STORED_DETAIL_NOTE}") });
+            }
+        }
     }
 }

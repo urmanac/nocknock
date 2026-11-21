@@ -36,6 +36,32 @@ info:
       out by the cycle in the price-source pool and sized to the shared reserve gate's
       most (LadderShape), for a card with no inputs. Left out of the state hash.
     - Position.rung and LadderReading.rung accept cap (cap | near | deep).
+    - DerivedMetrics.ladder_suggestion with a configured shape (operator_profile.
+      ladder_rungs): the card is built from ladder_shape instead of one rung, and a
+      tracked ladder no longer hides it (ladder_tracked stays the status with no shape
+      configured). New status ladder_deployed: nothing is left to deposit (shown false).
+      shape.rungs[] lists every rung of the shape in order with its number (index of
+      `of`), its status (to_deposit | deployed | over | passed | none), what a deployed
+      one holds (holds_now) and one stated line (text); shape.of, left, deployed,
+      passed, over and none count them, and the headline counts only what is left.
+      rungs[] holds one deposit per to_deposit rung, numbered as in the shape: summary,
+      tick_lower and tick_upper, bounds_usd and bounds_nock_per_usdc from the ticks,
+      usdc and nock (amount and raw are exact, from the shape's mint; to_enter is the
+      amount cut, never rounded up, to what a person types), mint (liquidity_raw,
+      amount0_raw, amount1_raw; mint_note once on the suggestion), fee_estimate (the
+      figure with its sample size, in-range share of stored history and replay bound,
+      or the reason it is not measured; left out of the state hash and of stored rows)
+      and its own deep_link (pool and range, never an amount). A deposit that holds
+      NOCK (the cap) carries nock_limit: the NOCK side must not exceed lp_nock_budget,
+      and the NOCK field is the one named for typing, because the app works out the
+      other side from the price at that moment. wallet_after states what the deposits
+      leave in the wallet and the USDC inside NOCK ranges the reserve counts, now and at
+      the gate price. picture.bars[] has one bar per rung with its rung, status and
+      deployed. no_headroom also covers a shape whose remainder would read the stable
+      balance below the reserve (a tracked rung over its target, or one that matches no
+      rung). With no shape configured nothing changes: the bodies in
+      golden_ladder_suggest.json are byte-identical. The shape's bodies are in
+      ingestion-worker/testdata/ladder_suggest/golden_ladder_bottle.json.
 
     2.9.0 (the floor-crossing price, issue #165), additive:
     - DerivedMetrics.floor_breach (new, nullable): the lowest NOCK price at or above
@@ -946,9 +972,11 @@ components:
           description: |
             The ladder suggestion (2.9.0, issue #168): a structured top-of-page event,
             a measurement. Shape and statuses are in the 2.9.0 notes at the top of this
-            file; the worker's golden bodies are in
-            ingestion-worker/testdata/ladder_suggest/golden_ladder_suggest.json. Absent
-            in a snapshot stored before it: not reported, never "nothing fits".
+            file, and in the 2.10.0 notes for a configured ladder shape (one numbered
+            deposit per rung); the worker's golden bodies are in
+            ingestion-worker/testdata/ladder_suggest/golden_ladder_suggest.json and
+            golden_ladder_bottle.json. Absent in a snapshot stored before it: not
+            reported, never "nothing fits".
 
     FeeYield:
       type: object

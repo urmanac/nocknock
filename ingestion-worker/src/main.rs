@@ -1054,8 +1054,10 @@ struct DerivedMetrics {
     /// The ladder suggestion (snapshot 2.9.0, issue #168): a structured top-of-page event
     /// stating whether a NOCK ladder fits the operator's rules and, when it does, its
     /// range, the most USDC the standing reserve allows and the deposit link. Built by
-    /// `ladder_suggest::attach_ladder_suggestion` from the assembled snapshot. Absent in a
-    /// snapshot stored before the field existed: not reported, never "nothing fits".
+    /// `ladder_suggest::attach_ladder_suggestion` from the assembled snapshot. With
+    /// `operator_profile.ladder_rungs` set (2.10.0) it is built from `ladder_shape`: one
+    /// numbered deposit per rung still to deposit. Absent in a snapshot stored before the
+    /// field existed: not reported, never "nothing fits".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ladder_suggestion: Option<serde_json::Value>,
 }
@@ -2485,3 +2487,5 @@ mod tests_fee_yield;
 mod tests_ladder_rungs;
 #[cfg(test)]
 mod tests_ladder_suggest;
+#[cfg(test)]
+mod tests_ladder_bottle;
