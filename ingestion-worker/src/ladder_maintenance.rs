@@ -1070,7 +1070,7 @@ pub(crate) fn deep_cannot_fire(
         return None;
     }
     let width = (top / bottom - 1.0) * 100.0;
-    let from = if ep_low.is_some() { format!("the lowest price seen, ${}", price4(low)) } else { format!("its bottom, ${}", price4(low)) };
+    let from = if ep_low.is_some() { format!("the lowest price seen (${})", price4(low)) } else { format!("its bottom (${})", price4(low)) };
     let text = format!(
         "{label}: the deep-rung pull cannot fire for this rung with your {LM_KEY}.deep_pull_recovery_pct of {}%. The rung is {:.2}% wide (its top ${} is {:.2}% above its bottom ${}), so a {}% recovery from {from} lands at ${}, at or above its top, and by then the rung has sold all the NOCK it bought back for USDC. A recovery below {:.2}% would let the pull be stated before that.",
         num_plain(rec),
