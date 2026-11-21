@@ -18,6 +18,15 @@ info:
       in `assumption`). status crosses | already_below | never | no_floor |
       unavailable; unavailable carries `reason` and no figures. Null in snapshots
       stored before 2.9.0. A measurement, never advice.
+    - For the ladder simulator (issue #166), also additive, so a what-if over the
+      stored snapshot never reads config: Position.tick_spacing is now also emitted for
+      uniswap-v4 (word 3 of the poolKeys answer the adapter already reads; absent when
+      not read, never derived from the fee tier). GlobalStatus.lp_nock_budget (signed,
+      4 dp): wallet NOCK - treasury_floor_nock + the tolerated overage, the rebuild's
+      "only N NOCK may go into LP", every cycle; it is measured on wallet NOCK, while
+      floor_breach is measured on total tracked NOCK. GlobalStatus.lp_nock_budget_note:
+      why it is not a plain budget (no floor set, or negative). GlobalStatus.
+      lp_floor_tolerance_bps: the parameter of lp_nock_budget and floor_breach.tolerated.
 
     2.8.3 (the standing protected cash reserve, issue #162), additive:
     - GlobalStatus.cash_reserve_usdc, reserve_stable_usdc, reserve_headroom_usdc
@@ -429,7 +438,7 @@ components:
           description: True for a position spanning every price (an Aerodrome volatile pool). It cannot go out of range; lower_price/upper_price are then "0" and not meaningful. (2.2.0)
         tick_spacing:
           type: integer
-          description: aerodrome-cl only. The pool's tick spacing (200 for a CL200 pool). Absent for every other protocol. fee_tier_bps is the pool's current swap fee, which is dynamic on Aero CL pools. (v0.6.0)
+          description: The pool's tick spacing. aerodrome-cl (200 for a CL200 pool; v0.6.0) and, since 2.9.0, uniswap-v4 (300 for the 3% pool, word 3 of poolKeys; #166). Absent for uniswap-v3 and aerodrome basic, and whenever it was not read; never derived from the fee tier. fee_tier_bps is the pool's current swap fee, which is dynamic on Aero CL pools.
           example: 200
         staked_in_gauge:
           type: string
@@ -1844,6 +1853,32 @@ components:
             positive. Present only then; cash_reserve_usdc and dry_powder_usdc are then
             absent. (2.8.3, #162)
           example: "operator_profile.cash_reserve_usdc must be zero or positive"
+        lp_nock_budget:
+          type: string
+          description: >
+            The NOCK that may go into LP: wallet NOCK - treasury_floor_nock + the
+            tolerated overage (treasury_floor_nock x lp_floor_tolerance_bps / 10000), the
+            same figure as the rebuild's "only N NOCK may go into LP", emitted every
+            cycle, 4 dp. Signed: negative when wallet NOCK is below the floor less the
+            tolerance (lp_nock_budget_note then says so). With no floor it is the
+            wallet's NOCK. Measured on wallet NOCK; floor_breach is measured on total
+            tracked NOCK (wallet + LP + uncollected fees). The budget a ladder's NOCK is
+            measured against (#166). Absent before 2.9.0: unknown, never 0.
+          example: "86.7891"
+        lp_nock_budget_note:
+          type: string
+          description: >
+            Why lp_nock_budget is not a plain budget: "no treasury_floor_nock is set: the
+            budget is the wallet's NOCK", or "none: wallet NOCK is N below the F NOCK
+            floor ..." when it is negative. Absent otherwise. (2.9.0, #166)
+        lp_floor_tolerance_bps:
+          type: integer
+          minimum: 0
+          description: >
+            operator_profile.lp_floor_tolerance_bps: the parameter of lp_nock_budget and
+            of floor_breach.tolerated, stated so a what-if over the stored snapshot reads
+            it from there. Absent before 2.9.0. (#166)
+          example: 1000
 
     AssetAggregationSeries:
       type: object

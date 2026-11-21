@@ -119,7 +119,7 @@ pub(crate) fn apply_pool_activity(positions: &mut [Position], pool_liquidity: &H
 }
 
 /// Stamp each snapshot position with the facts only its protocol has (v0.6.0, #91):
-/// an Aero CL position's tick spacing, the gauge it is staked in, and the reason its
+/// an Aero CL or (#166) Uniswap v4 pool's tick spacing, the gauge it is staked in, and the reason its
 /// fee figure is not a read of LP-claimable fees. Positions without an entry are left
 /// exactly as built. Run before build_contract_fees, which prints the reason.
 pub(crate) fn apply_position_facts(positions: &mut [Position], facts: &HashMap<String, PositionFacts>) {

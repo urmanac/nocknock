@@ -84,6 +84,9 @@
           "eth_price_usd": "1820.91",
           "gas_to_fee_delta_usd": "-0.01",
           "high_water_mark_usd": "2154.54",
+          "lp_floor_tolerance_bps": 0,
+          "lp_nock_budget": "-6203.5414",
+          "lp_nock_budget_note": "none: wallet NOCK is 6204 below the 100000 NOCK floor",
           "nock_floor_delta": "742",
           "nock_floor_target": "100000",
           "regime": "unknown",
@@ -322,6 +325,6 @@
         }
       ]
     },
-    "state_hash": "25a80ed41d8fff5cea8df13f4976295e3943fb76113fa0c72af78996e06ab305"
+    "state_hash": "a621a84cca873f223a07537d549d530f369648e6a2bfee5d13807caceebf2e24"
   }
 }
