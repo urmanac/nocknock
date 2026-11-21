@@ -260,7 +260,7 @@ fn test_a_mint_found_on_chain_and_not_yet_tracked_is_not_offered_again() {
     assert_listed(&l, &["cap", "near", "deep"]);
     assert_eq!(
         st(&l, "/found_note"),
-        "Found on-chain in this pool and not counted yet: NFT #9000003 on ticks 274500..275400. It matches no rung's ticks exactly, so it is not tracked by itself; one tap under Found on-chain tracks it or sets it aside. The amounts here do not count it."
+        "Found on-chain in this pool and not counted yet: NFT #9000003 on ticks 274500..275400 (it matches a suggested rung, and tracking it did not go through this cycle; it is tried again next cycle). It stands for no rung of your shape and is not tracked by itself; one tap under Found on-chain tracks it or sets it aside. The amounts here do not count it."
     );
     assert!(text(&env, &l, Some("ok")).contains(&format!("  {}\n", st(&l, "/found_note"))));
 }
@@ -565,7 +565,8 @@ fn test_a_strangers_position_never_stands_for_a_rung() {
         assert_eq!(st(deposit(&l, "deep"), "/usdc/to_enter"), "650.89");
         assert_ne!(st(row(&l, "deep"), "/status"), "found");
         assert!(!serde_json::to_string(&l).unwrap().contains("being tracked"));
-        assert!(st(&l, "/found_note").contains("NFT #9000020 on ticks 275400..276300"), "{}", l["found_note"]);
+        assert!(st(&l, "/found_note").contains("NFT #9000020 on ticks 275400..276300 ("), "{}", l["found_note"]);
+        assert!(st(&l, "/found_note").contains("It stands for no rung of your shape"), "{}", l["found_note"]);
     }
     // The same on the near rung's ticks, and on the cap's band (public: it contains spot).
     for (tl, tu) in [(273900, 275400), (273600, 273900)] {

@@ -1310,10 +1310,17 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         if !others.is_empty() {
             let names: Vec<String> = others
                 .iter()
-                .map(|p| format!("NFT #{} on ticks {}..{}", p["nft_id"], p["tick_lower"], p["tick_upper"]))
+                .map(|p| {
+                    // Why it stands for no rung, in detection's own words.
+                    let why = p.get("why_not_automatic").and_then(|w| w.as_array()).and_then(|w| w.first()).and_then(|w| w.as_str());
+                    match why {
+                        Some(why) => format!("NFT #{} on ticks {}..{} ({why})", p["nft_id"], p["tick_lower"], p["tick_upper"]),
+                        None => format!("NFT #{} on ticks {}..{}", p["nft_id"], p["tick_lower"], p["tick_upper"]),
+                    }
+                })
                 .collect();
             out["found_note"] = json!(format!(
-                "Found on-chain in this pool and not counted yet: {}. It matches no rung's ticks exactly, so it is not tracked by itself; one tap under Found on-chain tracks it or sets it aside. The amounts here do not count it.",
+                "Found on-chain in this pool and not counted yet: {}. It stands for no rung of your shape and is not tracked by itself; one tap under Found on-chain tracks it or sets it aside. The amounts here do not count it.",
                 names.join("; ")
             ));
         }
