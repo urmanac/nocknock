@@ -91,6 +91,14 @@ pub(crate) fn concentrated_amounts_raw(liquidity: u128, sqrt_price_x96: U256, ti
     let s = sqrt_price_x96_to_raw(sqrt_price_x96).sqrt();
     let sa = tick_sqrt_price(tick_lower);
     let sb = tick_sqrt_price(tick_upper);
+    concentrated_amounts_at(l, s, sa, sb)
+}
+
+/// The body of `concentrated_amounts_raw` on f64 inputs: liquidity `l`, the pool's sqrt
+/// price `s` in raw units (sqrt(token1_raw / token0_raw)) and the range's edges `sa`, `sb`.
+/// Split out so the floor-breach price (#165) can evaluate a range at a moved price; the
+/// expressions are unchanged.
+pub(crate) fn concentrated_amounts_at(l: f64, s: f64, sa: f64, sb: f64) -> (f64, f64) {
     if s <= sa {
         // Entirely token0: L * (1/sa - 1/sb)
         (l * (1.0 / sa - 1.0 / sb), 0.0)

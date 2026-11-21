@@ -72,6 +72,8 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
     let closed = closed_positions_lines(data);
     // The standing protected cash reserve (issue #162): stated only when one is set.
     let reserve = crate::reserve_text::reserve_line(global);
+    // The floor-crossing price (issue #165), the same line in both transports.
+    let floor_breach = crate::floor_breach_text::floor_breach_line(data.pointer("/derived_metrics/floor_breach"));
 
     format!(
         "📈 NockNock Sovereign Portfolio State\n\
@@ -79,6 +81,7 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
          • Total Value: {total_usd}\n\
          • Pillars: {pillars}\n\
          • Sovereign NOCK Stack: {total_nock} ({floor})\n\
+         {floor_breach}\
          • Stable Stack: {total_usdc}\n\
          {reserve}\
          • Gas held (wallet ETH+WETH): {gas}\n\

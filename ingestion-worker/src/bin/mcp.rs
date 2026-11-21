@@ -12,13 +12,16 @@ use fill_text::fill_detection_lines;
 #[path = "../quote_text.rs"]
 mod quote_text;
 use quote_text::route_quote_lines;
-/// Shared with the worker (src/cost_basis_text.rs) so both transports print the same
-/// cost-basis lines. This binary cannot import from main.rs, so it compiles the file.
+// Shared the same way (src/reserve_text.rs): the standing protected cash reserve (#162).
 #[path = "../reserve_text.rs"]
 mod reserve_text;
-
+/// Shared with the worker (src/cost_basis_text.rs) so both transports print the same
+/// cost-basis lines. This binary cannot import from main.rs, so it compiles the file.
 #[path = "../cost_basis_text.rs"]
 mod cost_basis_text;
+// The floor-crossing price line (issue #165), shared with the worker's mcp_text.
+#[path = "../floor_breach_text.rs"]
+mod floor_breach_text;
 
 /// Worker base URL when NOCKNOCK_API_URL is unset. Point the variable at a remote
 /// deployment (e.g. `http://chudmax:8081`) to read it instead of a local worker.
@@ -99,7 +102,7 @@ async fn main() -> Result<()> {
                         "tools": [
                             {
                                 "name": "get_portfolio_state",
-                                "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, native token balance, tracked LP position totals, and the average cost of the plan's verified NOCK buys against spot (plus the whole-stack average when an opening basis is configured).",
+                                "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, the floor-crossing price (how far NOCK can rise before the deployed ranges sell the stack below the floor, a measurement), native token balance, tracked LP position totals, and the average cost of the plan's verified NOCK buys against spot (plus the whole-stack average when an opening basis is configured).",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {},
@@ -380,6 +383,8 @@ fn format_portfolio_state(data: &Value) -> String {
     let closed = closed_positions_lines(data);
     // The standing protected cash reserve (issue #162), the same line as the HTTP transport.
     let reserve = reserve_text::reserve_line(global);
+    // The floor-crossing price (issue #165), the same line in both transports.
+    let floor_breach = floor_breach_text::floor_breach_line(data.pointer("/derived_metrics/floor_breach"));
 
     format!(
         "📈 NockNock Sovereign Portfolio State\n\
@@ -387,6 +392,7 @@ fn format_portfolio_state(data: &Value) -> String {
          • Total Value: {total_usd}\n\
          • Pillars: {pillars}\n\
          • Sovereign NOCK Stack: {total_nock} ({floor})\n\
+         {floor_breach}\
          • Stable Stack: {total_usdc}\n\
          {reserve}\
          • Gas held (wallet ETH+WETH): {gas}\n\
@@ -703,3 +709,8 @@ mod tests_closed;
 #[cfg(test)]
 #[path = "../mcp_bin_tests_gas_lp.rs"]
 mod tests_gas_lp;
+
+// The floor-crossing price line (issue #165), against the worker's golden text.
+#[cfg(test)]
+#[path = "../mcp_bin_tests_floor_breach.rs"]
+mod tests_floor_breach;

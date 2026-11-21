@@ -47,6 +47,7 @@ import { aeroRewardsSentence, aeroStatSubtitle, compositionAeroText, composition
 import { AeroPillarLines, PositionAeroLine } from './components/AeroPillar.tsx';
 import { PositionEarningsLines, hasPositionEarnings } from './components/CollectibleEarnings.tsx';
 import { ClosedPositionsCard } from './components/ClosedPositions.tsx';
+import { FloorBreachNote } from './components/FloorBreachNote.tsx';
 import { priceSourceIsClosedText } from './closedPositions.ts';
 import {
   LP_FEE_COLOR,
@@ -283,6 +284,7 @@ function Dashboard() {
             suffix="%"
             subtitle={floorNone ? 'No floor configured' : !nockFloorDeltaKnown ? 'floor status unknown' : floorDeltaText(nockFloorDeltaRaw, floorTarget)}
             highlightColor={floorHealthColor}
+            note={<FloorBreachNote floorBreach={metrics?.floor_breach} />}
           />
           <StatCard
             label="High-Water Mark"
@@ -850,6 +852,7 @@ function StatCard({
   suffix = '',
   subtitle,
   highlightColor,
+  note,
 }: {
   label: string;
   value?: string;
@@ -857,6 +860,8 @@ function StatCard({
   suffix?: string;
   subtitle?: string;
   highlightColor?: string;
+  /** A second, muted line under the subtitle (the floor-crossing price, #165). */
+  note?: React.ReactNode;
 }) {
   const display = statValueText(value, prefix, suffix);
   return (
@@ -864,6 +869,7 @@ function StatCard({
       <div style={styles.statLabel}>{label}</div>
       <div style={{ ...styles.statValue, color: highlightColor || '#fff' }}>{display}</div>
       {subtitle && <div style={styles.statSubtitle}>{subtitle}</div>}
+      {note}
     </div>
   );
 }

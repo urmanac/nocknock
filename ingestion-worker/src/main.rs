@@ -81,6 +81,9 @@ mod closed;
 use closed::*;
 mod closed_text;
 use closed_text::*;
+mod floor_breach;
+use floor_breach::*;
+mod floor_breach_text;
 
 // ============================================================
 // Configuration
@@ -926,6 +929,11 @@ struct DerivedMetrics {
     /// existed: unknown, never a zero basis.
     #[serde(default)]
     cost_basis: Option<CostBasis>,
+    /// The floor-crossing price (snapshot 2.9.0, issue #165): how far NOCK can rise
+    /// before the deployed ranges sell the stack below the floor. Null in a snapshot
+    /// stored before the field existed: not reported, never "safe".
+    #[serde(default)]
+    floor_breach: Option<FloorBreach>,
 }
 
 /// NOCK cost basis in two layers (v0.6.0, issue #98). `plan_buys` is exact: it comes only
@@ -1240,6 +1248,78 @@ struct LpRebuild {
     worst_case_nock: Option<String>,
 }
 
+/// The floor-crossing price (snapshot 2.9.0, issue #165). Tracked NOCK (wallet NOCK +
+/// uncollected NOCK fees + every NOCK-pair range at that price) as NOCK rises by a
+/// multiple of spot, and the lowest multiple at which it drops below the floor and below
+/// the tolerated level. A measurement, never advice. Built by `floor_breach::floor_breach`.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct FloorBreach {
+    /// The hard floor's status: crosses | already_below | never | no_floor | unavailable.
+    status: String,
+    /// `treasury_floor_nock`, `{:.0}`.
+    floor_nock: String,
+    /// NOCK/USD spot the multiples apply to; null when unavailable or no floor.
+    spot_price_usd: Option<String>,
+    /// The hard floor (`treasury_floor_nock`). Null when unavailable or no floor.
+    crossing: Option<FloorCrossing>,
+    /// The tolerated level (floor less `lp_floor_tolerance_bps`); null when the tolerance
+    /// is 0, unavailable or no floor.
+    tolerated: Option<FloorCrossing>,
+    /// Tracked NOCK at spot: equals `global_status.total_nock_amount`.
+    nock_now: Option<String>,
+    /// Wallet NOCK, the part no price move sells.
+    wallet_nock: Option<String>,
+    /// Uncollected NOCK fees, counted as held.
+    fees_nock: Option<String>,
+    /// NOCK left if every range sold all its NOCK: `wallet_nock` + `fees_nock`.
+    nock_if_all_sold: Option<String>,
+    /// The range that sells the most NOCK between spot and the hard-floor crossing; null
+    /// unless `status` is crosses.
+    largest_seller: Option<String>,
+    /// The NOCK range with the lowest sell-out multiple; null when only full-range pools
+    /// (or no ranges) hold NOCK.
+    first_to_sell_out: Option<String>,
+    /// Every NOCK-pair position, in snapshot order.
+    #[serde(default)]
+    positions: Vec<FloorBreachPosition>,
+    /// The assumptions the figure rests on, stated.
+    assumption: String,
+    /// Why the figure is unavailable; null otherwise.
+    reason: Option<String>,
+}
+
+/// One level's crossing (#165).
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct FloorCrossing {
+    level_nock: String,
+    /// crosses | already_below | never
+    status: String,
+    /// Multiple of spot at which tracked NOCK first drops below the level, `{:.4}`;
+    /// "1.0000" when already below; null when never.
+    multiple: Option<String>,
+    /// spot × multiple, USD per NOCK, `{:.6}`.
+    price_usd: Option<String>,
+    /// (multiple − 1) × 100, `{:.1}`.
+    pct_above_spot: Option<String>,
+}
+
+/// One NOCK-pair position in the floor-breach figure (#165).
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct FloorBreachPosition {
+    position_id: String,
+    label: String,
+    full_range: bool,
+    /// The position's NOCK at spot, `{:.0}`.
+    nock_now: String,
+    /// Its NOCK at the hard-floor crossing; null unless the status is crosses.
+    nock_at_crossing: Option<String>,
+    /// The multiple of spot at which the range holds no NOCK (tick-based, as the rebuild
+    /// computes it), `{:.4}`; null for a full-range pool or a range already past its edge.
+    sold_out_at_multiple: Option<String>,
+    sold_out_at_price_usd: Option<String>,
+    note: Option<String>,
+}
+
 /// One suggested deposit into an existing tracked position. Amounts are what the
 /// position's range takes at the pool's current price for `add_usd` of value; the
 /// operator makes the deposit in the Uniswap app, and the worker sees it on-chain.
@@ -1491,7 +1571,7 @@ struct GlobalStatus {
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
-const SNAPSHOT_SPEC_VERSION: &str = "2.8.3";
+const SNAPSHOT_SPEC_VERSION: &str = "2.9.0";
 
 /// The gas (wallet ETH + WETH) and ETH pillar figures, each None when it cannot be
 /// measured: unread wallet balances or an unpriced ETH. Never a zero stand-in.
@@ -2063,3 +2143,5 @@ mod tests_gas_lp;
 mod tests_harvest_principal;
 #[cfg(test)]
 mod tests_reserve;
+#[cfg(test)]
+mod tests_floor_breach;

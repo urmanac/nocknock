@@ -64,3 +64,95 @@ export function regimeTone(regime: string | undefined | null): 'warn' | 'ok' | '
   if (regime === 'normal') return 'ok';
   return 'neutral';
 }
+
+// ============================================================
+// The floor-crossing price (snapshot 2.9.0, issue #165)
+// ============================================================
+
+/** Where one level is crossed (snapshot FloorCrossing). */
+export interface FloorCrossing {
+  level_nock: string;
+  /** crosses | already_below | never */
+  status: string;
+  multiple?: string | null;
+  price_usd?: string | null;
+  pct_above_spot?: string | null;
+}
+
+/** One NOCK-pair position in the figure (snapshot FloorBreachPosition). */
+export interface FloorBreachPosition {
+  position_id: string;
+  label: string;
+  full_range: boolean;
+  nock_now: string;
+  nock_at_crossing?: string | null;
+  sold_out_at_multiple?: string | null;
+  sold_out_at_price_usd?: string | null;
+  note?: string | null;
+}
+
+/** derived_metrics.floor_breach: how far NOCK can rise before the ranges sell the stack below the floor. */
+export interface FloorBreach {
+  /** crosses | already_below | never | no_floor | unavailable */
+  status: string;
+  floor_nock: string;
+  spot_price_usd?: string | null;
+  crossing?: FloorCrossing | null;
+  tolerated?: FloorCrossing | null;
+  nock_now?: string | null;
+  wallet_nock?: string | null;
+  fees_nock?: string | null;
+  nock_if_all_sold?: string | null;
+  largest_seller?: string | null;
+  first_to_sell_out?: string | null;
+  positions: FloorBreachPosition[];
+  assumption: string;
+  reason?: string | null;
+}
+
+function nockText(v: string | null | undefined): string | null {
+  const n = parseNum(v);
+  return n === null ? null : Math.round(n).toLocaleString('en-US');
+}
+
+function remainText(fb: FloorBreach): string | null {
+  const all = nockText(fb.nock_if_all_sold);
+  if (all === null) return null;
+  const w = nockText(fb.wallet_nock);
+  const f = nockText(fb.fees_nock);
+  return w !== null && f !== null ? `${all} NOCK (${w} wallet + ${f} uncollected fees)` : `${all} NOCK`;
+}
+
+function toleratedText(t: FloorCrossing | null | undefined): string {
+  if (!t) return '';
+  const level = nockText(t.level_nock) ?? t.level_nock;
+  if (t.status === 'crosses' && t.price_usd) return ` · tolerated ${level} crossed at $${t.price_usd} (+${t.pct_above_spot}%)`;
+  if (t.status === 'already_below') return ` · tolerated ${level}: already below`;
+  return ` · tolerated ${level}: never crossed`;
+}
+
+/**
+ * The measured line under the Floor Health tile (#165). A measurement of the deployed
+ * ranges, never an instruction. Null when no floor is configured or the snapshot
+ * predates 2.9.0 (no field): the tile already says what it knows.
+ */
+export function floorBreachLine(fb: FloorBreach | null | undefined): string | null {
+  if (!fb || fb.status === 'no_floor') return null;
+  if (fb.status === 'unavailable') return `Floor-crossing price unavailable: ${fb.reason ?? 'no reason given'}`;
+  const remain = remainText(fb);
+  const tolerated = toleratedText(fb.tolerated);
+  if (fb.status === 'already_below') return `Below the floor at today's price${tolerated}`;
+  if (fb.status === 'never') {
+    return `No rise crosses the floor: ${remain ?? 'the NOCK left'} remain if every range sells out${tolerated}`;
+  }
+  if (fb.status !== 'crosses' || !fb.crossing?.price_usd) return `Floor-crossing price unavailable: status ${fb.status}`;
+  const first = fb.first_to_sell_out ? fb.positions.find((p) => p.label === fb.first_to_sell_out) : undefined;
+  let who = '';
+  if (fb.first_to_sell_out) {
+    who = `; ${fb.first_to_sell_out} sells out first${first?.sold_out_at_price_usd ? ` (at $${first.sold_out_at_price_usd})` : ''}`;
+  } else if (fb.positions.some((p) => p.full_range)) {
+    who = '; no range sells out (only full-range pools hold NOCK)';
+  }
+  const allSold = remain ? ` · if every range sells out, ${remain} remain` : '';
+  return `Floor crossed if NOCK ≥ $${fb.crossing.price_usd} (+${fb.crossing.pct_above_spot}%)${who}${allSold}${tolerated}`;
+}
