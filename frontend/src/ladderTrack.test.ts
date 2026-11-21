@@ -17,7 +17,7 @@ import {
 } from './ladderTrack';
 import { hasNockLeg, nockBracketRows, positionsSummary, rangeStatus } from './positions';
 import { reserveText } from './reserve';
-import { costBasisView } from './costBasis';
+import { costBasisView, ladderBasisClause, ladderChartNote } from './costBasis';
 import { buildPositionSeriesDefs } from './timeline';
 import {
   COST_BASIS_BOUGHT,
@@ -81,10 +81,12 @@ describe('tracked ladders (#167)', () => {
     expect(ladderRungText(r)).toBe('rung near');
     expect(ladderRungText(deep(LADDERS_BOUGHT))).toBe('rung unset');
     expect(ladderRangeLine(deep(LADDERS_ABOVE))).toBe('$0.00678699 – $0.01032932 (−67.16% / −50.01% of spot)');
-    expect(ladderRangeLine({ ...r, low_pct_of_spot: null })).toBe('$0.00000000 – $0.01720088 (no spot to compare)');
+    // Its bottom is the pool's lowest usable price: said in words, never $0.00000000.
+    expect(ladderRangeLine(r)).toBe("no bottom – $0.01720088 (no bottom / +16.18% of spot); the bottom reaches the pool's lowest usable price (tick 887100): the range buys all the way down, so no bottom price and no NOCK at the bottom are stated");
+    expect(ladderRangeLine({ ...r, spot_price_usd: null, high_pct_of_spot: null })).toBe("no bottom – $0.01720088 (no spot to compare); the bottom reaches the pool's lowest usable price (tick 887100): the range buys all the way down, so no bottom price and no NOCK at the bottom are stated");
     expect(ladderHoldsLine(r)).toBe('Holds $1137.51 USDC + 5551.3674 NOCK ($1219.69)');
     expect(ladderCurveLine(r)).toBe(
-      'Against its all-USDC top ($1226.09 USDC): 5551.3674 NOCK held, $88.59 converted (7.23%), curve average $0.01595807; all NOCK at the bottom: 1709690206954494208.0000 NOCK',
+      'Against its all-USDC top ($1226.09 USDC): 5551.3674 NOCK held, $88.59 converted (7.23%), curve average $0.01595807; all NOCK at the bottom: not stated (no bottom)',
     );
     expect(ladderLiteLine(deep(LADDERS_ABOVE))).toBe('v4 USDC/NOCK 3.00% #3299001: above range, all USDC · $77.00 USDC + 0.0000 NOCK');
   });
@@ -160,6 +162,23 @@ describe('tracked ladders (#167)', () => {
       'Whole stack counts: The net NOCK bought by 1 of 2 tracked ladders since a receipt-verified deposit after 2026-11-19T00:00:00+00:00: 5303.7885 NOCK for $84.35, measured from each deposit_tx receipt to now.',
     );
     expect(notes).toContain('Tracked ladders left out: uniswap-v4:base:3299001: no verified deposit baseline (no_baseline).');
+  });
+
+  it('the whole-stack tile names the ladder buys its total includes, and the chart says it does not draw them', () => {
+    const tile = costBasisView(COST_BASIS_BOUGHT as any).tiles.find((t) => t.label === 'WHOLE STACK · AVERAGE COST')!;
+    expect(tile.value).toBe('$0.01687');
+    expect(tile.sub).toContain('plus 0 verified buys since and the net buys of 1 of 2 tracked ladders since a verified deposit (5303.7885 NOCK for $84.35).');
+    // The parts add up: 90,086.79 opening + 5,303.7885 ladder NOCK = the basis.
+    expect(COST_BASIS_BOUGHT.whole_stack.basis_nock).toBe('95390.5785');
+    expect(ladderChartNote(COST_BASIS_BOUGHT as any)).toBe(
+      "The whole-stack line counts the opening basis and verified buys only. The tile's $0.01687 also counts the net buys of 1 tracked ladder since a verified deposit (5303.7885 NOCK for $84.35), which this chart does not draw: a ladder converts continuously, not at recorded buys.",
+    );
+    // No ladder buy counted, or no ladder: no note, and the tile reads as before.
+    expect(ladderChartNote({ ...COST_BASIS_BOUGHT, whole_stack: { ...COST_BASIS_BOUGHT.whole_stack, ladder_buys_since: { ladders_counted: 0, nock: '0.0000', usdc: '0.00', not_counted: ['x', 'y'] } } } as any)).toBeNull();
+    const plain = { ...COST_BASIS_BOUGHT.whole_stack } as any;
+    delete plain.ladder_buys_since;
+    expect(ladderBasisClause(plain)).toBe('');
+    expect(ladderChartNote({ ...COST_BASIS_BOUGHT, whole_stack: plain } as any)).toBeNull();
   });
 
   it('the deviation matrix carries the ladder row last, with no target', () => {

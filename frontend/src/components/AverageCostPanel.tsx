@@ -18,6 +18,7 @@ import {
   buildCostChart,
   costBasisView,
   fillRows,
+  ladderChartNote,
   spotProvenanceText,
   type CostBasis,
   type CostBasisSeries,
@@ -254,6 +255,9 @@ export function AverageCostPanel({
           <div style={{ ...small, textAlign: 'center' }}>
             {spotProvenanceText(chart)} The average-cost lines are steps: an average changes only when a buy is recorded.
           </div>
+          {ladderChartNote(costBasis) && (
+            <div style={{ ...small, textAlign: 'center' }} data-testid="cost-ladder-note">{ladderChartNote(costBasis)}</div>
+          )}
         </>
       )}
 

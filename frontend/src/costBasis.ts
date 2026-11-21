@@ -237,6 +237,26 @@ function planDifferenceTile(p: PlanBuysBasis | undefined, spot: unknown): CostTi
   };
 }
 
+/** " and the net buys of 1 of 2 tracked ladders since a verified deposit (5303.7885 NOCK for $84.35)"; "" without a ladder. */
+export function ladderBasisClause(w: WholeStackBasis | undefined | null): string {
+  const lb = w?.ladder_buys_since;
+  if (!lb) return '';
+  const total = lb.ladders_counted + (lb.not_counted?.length ?? 0);
+  return ` and the net buys of ${lb.ladders_counted} of ${total} tracked ladder${total === 1 ? '' : 's'} since a verified deposit (${lb.nock} NOCK for $${lb.usdc})`;
+}
+
+/**
+ * Under the chart, when the whole-stack figure counts ladder buys (#167): the chart's
+ * whole-stack line steps at recorded buys only, and a ladder converts continuously, so
+ * those buys are not drawn. Null when no ladder buy is counted.
+ */
+export function ladderChartNote(cb: CostBasis | null | undefined): string | null {
+  const w = cb?.whole_stack;
+  const lb = w?.ladder_buys_since;
+  if (w?.status !== 'ok' || !lb || lb.ladders_counted <= 0) return null;
+  return `The whole-stack line counts the opening basis and verified buys only. The tile's ${priceText(w.avg_cost_usd)} also counts the net buys of ${lb.ladders_counted} tracked ladder${lb.ladders_counted === 1 ? '' : 's'} since a verified deposit (${lb.nock} NOCK for $${lb.usdc}), which this chart does not draw: a ladder converts continuously, not at recorded buys.`;
+}
+
 function wholeStackTile(w: WholeStackBasis | undefined): CostTile {
   const label = 'WHOLE STACK · AVERAGE COST';
   if (!w) return { label, value: '—', sub: NOT_REPORTED, tone: 'none' };
@@ -257,11 +277,14 @@ function wholeStackTile(w: WholeStackBasis | undefined): CostTile {
       const since = w.fills_since ?? 0;
       const diff = d.tone === 'none' ? '' : ` At spot that NOCK is worth ${usdText(w.value_at_spot_usd)}: ${d.text} against its cost.`;
       const held = finiteOrNull(w.held_nock);
+      // Verified ladder buys (#167) are in basis_nock and basis_cost_usd: named, so the
+      // parts add up to the total.
+      const ladders = ladderBasisClause(w);
       const heldText = held === null ? '' : ` NockNock reads ${nockText(held)} NOCK held now (wallet plus tracked LP).`;
       return {
         label,
         value: priceText(w.avg_cost_usd),
-        sub: `On ${nockText(w.basis_nock)} NOCK costing ${usdText(w.basis_cost_usd)}: your opening basis (${nockText(w.opening_nock)} NOCK for ${usdText(w.opening_cost_usd)}, source: ${w.source ?? 'not stated'}, as of ${w.as_of ?? 'unknown'}) plus ${since} verified buy${since === 1 ? '' : 's'} since.${diff}${heldText}`,
+        sub: `On ${nockText(w.basis_nock)} NOCK costing ${usdText(w.basis_cost_usd)}: your opening basis (${nockText(w.opening_nock)} NOCK for ${usdText(w.opening_cost_usd)}, source: ${w.source ?? 'not stated'}, as of ${w.as_of ?? 'unknown'}) plus ${since} verified buy${since === 1 ? '' : 's'} since${ladders}.${diff}${heldText}`,
         // The headline is an average, not a difference: it takes no tone.
         tone: 'none',
       };

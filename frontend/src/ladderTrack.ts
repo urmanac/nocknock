@@ -77,10 +77,14 @@ const pct = (v: string | null | undefined) => (v == null ? null : `${v.startsWit
 
 /** "$0.00678699 – $0.01032932 (−67.16% / −50.01% of spot)". */
 export function ladderRangeLine(r: LadderReading): string {
-  const lo = pct(r.low_pct_of_spot);
-  const hi = pct(r.high_pct_of_spot);
-  const vs = lo && hi ? ` (${lo} / ${hi} of spot)` : ' (no spot to compare)';
-  return `$${r.low_price_usd} – $${r.high_price_usd}${vs}`;
+  // A bound at the pool's usable extremes is stated in words, never as a price.
+  const low = r.low_price_usd == null ? 'no bottom' : `$${r.low_price_usd}`;
+  const high = r.high_price_usd == null ? 'no top' : `$${r.high_price_usd}`;
+  const lo = r.low_price_usd == null ? 'no bottom' : pct(r.low_pct_of_spot);
+  const hi = r.high_price_usd == null ? 'no top' : pct(r.high_pct_of_spot);
+  const vs = r.spot_price_usd == null || !lo || !hi ? ' (no spot to compare)' : ` (${lo} / ${hi} of spot)`;
+  const open = r.open_end ? `; ${r.open_end}` : '';
+  return `${low} – ${high}${vs}${open}`;
 }
 
 /** "rung near" or "rung unset". */
@@ -96,7 +100,10 @@ export function ladderHoldsLine(r: LadderReading): string {
 export function ladderCurveLine(r: LadderReading): string {
   const v = r.vs_top;
   const avg = v.curve_avg_price_usd ? `, curve average $${v.curve_avg_price_usd}` : '';
-  return `Against its all-USDC top ($${v.usdc_at_top} USDC): ${v.nock_held_vs_top} NOCK held, $${v.usdc_converted_vs_top} converted (${v.converted_pct ?? '—'}%)${avg}; all NOCK at the bottom: ${v.nock_at_bottom} NOCK`;
+  const top = v.usdc_at_top == null ? 'not stated' : `$${v.usdc_at_top}`;
+  const conv = v.usdc_converted_vs_top == null ? 'not stated' : `$${v.usdc_converted_vs_top}`;
+  const bottom = v.nock_at_bottom == null ? 'not stated (no bottom)' : `${v.nock_at_bottom} NOCK`;
+  return `Against its all-USDC top (${top} USDC): ${v.nock_held_vs_top} NOCK held, ${conv} converted (${v.converted_pct ?? '—'}%)${avg}; all NOCK at the bottom: ${bottom}`;
 }
 
 /** What it bought since its deposit, from the verified receipt only; else the reason. */

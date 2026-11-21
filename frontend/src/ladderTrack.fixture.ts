@@ -15,9 +15,10 @@ export const LADDERS_ABOVE: LadderReading[] = [
     "high_pct_of_spot": "-16.76",
     "high_price_usd": "0.01720088",
     "label": "v4 USDC/NOCK 3.00% #3240369",
-    "low_pct_of_spot": "-100.00",
-    "low_price_usd": "0.00000000",
+    "low_pct_of_spot": null,
+    "low_price_usd": null,
     "nock_now": "0.0000",
+    "open_end": "the bottom reaches the pool's lowest usable price (tick 887100): the range buys all the way down, so no bottom price and no NOCK at the bottom are stated",
     "pool_price_usd": "0.02066445",
     "position_id": "uniswap-v4:base:3240369",
     "rung": "near",
@@ -44,7 +45,7 @@ export const LADDERS_ABOVE: LadderReading[] = [
     "vs_top": {
       "converted_pct": "0.00",
       "curve_avg_price_usd": null,
-      "nock_at_bottom": "1709690206954494208.0000",
+      "nock_at_bottom": null,
       "nock_held_vs_top": "0.0000",
       "usdc_at_top": "1226.09",
       "usdc_converted_vs_top": "0.00"
@@ -59,6 +60,7 @@ export const LADDERS_ABOVE: LadderReading[] = [
     "low_pct_of_spot": "-67.16",
     "low_price_usd": "0.00678699",
     "nock_now": "0.0000",
+    "open_end": null,
     "pool_price_usd": "0.02066445",
     "position_id": "uniswap-v4:base:3299001",
     "rung": null,
@@ -113,6 +115,7 @@ export const POSITIONS_ABOVE: Position[] = [
     "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
     "position_id": "uniswap-v4:base:3163450",
     "protocol": "uniswap-v4",
+    "tick_spacing": 300,
     "token0": {
       "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
       "decimals": 6,
@@ -184,6 +187,7 @@ export const POSITIONS_ABOVE: Position[] = [
     "protocol": "uniswap-v4",
     "role": "ladder",
     "rung": "near",
+    "tick_spacing": 300,
     "token0": {
       "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
       "decimals": 6,
@@ -219,6 +223,7 @@ export const POSITIONS_ABOVE: Position[] = [
     "position_id": "uniswap-v4:base:3299001",
     "protocol": "uniswap-v4",
     "role": "ladder",
+    "tick_spacing": 300,
     "token0": {
       "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
       "decimals": 6,
@@ -366,9 +371,10 @@ export const LADDERS_BOUGHT: LadderReading[] = [
     "high_pct_of_spot": "+16.18",
     "high_price_usd": "0.01720088",
     "label": "v4 USDC/NOCK 3.00% #3240369",
-    "low_pct_of_spot": "-100.00",
-    "low_price_usd": "0.00000000",
+    "low_pct_of_spot": null,
+    "low_price_usd": null,
     "nock_now": "5551.3674",
+    "open_end": "the bottom reaches the pool's lowest usable price (tick 887100): the range buys all the way down, so no bottom price and no NOCK at the bottom are stated",
     "pool_price_usd": "0.01480505",
     "position_id": "uniswap-v4:base:3240369",
     "rung": "near",
@@ -395,7 +401,7 @@ export const LADDERS_BOUGHT: LadderReading[] = [
     "vs_top": {
       "converted_pct": "7.23",
       "curve_avg_price_usd": "0.01595807",
-      "nock_at_bottom": "1709690206954494208.0000",
+      "nock_at_bottom": null,
       "nock_held_vs_top": "5551.3674",
       "usdc_at_top": "1226.09",
       "usdc_converted_vs_top": "88.59"
@@ -410,6 +416,7 @@ export const LADDERS_BOUGHT: LadderReading[] = [
     "low_pct_of_spot": "-54.16",
     "low_price_usd": "0.00678699",
     "nock_now": "0.0000",
+    "open_end": null,
     "pool_price_usd": "0.01480505",
     "position_id": "uniswap-v4:base:3299001",
     "rung": null,
@@ -464,6 +471,7 @@ export const POSITIONS_BOUGHT: Position[] = [
     "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
     "position_id": "uniswap-v4:base:3163450",
     "protocol": "uniswap-v4",
+    "tick_spacing": 300,
     "token0": {
       "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
       "decimals": 6,
@@ -535,6 +543,7 @@ export const POSITIONS_BOUGHT: Position[] = [
     "protocol": "uniswap-v4",
     "role": "ladder",
     "rung": "near",
+    "tick_spacing": 300,
     "token0": {
       "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
       "decimals": 6,
@@ -570,6 +579,7 @@ export const POSITIONS_BOUGHT: Position[] = [
     "position_id": "uniswap-v4:base:3299001",
     "protocol": "uniswap-v4",
     "role": "ladder",
+    "tick_spacing": 300,
     "token0": {
       "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
       "decimals": 6,

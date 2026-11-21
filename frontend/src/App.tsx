@@ -594,7 +594,7 @@ function Dashboard() {
               <Legend wrapperStyle={{ color: '#cbd5e1' }} formatter={(val) => <span style={{ color: '#cbd5e1' }}>{val}</span>} />
             </BarChart>
           </ResponsiveContainer>
-          <RangeSideList positions={positionsList} poolMechanics={rawData?.pool_mechanics} />
+          <RangeSideList positions={positionsList} poolMechanics={rawData?.pool_mechanics} ladders={ladderReads} />
           <div style={{ marginTop: 12, fontSize: '0.75rem', color: '#aaa', fontFamily: 'monospace', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span>Spot Price: <strong>${metrics?.tick_bracket_hypervisor?.current_price || '0.00'}</strong></span>
             {notDrawnRanges && <span style={{ color: '#8b949e' }}>{notDrawnRanges}</span>}

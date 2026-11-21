@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { LadderLiteCard, LaddersCard } from './Ladders';
+import { RangeSideList } from './PositionRangeNotes';
 import { LADDERS_ABOVE, LADDERS_BOUGHT, POSITIONS_ABOVE } from '../ladderTrack.fixture';
 
 // The worker's golden readings (ladderTrack.fixture.ts).
@@ -39,5 +40,28 @@ describe('Ladders components (#167)', () => {
       expect(renderToStaticMarkup(<LaddersCard data={data} />)).toBe('');
       expect(renderToStaticMarkup(<LadderLiteCard data={data} />)).toBe('');
     }
+  });
+});
+
+describe('RangeSideList with tracked ladders (#167 review)', () => {
+  it('states a ladder by what it holds, in the neutral tone, never as out of range', () => {
+    const html = renderToStaticMarkup(
+      <RangeSideList positions={POSITIONS_ABOVE} poolMechanics={POSITIONS_ABOVE.map(() => ({ tick_current: 269065 }))} ladders={LADDERS_ABOVE} />,
+    );
+    expect(html).toContain(
+      'v4 · 3%: ladder, holds only USDC: the price is above the range, so it converts nothing until NOCK falls into it at $0.01032932',
+    );
+    // Neither ladder is called out of range or said to have sold NOCK, and neither is amber.
+    const ladderSpans = html.split('<span').filter((s) => s.includes('ladder,'));
+    expect(ladderSpans).toHaveLength(2);
+    for (const s of ladderSpans) {
+      expect(s).not.toMatch(/out of range|sold all its NOCK/);
+      expect(s).toContain('color:#94a3b8');
+      expect(s).not.toContain('#f59e0b');
+    }
+    // Without a reading the ladder is still neutral and says the state is not reported.
+    const bare = renderToStaticMarkup(<RangeSideList positions={[POSITIONS_ABOVE[3]]} poolMechanics={[{ tick_current: 269065 }]} />);
+    expect(bare).toContain('ladder, state not reported');
+    expect(bare).not.toMatch(/out of range|#f59e0b/);
   });
 });

@@ -573,8 +573,10 @@ export interface LadderReading {
   /** What the range holds, by its own pool's tick. */
   state: 'holds_only_usdc' | 'in_range' | 'holds_only_nock' | 'empty' | 'pool_stale';
   state_text: string;
-  low_price_usd: string;
-  high_price_usd: string;
+  /** Null for a bound at the pool's usable extremes (open_end says which). */
+  low_price_usd: string | null;
+  high_price_usd: string | null;
+  open_end: string | null;
   low_pct_of_spot: string | null;
   high_pct_of_spot: string | null;
   spot_price_usd: string | null;
@@ -585,10 +587,10 @@ export interface LadderReading {
   fees_usd: string;
   /** Holdings against the range's own all-USDC top: not trades. */
   vs_top: {
-    usdc_at_top: string;
-    nock_at_bottom: string;
+    usdc_at_top: string | null;
+    nock_at_bottom: string | null;
     nock_held_vs_top: string;
-    usdc_converted_vs_top: string;
+    usdc_converted_vs_top: string | null;
     curve_avg_price_usd: string | null;
     converted_pct: string | null;
   };
