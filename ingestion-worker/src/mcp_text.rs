@@ -70,6 +70,8 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
     let cost_basis = cost_basis_lines(data);
     // Closed positions (issue #144): stated, never counted. Empty when there are none.
     let closed = closed_positions_lines(data);
+    // The standing protected cash reserve (issue #162): stated only when one is set.
+    let reserve = reserve_line(global);
 
     format!(
         "📈 NockNock Sovereign Portfolio State\n\
@@ -78,6 +80,7 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
          • Pillars: {pillars}\n\
          • Sovereign NOCK Stack: {total_nock} ({floor})\n\
          • Stable Stack: {total_usdc}\n\
+         {reserve}\
          • Gas held (wallet ETH+WETH): {gas}\n\
          {aero}\n\
          {collectible}\
@@ -253,4 +256,19 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
 #[cfg(test)]
 pub fn format_claim_simulation_text(data: &serde_json::Value) -> String {
     claim_simulation_text(data, &[])
+}
+
+/// "• Protected cash reserve: $950.00 (...)\n", or "" when no reserve is set (#162).
+pub fn reserve_line(global: Option<&serde_json::Value>) -> String {
+    let get = |k: &str| global.and_then(|g| g.get(k)).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
+    let Some(reserve) = get("cash_reserve_usdc") else { return String::new() };
+    let measured = match (get("reserve_stable_usdc"), get("reserve_headroom_usdc")) {
+        (Some(stable), Some(h)) => match h.strip_prefix('-') {
+            Some(below) => format!("wallet + NOCK LP USDC ${stable}, ${below} below it"),
+            None => format!("wallet + NOCK LP USDC ${stable}, ${h} above it"),
+        },
+        _ => "not measured this cycle".to_string(),
+    };
+    let dry = get("dry_powder_usdc").map(|d| format!("; liquid dry powder ${d}")).unwrap_or_default();
+    format!("• Protected cash reserve: ${reserve} ({measured}{dry}); kept for buying lower, never drawn by a plan buy\n")
 }

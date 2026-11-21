@@ -1,9 +1,19 @@
 openapi: 3.0.3
 info:
   title: NockNock Snapshot Data Model
-  version: 2.8.2
+  version: 2.8.3
   description: |
     Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
+
+    2.8.3 (the standing protected cash reserve, issue #162), additive:
+    - GlobalStatus.cash_reserve_usdc, reserve_stable_usdc, reserve_headroom_usdc
+      (new, optional): operator_profile.cash_reserve_usdc, the stable balance it is
+      measured on (wallet USDC plus USDC in NOCK-pair LP) and the headroom above it.
+      Absent when the operator set no reserve.
+    - GlobalStatus.dry_powder_usdc (new, optional): the liquid dry powder the advice
+      names, never more than reserve_headroom_usdc.
+    - AccumulationPlanStatus.cash_reserve_usdc names the reserve the plan honours: the
+      larger of the plan's own and the standing one.
 
     2.8.2 (positions with no NOCK leg, issues #151-#153), additive:
     - TickBracket.position_id (new, optional): the position the bracket belongs to.
@@ -1617,6 +1627,36 @@ components:
             spot, that another position must be flagged first). Absent when no
             position is closed. It changes no directive. (#144)
           example: "1 configured position is closed and is not counted in any total: Aero CL #2914490 (aero-cl200-weth-nock) (NFT #2914490 no longer exists: withdrawn and burned, or a mistyped nft_id). Its entry can be removed from config.yaml."
+        cash_reserve_usdc:
+          type: string
+          description: >
+            The standing protected cash reserve, operator_profile.cash_reserve_usdc:
+            dry powder kept for buying lower after a drawdown. No dry powder is
+            reported above it and no plan buy draws below it. Absent when the operator
+            set none, or set one that is not zero or positive. (2.8.3, #162)
+          example: "950.00"
+        reserve_stable_usdc:
+          type: string
+          description: >
+            The stable balance the reserve is measured on: wallet USDC plus USDC inside
+            NOCK-pair LP. Moving USDC into a NOCK range does not consume the reserve;
+            buying NOCK does. USDC in a gas-side ETH/USDC range is left out (#151).
+            Absent with no reserve. (2.8.3, #162)
+          example: "1768.18"
+        reserve_headroom_usdc:
+          type: string
+          description: >
+            reserve_stable_usdc less cash_reserve_usdc. Signed: negative when the stable
+            balance is below the reserve. Absent with no reserve. (2.8.3, #162)
+          example: "818.18"
+        dry_powder_usdc:
+          type: string
+          description: >
+            Liquid dry powder: wallet USDC less the larger of the cash target and the
+            virtual tax reserve, and never more than reserve_headroom_usdc (never below
+            0.00). The figure the advice's "Liquid dry powder" sentence names; "0.00"
+            when the reserve is invalid. Absent on a snapshot from before 2.8.3. (#162)
+          example: "818.18"
 
     AssetAggregationSeries:
       type: object

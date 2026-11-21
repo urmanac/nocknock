@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The protected cash reserve no longer lapses with the plan, and dry powder honours it
+  (#162).** The operator's $950 reserve was configured as `accumulation_plan.cash_reserve_usdc`,
+  which only the plan's buy guard read. Once plan `2026-11-reentry` completed, nothing
+  protected it, and the advice reported "Liquid dry powder: $1360.77" (wallet USDC less
+  the cash target) without naming it. The reserve is now a standing setting,
+  `operator_profile.cash_reserve_usdc`, measured as before on wallet USDC plus USDC
+  inside NOCK LP (gas-side ETH/USDC ranges are left out, #151).
+  - Dry powder never exceeds the headroom above it. The advice names the reserve and the
+    headroom ("$818.18 above it"), and says when the stable balance is below it.
+  - A plan never draws below either reserve, the plan's own or the standing one. The
+    plan panel names the one that binds.
+  - The snapshot (spec 2.8.3) adds `cash_reserve_usdc`, `reserve_stable_usdc`,
+    `reserve_headroom_usdc` and `dry_powder_usdc` to `global_status`. The Total USDC
+    Stack tile and `get_portfolio_state` state the reserve.
+  - Moving USDC into a NOCK range does not use the reserve up; buying NOCK does.
+  - Unset means no rule. A reserve that is not zero or positive is named, and no dry
+    powder is reported until it is fixed.
+
 ### Added
 
 - **The tick bracket chart draws the ETH/USDC ranges (#160).** The gas-side WETH/USDC

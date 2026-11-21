@@ -161,6 +161,13 @@ operator_profile:
   # liquid growth dry powder. Purely internal accounting — no on-chain address change.
   tax_reserve_ratio: 0.40
 
+  # Optional standing protected cash reserve in USDC (#162): dry powder you keep for
+  # buying lower after a drawdown. It does not end with an accumulation plan. It is
+  # measured on wallet USDC plus USDC inside NOCK LP (moving USDC into a NOCK range does
+  # not use it up; buying NOCK does; a gas-side ETH/USDC range does not count). No dry
+  # powder is reported above it and no plan buy draws below it. Unset = no rule.
+  # cash_reserve_usdc: 950
+
   # Target allocation weights in Portfolio Deviation Matrix (basis points, sum = 10000).
   # v2.0.0: Aerodrome tranche liquidated — the LP bucket is the aggregate across the
   # tracked positions. Since #151 the LP target counts NOCK-pair positions only (token0
@@ -198,8 +205,10 @@ operator_profile:
 #   max_price_usd: 0.020           # optional ceiling: pause while spot is above it
 #   pause_when_overextended: true  # pause while daily RSI(14) >= 70
 #   respect_cash_target: true      # never spend liquid USDC below target_weights_bps.cash
-#   cash_reserve_usdc: 950         # protected reserve: never advise a buy that takes liquid
-#                                  # USDC below this, at any price (keep dry powder for a dip)
+#   cash_reserve_usdc: 950         # this plan's protected reserve: never advise a buy that
+#                                  # takes the stable balance below it. It ends with the
+#                                  # plan; for a standing one use operator_profile's (#162).
+#                                  # The plan honours the larger of the two.
 
 # ============================================================
 # Fill detection for the accumulation plan (v0.6.0, issue #118)

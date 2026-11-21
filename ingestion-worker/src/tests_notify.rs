@@ -14,6 +14,7 @@ fn profile(floor: f64) -> OperatorProfile {
         lp_floor_tolerance_bps: 0,
         tax_reserve_ratio: 0.0,
         target_weights_bps: TargetWeightsBps { treasury: 8000, uniswap_lp: 1500, cash: 500 },
+        cash_reserve_usdc: None,
     }
 }
 

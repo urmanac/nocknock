@@ -91,6 +91,7 @@
           "aero_price_usd": null,
           "collectible_rewards_note": null,
           "collectible_rewards_usd": null,
+          "dry_powder_usdc": "134.41",
           "eth_price_usd": "2373.14",
           "gas_to_fee_delta_usd": "-0.01",
           "high_water_mark_usd": "2886.53",
@@ -531,7 +532,7 @@
         }
       ]
     },
-    "state_hash": "5f6b2f891174bfa10d41b81b6b36ee8cd90f10cef69daa87af24d89202e0fa55"
+    "state_hash": "c485b3b6d747d800f0a96068d928fdd8c0421420c3931e8ae9b2104708bd4a20"
   },
   "from_zero": {
     "mcp_text": {
@@ -563,6 +564,7 @@
           "aero_price_usd": null,
           "collectible_rewards_note": null,
           "collectible_rewards_usd": null,
+          "dry_powder_usdc": "500.00",
           "eth_price_usd": "3000.00",
           "gas_to_fee_delta_usd": "-0.01",
           "high_water_mark_usd": "500.00",
@@ -698,7 +700,7 @@
         }
       ]
     },
-    "state_hash": "e3eae7a681635614a28eb8f0481a4b1383c321a8c24a0eae1550d311147b0315"
+    "state_hash": "dc47cf32db3d7e2422b5bc83e619b5e82b7ee473a24bb38af4c3b2fb7ca2f7a0"
   },
   "whole_book_plan_due": {
     "mcp_text": {
@@ -828,6 +830,7 @@
           "aero_price_usd": null,
           "collectible_rewards_note": null,
           "collectible_rewards_usd": null,
+          "dry_powder_usdc": "911.87",
           "eth_price_usd": "2373.14",
           "gas_to_fee_delta_usd": "0.74",
           "high_water_mark_usd": "2822.68",
@@ -1459,6 +1462,6 @@
         }
       ]
     },
-    "state_hash": "6ee7346296865a6fe63d64c7399938efbf511004626f376a0dbb3df839a32f0e"
+    "state_hash": "3b251ee438e6c2ba15f2d94f6712f931ef91ce271142a965c432b94e615efa5f"
   }
 }
