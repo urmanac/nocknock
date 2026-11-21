@@ -48,6 +48,7 @@ import { AeroPillarLines, PositionAeroLine } from './components/AeroPillar.tsx';
 import { PositionEarningsLines, hasPositionEarnings } from './components/CollectibleEarnings.tsx';
 import { ClosedPositionsCard } from './components/ClosedPositions.tsx';
 import { FloorBreachNote } from './components/FloorBreachNote.tsx';
+import { LadderSimulatorPanel } from './components/LadderSimulatorPanel';
 import { priceSourceIsClosedText } from './closedPositions.ts';
 import {
   LP_FEE_COLOR,
@@ -721,6 +722,11 @@ function Dashboard() {
             lpRebuild={metrics?.lp_rebuild}
             onRecorded={refetch}
           />
+        </CanvasPanel>
+
+        {/* 5a'. Ladder simulator (#166): a read-only what-if from the stored snapshot */}
+        <CanvasPanel title="Ladder Simulator (what-if, read-only)">
+          <LadderSimulatorPanel positions={positionsList} snapshotId={snapshot?.meta?.snapshot_id} />
         </CanvasPanel>
 
         {/* 5b. Harvest ledger (virtual tax reserve) + change from the recorded peak (#102) */}

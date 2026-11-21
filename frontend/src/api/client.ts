@@ -331,4 +331,30 @@ export const api = {
   // Average cost vs spot (v0.6.0, #98): verified fills with running averages, and stored spot.
   costBasisSeries: (days?: number) =>
     request<import('../costBasis').CostBasisSeries>(`/cost-basis/series${days ? `?days=${days}` : ''}`),
+
+  // The ladder simulator (#166): a read-only what-if over the stored snapshot.
+  simulateLadder: (query: URLSearchParams) => simulateLadder(query),
 };
+
+/**
+ * GET /v1/simulate/ladder (#166). Its own fetch, because a 400 or 422 body is a result
+ * to show, not only an error message: the sub-code, `nock_needed` and the bounds are
+ * kept. Throws only when the worker does not answer with one of the endpoint's bodies.
+ */
+export async function simulateLadder(
+  query: URLSearchParams,
+  fetchImpl: typeof fetch = fetch,
+): Promise<import('../ladder').LadderOutcome> {
+  const res = await fetchImpl(`${API_BASE}/simulate/ladder?${query.toString()}`, { cache: 'no-store' });
+  const body = await res.json().catch(() => null);
+  if (res.ok && body) return { ok: true, sim: body };
+  if ((res.status === 400 || res.status === 422) && body && typeof body.error === 'string') {
+    return { ok: false, status: res.status, error: body };
+  }
+  const msg = (body && (body.detail || body.message || body.error)) || res.statusText || `HTTP ${res.status}`;
+  throw Object.assign(new Error(msg), {
+    status: res.status,
+    code: typeof body?.error === 'string' ? body.error : undefined,
+    detail: typeof body?.detail === 'string' ? body.detail : undefined,
+  });
+}

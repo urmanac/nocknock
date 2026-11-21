@@ -25,6 +25,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   2026-11-21: the 100,000 floor is crossed at NOCK ≥ $0.025405 (+96.3%), and the
   tolerated 90,000 is never crossed (90,201 NOCK would remain).
 
+- **The ladder simulator (#166).** A read-only what-if for a USDC/NOCK range that is
+  mostly USDC and sits below spot: `GET /v1/simulate/ladder`, the `simulate_ladder`
+  MCP tool in both transports (the first tool that takes arguments; the stdio
+  transport forwards them and `isError`, and its fallback formats the worker's own
+  answer) and a Ladder Simulator panel on the dashboard. It works only from the latest
+  stored snapshot: no RPC read, nothing signed or sent, no amount chosen. For the
+  inputs (USDC, optional NOCK, bounds in USD, in % or `high=spot`) it states the
+  liquidity and the NOCK the range needs, NOCK bought and USDC left down a price grid,
+  the full-conversion price and average buy price, the top (all USDC), the stable
+  balance at the ladder's bottom against the $950 standing reserve (counting the
+  existing NOCK ranges' USDC converting on the way down), the reading below the bottom
+  and at the top as separate measured lines, and whether its NOCK fits the floor plus
+  tolerance budget, with its effect on the floor-crossing price (#165) before and after.
+  Bounds snap to a tracked pool's tick spacing or a spacing the caller states; on a
+  snapped grid `high=spot` is the usable tick at or below spot (no NOCK), and both
+  ticks next to spot are listed with their NOCK need. Snapshot spec 2.9.0, additive:
+  `positions[].tick_spacing` for Uniswap v4 and `global_status.lp_nock_budget`,
+  `lp_nock_budget_note` and `lp_floor_tolerance_bps`. On the #166 fixture (spot
+  $0.012944): $900 from -30% to +2% needs 4,194 NOCK and averages $0.01083; $741 from
+  $0.01 to spot needs none, holds 65,130 NOCK at the bottom at an average $0.01138, and
+  leaves the stable balance there $25.99 above the reserve.
+
 ## [0.8.3] - 2026-11-20
 
 A patch release: the protected cash reserve is a standing rule, and dry powder honours it.
