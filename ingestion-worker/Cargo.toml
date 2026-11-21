@@ -44,3 +44,10 @@ path = "src/main.rs"
 [[bin]]
 name = "nocknock-mcp"
 path = "src/bin/mcp.rs"
+# Build scripts and proc-macros (sqlx's macros) are not stripped in release builds. On
+# macOS 27.2.1 the toolchain's strip leaves a proc-macro dylib that dyld refuses to load
+# ("mis-aligned LINKEDIT string pool"), so `cargo build --release` failed with "can't find
+# crate for sqlx". The shipped binaries are still stripped; only host-side build tools
+# keep their debug info. Harmless on Linux.
+[profile.release.build-override]
+strip = "none"
