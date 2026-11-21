@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-21
+
+The ladder track: NockNock now measures, suggests, tracks and maintains a mostly-USDC
+ladder of Uniswap v4 ranges below the price, finds the positions you deposit on-chain by
+itself, and shows the ladder's shape. Only real calls to action reach the top of the page.
+NockNock still builds no transaction and signs nothing.
+
+- **The floor-crossing price (#165)**: how far NOCK can rise before the ranges sell the
+  stack below the floor.
+- **The ladder simulator (#166)**: a read-only what-if, `GET /v1/simulate/ladder` and the
+  `simulate_ladder` MCP tool.
+- **Ladders as their own role (#167)**: `role: ladder`, outside the LP target and the
+  rebuild; counted in the totals and the reserve.
+- **The ladder suggestion and the bottle (#168)**: with `operator_profile.ladder_rungs`, a
+  numbered deposit per rung, measured by liquidity, frozen once deposits start.
+- **Positions found on-chain**: the wallet's Uniswap v4 position NFTs are found from its
+  transfers; one it minted on a suggested rung is tracked by itself, anything else is
+  offered with one tap. No hash, NFT id or `config.yaml` edit.
+- **Ladder maintenance, call-to-action tiers and the ladder shape chart (#169)**: a
+  restraint model for moving a near rung and pulling a deep one, `derived_metrics.events[]`
+  in two tiers, and a chart of the deployed NOCK ranges whose area is their capital.
+
+Snapshot spec 2.8.3 -> 2.11.0, every step additive.
+
+Before you upgrade:
+
+- **This release adds a database migration, and from it on a deploy is forward-only.**
+  `20261121000013_tracked_positions` adds `tracked_positions`, `position_candidates` and
+  `position_detection_state`. A build older than v0.9.0 refuses to start on that database
+  (`VersionMissing`), and once a position is tracked from the chain an older build would
+  publish a total without it. To go back anyway, first copy each row's `config_entry` from
+  `GET /v1/positions/found` into `positions:` in `config.yaml`, then follow DEPLOYMENT.md
+  section 5.
+- **Every new setting is optional and has no default**: `operator_profile.ladder_bottom_usd`,
+  `ladder_rungs` and `ladder_maintenance` (see `config.yaml.example`). Without them the
+  ladder cards say which settings they need, and nothing else changes.
+
 ### Added
 
 - **Ladder maintenance, with a "keep it in your pants" restraint model (#169).**

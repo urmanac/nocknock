@@ -94,9 +94,11 @@ This guide captures the operational rules, environment quirks, toolchain configu
   refactor must leave it untouched; an intended behaviour change regenerates it with
   `NOCKNOCK_BLESS_GOLDEN=1 cargo test test_golden_snapshot` and the diff is reviewed.
   `tracked` and `position_detect` (v0.9.0) use runtime `sqlx::query`, so the `.sqlx` cache
-  does not change with them. Their SQL is run for real by two ignored tests against a
-  scratch PostgreSQL whose name ends in `_scratch` (the migrations are applied to it):
-  `NOCKNOCK_SCRATCH_DATABASE_URL=postgres://…/nocknock_scratch cargo test scratch_database -- --ignored`.
+  does not change with them. Their SQL, and the fill and route-quote SQL, is run for real
+  by five ignored tests against a scratch PostgreSQL whose name ends in `_scratch` (the
+  migrations are applied to it). They share that database, so run them one at a time:
+  `NOCKNOCK_SCRATCH_DATABASE_URL=postgres://…/nocknock_scratch cargo test scratch_database -- --ignored --test-threads=1`.
+  A plain `postgres:16` container is enough (no TimescaleDB extension is needed).
   CI has no PostgreSQL: run it before a release that touches a query or a migration.
   `testdata/position_detect/chain_fixture.json` holds recorded chain answers for the scan
   (ONCHAIN_INTEGRATION.md §15); a position is tracked by itself only when the wallet itself
@@ -185,8 +187,8 @@ This guide captures the operational rules, environment quirks, toolchain configu
 Before pushing any PR or tag:
 ```bash
 make test-brain       # 3 tests (WASM invariants)
-make test-worker      # 468 tests as of v0.8.3: 440 worker + 28 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger, collectible rewards, closed positions, burn-down #130-#137, gas-side ranges #151-#153, harvest principal #156-#157, standing reserve #162)
-make test-frontend    # 357 tests as of v0.8.3 (staleness, contract, display helpers, charts, surfaces, ledger, collectible rewards, closed positions, burn-down, NOCK-leg brackets, ETH/USDC brackets, reserve)
+make test-worker      # 761 tests as of v0.9.0: 716 worker + 45 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger, collectible rewards, closed positions, burn-down #130-#137, gas-side ranges #151-#153, harvest principal #156-#157, standing reserve #162, floor crossing #165, ladders #166-#169, position detection)
+make test-frontend    # 518 tests as of v0.9.0 (staleness, contract, display helpers, charts, surfaces, ledger, collectible rewards, closed positions, burn-down, NOCK-leg brackets, ETH/USDC brackets, reserve, ladders, events, ladder shape)
 make dist             # Verifies packaging of dist/ binaries and tarballs
 NOCKNOCK_API_URL=http://chudmax:8081 make test-mcp   # both MCP transports against the deployment
 ```
