@@ -108,8 +108,16 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // backfilled candles for any period the worker was offline.
     ensure_price_history(state).await;
 
+    // Positions found on-chain (v0.9.0, #145): looked for before the position reads, so a
+    // deposit that landed before this cycle is counted in it. It never fails the cycle;
+    // when it cannot check, the snapshot says why and how far it had read.
+    let detection = detect_positions_for_cycle(state).await;
+
     // Fetch raw data from Alchemy (parallelized on-chain calls)
     let raw_data = fetch_raw_data(state).await?;
+    // What detection found, valued at this cycle's prices, with what became of each
+    // database row in this cycle's reads.
+    let position_detection = position_detection_block(&detection, &raw_data);
 
     // Persistent high-water mark: the peak stored total and the earliest row that reached
     // it (issue #94, N2). An empty table (a fresh start) has no mark yet. A database error
@@ -289,6 +297,7 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     let fill_detection = detect_fills(state, &plan_ctx).await;
     let mut derived_metrics = compute_derived_metrics_with_fills(&raw_data, prev_hwm, &profile, structural_channels,
         &counterfactual_history, &ledger_agg, &regime, &plan_ctx, fill_detection.as_ref());
+    derived_metrics.position_detection = Some(position_detection);
     {
         let gs = &mut derived_metrics.global_status;
         let current_total: f64 = gs.total_portfolio_usd.parse().unwrap_or(f64::INFINITY);
@@ -325,7 +334,8 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
         cycle_snapshot_data(raw_data, derived_metrics, prev.as_ref().map(|s| &s.data), &Utc::now().to_rfc3339())
     };
     // The ladder suggestion (#168), measured on the assembled snapshot after the
-    // directive strings were captured: it never changes the directive or a push.
+    // directive strings were captured: it never changes the directive or a push. It reads
+    // this cycle's position detection, attached above.
     attach_ladder_suggestion(&mut snapshot_data, &profile, Utc::now());
 
     // Compute deterministic state hash
@@ -459,7 +469,9 @@ pub(crate) fn canonical_state_json(data: &SnapshotData) -> serde_json::Value {
 }
 
 pub(crate) fn strip_volatile_time_fields(value: &mut serde_json::Value) {
-    const VOLATILE_KEYS: [&str; 9] = [
+    const VOLATILE_KEYS: [&str; 10] = [
+        // Position detection's scan block (v0.9.0): the chain's head moves every cycle.
+        "checked_at_block",
         // Route quotes for a due tranche (issue #115): contract reads at a stated
         // block, fresh every cycle. They say nothing about the wallet's state.
         "route_quotes",

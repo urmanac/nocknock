@@ -108,6 +108,8 @@ pub(crate) fn build_position_snapshots(raw_positions: &[RawPosition], nock_usd: 
                 // Stamped by apply_ladder_roles for a position configured role: ladder (#167).
                 role: None,
                 rung: None,
+                // Stamped by snapshot_positions for a position that comes from a database row.
+                source: None,
             }
         })
         .collect()
@@ -172,6 +174,11 @@ pub(crate) fn snapshot_positions(raw: &RawOnChainData) -> Vec<Position> {
         &raw.aero,
     );
     apply_ladder_roles(&mut positions, &raw.ladders);
+    // A position found on-chain and tracked from the database says so; a config entry
+    // carries no source, so a snapshot without such a row keeps its bytes.
+    for p in positions.iter_mut() {
+        p.source = raw.position_sources.get(&p.position_id).cloned();
+    }
     positions
 }
 

@@ -57,6 +57,10 @@ pub(crate) fn amounts_per_usd(p: &RawPosition, nock_usd: f64, eth_usd: f64) -> O
     Some((a0 / value, a1 / value))
 }
 
+/// Why a position tracked from the database (tracked.rs) is never sized: it is counted
+/// toward what LP holds, and no deposit into it is ever suggested.
+pub(crate) const LP_TRACKED_REASON: &str = "tracked from the chain, not from config.yaml: counted, never a rebuild target";
+
 /// Size the LP rebuild: split the LP target across eligible tracked positions and work
 /// out what each deposit takes. Pure — no I/O, unit-testable.
 ///
@@ -94,7 +98,9 @@ pub(crate) fn lp_rebuild_suggestions(
             })
         };
         if rule.weight_bps == Some(0) {
-            skip("excluded in config (rebuild_weight_bps: 0)");
+            // A position found on-chain and tracked from the database has no config
+            // entry: its exclusion says what it is, not which key to edit.
+            skip(if raw.position_sources.contains_key(&p.position_id) { LP_TRACKED_REASON } else { "excluded in config (rebuild_weight_bps: 0)" });
             continue;
         }
         match raw.pool_liquidity.get(&p.position_id).and_then(|v| v.parse::<u128>().ok()) {

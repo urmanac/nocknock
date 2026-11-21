@@ -500,6 +500,28 @@ pub(crate) fn api_router(state: Arc<AppState>) -> axum::Router {
             "/v1/simulate/ladder",
             axum::routing::get(simulate_ladder_handler),
         )
+        // Positions found on-chain (v0.9.0, #145). The four writes take a JSON body and
+        // sit behind the cross-site guard below like every other write.
+        .route(
+            "/v1/positions/found",
+            axum::routing::get(found_positions_handler),
+        )
+        .route(
+            "/v1/positions/track",
+            axum::routing::post(track_position_handler),
+        )
+        .route(
+            "/v1/positions/untrack",
+            axum::routing::post(untrack_position_handler),
+        )
+        .route(
+            "/v1/positions/dismiss",
+            axum::routing::post(dismiss_position_handler),
+        )
+        .route(
+            "/v1/positions/restore",
+            axum::routing::post(restore_position_handler),
+        )
         .layer(axum::middleware::from_fn(refuse_cross_site_writes))
         .layer(Extension(state))
 }

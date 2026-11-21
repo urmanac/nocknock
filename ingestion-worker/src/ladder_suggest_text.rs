@@ -166,12 +166,14 @@ pub fn prefilled_words(r: &Value) -> String {
     format!("{joined} prefilled")
 }
 
-/// The `after_deposit` field, whatever its kind. Today only `manual_config`, the fallback
-/// until new position NFTs are detected on-chain. Pure.
+/// The `after_deposit` field, whatever its kind: `tracked_automatically` since v0.9.0
+/// (the wallet's new position NFT is found on-chain), `manual_config` in a snapshot
+/// stored before that. A note about this cycle's check follows when there is one. Pure.
 pub fn after_deposit_line(a: Option<&Value>) -> String {
+    let note = a.and_then(|a| s(a, "/detection_note")).map(|n| format!(" {n}")).unwrap_or_default();
     match a.and_then(|a| s(a, "/kind")) {
         Some("manual_config") => format!("  After you deposit (current fallback): {}\n", a.and_then(|a| s(a, "/text")).unwrap_or("")),
-        Some(other) => format!("  After you deposit: {}\n", a.and_then(|a| s(a, "/text")).unwrap_or(other)),
+        Some(other) => format!("  After you deposit: {}{note}\n", a.and_then(|a| s(a, "/text")).unwrap_or(other)),
         None => String::new(),
     }
 }

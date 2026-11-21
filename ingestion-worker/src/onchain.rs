@@ -41,20 +41,39 @@ pub(crate) async fn fetch_eth_price_usd_at(http_client: &Client, alchemy_url: &s
 pub(crate) async fn fetch_raw_data(state: &Arc<AppState>) -> Result<RawOnChainData> {
     let alchemy_key = state.config.alchemy_api_keys.first().cloned().unwrap_or_default();
     let alchemy_url = format!("https://base-mainnet.g.alchemy.com/v2/{}", alchemy_key);
-    fetch_raw_data_from(&state.http_client, &alchemy_url, &state.config, Utc::now()).await
+    // The positions tracked from the database (tracked.rs) are read after config.yaml's.
+    // A table that cannot be read fails the cycle: a total without them would be false.
+    let merged = load_cycle_positions(&PositionStore::of(state), &state.http_client, &alchemy_url, &state.config).await?;
+    fetch_raw_data_merged(&state.http_client, &alchemy_url, &state.config, &merged, Utc::now()).await
 }
 
-/// One cycle's reads against a given RPC URL. `fetch_raw_data` builds the URL from the
-/// configured key; the tests of #144 point this at a local node that answers with real
-/// captured responses. It reads only `http_client` and `config`. `now` is the cycle's
-/// clock: the one thing it decides is whether the block of a closed position's proof is
-/// current (closed::ProofClock), so the tests pass the recorded block's own time.
+/// One cycle's reads of config.yaml's positions alone, against a given RPC URL: what
+/// every cycle read before database-tracked positions existed. The tests of #144 point
+/// this at a local node that answers with real captured responses.
+#[cfg(test)]
 pub(crate) async fn fetch_raw_data_from(
     http_client: &Client,
     alchemy_url: &str,
     config: &AppConfig,
     now: DateTime<Utc>,
 ) -> Result<RawOnChainData> {
+    fetch_raw_data_merged(http_client, alchemy_url, config, &MergedPositions::config_only(&config.positions), now).await
+}
+
+/// One cycle's reads against a given RPC URL. `fetch_raw_data` builds the URL from the
+/// configured key and merges the database rows. It reads only `http_client`, `config`
+/// and `merged`: the cycle's positions are `merged.positions` (config.yaml's entries
+/// first, then the rows), and nothing here reads `config.positions`. `now` is the
+/// cycle's clock: the one thing it decides is whether the block of a closed position's
+/// proof is current (closed::ProofClock), so the tests pass the recorded block's own time.
+pub(crate) async fn fetch_raw_data_merged(
+    http_client: &Client,
+    alchemy_url: &str,
+    config: &AppConfig,
+    merged: &MergedPositions,
+    now: DateTime<Utc>,
+) -> Result<RawOnChainData> {
+    let cycle_positions: &[PositionConfig] = &merged.positions;
     let proof_clock = ProofClock::for_cycle(now, config.sync_window_seconds);
     let Some(wallet_addr) = config.tracked_wallets.first() else {
         return Err(anyhow::anyhow!(
@@ -64,7 +83,7 @@ pub(crate) async fn fetch_raw_data_from(
 
     // A position with an unknown protocol is a configuration error, stated before any
     // chain read (issue #91): it is never read as another protocol.
-    validate_positions_config(&config.positions)?;
+    validate_positions_config(cycle_positions)?;
 
     // 0. Fetch live ETH/USD spot price from the canonical Uniswap v3 WETH/USDC pool slot0.
     //    (The former Aerodrome vAMM-WETH/USDC source is retired along with the liquidated
@@ -155,7 +174,7 @@ pub(crate) async fn fetch_raw_data_from(
 
     // 2. Per-position reads (v2.0.0): every configured Uniswap position is read live;
     //    there are no Aerodrome LP-share reads anymore (tranche liquidated 2026-10-23).
-    if config.positions.is_empty() {
+    if cycle_positions.is_empty() {
         return Err(anyhow::anyhow!(
             "No positions configured; add entries under `positions:` in config.yaml (see ONCHAIN_INTEGRATION.md §5)"
         ));
@@ -169,7 +188,7 @@ pub(crate) async fn fetch_raw_data_from(
     // The config entries that are still live, in config order: the only ones whose
     // gauges are read and whose rebuild rules apply.
     let mut live_configs: Vec<PositionConfig> = Vec::new();
-    for pos in &config.positions {
+    for pos in cycle_positions {
         let read: PositionRead<RawPosition> = match Protocol::parse(&pos.protocol) {
             Some(Protocol::UniswapV4) => {
                 // The pool's tick spacing (#166) travels as a position fact, like Aero CL's.
@@ -231,7 +250,10 @@ pub(crate) async fn fetch_raw_data_from(
                     pos.id,
                     closed_reason(pos.nft_id, &proof.position_manager)
                 );
-                closed_positions.push(closed_position_entry(pos, proof, false));
+                let mut entry = closed_position_entry(pos, proof, false);
+                // A database row that is closed says so: UNTRACK removes it, not a config edit.
+                entry.source = merged.sources.get(&entry.position_id).cloned();
+                closed_positions.push(entry);
             }
         }
     }
@@ -256,7 +278,7 @@ pub(crate) async fn fetch_raw_data_from(
     let mut closed_price_pool: Option<ClosedPricePool> = None;
     if !raw_positions.iter().any(|p| p.is_price_source) {
         // The first flagged config entry that is closed, with its index in the list.
-        let closed_source = config.positions.iter().filter(|c| c.is_price_source).find_map(|c| {
+        let closed_source = cycle_positions.iter().filter(|c| c.is_price_source).find_map(|c| {
             let key = position_key(c);
             closed_positions.iter().position(|x| x.position_id == key).map(|i| (c, i))
         });
@@ -461,6 +483,8 @@ pub(crate) async fn fetch_raw_data_from(
         closed_positions,
         ladders,
         ladder_baselines,
+        position_sources: merged.sources.clone(),
+        tracked_report: merged.report.clone(),
     })
 }
 

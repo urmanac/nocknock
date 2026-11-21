@@ -213,7 +213,21 @@ pub(crate) async fn get_claim_fees_payload_handler(Extension(state): Extension<A
     // --- Per-position Uniswap v4 collect actions ---
     // Closed positions (#144) get no action: the snapshot lists them as closed, their
     // NFT does not exist and there is nothing to collect from it.
-    let live_configs = live_position_configs(&state.config.positions, &snapshot.data.closed_positions);
+    // Positions tracked from the database (tracked.rs) get their action like config
+    // entries, once a cycle has read them. A table that cannot be read is stated: a
+    // payload that silently left a tracked position out would read as "nothing to collect".
+    let tracked_rows = match PositionStore::of(&state).tracked(&wallet).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!("Tracked positions unreadable: {e}");
+            return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+                "error": "TRACKED_POSITIONS_UNAVAILABLE",
+                "detail": "The tracked positions table could not be read, so the claim actions cannot be listed in full. Nothing was built."
+            }))).into_response();
+        }
+    };
+    let claim_configs = claim_position_configs(&state.config.positions, &tracked_rows, &snapshot.data);
+    let live_configs = live_position_configs(&claim_configs, &snapshot.data.closed_positions);
     let v4_configs: Vec<&PositionConfig> =
         live_configs.iter().copied().filter(|p| p.protocol == "uniswap-v4").collect();
     let v3_configs: Vec<&PositionConfig> =

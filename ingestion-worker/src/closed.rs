@@ -303,6 +303,7 @@ pub(crate) fn closed_position_entry(cfg: &PositionConfig, proof: ClosedProof, su
         evidence: proof.evidence,
         first_seen_closed_at: None,
         supplies_spot_price,
+        source: None,
     }
 }
 
@@ -349,7 +350,8 @@ pub(crate) fn closed_positions_note(closed: &[ClosedPosition]) -> Option<String>
         if one { "is" } else { "are" },
         list,
     );
-    let removable: Vec<&ClosedPosition> = closed.iter().filter(|c| !c.supplies_spot_price).collect();
+    // A database row (found on-chain) has no config.yaml entry: UNTRACK removes it.
+    let removable: Vec<&ClosedPosition> = closed.iter().filter(|c| !c.supplies_spot_price && c.source.is_none()).collect();
     if removable.len() == closed.len() {
         note.push_str(if one { " Its entry can be removed from config.yaml." } else { " Their entries can be removed from config.yaml." });
     } else if !removable.is_empty() {
@@ -364,6 +366,9 @@ pub(crate) fn closed_positions_note(closed: &[ClosedPosition]) -> Option<String>
             " The pool of {} still supplies the NOCK/USD spot: flag another position as is_price_source before removing that entry.",
             c.label
         ));
+    }
+    for c in closed.iter().filter(|c| c.source.is_some()) {
+        note.push_str(&format!(" {} was tracked from the chain, not from config.yaml: UNTRACK removes it from this list.", c.label));
     }
     Some(note)
 }
@@ -396,7 +401,9 @@ pub(crate) fn closed_position_notes(prev_live_position_ids: Option<&[String]>, c
         .map(|c| {
             // One or the other, never both: an operator who reads "can be removed" and
             // removes a price-source entry stalls every cycle after it.
-            let what_to_do = if c.supplies_spot_price {
+            let what_to_do = if c.source.is_some() {
+                "It was tracked from the chain, not from config.yaml: UNTRACK removes it from the list.".to_string()
+            } else if c.supplies_spot_price {
                 format!(
                     "Its pool still supplies the NOCK/USD spot: flag another position as is_price_source before removing its entry ({}) from config.yaml.",
                     c.config_id
