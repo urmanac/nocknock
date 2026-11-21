@@ -5,6 +5,10 @@
  * plain words, and the numbered deposits with their links. Each deposit leaves a slot
  * (`rungAction`) for the follow-up's sign-in-wallet button.
  *
+ * With a configured shape (the operator's cap | near | deep) the list is every rung of
+ * the shape in order: a deposit for each rung left, one stated line for a rung that is
+ * deployed, passed or over; the picture draws a bar per rung, a deployed one hatched.
+ *
  * Wording lives in ../ladderSuggestion.ts and is unit-tested.
  */
 import type { CSSProperties, ReactNode } from 'react';
@@ -19,18 +23,24 @@ import {
   ladderCardView,
   ladderDepositUrl,
   ladderLinkLabel,
+  ladderList,
   linkFormatNote,
   missingSettingSentence,
   pictureGeometry,
   price4,
+  rungFeeLine,
+  rungNockLimit,
   rungRangeLines,
   rungTitle,
+  shapeRowLines,
   statedLines,
+  walletAfterLine,
 } from '../ladderSuggestion';
 
 const MUTED = '#8b949e';
 const TEXT = '#c9d1d9';
 const GREEN = '#10b981';
+const AMBER = '#fbbf24';
 const WRAP: CSSProperties = { overflowWrap: 'anywhere' };
 
 /** The ladder on a USD-per-NOCK axis: spot, each rung's bar with its amount, the bottom
@@ -41,7 +51,7 @@ export function LadderPicture({ picture, width = 520 }: { picture: LadderPicture
   const g = pictureGeometry(picture, width);
   if (!g) return null;
   const fs = g.fontSize;
-  const { labels, axis, axisLabels, legend } = g.rows;
+  const { labels, axis, axisLabels, legend, deployedLegend } = g.rows;
   // The spot label sits left of its line, the bottom label right of its line.
   return (
     <svg
@@ -52,18 +62,31 @@ export function LadderPicture({ picture, width = 520 }: { picture: LadderPicture
       aria-label="The ladder on a price axis"
       style={{ maxWidth: g.width * 1.2, display: 'block', margin: '8px 0' }}
     >
+      <defs>
+        <pattern id="ladder-hatch" width={6} height={6} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1={0} y1={0} x2={0} y2={6} stroke={MUTED} strokeWidth={2} />
+        </pattern>
+      </defs>
       {/* The reserve zone: below the ladder bottom. */}
       <rect data-testid="ladder-reserve-zone" x={8} y={labels + 6} width={Math.max(0, g.bottomX - 8)} height={axis - labels - 6} fill="#1e3a8a" fillOpacity={0.35} />
       {/* The ladder bottom. */}
       <line data-testid="ladder-bottom-line" x1={g.bottomX} x2={g.bottomX} y1={labels + 4} y2={axis} stroke="#93c5fd" strokeDasharray="4 3" />
       <text x={g.bottomX + 3} y={labels} fontSize={fs} fill="#93c5fd">bottom ${price4(Number(picture.bottom_usd))}</text>
       {/* Each rung. */}
-      {g.bars.map((b) => (
-        <g key={b.label + b.x} data-testid="ladder-bar">
-          <rect x={b.x} y={b.y} width={b.w} height={20} rx={3} fill={GREEN} fillOpacity={0.6} stroke={GREEN} />
-          <text x={b.x + b.w / 2} y={b.y + 14} fontSize={fs} fill="#ecfdf5" textAnchor="middle">{b.label}</text>
-        </g>
-      ))}
+      {g.bars.map((b) =>
+        b.deployed ? (
+          // Already deployed: hatched and muted, so it reads as done, not as a deposit.
+          <g key={b.label + b.x} data-testid="ladder-bar" data-deployed="true">
+            <rect x={b.x} y={b.y} width={b.w} height={20} rx={3} fill="url(#ladder-hatch)" fillOpacity={0.5} stroke={MUTED} strokeDasharray="3 2" />
+            <text x={b.labelX} y={b.y + 14} fontSize={fs} fill={TEXT} textAnchor={b.labelAnchor}>{b.label}</text>
+          </g>
+        ) : (
+          <g key={b.label + b.x} data-testid="ladder-bar">
+            <rect x={b.x} y={b.y} width={b.w} height={20} rx={3} fill={GREEN} fillOpacity={0.6} stroke={GREEN} />
+            <text x={b.labelX} y={b.y + 14} fontSize={fs} fill={b.labelInside ? '#ecfdf5' : '#6ee7b7'} textAnchor={b.labelAnchor}>{b.label}</text>
+          </g>
+        ),
+      )}
       {/* Spot. */}
       {g.spotX != null && (
         <g data-testid="ladder-spot-marker">
@@ -77,12 +100,20 @@ export function LadderPicture({ picture, width = 520 }: { picture: LadderPicture
       {/* The reserve's legend, in its own row. */}
       <rect x={8} y={legend - fs + 2} width={10} height={10} fill="#1e3a8a" fillOpacity={0.8} />
       <text data-testid="ladder-reserve-label" x={22} y={legend} fontSize={fs} fill="#93c5fd">{picture.reserve_label}</text>
+      {deployedLegend != null && (
+        <>
+          <rect x={8} y={deployedLegend - fs + 2} width={10} height={10} fill="url(#ladder-hatch)" stroke={MUTED} />
+          <text data-testid="ladder-deployed-legend" x={22} y={deployedLegend} fontSize={fs} fill={MUTED}>already deployed</text>
+        </>
+      )}
     </svg>
   );
 }
 
 function RungBlock({ r, action, compact }: { r: LadderRung; action?: ReactNode; compact?: boolean }) {
   const url = ladderDepositUrl(r.deep_link?.url);
+  const limit = rungNockLimit(r);
+  const fee = rungFeeLine(r);
   return (
     <li data-testid="ladder-rung" style={{ marginBottom: 10, ...WRAP }}>
       <div style={{ fontWeight: 600, color: '#e6edf3' }}>{rungTitle(r)}</div>
@@ -104,6 +135,10 @@ function RungBlock({ r, action, compact }: { r: LadderRung; action?: ReactNode; 
       {url && r.deep_link?.amount_to_enter && (
         <div data-testid="ladder-amount-to-enter" style={{ fontWeight: 600, color: '#e6edf3' }}>{r.deep_link.amount_to_enter}</div>
       )}
+      {/* A deposit that holds NOCK (the cap): the app works out the other side from the
+          field typed, so the limit and the field that keeps it are stated. */}
+      {limit && <div data-testid="ladder-nock-limit" style={{ color: AMBER }}>{limit}</div>}
+      {fee && <div data-testid="ladder-fee-line" style={{ color: MUTED, fontSize: compact ? 11 : '0.7rem' }}>{fee}</div>}
       {!compact && <div style={{ color: MUTED, fontSize: '0.7rem' }}>{r.would_sign}</div>}
     </li>
   );
@@ -126,6 +161,7 @@ function Body({
     const missing = missingSettingSentence(s);
     const candidates = view.mode === 'line' ? candidateLines(s) : [];
     const excluded = view.mode === 'line' && s.status === 'no_target_pool' ? excludedLines(s) : [];
+    const rows = view.mode === 'line' ? shapeRowLines(s) : [];
     return (
       <>
         <div data-testid="ladder-headline" style={{ fontSize: compact ? 14 : '0.95rem', fontWeight: 700, color: '#e6edf3' }}>{view.headline}</div>
@@ -136,6 +172,13 @@ function Body({
               <li key={e}>{e}</li>
             ))}
           </ul>
+        )}
+        {rows.length > 0 && (
+          <ol data-testid="ladder-shape-rows" style={{ margin: '4px 0 0', paddingLeft: 18, listStyle: 'none', ...muted }}>
+            {rows.map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ol>
         )}
         {candidates.length > 0 && (
           <>
@@ -152,6 +195,7 @@ function Body({
   }
   const note = linkFormatNote(s);
   const stated = statedLines(s);
+  const wallet = walletAfterLine(s);
   return (
     <>
       <div data-testid="ladder-headline" style={{ fontSize: compact ? 15 : '1rem', fontWeight: 700, color: '#e6edf3' }}>{view.headline}</div>
@@ -161,10 +205,19 @@ function Body({
           <li key={o.kind}>{o.text}</li>
         ))}
       </ul>
+      {wallet && (
+        <div data-testid="ladder-wallet-after" style={{ color: TEXT, margin: '0 0 8px' }}>{wallet}</div>
+      )}
       <ol data-testid="ladder-rungs" style={{ margin: 0, paddingLeft: 18 }}>
-        {s.rungs.map((r) => (
-          <RungBlock key={r.index} r={r} compact={compact} action={rungAction?.(r)} />
-        ))}
+        {ladderList(s).map((item) =>
+          item.kind === 'deposit' ? (
+            <RungBlock key={item.rung.index} r={item.rung} compact={compact} action={rungAction?.(item.rung)} />
+          ) : (
+            <li key={item.row.index} data-testid="ladder-rung-done" data-status={item.row.status} style={{ marginBottom: 10, color: MUTED, ...WRAP }}>
+              {item.row.text}
+            </li>
+          ),
+        )}
       </ol>
       {note && <div data-testid="ladder-link-note" style={muted}>{note}</div>}
       {stated.length > 0 && (

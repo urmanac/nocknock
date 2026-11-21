@@ -7,8 +7,13 @@
  * rules, what it would do in plain words, and the numbered deposits with their links.
  * It shows only while the snapshot is fresh. NockNock signs and sends nothing, and the
  * links prefill no amount.
+ *
+ * With a configured shape (operator_profile.ladder_rungs, 2.10.0) the suggestion carries
+ * `shape.rungs[]`, every rung of the shape in order: the rungs left to deposit are the
+ * numbered deposits, and a rung that is deployed, passed or over is one stated line.
  */
 import type { SyncStatus } from './hooks/useFreshness';
+import { feeEstimateLine, type FeeEstimateForLines } from './feeYield';
 
 export interface LadderToken {
   symbol: string;
@@ -19,7 +24,18 @@ export interface LadderToken {
 export interface LadderRung {
   index: number;
   of: number;
-  rung: 'near' | 'deep' | null;
+  rung: 'cap' | 'near' | 'deep' | null;
+  /** A rung of a configured shape (2.10.0): always to_deposit here. */
+  status?: 'to_deposit';
+  /** A rung of a configured shape: its amounts in plain words. */
+  summary?: string;
+  in_range_now?: boolean | null;
+  /** The exact mint of the remainder, for a transaction builder. */
+  mint?: { liquidity_raw: string; amount0_raw: string | null; amount1_raw: string | null };
+  /** Only for a deposit that holds NOCK (the cap): the limit and the field that keeps it. */
+  nock_limit?: { nock: string; is: string; field_to_type: string; nock_to_enter: string; usdc_then_about: string; text: string } | null;
+  fee_estimate?: FeeEstimateForLines | null;
+  cap?: { bound_by: string; note: string } | null;
   pool: {
     position_id: string;
     label: string;
@@ -36,8 +52,8 @@ export interface LadderRung {
   tick_upper: number;
   bounds_usd: { low: string; high: string };
   bounds_nock_per_usdc: { low: string | null; high: string | null };
-  usdc: { amount: string; raw: string; decimals: number };
-  nock: { amount: string; raw: string; decimals: number };
+  usdc: { amount: string; raw: string; decimals: number; to_enter?: string };
+  nock: { amount: string; raw: string; decimals: number; to_enter?: string };
   deep_link: { url: string | null; prefilled: string[]; not_prefilled: string[]; reason: string | null; format_note?: string | null; amount_to_enter?: string | null };
   would_sign: string;
 }
@@ -47,13 +63,42 @@ export interface LadderOutcome {
   text: string;
 }
 
+export interface LadderPictureBar {
+  index: number;
+  low_usd: string;
+  high_usd: string;
+  usdc: string;
+  label: string;
+  /** A configured shape (2.10.0): the rung, its status, and whether it is already deployed. */
+  rung?: 'cap' | 'near' | 'deep';
+  status?: string;
+  deployed?: boolean;
+}
+
 export interface LadderPictureData {
   spot_usd: string | null;
   bottom_usd: string;
-  bottom_requested_usd: string;
+  bottom_requested_usd: string | null;
   reserve_usdc: string;
   reserve_label: string;
-  bars: { index: number; low_usd: string; high_usd: string; usdc: string; label: string }[];
+  bars: LadderPictureBar[];
+}
+
+/** One rung of the operator's shape as the card states it (2.10.0): shape.rungs[]. */
+export interface LadderShapeRow {
+  index: number;
+  of: number;
+  rung: 'cap' | 'near' | 'deep';
+  status: 'to_deposit' | 'deployed' | 'over' | 'passed' | 'none';
+  reason: string | null;
+  target_usdc: string;
+  deployed_usdc: string;
+  remaining_usdc: string;
+  counterparts: string[];
+  holds_now: { usdc: string; nock: string } | null;
+  bounds_usd: { low: string; high: string } | null;
+  /** The whole row in plain words. */
+  text: string;
 }
 
 export interface LadderCandidateRow {
@@ -84,6 +129,11 @@ export interface LadderSuggestion {
   excluded?: { position_id: string; reason: string }[];
   stated?: { lines?: string[]; note?: string } | null;
   assumptions?: string[];
+  /** A configured shape (2.10.0): every rung in order, and how many are left. */
+  shape?: { source: string; status: string; of: number; left: number; deployed: number; passed: number; over: number; none: number; total_usdc: string; rungs: LadderShapeRow[] } | null;
+  /** What the deposits leave in the wallet, and how the reserve counts the rest. */
+  wallet_after?: { text: string; wallet_usdc_after: string; stable_at_gate_usdc: string; wallet_alone_below_reserve: boolean } | null;
+  mint_note?: string | null;
 }
 
 export const LADDER_TITLE = 'Ladder suggestion (a measurement, not advice)';
@@ -161,8 +211,13 @@ export function price4(v: number): string {
   return v.toFixed(dp);
 }
 
-/** "Deposit 1 of 2 (near rung): $115.12 USDC + 0 NOCK" */
+/** "Deposit 1 of 2 (near rung): $115.12 USDC + 0 NOCK"; for a rung of a configured shape,
+ *  "Deposit 1 of 3 (cap): about 86.79 NOCK + $1.23 USDC, in range now". */
 export function rungTitle(r: LadderRung): string {
+  if (r.summary) {
+    const which = r.rung === 'cap' ? ' (cap)' : r.rung ? ` (${r.rung} rung)` : '';
+    return `Deposit ${r.index} of ${r.of}${which}: ${r.summary}`;
+  }
   const name = r.rung ? ` (${r.rung} rung)` : '';
   const nock = Number(r.nock?.amount);
   return `Deposit ${r.index} of ${r.of}${name}: $${r.usdc.amount} USDC + ${Number.isFinite(nock) && nock > 0 ? r.nock.amount : '0'} NOCK`;
@@ -176,6 +231,42 @@ export function rungRangeLines(r: LadderRung): string[] {
   }
   lines.push(`ticks ${r.tick_lower} to ${r.tick_upper}, a new position in ${r.pool.label}`);
   return lines;
+}
+
+export type LadderListItem = { kind: 'deposit'; rung: LadderRung } | { kind: 'row'; row: LadderShapeRow };
+
+/** The card's numbered list. With a configured shape it is every rung of the shape in
+ *  order: a deposit for a rung left to deposit, the stated row for one that is deployed,
+ *  passed or over. Without one it is the deposits as they come. */
+export function ladderList(s: LadderSuggestion): LadderListItem[] {
+  const rows = s.shape?.rungs;
+  if (!rows?.length) return (s.rungs ?? []).map((rung) => ({ kind: 'deposit', rung }));
+  return rows.map((row) => {
+    const rung = (s.rungs ?? []).find((r) => r.index === row.index);
+    return rung ? { kind: 'deposit', rung } : { kind: 'row', row };
+  });
+}
+
+/** Every rung's stated line, for a card that lists no deposit (all deployed, all passed). */
+export function shapeRowLines(s: LadderSuggestion): string[] {
+  return (s.shape?.rungs ?? []).map((r) => r.text).filter((t) => typeof t === 'string' && t.length > 0);
+}
+
+/** "After these deposits your wallet holds about $779 USDC; …", or null. */
+export function walletAfterLine(s: LadderSuggestion): string | null {
+  return s.wallet_after?.text ?? null;
+}
+
+/** The NOCK limit of a deposit that holds NOCK (the cap), in the worker's words, or null. */
+export function rungNockLimit(r: LadderRung): string | null {
+  return r.nock_limit?.text ?? null;
+}
+
+/** One muted fee line for a rung of a configured shape (never without its sample size,
+ *  in-range share and replay bound; the reason when it is not measured). Null for the
+ *  single rung of #168, which states no estimate. */
+export function rungFeeLine(r: LadderRung): string | null {
+  return r.summary ? feeEstimateLine(r.fee_estimate) : null;
 }
 
 /** The setting the card is missing, in one plain sentence. */
@@ -207,10 +298,29 @@ export interface PictureGeometry {
   max: number;
   spotX: number | null;
   bottomX: number;
-  bars: { x: number; w: number; y: number; label: string; low: number; high: number }[];
-  /** Rows (y) of the drawing: top labels, the axis line, the axis labels, the reserve legend. */
-  rows: { labels: number; axis: number; axisLabels: number; legend: number };
+  bars: {
+    x: number;
+    w: number;
+    y: number;
+    label: string;
+    low: number;
+    high: number;
+    /** Where the label is drawn: inside a bar wide enough for it, otherwise beside it. */
+    labelX: number;
+    labelAnchor: 'middle' | 'end' | 'start';
+    labelInside: boolean;
+    /** Already deployed (a configured shape): drawn hatched and muted. */
+    deployed: boolean;
+  }[];
+  /** Rows (y) of the drawing: top labels, the axis line, the axis labels, the reserve
+   *  legend, and the deployed legend when a deployed bar is drawn. */
+  rows: { labels: number; axis: number; axisLabels: number; legend: number; deployedLegend: number | null };
   fontSize: number;
+}
+
+/** The width a label takes at `fontSize`, in drawing units (a little generous). */
+export function labelWidth(label: string, fontSize: number): number {
+  return label.length * fontSize * 0.6;
 }
 
 /**
@@ -236,9 +346,40 @@ export function pictureGeometry(p: LadderPictureData, width = 520): PictureGeome
   const bars = p.bars.map((b, i) => {
     const low = Number(b.low_usd);
     const high = Number(b.high_usd);
-    return { x: x(low), w: Math.max(2, x(high) - x(low)), y: barTop + i * 28, label: b.label, low, high };
+    const bx = x(low);
+    const w = Math.max(2, x(high) - x(low));
+    // A label goes inside a bar wide enough for it; a narrow bar (the cap) carries it
+    // beside itself, on the side with room, so it stays readable on a phone.
+    const lw = labelWidth(b.label, fontSize);
+    let labelX = bx + w / 2;
+    let labelAnchor: 'middle' | 'end' | 'start' = 'middle';
+    let labelInside = true;
+    if (lw + 6 > w) {
+      if (bx - 4 - lw >= left) {
+        labelX = bx - 4;
+        labelAnchor = 'end';
+        labelInside = false;
+      } else if (bx + w + 4 + lw <= right) {
+        labelX = bx + w + 4;
+        labelAnchor = 'start';
+        labelInside = false;
+      }
+    }
+    return { x: bx, w, y: barTop + i * 28, label: b.label, low, high, labelX, labelAnchor, labelInside, deployed: b.deployed === true };
   });
   const axis = barTop + p.bars.length * 28 + 6;
-  const rows = { labels, axis, axisLabels: axis + 16, legend: axis + 34 };
-  return { width, height: rows.legend + 8, x, min, max, spotX: Number.isFinite(spot) ? x(spot) : null, bottomX: x(bottom), bars, rows, fontSize };
+  const anyDeployed = bars.some((b) => b.deployed);
+  const rows = { labels, axis, axisLabels: axis + 16, legend: axis + 34, deployedLegend: anyDeployed ? axis + 50 : null };
+  return {
+    width,
+    height: (rows.deployedLegend ?? rows.legend) + 8,
+    x,
+    min,
+    max,
+    spotX: Number.isFinite(spot) ? x(spot) : null,
+    bottomX: x(bottom),
+    bars,
+    rows,
+    fontSize,
+  };
 }

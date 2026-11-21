@@ -237,6 +237,22 @@ export function feeYieldSpreadLine(s: FeeYieldSpread): string {
   } with at least ${h} h measured`;
 }
 
+/** The fields of a fee estimate its lines read: the simulator's full estimate
+ *  (LadderFeeEstimate) and the summary a ladder suggestion's deposit carries both fit. */
+export interface FeeEstimateForLines {
+  status: string;
+  reason?: string | null;
+  per_day_in_range_usd?: string | null;
+  measured_days?: string | null;
+  intervals?: number | null;
+  measured_label?: string | null;
+  in_range_share_stored_history?: { share_pct: string } | null;
+  in_range_share_reason?: string | null;
+  stored_history_replay?: { inside_upper_usd: string; edge_upper_usd: string } | null;
+  replay_reason?: string | null;
+  coverage?: { whole: boolean; note: string } | null;
+}
+
 /**
  * A fee estimate as lines (2.10.0). The rules the worker states are kept here too: a fee
  * per day while in range is never printed without its sample size (days and intervals),
@@ -244,7 +260,7 @@ export function feeYieldSpreadLine(s: FeeYieldSpread): string {
  * those is missing its reason is printed in its place; an unavailable estimate prints
  * its reason, never a zero.
  */
-export function feeEstimateLines(fe: import('./ladder').LadderFeeEstimate | null | undefined): string[] {
+export function feeEstimateLines(fe: FeeEstimateForLines | null | undefined): string[] {
   if (!fe) return ['Fees while in range: not stated in this body'];
   if (fe.status !== 'measured' || fe.per_day_in_range_usd == null) {
     return [`Fees while in range: not estimated: ${fe.reason ?? 'no reason given'}`];
@@ -268,4 +284,14 @@ export function feeEstimateLines(fe: import('./ladder').LadderFeeEstimate | null
   );
   if (fe.coverage && !fe.coverage.whole) lines.push(fe.coverage.note);
   return lines;
+}
+
+/**
+ * The same estimate as one line, for a card that gives each rung one muted line. The
+ * worker prints these words too (ladder_suggest_text.rs, fee_estimate_line): the figure
+ * with its sample size, in-range share and replay bound, or the reason it is not measured.
+ */
+export function feeEstimateLine(fe: FeeEstimateForLines | null | undefined): string {
+  const joined = feeEstimateLines(fe).join('. ');
+  return joined.endsWith('.') ? joined : `${joined}.`;
 }
