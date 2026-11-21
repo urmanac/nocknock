@@ -119,6 +119,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `derived_metrics.ladder_shape` carries that result in the snapshot, for a card with
     no inputs.
   - *Rung vocabulary.* `cap | near | deep`, for tracked ladders (#167) too.
+  - *The shape is planned against what is deployed.* Tracked ladder rungs in the pool
+    are part of the shape, not existing ranges. The gated total counts their USDC as if
+    it were still in the wallet (a near or deep rung's USDC at its top, a cap's USDC now
+    with its NOCK counted back into the budget). Each is matched to a configured rung by
+    role, then ticks, and each shape rung states its target, what is deployed, what is
+    left and a status (`to_deposit`, `deployed`, `over`, `passed`, `none`). Depositing
+    one rung leaves the others' targets unchanged. Only the remainder is minted, on the
+    matched rung's own ticks. An unmatched tracked ladder is listed and still counts.
+  - *Below a rung, it is passed.* When the price is below a rung's range the rung is
+    `passed` ("a USDC-only deposit there is not possible"), the rungs below are still
+    drawn from the usable tick at or below spot, and with every rung passed the status
+    is `price_at_or_below_bottom`. `shape=configured` never answers a parameter error
+    for a valid setting.
+  - *Exact mints.* A snapped rung states `mint`: the liquidity its USDC and NOCK buy,
+    rounded down with Uniswap's integer formulas, and the amounts a mint of it pulls,
+    rounded up, never more than the amounts stated.
+  - *Stored rows stay small.* The fee measurement's by-day and band detail and the
+    shape's grid and full estimates are kept in the worker's memory and served from the
+    latest snapshot; a stored row keeps the summary and says what it leaves out.
+    Intervals in which the measuring range was staked are skipped and their seconds
+    stated.
   - *Dashboard.* No form is added (operator, 2026-11-20). The typed client and a
     fee-yield helper (a quiet line and the by-day spread) are ready for the card.
 
