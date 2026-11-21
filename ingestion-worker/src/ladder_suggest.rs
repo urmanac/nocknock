@@ -77,6 +77,58 @@ fn grouped(v: f64) -> String {
     format!("{sign}{out}")
 }
 
+/// A price with 4 significant digits, for the plain lines: $0.01274, $0.01002. Pure.
+pub(crate) fn price4(v: f64) -> String {
+    if !(v.is_finite() && v > 0.0) {
+        return fx(v, 2);
+    }
+    let dp = (3 - v.log10().floor() as i32).max(0) as usize;
+    fx(v, dp)
+}
+
+/// A percent for the plain lines: whole at 10 or more in size, one decimal below, signed:
+/// "-23%", "-1.6%". Pure.
+pub(crate) fn pct_plain(v: f64) -> String {
+    let s = if v.abs() >= 9.5 { fx(v, 0) } else { fx(v, 1) };
+    if s.starts_with('-') || s == "0" || s == "0.0" { format!("{s}%") } else { format!("+{s}%") }
+}
+
+/// A dollar amount without trailing ".00": $950, $950.50. Pure.
+fn dollars_short(v: f64) -> String {
+    let s = fx(v, 2);
+    s.strip_suffix(".00").map(|w| w.to_string()).unwrap_or(s)
+}
+
+/// The pool by its own identity, never by a tracked position's NFT id: "the USDC/NOCK 3%
+/// v4 pool". Pure.
+pub(crate) fn pool_name(p: &Position) -> String {
+    let fee = {
+        let f = fx(p.fee_tier_bps as f64 / 100.0, 2);
+        let f = f.trim_end_matches('0').trim_end_matches('.').to_string();
+        format!("{f}%")
+    };
+    let venue = match p.protocol.as_str() {
+        "uniswap-v4" => "v4",
+        "uniswap-v3" => "v3",
+        "aerodrome-cl" => "Aero CL",
+        other => other,
+    };
+    format!("the {}/{} {fee} {venue} pool", p.token0.symbol, p.token1.symbol)
+}
+
+/// USD per NOCK and NOCK per USDC at a pool tick, from 1.0001^tick and the decimals,
+/// never from a rounded string. Pure.
+fn tick_prices(p: &Position, tick: i32) -> (f64, f64) {
+    let raw = 1.0001f64.powi(tick); // token1 raw per token0 raw
+    let (d0, d1) = (p.token0.decimals, p.token1.decimals);
+    let token1_per_token0 = raw * 10f64.powi(d0 - d1);
+    if is_nock_token(&p.token1) {
+        (1.0 / token1_per_token0, token1_per_token0)
+    } else {
+        (token1_per_token0, 1.0 / token1_per_token0)
+    }
+}
+
 fn s<'a>(v: &'a Value, ptr: &str) -> Option<&'a str> {
     v.pointer(ptr).and_then(|x| x.as_str())
 }
@@ -141,19 +193,27 @@ fn sim_with(env: &SnapshotEnvelope, position_id: &str, low: (&str, f64), usdc: f
     simulate_ladder(env, &req, env.meta.generated_at, "ok")
 }
 
-/// The Uniswap web app's new-position page for this pool and range, or the Aero pool's
-/// deposit page, with no amount (OPERATOR_GUIDANCE §7.6). Pure.
-fn deep_link(p: &Position, tick_lower: i32, tick_upper: i32) -> Value {
-    match new_position_url(p, tick_lower, tick_upper) {
-        Ok((url, prefilled)) => json!({
-            "url": url,
-            "host": reqwest::Url::parse(&url).ok().and_then(|u| u.host_str().map(|h| h.to_string())),
-            "prefilled": prefilled,
-            "not_prefilled": ["amount"],
-            "format_note": "The link format is the app's own and undocumented: check the pool, fee and range in the app against the ticks and prices stated here.",
-            "reason": Value::Null,
-        }),
-        Err(reason) => json!({ "url": Value::Null, "host": Value::Null, "prefilled": [], "not_prefilled": ["amount"], "format_note": Value::Null, "reason": reason }),
+pub(crate) const LADDER_LINK_FORMAT_NOTE: &str = "The link format is the app's own and undocumented: check the pool, range and amount in the app against the figures here.";
+
+/// The Uniswap web app's new-position page for this pool, range and USDC amount, or the
+/// Aero pool's deposit page (nothing prefilled). The amount is prefilled on the USDC side
+/// only (operator decision 2026-11-21: no typing into forms); the app derives any other
+/// side. Pure.
+fn deep_link(p: &Position, tick_lower: i32, tick_upper: i32, usdc_amount: &str) -> Value {
+    match new_position_url(p, tick_lower, tick_upper, Some(usdc_amount)) {
+        Ok((url, prefilled)) => {
+            let all = ["pair", "fee and tick spacing", "range ticks", "amount"];
+            let not: Vec<&str> = all.iter().copied().filter(|k| !prefilled.contains(k)).collect();
+            json!({
+                "url": url,
+                "host": reqwest::Url::parse(&url).ok().and_then(|u| u.host_str().map(|h| h.to_string())),
+                "prefilled": prefilled,
+                "not_prefilled": not,
+                "format_note": LADDER_LINK_FORMAT_NOTE,
+                "reason": Value::Null,
+            })
+        }
+        Err(reason) => json!({ "url": Value::Null, "host": Value::Null, "prefilled": [], "not_prefilled": [], "format_note": Value::Null, "reason": reason }),
     }
 }
 
@@ -191,7 +251,7 @@ pub(crate) fn after_deposit(rungs: &[(&Position, i32, i32)]) -> Value {
     json!({
         "kind": "manual_config",
         "is": "the current fallback until NockNock detects the wallet's new position NFTs on-chain",
-        "text": "NockNock does not yet find a new ladder position by itself. Until it does, a minted rung is tracked by its config.yaml entry (role: ladder, with the minted ticks, the NFT id and the mint transaction as deposit_tx) and a redeploy; the deposit is then verified on-chain from that transaction's receipt (#167).",
+        "text": "Automatic tracking of a new ladder position is not built yet; until it is, a minted rung is tracked only from a config.yaml entry (role: ladder).",
         "config_snippets": snippets,
     })
 }
@@ -200,12 +260,13 @@ pub(crate) fn after_deposit(rungs: &[(&Position, i32, i32)]) -> Value {
 pub(crate) fn headline_for(status: &str) -> &'static str {
     match status {
         "ladder_tracked" => "Ladder: tracked. No new one is suggested.",
-        "needs_setting" => "Ladder: a setting is needed to see one.",
+        "needs_setting" => "Ladder: a setting is needed before one is measured.",
         "invalid" => "Ladder: a setting is invalid, so none is measured.",
         "no_target_pool" => "Ladder: no tracked USDC/NOCK pool can hold one this cycle.",
         "several_pools" => "Ladder: several pools could hold one; NockNock does not choose between them.",
-        "no_headroom" => "Ladder: no USDC above your protected reserve at the ladder bottom.",
-        "bottom_at_or_above_top" => "Ladder: the price is at or near your bottom, so there is nothing to buy below it.",
+        "no_headroom" => "Ladder: no USDC is free for one at the ladder bottom.",
+        "price_at_or_below_bottom" => "Ladder: NOCK is at or below your ladder bottom, so none is measured above it.",
+        "bottom_at_or_above_top" => "Ladder: NOCK is within one tick spacing of your bottom, so the range would be empty.",
         "nock_exceeds" => "Ladder: the range would need NOCK the floor budget does not allow.",
         _ => "Ladder: not measured this cycle.",
     }
@@ -294,7 +355,7 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
     out["excluded"] = json!(excluded);
     let target: std::result::Result<&Position, (&str, String)> = match eligible.as_slice() {
         [one] => Ok(*one),
-        [] => Err(("no_target_pool", "No tracked USDC/NOCK concentrated pool can hold a ladder this cycle (see excluded).".to_string())),
+        [] => Err(("no_target_pool", "No tracked USDC/NOCK concentrated pool can hold a ladder this cycle; each pool's reason is listed.".to_string())),
         many => {
             let ids: Vec<&str> = many.iter().map(|p| p.position_id.as_str()).collect();
             Err((
@@ -329,19 +390,23 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
         .unwrap_or(0.0);
     if !missing.is_empty() {
         out["missing"] = json!(missing);
-        out["candidates"] = match &target {
-            Ok(t) => candidates(env, t, wallet_usdc),
-            Err((_, why)) => json!({ "rows": [], "reason": why, "note": "candidate bottoms, a measurement; none is picked" }),
-        };
+        // Candidate bottoms only when the bottom is what is missing: an operator who has
+        // set one is never shown other bottoms.
+        if bottom.is_none() {
+            out["candidates"] = match &target {
+                Ok(t) => candidates(env, t, wallet_usdc),
+                Err((_, why)) => json!({ "rows": [], "reason": why, "note": "candidate bottoms, a measurement; none is picked" }),
+            };
+        }
         let why: Vec<String> = missing
             .iter()
             .map(|k| if *k == LADDER_BOTTOM_KEY { format!("{k} (your bottom price; NockNock does not choose one)") } else { format!("{k} (the reserve that sizes it)") })
             .collect();
         set(&mut out, "needs_setting", format!("No ladder is tracked. A suggestion needs {}.", why.join(" and ")));
         out["headline"] = json!(if bottom.is_none() {
-            "Ladder: set your bottom price (operator_profile.ladder_bottom_usd) to see one.".to_string()
+            "Ladder: needs your bottom price (operator_profile.ladder_bottom_usd) before one is measured."
         } else {
-            "Ladder: set your protected reserve (operator_profile.cash_reserve_usdc) to see one.".to_string()
+            "Ladder: needs your protected reserve (operator_profile.cash_reserve_usdc) before one is measured."
         });
         return out;
     }
@@ -353,9 +418,27 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
             return out;
         }
     };
+    let name = pool_name(target);
 
-    // 5. The reserve gate, read at the ladder's own bottom.
+    // 5. The price against the bottom: at or below it there is nothing to measure above.
     let probe_usdc = LADDER_SUGGEST_MIN_USDC.min(wallet_usdc);
+    let price_now = sim_with(env, &target.position_id, ("low_pct", -50.0), probe_usdc.max(1e-6))
+        .ok()
+        .and_then(|b| n(&b, "/pool/pool_price_usd"));
+    let at_or_below = |o: &mut Value, price: Option<f64>| {
+        let p = price.map(|p| format!(" (NOCK ${} in {name})", price4(p))).unwrap_or_default();
+        o["status"] = json!("price_at_or_below_bottom");
+        o["reason"] = json!(format!("NOCK is at or below your ${bottom} ladder bottom{p}: no ladder is measured above it."));
+        o["headline"] = json!(format!("Ladder: NOCK is at or below your ${bottom} ladder bottom, so none is measured above it."));
+    };
+    if let Some(p) = price_now {
+        if p <= bottom {
+            at_or_below(&mut out, Some(p));
+            return out;
+        }
+    }
+
+    // 6. The reserve gate.
     if !(probe_usdc > 0.0) {
         set(&mut out, "no_headroom", format!("Wallet USDC is ${}: below the ${} minimum, so no ladder can be sized.", fx(wallet_usdc, 2), fx(LADDER_SUGGEST_MIN_USDC, 2)));
         return out;
@@ -363,8 +446,14 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
     let probe = match sim(env, &target.position_id, bottom, probe_usdc) {
         Ok(b) => b,
         Err(e) => {
+            // The simulator's "the bottom must be below the top" 400 and its
+            // RANGE_ABOVE_SPOT are both the price at or below the bottom, not a bad setting.
+            if e.code == Some("RANGE_ABOVE_SPOT") || (e.status == 400 && e.detail.contains("must be below the top")) {
+                at_or_below(&mut out, price_now);
+                return out;
+            }
             let status = match e.code {
-                Some("RANGE_ABOVE_SPOT") | Some("RANGE_TOO_NARROW") => "bottom_at_or_above_top",
+                Some("RANGE_TOO_NARROW") => "bottom_at_or_above_top",
                 _ if e.status == 400 => "invalid",
                 _ => "unavailable",
             };
@@ -383,32 +472,50 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
         }
         _ => {}
     }
-    let Some(max_usdc) = n(&probe, "/reserve_check/max_usdc_for_this_range") else {
+    let (Some(reserve), Some(pool_price), Some(snapped_low)) =
+        (n(&probe, "/reserve_check/cash_reserve_usdc"), n(&probe, "/pool/pool_price_usd"), n(&probe, "/bounds/low_usd"))
+    else {
         set(&mut out, "unavailable", "the reserve ceiling could not be measured for this range".to_string());
         return out;
     };
-    let reserve = n(&probe, "/reserve_check/cash_reserve_usdc").unwrap_or(0.0);
-    let existing_at_bottom = n(&probe, "/reserve_check/existing_ranges_usdc_at_bottom").unwrap_or(0.0);
+    // The gate is read at the lower of the snapped bottom and your setting (decisions,
+    // 2026-11-20): snapping can move the bottom up, never the reserve's own price. Every
+    // existing NOCK range moves by the same ratio from its own price, as in the simulator.
+    let gate_usd = snapped_low.min(bottom);
+    let book = stored_book(&env.data);
+    if !book.problems.is_empty() {
+        set(&mut out, "unavailable", book.problems.join("; "));
+        return out;
+    }
+    let existing_at_gate: f64 = book.raw.positions.iter().map(|p| existing_at_ratio(p, gate_usd / pool_price).0).sum();
+    let reserve_room = floor_cents_up(wallet_usdc + existing_at_gate - reserve);
+    let wallet_room = floor_cents_up(wallet_usdc);
+    let (max_usdc, binding) = if wallet_room < reserve_room { (wallet_room, "wallet") } else { (reserve_room, "reserve") };
     if max_usdc < LADDER_SUGGEST_MIN_USDC {
-        let stable = wallet_usdc + existing_at_bottom;
-        set(
-            &mut out,
-            "no_headroom",
+        let why = if binding == "wallet" {
             format!(
-                "At a ${} bottom the stable balance would be ${} with no ladder (wallet ${} + ${} in the other NOCK ranges): the ${} reserve leaves ${} for a ladder, below the ${} minimum.",
-                fx(n(&probe, "/bounds/low_usd").unwrap_or(bottom), 8),
-                fx(stable, 2),
+                "Wallet USDC is ${}: below the ${} minimum (the reserve alone would leave ${}).",
                 fx(wallet_usdc, 2),
-                fx(existing_at_bottom, 2),
+                fx(LADDER_SUGGEST_MIN_USDC, 2),
+                fx(reserve_room.max(0.0), 2)
+            )
+        } else {
+            format!(
+                "At ${} the stable balance would be ${} with no ladder (wallet ${} + ${} in the other NOCK ranges): the ${} reserve leaves ${} for a ladder, below the ${} minimum.",
+                price4(gate_usd),
+                fx(wallet_usdc + existing_at_gate, 2),
+                fx(wallet_usdc, 2),
+                fx(existing_at_gate, 2),
                 fx(reserve, 2),
-                fx(max_usdc.max(0.0), 2),
+                fx(reserve_room.max(0.0), 2),
                 fx(LADDER_SUGGEST_MIN_USDC, 2)
-            ),
-        );
+            )
+        };
+        set(&mut out, "no_headroom", why);
         return out;
     }
 
-    // 6. The range at that amount, and the NOCK gate.
+    // 7. The range at that amount, and the NOCK gate.
     let body = match sim(env, &target.position_id, bottom, max_usdc) {
         Ok(b) => b,
         Err(e) => {
@@ -443,22 +550,30 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
     let nock_is_token1 = is_nock_token(&target.token1);
     // NOCK as token1: a higher USD price is a lower tick, so the top is tick_lower.
     let (top_tick, bottom_tick) = if nock_is_token1 { (tl, tu) } else { (tu, tl) };
-    let label = s(&body, "/pool/label").unwrap_or(&target.position_id).to_string();
-    let top_usd = s(&body, "/bounds/high_usd").unwrap_or("").to_string();
-    let bottom_usd = s(&body, "/bounds/low_usd").unwrap_or("").to_string();
+    let (top_exact, top_npu) = tick_prices(target, top_tick);
+    let (bottom_exact, bottom_npu) = tick_prices(target, bottom_tick);
+    let top_usd = fx(top_exact, 8);
+    let bottom_usd = fx(bottom_exact, 8);
     let top_pct = s(&body, "/bounds/high_pct").unwrap_or("").to_string();
     let bottom_pct = s(&body, "/bounds/low_pct").unwrap_or("").to_string();
     let usdc_txt = fx(max_usdc, 2);
-    let nock_held = n(&body, "/bottom/nock_held").unwrap_or(0.0);
-    let avg = s(&body, "/bottom/avg_buy_price_usd").map(|v| v.to_string());
+    // A USDC-only range from Pt down to Pb with L = usdc / (√Pt − √Pb) (USD terms).
+    let l = max_usdc / (top_exact.sqrt() - bottom_exact.sqrt());
+    let nock_held = nock_needed + l * (1.0 / bottom_exact.sqrt() - 1.0 / top_exact.sqrt());
+    let avg_exact = (top_exact * bottom_exact).sqrt();
+    let avg = Some(fx(avg_exact, 8));
     let below = body.pointer("/reserve_check/existing_ranges_below_bottom").cloned().unwrap_or(Value::Null);
 
     let app = if target.protocol == "aerodrome-cl" { "the Aero app" } else { "the Uniswap web app" };
     let (usdc_tok, nock_tok) = if nock_is_token1 { (&target.token0, &target.token1) } else { (&target.token1, &target.token0) };
     let usdc_raw = format!("{}", ((max_usdc * 100.0).round() as u128) * 10u128.pow((usdc_tok.decimals.max(2) - 2) as u32));
     let nock_raw = format!("{}", (nock_needed * 10f64.powi(nock_tok.decimals)).floor().max(0.0) as u128);
-    let per_usdc = |usd: &str| usd.trim().parse::<f64>().ok().filter(|v| *v > 0.0).map(|v| fx(1.0 / v, 4));
     let token = |t: &PositionTokenInfo| json!({ "symbol": t.symbol, "address": t.address, "decimals": t.decimals });
+    let limit_text = if binding == "wallet" {
+        format!("all the wallet's USDC (the ${} reserve would allow ${})", fx(reserve, 2), fx(reserve_room, 2))
+    } else {
+        format!("the most that leaves the stable balance at your ${} reserve at your ${bottom} bottom", fx(reserve, 2))
+    };
     let rung = json!({
         "index": 1,
         "of": 1,
@@ -466,7 +581,8 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
         "rung_note": "one rung for now; near and deep rungs are operator settings that join this card later",
         "pool": {
             "position_id": target.position_id,
-            "label": label,
+            "label": name,
+            "new_position": true,
             "protocol": target.protocol,
             "network": target.network,
             "pool_id": target.pool_id,
@@ -478,37 +594,39 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
             "tick_spacing": target.tick_spacing,
             "hooks": target.hooks,
             "pool_price_usd": s(&body, "/pool/pool_price_usd"),
-            "note": "a ladder is a NEW position (a new NFT) in this pool",
+            "note": "a NEW position (a new NFT) in this pool; position_id is the tracked position the pool was read from",
         },
         "tick_lower": tl,
         "tick_upper": tu,
         "top": { "tick": top_tick, "price_usd": top_usd, "pct_of_spot": top_pct, "rule": "the usable tick at or below spot: the range holds no NOCK now" },
         "bottom": { "tick": bottom_tick, "price_usd": bottom_usd, "pct_of_spot": bottom_pct, "requested_usd": format!("{bottom}"), "rule": "your ladder_bottom_usd, snapped to the nearest usable tick" },
         "bounds_usd": { "low": bottom_usd, "high": top_usd },
-        // The form the Uniswap app shows for USDC/NOCK: NOCK per USDC. The top (dearest
-        // NOCK) is the fewest NOCK per USDC.
-        "bounds_nock_per_usdc": { "low": per_usdc(&top_usd), "high": per_usdc(&bottom_usd) },
+        // The form the Uniswap app shows for USDC/NOCK: NOCK per USDC, from the ticks. The
+        // top (dearest NOCK) is the fewest NOCK per USDC.
+        "bounds_nock_per_usdc": { "low": fx(top_npu, 4), "high": fx(bottom_npu, 4) },
         "usdc": { "amount": usdc_txt, "raw": usdc_raw, "decimals": usdc_tok.decimals, "address": usdc_tok.address },
         "nock": { "amount": fx(nock_needed, 4), "raw": nock_raw, "decimals": nock_tok.decimals, "address": nock_tok.address },
         "at_bottom": { "nock_held": fx(nock_held, 4), "avg_buy_price_usd": avg },
         "at_top": { "usdc_held": s(&body, "/top/usdc_held"), "out_of_range_above_now": body.pointer("/top/out_of_range_above_now").cloned().unwrap_or(Value::Null) },
         "top_neighbours": body.get("top_neighbours").cloned().unwrap_or(Value::Null),
-        "deep_link": deep_link(target, tl, tu),
+        "deep_link": deep_link(target, tl, tu, &usdc_txt),
         "would_sign": format!(
-            "In {app}, with your own wallet: one new position in {label}, ticks {tl} to {tu}, holding up to ${usdc_txt} USDC and 0 NOCK (the app may first ask for a USDC approval). NockNock builds no transaction and signs nothing."
+            "In {app}, with your own wallet: one new position in {name}, ticks {tl} to {tu}, holding up to ${usdc_txt} USDC and 0 NOCK (the app may first ask for a USDC approval). NockNock builds no transaction and signs nothing."
         ),
     });
     out["rungs"] = json!([rung]);
     out["numbers"] = json!({
         "usdc_max": usdc_txt,
+        "binding": binding,
         "nock_now": fx(nock_needed, 4),
         "nock_at_bottom": fx(nock_held, 4),
         "avg_buy_price_usd": avg,
         "spot_usd": s(&body, "/snapshot/spot_usd"),
         "wallet_usdc": fx(wallet_usdc, 2),
         "cash_reserve_usdc": fx(reserve, 2),
-        "existing_ranges_usdc_at_bottom": fx(existing_at_bottom, 2),
-        "stable_at_bottom_usdc": s(&body, "/reserve_check/stable_at_bottom_usdc"),
+        "gate_price_usd": fx(gate_usd, 8),
+        "existing_ranges_usdc_at_gate": fx(existing_at_gate, 2),
+        "stable_at_gate_usdc": fx(wallet_usdc - max_usdc + existing_at_gate, 2),
         "lp_nock_budget": s(&body, "/floor_check/lp_nock_budget"),
     });
     out["gates"] = json!({
@@ -517,12 +635,16 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
         "reserve": {
             "status": "allows",
             "key": LADDER_RESERVE_KEY,
+            "binding": binding,
             "cash_reserve_usdc": fx(reserve, 2),
-            "max_usdc_for_this_range": usdc_txt,
+            "read_at_usd": fx(gate_usd, 8),
+            "read_at_rule": "the lower of the snapped bottom and your ladder_bottom_usd",
+            "reserve_allows_usdc": fx(reserve_room, 2),
+            "wallet_usdc": fx(wallet_room, 2),
+            "max_usdc": usdc_txt,
             "minimum_usdc": fx(LADDER_SUGGEST_MIN_USDC, 2),
-            "stable_at_bottom_usdc": s(&body, "/reserve_check/stable_at_bottom_usdc"),
-            "margin_usdc": s(&body, "/reserve_check/margin_usdc"),
-            "rule": "the stable balance at the ladder's bottom stays at or above the reserve",
+            "stable_at_gate_usdc": fx(wallet_usdc - max_usdc + existing_at_gate, 2),
+            "rule": "the stable balance at your bottom stays at or above the reserve",
         },
         "nock_budget": {
             "status": floor_status,
@@ -532,88 +654,147 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
         },
         "floor_breach_effect": body.pointer("/floor_check/floor_breach_effect/status").cloned().unwrap_or(Value::Null),
     });
-    out["stated"] = json!({
-        "note": LADDER_STATED_NOT_GATES,
-        "accumulation_plan_unspent": body.pointer("/reserve_check/accumulation_plan_unspent").cloned().unwrap_or(Value::Null),
-        "tax_reserve_usd": body.pointer("/reserve_check/tax_reserve_usd").cloned().unwrap_or(Value::Null),
-        "existing_ranges_below_bottom": below,
-    });
+    out["stated"] = stated(env, &body, below);
     out["after_deposit"] = after_deposit(&[(target, tl, tu)]);
     out["headline"] = json!(format!(
-        "Ladder ready: ${usdc_txt} of idle USDC in 1 deposit, {} NOCK.",
-        if nock_needed > 0.0 { fx(nock_needed, 4) } else { "0".to_string() }
+        "Ladder ready: up to ${usdc_txt} USDC in 1 deposit, {} NOCK.",
+        if nock_needed > 0.0 { grouped(nock_needed) } else { "0".to_string() }
     ));
-    out["outcomes"] = json!(outcomes(&body, max_usdc, nock_needed, &bottom_usd, &bottom_pct, nock_held, avg.as_deref()));
+    out["outcomes"] = json!(outcomes(max_usdc, nock_needed, top_exact, bottom_exact, pool_price));
     out["picture"] = json!({
         "spot_usd": s(&body, "/pool/pool_price_usd"),
         "bottom_usd": bottom_usd,
         "bottom_requested_usd": format!("{bottom}"),
         "reserve_usdc": fx(reserve, 2),
-        "reserve_label": format!("${} kept for below ${bottom}", fx(reserve, 0)),
+        "reserve_label": format!("${} kept for below ${bottom}", dollars_short(reserve)),
         "bars": [{ "index": 1, "low_usd": bottom_usd, "high_usd": top_usd, "usdc": usdc_txt, "label": format!("${usdc_txt}") }],
     });
-    let avg_txt = avg.as_deref().map(|a| format!(", an average of ${a}")).unwrap_or_default();
     let sentence = format!(
-        "No ladder is tracked. A USDC-only range in {label} from ${top_usd} (tick {top_tick}, the usable tick at or below spot, {top_pct}%) down to ${bottom_usd} (tick {bottom_tick}, your ${bottom} bottom snapped, {bottom_pct}%) would hold up to ${usdc_txt} USDC and 0 NOCK now: the most that leaves the stable balance at your ${} reserve when fully converted at the bottom. Fully converted it would hold about {} NOCK{avg_txt}.",
-        fx(reserve, 2),
-        grouped(nock_held)
+        "No ladder is tracked. A new USDC-only position in {name} from ${} ({}) down to ${} ({}) would hold up to ${usdc_txt} USDC and 0 NOCK now: {limit_text}. Fully converted it would hold about {} NOCK, an average of ${}.",
+        price4(top_exact),
+        pct_plain((top_exact / pool_price - 1.0) * 100.0),
+        price4(bottom_exact),
+        pct_plain((bottom_exact / pool_price - 1.0) * 100.0),
+        grouped(nock_held),
+        price4(avg_exact),
     );
-    out["what_changed"] = json!(format!(
-        "No ladder is tracked, and the standing reserve allows ${usdc_txt} in {label} down to your ${bottom} bottom."
-    ));
+    out["what_changed"] = json!(if binding == "wallet" {
+        format!("No ladder is tracked, and the wallet's ${usdc_txt} USDC fits in {name} down to your ${bottom} bottom.")
+    } else {
+        format!("No ladder is tracked, and the standing reserve allows ${usdc_txt} in {name} down to your ${bottom} bottom.")
+    });
     out["sentence"] = json!(sentence);
     out["status"] = json!("ready");
     out["shown"] = json!(true);
     out
 }
 
-/// What the range would do, in plain words, from the simulator's own readings: a fall to
-/// a grid depth inside the range, a fall to the bottom, and a rise. Measurements. Pure.
-fn outcomes(body: &Value, usdc: f64, nock_now: f64, bottom_usd: &str, bottom_pct: &str, nock_at_bottom: f64, avg: Option<&str>) -> Vec<Value> {
-    let mut out = Vec::new();
-    // The grid row nearest the middle of the range (in log price), strictly inside it.
-    let (top, bot) = (n(body, "/bounds/high_usd").unwrap_or(0.0), n(body, "/bounds/low_usd").unwrap_or(0.0));
-    if top > 0.0 && bot > 0.0 {
-        let mid = (top * bot).sqrt();
-        let inside = body.get("grid").and_then(|g| g.as_array()).into_iter().flatten().filter(|r| {
-            n(r, "/pool_price_usd").map_or(false, |p| p < top * (1.0 - 1e-9) && p > bot * (1.0 + 1e-9))
-        });
-        let best = inside.min_by(|a, b| {
-            let d = |r: &Value| (n(r, "/pool_price_usd").unwrap_or(0.0).ln() - mid.ln()).abs();
-            d(a).partial_cmp(&d(b)).unwrap_or(std::cmp::Ordering::Equal)
-        });
-        if let Some(r) = best {
-            let bought = n(r, "/ladder_nock_acquired").unwrap_or(0.0);
-            let spent = usdc - n(r, "/ladder_usdc").unwrap_or(usdc);
-            if bought > 0.0 && spent > 0.0 {
-                out.push(json!({
-                    "kind": "fall_inside",
-                    "price_usd": s(r, "/pool_price_usd"),
-                    "pct_of_spot": s(r, "/pct_of_spot"),
-                    "nock_bought": fx(bought, 0),
-                    "usdc_spent": fx(spent, 2),
-                    "avg_buy_price_usd": fx(spent / bought, 8),
-                    "text": format!(
-                        "A fall to ${} ({}%) would buy about {} NOCK for ${} of the USDC, an average of ${}.",
-                        s(r, "/pool_price_usd").unwrap_or("?"), s(r, "/pct_of_spot").unwrap_or("?"), grouped(bought), fx(spent, 2), fx(spent / bought, 8)
-                    ),
-                }));
-            }
+/// Whole cents, rounded down. Pure.
+fn floor_cents_up(v: f64) -> f64 {
+    ((v * 100.0 + 1e-7).floor() / 100.0) + 0.0
+}
+
+/// The lines that are stated, never gates: the plan's unspent budget, the tax reserve and
+/// the cash target, plus the below-bottom reading. Pure.
+fn stated(env: &SnapshotEnvelope, body: &Value, below: Value) -> Value {
+    let dm = &env.data.derived_metrics;
+    let mut lines: Vec<String> = Vec::new();
+    let plan = body.pointer("/reserve_check/accumulation_plan_unspent/usdc").and_then(|v| v.as_str()).and_then(|v| v.parse::<f64>().ok());
+    match plan {
+        Some(p) => lines.push(format!("Plan budget not yet spent: ${} (stated, not a gate).", fx(p, 2))),
+        None => lines.push("No accumulation plan is configured.".to_string()),
+    }
+    let tax = body.pointer("/reserve_check/tax_reserve_usd/usd").and_then(|v| v.as_str()).and_then(|v| v.parse::<f64>().ok());
+    if let Some(t) = tax {
+        lines.push(format!("Tax reserve: ${} (stated, not a gate).", fx(t, 2)));
+    }
+    let total = dm.global_status.total_portfolio_usd.trim().parse::<f64>().ok();
+    let cash_bps = dm
+        .portfolio_deviation_matrix
+        .allocations
+        .iter()
+        .find(|a| a.bucket_name.starts_with("Liquid USDC"))
+        .map(|a| a.target_weight_bps);
+    let cash_target = match (total, cash_bps) {
+        (Some(t), Some(b)) if b > 0 => {
+            let usd = t * b as f64 / 10000.0;
+            lines.push(format!("Cash target: ${} ({}% of the portfolio; stated, not a gate).", fx(usd, 2), fx(b as f64 / 100.0, 0)));
+            Some(usd)
+        }
+        (_, Some(0)) => {
+            lines.push("No cash target is set.".to_string());
+            None
+        }
+        _ => None,
+    };
+    if let Some(price) = below.get("price_usd").and_then(|v| v.as_str()).and_then(|v| v.parse::<f64>().ok()) {
+        if let Some(stable) = below.get("stable_usdc").and_then(|v| v.as_str()) {
+            lines.push(format!(
+                "Below the bottom the other NOCK ranges keep converting: at ${} the stable balance would be ${stable} (a measurement, not the gate).",
+                price4(price)
+            ));
         }
     }
-    let bought = nock_at_bottom - nock_now;
+    json!({
+        "note": LADDER_STATED_NOT_GATES,
+        "accumulation_plan_unspent": body.pointer("/reserve_check/accumulation_plan_unspent").cloned().unwrap_or(Value::Null),
+        "tax_reserve_usd": body.pointer("/reserve_check/tax_reserve_usd").cloned().unwrap_or(Value::Null),
+        "cash_target_usd": cash_target.map(|c| fx(c, 2)),
+        "existing_ranges_below_bottom": below,
+        "lines": lines,
+    })
+}
+
+/// What the range would do, in plain words: a fall to a grid depth inside the range, a
+/// fall to the bottom, and a rise. Exact for a USDC-only range: the average buy price
+/// between two prices is their geometric mean. Pure.
+fn outcomes(usdc: f64, nock_now: f64, top: f64, bottom: f64, pool_price: f64) -> Vec<Value> {
+    let mut out = Vec::new();
+    if !(top > bottom && bottom > 0.0 && usdc > 0.0) {
+        return out;
+    }
+    let (st, sb) = (top.sqrt(), bottom.sqrt());
+    let l = usdc / (st - sb);
+    let buy_to = |p: f64| -> (f64, f64, f64) {
+        let sp = p.sqrt();
+        let spent = l * (st - sp);
+        let bought = l * (1.0 / sp - 1.0 / st);
+        (spent, bought, (top * p).sqrt())
+    };
+    // The grid depth nearest the middle of the range (in log price), strictly inside it.
+    let mid = (top * bottom).sqrt().ln();
+    let steps = (-LADDER_GRID_DEFAULT_TO_PCT / LADDER_GRID_DEFAULT_STEP_PCT + 1e-9).floor() as usize;
+    let best = (1..=steps)
+        .map(|k| pool_price * (1.0 - k as f64 * LADDER_GRID_DEFAULT_STEP_PCT / 100.0))
+        .filter(|p| *p < top * (1.0 - 1e-9) && *p > bottom * (1.0 + 1e-9))
+        .min_by(|a, b| (a.ln() - mid).abs().partial_cmp(&(b.ln() - mid).abs()).unwrap_or(std::cmp::Ordering::Equal));
+    let pct = |p: f64| pct_plain((p / pool_price - 1.0) * 100.0);
+    if let Some(p) = best {
+        let (spent, bought, avg) = buy_to(p);
+        out.push(json!({
+            "kind": "fall_inside",
+            "price_usd": fx(p, 8),
+            "pct_of_spot": pct(p),
+            "nock_bought": fx(bought, 0),
+            "usdc_spent": fx(spent, 2),
+            "avg_buy_price_usd": fx(avg, 8),
+            "text": format!(
+                "A fall to ${} ({}) would buy about {} NOCK for ${} of the USDC, an average of ${}.",
+                price4(p), pct(p), grouped(bought), fx(spent, 2), price4(avg)
+            ),
+        }));
+    }
+    let (_, bought, avg) = buy_to(bottom);
     out.push(json!({
         "kind": "fall_to_bottom",
-        "price_usd": bottom_usd,
-        "pct_of_spot": bottom_pct,
+        "price_usd": fx(bottom, 8),
+        "pct_of_spot": pct(bottom),
         "nock_bought": fx(bought, 0),
         "usdc_spent": fx(usdc, 2),
-        "avg_buy_price_usd": avg,
+        "avg_buy_price_usd": fx(avg, 8),
         "text": format!(
-            "A fall to the ladder bottom ${bottom_usd} ({bottom_pct}%) would buy about {} NOCK with all ${}{}.",
-            grouped(bought),
-            fx(usdc, 2),
-            avg.map(|a| format!(", an average of ${a}")).unwrap_or_default()
+            "A fall to the ladder bottom ${} ({}) would buy about {} NOCK with all ${}, an average of ${}.",
+            price4(bottom), pct(bottom), grouped(bought), fx(usdc, 2), price4(avg)
         ),
     }));
     if nock_now <= 0.0 {

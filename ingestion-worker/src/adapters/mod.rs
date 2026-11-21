@@ -195,7 +195,10 @@ pub(crate) fn deposit_url_for(p: &RawPosition, rule: &RebuildRule) -> String {
 
 /// Where the operator would open a NEW position (a ladder, #168) in the pool of the
 /// tracked snapshot position `p`, with the range `tick_lower..tick_upper` in pool ticks.
-/// Never an amount (OPERATOR_GUIDANCE §7.6). Returns the URL and what it prefills.
+/// With `usdc_amount`, the USDC side of the deposit is prefilled as `depositState`
+/// (operator decision 2026-11-21, reversing v0.7.0's "nothing prefilled": the operator
+/// does not type into forms); any other side is left to the app. Returns the URL and
+/// what it prefills.
 ///
 /// - Uniswap v4 on Base: the web app's new-position page,
 ///   `https://app.uniswap.org/positions/add/new`, with the pair, the pool key's fee and
@@ -206,7 +209,7 @@ pub(crate) fn deposit_url_for(p: &RawPosition, rule: &RebuildRule) -> String {
 ///   `hooks`), never a fee rebuilt from `fee_tier_bps`.
 /// - Aero CL on Base: the pool's deposit page, nothing prefilled (no format is known).
 /// - Anything else: no link, with the reason.
-pub(crate) fn new_position_url(p: &Position, tick_lower: i32, tick_upper: i32) -> std::result::Result<(String, Vec<&'static str>), String> {
+pub(crate) fn new_position_url(p: &Position, tick_lower: i32, tick_upper: i32, usdc_amount: Option<&str>) -> std::result::Result<(String, Vec<&'static str>), String> {
     if p.network != "base" {
         return Err(format!("no new-position link is known for network {}", p.network));
     }
@@ -229,10 +232,24 @@ pub(crate) fn new_position_url(p: &Position, tick_lower: i32, tick_upper: i32) -
                 "priceRangeState",
                 json!({ "priceInverted": false, "fullRange": false, "minTick": tick_lower, "maxTick": tick_upper }).to_string(),
             ));
+            // TOKEN0 / TOKEN1 are currencyA / currencyB.
+            let usdc_field = if is_usdc_token(&p.token0) { Some("TOKEN0") } else if is_usdc_token(&p.token1) { Some("TOKEN1") } else { None };
+            let amount = usdc_amount.zip(usdc_field);
+            if let Some((a, f)) = amount {
+                params.push(("depositState", {
+                    let mut amounts = serde_json::Map::new();
+                    amounts.insert(f.to_string(), json!(a));
+                    json!({ "exactField": f, "exactAmounts": amounts }).to_string()
+                }));
+            }
             params.push(("step", "1".to_string()));
             let url = reqwest::Url::parse_with_params("https://app.uniswap.org/positions/add/new", &params)
                 .map_err(|e| format!("the link could not be built: {e}"))?;
-            Ok((url.to_string(), vec!["pair", "fee and tick spacing", "range ticks"]))
+            let mut prefilled = vec!["pair", "fee and tick spacing", "range ticks"];
+            if amount.is_some() {
+                prefilled.push("amount");
+            }
+            Ok((url.to_string(), prefilled))
         }
         Some(Protocol::AeroCl) => Ok((format!("https://app.aero.xyz/deposit/8453-{}", p.pool_id), vec![])),
         Some(Protocol::AeroBasic) => Err("a basic Aero pool is full range; it cannot hold a ladder".to_string()),

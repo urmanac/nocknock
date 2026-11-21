@@ -210,12 +210,14 @@ operator_profile:
 
   # Optional ladder bottom in USD per NOCK (v0.9.0, #168): the lowest price a NOCK ladder
   # buys down to. YOUR number, no default: unset, the ladder card says this setting is
-  # needed and lists candidate bottoms as a measurement, none picked. It must be a price
-  # above 0 (a finite number); anything else is reported as invalid and nothing is
-  # sized (the cycle does not fail). With it and cash_reserve_usdc set, the dashboard's
-  # ladder card states the range from the usable tick at or below spot down to this
-  # bottom, holding the most USDC that leaves the stable balance at cash_reserve_usdc
-  # when fully converted at the bottom, and a deposit link that prefills no amount.
+  # needed and lists candidate bottoms as a measurement, none picked. Write a plain
+  # number (0.01, not $0.01). Like every numeric key, a value that is not a number (text,
+  # "$0.01", "0,01", .nan, .inf) stops the worker at startup with a config error; a
+  # number at or below 0 is reported on the card as invalid and nothing is sized (the
+  # cycle does not fail). With it and cash_reserve_usdc set, the dashboard's ladder card
+  # states the range from the usable tick at or below spot down to this bottom, holding
+  # the most USDC that leaves the stable balance at cash_reserve_usdc at this price,
+  # and a Uniswap link that prefills the pool, the range and the USDC amount.
   # NockNock signs and sends nothing.
   # ladder_bottom_usd: 0.01
 

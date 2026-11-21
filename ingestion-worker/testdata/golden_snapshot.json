@@ -149,7 +149,7 @@
           ],
           "candidates": {
             "note": "candidate bottoms, a measurement; none is picked",
-            "reason": "No tracked USDC/NOCK concentrated pool can hold a ladder this cycle (see excluded).",
+            "reason": "No tracked USDC/NOCK concentrated pool can hold a ladder this cycle; each pool's reason is listed.",
             "rows": []
           },
           "excluded": [
@@ -172,7 +172,7 @@
           ],
           "freshness_rule": "Shown only while the snapshot is fresh: the dashboard's sync status is not stale, or the worker's health is ok.",
           "gates": null,
-          "headline": "Ladder: set your bottom price (operator_profile.ladder_bottom_usd) to see one.",
+          "headline": "Ladder: needs your bottom price (operator_profile.ladder_bottom_usd) before one is measured.",
           "id": "ladder_suggestion:NOCK",
           "minimum_usdc": "1.00",
           "missing": [
@@ -607,7 +607,7 @@
         }
       ]
     },
-    "state_hash": "281ecf6f6c55fc10330a546e09d3d7f420b8e04f82c6abcb7a2642c32630b88f"
+    "state_hash": "16dbe0e088af299439461a7ad371eebaa7abd74427e93912411a6f28f259c555"
   },
   "from_zero": {
     "mcp_text": {
@@ -697,13 +697,13 @@
           ],
           "candidates": {
             "note": "candidate bottoms, a measurement; none is picked",
-            "reason": "No tracked USDC/NOCK concentrated pool can hold a ladder this cycle (see excluded).",
+            "reason": "No tracked USDC/NOCK concentrated pool can hold a ladder this cycle; each pool's reason is listed.",
             "rows": []
           },
           "excluded": [],
           "freshness_rule": "Shown only while the snapshot is fresh: the dashboard's sync status is not stale, or the worker's health is ok.",
           "gates": null,
-          "headline": "Ladder: set your bottom price (operator_profile.ladder_bottom_usd) to see one.",
+          "headline": "Ladder: needs your bottom price (operator_profile.ladder_bottom_usd) before one is measured.",
           "id": "ladder_suggestion:NOCK",
           "minimum_usdc": "1.00",
           "missing": [
@@ -833,7 +833,7 @@
         }
       ]
     },
-    "state_hash": "ea735dbfb929ab6d5df166eedd31f01dbb1d14efa01a08a44cdd03695e530ea1"
+    "state_hash": "d435c51e5c2df7d098ef10626cef79f86fb555f464dc8208e59e0ce74e6375eb"
   },
   "whole_book_plan_due": {
     "mcp_text": {
@@ -1077,7 +1077,7 @@
           ],
           "candidates": {
             "note": "candidate bottoms, a measurement; none is picked",
-            "reason": "No tracked USDC/NOCK concentrated pool can hold a ladder this cycle (see excluded).",
+            "reason": "No tracked USDC/NOCK concentrated pool can hold a ladder this cycle; each pool's reason is listed.",
             "rows": []
           },
           "excluded": [
@@ -1104,7 +1104,7 @@
           ],
           "freshness_rule": "Shown only while the snapshot is fresh: the dashboard's sync status is not stale, or the worker's health is ok.",
           "gates": null,
-          "headline": "Ladder: set your bottom price (operator_profile.ladder_bottom_usd) to see one.",
+          "headline": "Ladder: needs your bottom price (operator_profile.ladder_bottom_usd) before one is measured.",
           "id": "ladder_suggestion:NOCK",
           "minimum_usdc": "1.00",
           "missing": [
@@ -1730,6 +1730,6 @@
         }
       ]
     },
-    "state_hash": "9aa57a1409491903bba071ee4c8332fb32cbca94480d2f301c8e4641727e06fa"
+    "state_hash": "78c30889dee9b6c79128bd310a90170e3c42562af644e2040a375593b5870ed2"
   }
 }

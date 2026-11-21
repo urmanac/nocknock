@@ -57,6 +57,12 @@ pub fn ladder_suggestion_lines(data: &Value, health: Option<&str>) -> String {
                 }
             }
         }
+        // Each excluded pool's reason, so "no pool can hold one" says why.
+        if status == "no_target_pool" {
+            for e in l.get("excluded").and_then(|e| e.as_array()).into_iter().flatten() {
+                out.push_str(&format!("  - {}: {}\n", s(e, "/position_id").unwrap_or("?"), s(e, "/reason").unwrap_or("?")));
+            }
+        }
         return out;
     }
     if !ladder_fresh(health) {
@@ -75,11 +81,21 @@ pub fn ladder_suggestion_lines(data: &Value, health: Option<&str>) -> String {
             out.push_str(&format!("  - {t}\n"));
         }
     }
+    let limit = if s(l, "/gates/reserve/binding") == Some("wallet") { "wallet USDC binds" } else { "the reserve binds" };
     out.push_str(&format!(
-        "  Reserve ${} holds at the bottom; NOCK budget: {}.\n",
+        "  Reserve ${} holds at ${} ({limit}); NOCK budget: {}.\n",
         s(l, "/numbers/cash_reserve_usdc").unwrap_or("?"),
+        s(l, "/gates/reserve/read_at_usd").unwrap_or("?"),
         s(l, "/gates/nock_budget/status").unwrap_or("unknown"),
     ));
+    let stated: Vec<&str> = l.pointer("/stated/lines").and_then(|v| v.as_array()).into_iter().flatten().filter_map(|x| x.as_str()).collect();
+    if !stated.is_empty() {
+        out.push_str(&format!("  Stated, not gates: {}\n", stated.join(" ")));
+    }
+    let assumptions: Vec<&str> = l.get("assumptions").and_then(|v| v.as_array()).into_iter().flatten().filter_map(|x| x.as_str()).collect();
+    if !assumptions.is_empty() {
+        out.push_str(&format!("  Assumptions: {}\n", assumptions.join(" ")));
+    }
     out.push_str(&rung_lines(l));
     out.push_str(&after_deposit_line(l.get("after_deposit")));
     out.push_str(&format!("  {}\n", s(l, "/statement").unwrap_or("")));
@@ -95,7 +111,7 @@ pub fn rung_lines(l: &Value) -> String {
     for (i, r) in rungs.iter().enumerate() {
         let name = s(r, "/rung").map(|n| format!(" ({n} rung)")).unwrap_or_default();
         out.push_str(&format!(
-            "  Deposit {} of {total}{name}: {} USDC + {} NOCK into {}, ticks {} to {} (${} to ${}; {} to {} NOCK per USDC).\n",
+            "  Deposit {} of {total}{name}: {} USDC + {} NOCK as a new position in {}, ticks {} to {} (${} to ${}; {} to {} NOCK per USDC).\n",
             i + 1,
             s(r, "/usdc/amount").unwrap_or("?"),
             s(r, "/nock/amount").unwrap_or("?"),
@@ -108,11 +124,41 @@ pub fn rung_lines(l: &Value) -> String {
             s(r, "/bounds_nock_per_usdc/high").unwrap_or("?"),
         ));
         match s(r, "/deep_link/url") {
-            Some(url) => out.push_str(&format!("    Deposit link (no amount prefilled): {url}\n")),
+            Some(url) => out.push_str(&format!("    Deposit link ({}): {url}\n", prefilled_words(r))),
             None => out.push_str(&format!("    Deposit link: none ({})\n", s(r, "/deep_link/reason").unwrap_or("not built"))),
         }
     }
+    // The link-format note once, after the links.
+    if let Some(note) = rungs.iter().find_map(|r| s(r, "/deep_link/format_note")) {
+        out.push_str(&format!("  {note}\n"));
+    }
     out
+}
+
+/// What a deposit link prefills, in words, from the worker's own list. Pure.
+pub fn prefilled_words(r: &Value) -> String {
+    let list: Vec<&str> = r.pointer("/deep_link/prefilled").and_then(|v| v.as_array()).into_iter().flatten().filter_map(|x| x.as_str()).collect();
+    let has = |k: &str| list.contains(&k);
+    if list.is_empty() {
+        return "nothing prefilled".to_string();
+    }
+    let mut parts = Vec::new();
+    if has("pair") || has("fee and tick spacing") {
+        parts.push("pool");
+    }
+    if has("range ticks") {
+        parts.push("range");
+    }
+    if has("amount") {
+        parts.push("amount");
+    }
+    let joined = match parts.as_slice() {
+        [a] => a.to_string(),
+        [a, b] => format!("{a} and {b}"),
+        [a, b, c] => format!("{a}, {b} and {c}"),
+        _ => parts.join(", "),
+    };
+    format!("{joined} prefilled")
 }
 
 /// The `after_deposit` field, whatever its kind. Today only `manual_config`, the fallback
