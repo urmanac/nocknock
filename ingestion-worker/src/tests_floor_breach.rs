@@ -630,3 +630,17 @@ fn test_portfolio_state_text_carries_the_line_under_the_stack() {
     old["derived_metrics"].as_object_mut().unwrap().remove("floor_breach");
     assert!(format_portfolio_state_text(&old).contains("• Floor crossing: not reported (snapshot predates 2.9.0)\n• Stable Stack"));
 }
+
+#[test]
+fn test_the_shown_parts_add_up_to_the_shown_total() {
+    // #165 review: wallet 90086.4 + fees 113.4 printed "90200 (90086 wallet + 113 fees)".
+    let mut pool = aero_basic(130.0, 10_000.0);
+    pool.fee1 = 113.4;
+    let raw = raw_of(vec![pool], "90086.4");
+    let fb = floor_breach(&raw, &floor_profile(100_000.0, 0));
+    let n = |s: &Option<String>| s.as_deref().unwrap().parse::<i64>().unwrap();
+    assert_eq!(fb.nock_if_all_sold.as_deref(), Some("90200"));
+    assert_eq!(fb.wallet_nock.as_deref(), Some("90086"));
+    assert_eq!(fb.fees_nock.as_deref(), Some("114"));
+    assert_eq!(n(&fb.wallet_nock) + n(&fb.fees_nock), n(&fb.nock_if_all_sold));
+}

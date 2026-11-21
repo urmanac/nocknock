@@ -369,9 +369,11 @@ pub(crate) fn floor_breach_with(raw: &RawOnChainData, profile: &OperatorProfile,
         crossing: Some(crossing),
         tolerated: c.tolerated.map(|(level, t)| crossing_fields(level, t, c.spot)),
         nock_now: Some(format!("{:.0}", c.nock_now)),
-        wallet_nock: Some(format!("{:.0}", c.wallet)),
-        fees_nock: Some(format!("{:.0}", c.fees)),
-        nock_if_all_sold: Some(format!("{:.0}", c.wallet + c.fees)),
+        // The total is rounded once and the parts are made to add up to it: the text
+        // prints "total (wallet + fees)", so the displayed sum must hold (#165 review).
+        wallet_nock: Some(format!("{:.0}", c.wallet.round())),
+        fees_nock: Some(format!("{:.0}", (c.wallet + c.fees).round() - c.wallet.round())),
+        nock_if_all_sold: Some(format!("{:.0}", (c.wallet + c.fees).round())),
         largest_seller: c.largest_seller.clone(),
         first_to_sell_out: c.first_to_sell_out.clone(),
         positions: c
