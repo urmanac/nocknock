@@ -45,6 +45,12 @@ export interface DerivedMetrics {
   cost_basis?: import('../costBasis').CostBasis | null;
   /** The floor-crossing price (2.9.0, #165); null/absent from a worker that predates it */
   floor_breach?: import('../floor').FloorBreach | null;
+  /** Fees per unit of liquidity measured on our own tracked ranges (2.10.0); absent from
+   *  a worker that predates it. */
+  fee_yield?: import('../feeYield').FeeYield;
+  /** The operator's configured ladder shape, worked out and sized by the worker (2.10.0);
+   *  absent when no shape is configured. */
+  ladder_shape?: import('../feeYield').LadderShape;
   /** The ladder suggestion (2.9.0, #168): a top-of-page event; absent from a worker that predates it */
   ladder_suggestion?: import('../ladderSuggestion').LadderSuggestion | null;
 }
@@ -312,6 +318,25 @@ export interface GlobalStatus {
   lp_nock_budget_note?: string;
   /** operator_profile.lp_floor_tolerance_bps (2.9.0, #166). */
   lp_floor_tolerance_bps?: number;
+  /** operator_profile.ladder_bottom_usd, 8 dp (2.10.0): where the ladder simulator reads
+   *  its reserve gate when it is below a ladder's deepest bottom. No default. */
+  ladder_bottom_usd?: string;
+  /** Why ladder_bottom_usd is not applied (2.10.0). */
+  ladder_bottom_note?: string;
+  /** operator_profile.ladder_rungs as validated (2.10.0), top down. */
+  ladder_rungs?: LadderRungSetting[];
+  /** The configuration error of operator_profile.ladder_rungs, named (2.10.0). */
+  ladder_rungs_note?: string;
+}
+
+/** One rung of the operator's ladder shape (2.10.0). */
+export interface LadderRungSetting {
+  rung: 'cap' | 'near' | 'deep';
+  /** The share of the USDC left after the cap; null for the cap. */
+  share: string | null;
+  /** 'band' (the cap), 'spot' (the first other rung) or the rung above's bottom. */
+  high: string;
+  low_usd: string | null;
 }
 
 /** A gauge reward stated as collectible earnings (#142): what is there and where it is
@@ -462,6 +487,9 @@ export interface PoolMechanic {
   fee_tier_bps: number;
   tick_current?: number;
   sqrt_price_x96?: string;
+  /** The pool's in-range liquidity at its current tick, read at latest (2.10.0); absent
+   *  when the read failed: unknown, never 0. */
+  active_liquidity_raw?: string;
 }
 
 export interface PoolAsset {
@@ -562,7 +590,7 @@ export interface Position {
    *  Absent for every other position. */
   role?: 'ladder';
   /** A ladder's rung from config; absent when unset (2.9.0, #167). */
-  rung?: 'near' | 'deep';
+  rung?: 'cap' | 'near' | 'deep';
   /** Uniswap v4: the pool fee from poolKeys in hundredths of a bip, and the hooks address (2.9.0, #168). */
   fee_raw?: number;
   hooks?: string;
@@ -573,7 +601,7 @@ export interface LadderReading {
   position_id: string;
   config_id: string;
   label: string;
-  rung: 'near' | 'deep' | null;
+  rung: 'cap' | 'near' | 'deep' | null;
   rung_note: string | null;
   /** What the range holds, by its own pool's tick. */
   state: 'holds_only_usdc' | 'in_range' | 'holds_only_nock' | 'empty' | 'pool_stale';

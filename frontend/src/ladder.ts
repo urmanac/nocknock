@@ -15,6 +15,8 @@ export interface LadderBounds {
   tick_lower: number | null;
   tick_upper: number | null;
   high_rule?: string;
+  /** A ladder of rungs (2.10.0): what the top-level figures span. */
+  describes?: string;
 }
 
 export interface LadderGridRow {
@@ -30,6 +32,155 @@ export interface LadderGridRow {
   reserve_headroom_usdc: string | null;
   total_tracked_nock: string | null;
   markers: string[];
+  /** A ladder of rungs only (2.10.0): each rung here, the rungs in range and their
+   *  summed fee per day (null with est_fee_reason). */
+  rungs?: Array<{ index: number; ladder_usdc: string; ladder_nock: string; in_range: boolean }>;
+  rungs_in_range?: number[];
+  est_fee_usd_per_day?: string | null;
+  est_fee_usd_per_day_diluted?: string | null;
+  est_fee_reason?: string | null;
+}
+
+/** Fees per day while in range (2.10.0): measured on our own tracked range, always with
+ *  the in-range share of stored history and the replay upper bounds beside it. */
+export interface LadderFeeEstimate {
+  status: 'measured' | 'unavailable';
+  reason: string | null;
+  measured_by: string | null;
+  measured_label: string | null;
+  measured_at: string | null;
+  measurement_age_seconds: number | null;
+  measured_seconds: number | null;
+  measured_days: string | null;
+  intervals: number | null;
+  skipped: Record<string, number> | null;
+  skipped_seconds: Record<string, number> | null;
+  rate: { usdc_per_liquidity_day: string; nock_per_liquidity_day: string; usd_per_1e15_liquidity_day: string; valued_at_pool_price_usd: string } | null;
+  per_day_in_range_usd: string | null;
+  per_day_in_range_usdc_leg: string | null;
+  per_day_in_range_nock_leg: string | null;
+  per_100_usd_per_day_in_range_usd: string | null;
+  per_day_in_range_diluted_usd: string | null;
+  dilution: { active_liquidity_raw: string | null; new_liquidity_raw: string; factor: string; share_of_active_pct: string } | null;
+  dilution_reason: string | null;
+  /** Why the spread is null (a snapshot read back from a stored row). */
+  spread_reason?: string | null;
+  spread: {
+    days_counted: number;
+    day_min_seconds: number;
+    min_usd_per_day: string | null;
+    median_usd_per_day: string | null;
+    max_usd_per_day: string | null;
+    days: Array<{ date: string; seconds: number; usd_per_day: string; counted: boolean }>;
+    note: string;
+  } | null;
+  band_measured: { usd_per_day: string | null; usd_total_upper: string; seconds: string; days: string } | null;
+  band_reason: string | null;
+  in_range_share_stored_history: { share_pct: string; seconds: string; of_seconds: string; edge_seconds: string; note: string } | null;
+  in_range_share_reason: string | null;
+  stored_history_replay: {
+    inside_upper_usd: string;
+    edge_upper_usd: string;
+    inside_seconds: string;
+    edge_seconds: string;
+    measured_days: string;
+    undiluted: boolean;
+    note: string;
+  } | null;
+  replay_reason: string | null;
+  coverage: { low_usd: string; high_usd: string; whole: boolean; note: string } | null;
+  constants: { window_days: number | null; max_gap_seconds: number | null; day_min_seconds: number | null; band_min_seconds: number; note: string };
+  assumptions: string[];
+}
+
+/** One rung of a ladder of rungs (2.10.0). */
+export interface LadderRung {
+  index: number;
+  rung: 'cap' | 'near' | 'deep';
+  inputs: Record<string, unknown>;
+  bounds: LadderBounds;
+  sizing: {
+    liquidity_raw: string;
+    liquidity_human: string;
+    usdc_at_spot: string;
+    nock_needed_at_spot: string;
+    nock_given: string | null;
+    nock_check: 'not_given' | 'matches';
+  };
+  /** The exact mint (2.10.0 review): liquidity rounded down from the amounts, the
+   *  amounts it pulls rounded up, never more than the maxima. */
+  mint: {
+    status: 'exact' | 'unavailable';
+    reason?: string;
+    liquidity_raw?: string;
+    amount0_raw?: string;
+    amount1_raw?: string;
+    usdc_raw?: string;
+    nock_raw?: string;
+    usdc?: string;
+    nock?: string;
+    usdc_max_raw?: string;
+    nock_max_raw?: string;
+    tick?: number;
+    note?: string;
+  };
+  /** shape=configured only: the rung against the tracked rungs. */
+  plan?: { status: string; target_usdc: string; deployed_usdc: string; remaining_usdc: string; counterparts: string[] };
+  bottom: { price_usd: string; pct_of_spot: string; nock_held: string; nock_bought: string; avg_buy_price_usd: string | null };
+  top: { price_usd: string; pct_of_spot: string; usdc_held: string; out_of_range_above_now: boolean };
+  max_usdc_with_the_others_as_given: string | null;
+  fee_estimate: LadderFeeEstimate;
+  round_trip: { down_to_usd: string; back_to_usd: string; usdc_start: string; nock_start: string; usdc_back: string; nock_back: string; text: string } | null;
+  if_pulled_at_fill: { at_usd: string; nock_kept: string; nock_bought: string; avg_price_usd: string | null; note: string } | null;
+  cap?: {
+    tick_lower: number;
+    tick_upper: number;
+    pool_tick: number;
+    band_rule: string;
+    lp_nock_budget: string | null;
+    nock: string;
+    usdc: string;
+    /** lp_nock_budget | near_usdc | reserve | total_usdc */
+    bound_by: string;
+    /** The USDC limit and what it is: near_share | near_usdc | reserve | total_usdc. */
+    usdc_limit?: string;
+    usdc_limit_is?: string;
+    limit_rule: string;
+    note: string;
+  } | null;
+}
+
+export interface LadderCombined {
+  rung_count: number;
+  max_rungs: number;
+  max_rungs_note: string;
+  total_usdc: string;
+  total_nock_needed: string;
+  deepest_bottom_usd: string;
+  nock_held_at_deepest_bottom: string;
+  nock_bought_at_deepest_bottom: string;
+  avg_buy_price_usd: string | null;
+  deep_rungs: number;
+  nock_kept_if_deep_rungs_pulled: string;
+  nock_bought_by_deep_rungs: string;
+  avg_kept_price_usd: string | null;
+  max_usdc_total: string | null;
+  overlaps: Array<{ a: number; b: number; low_usd: string; high_usd: string }>;
+  gate_price_usd: string;
+  gate_price_rule: string;
+}
+
+/** Measurement tables, in the order of the quantity varied, never ranked. */
+export interface LadderTradeoff {
+  split: { step_pct: number; step_note: string; varies: string; rows: Array<Record<string, unknown>> } | null;
+  split_reason: string | null;
+  near_depth: { rows: Array<Record<string, unknown>>; skipped_rows: unknown[]; ticks_between: number; max_rows: number; max_rows_note: string; truncated: boolean } | null;
+  near_depth_reason: string | null;
+  deep_top: { rows: Array<Record<string, unknown>>; skipped_rows: unknown[]; ticks_between: number; max_rows: number; max_rows_note: string; truncated: boolean } | null;
+  deep_top_reason: string | null;
+  statement: string;
+  order: string;
+  columns_note: string;
 }
 
 export interface LadderCrossingView {
@@ -74,16 +225,19 @@ export interface LadderSimulation {
   }> | null;
   top_neighbours_reason: string | null;
   sizing: {
-    liquidity_raw: string;
-    liquidity_human: string;
+    /** Null for a ladder of rungs: liquidity is per rung (2.10.0). */
+    liquidity_raw: string | null;
+    liquidity_human: string | null;
     usdc_at_spot: string;
     nock_needed_at_spot: string;
     nock_given: string | null;
-    nock_check: 'not_given' | 'matches';
+    nock_check: 'not_given' | 'matches' | 'per_rung';
+    describes?: string;
   };
   grid: LadderGridRow[];
-  bottom: { price_usd: string; pct_of_spot: string; nock_held: string; nock_bought: string; avg_buy_price_usd: string | null };
+  bottom: { price_usd: string; pct_of_spot: string; nock_held: string; nock_bought: string; avg_buy_price_usd: string | null; describes?: string };
   top: {
+    describes?: string;
     price_usd: string;
     pct_of_spot: string;
     multiple_of_spot: string;
@@ -108,6 +262,10 @@ export interface LadderSimulation {
     accumulation_plan_unspent_reason: string | null;
     tax_reserve_usd: { usd: string; is: string } | null;
     reason: string | null;
+    /** Where the gate is read (2.10.0): always for rungs; for one rung only when
+     *  operator_profile.ladder_bottom_usd is set. */
+    gate_price_usd?: string;
+    gate_price_rule?: string;
   };
   floor_check: {
     status: 'fits' | 'exceeds' | 'unknown';
@@ -117,6 +275,8 @@ export interface LadderSimulation {
     rebuild_suggested_nock: string;
     rebuild_note: string;
     max_usdc_within_budget: string | null;
+    /** A ladder of rungs only (2.10.0). */
+    nock_needed_by_rung?: Array<{ index: number; nock_needed: string }>;
     floor_breach_effect: {
       status: string;
       before: LadderCrossingView | null;
@@ -126,8 +286,58 @@ export interface LadderSimulation {
     };
     reason: string | null;
   };
+  /** One rung (2.10.0): the fee estimate. Null for a ladder of rungs (per rung there). */
+  fee_estimate?: LadderFeeEstimate | null;
+  fee_estimate_reason?: string;
+  /** A ladder of rungs and shape=configured only (2.10.0). */
+  rungs?: LadderRung[];
+  combined?: LadderCombined;
+  tradeoff?: LadderTradeoff | null;
+  tradeoff_reason?: string | null;
+  /** shape=configured only: computed, deployed or price_at_or_below_bottom. */
+  shape_status?: 'computed' | 'deployed' | 'price_at_or_below_bottom';
   assumptions: string[];
   statement: string;
+}
+
+/** One rung of an indexed query (2.10.0): the operator's own values, none defaulted. */
+export interface LadderRungQuery {
+  rung: 'cap' | 'near' | 'deep';
+  usdc: string;
+  nock?: string;
+  low?: string;
+  low_pct?: string;
+  /** A price, or 'spot'. */
+  high?: string;
+  high_pct?: string;
+}
+
+/** The GET /v1/simulate/ladder query for a ladder of rungs (r1_..r4_), or for the
+ *  operator's configured shape (`shape: true`). Throws on a rung with no role or more
+ *  than four rungs, the worker's own 400s. */
+export function buildRungsQuery(
+  rungs: LadderRungQuery[] | 'configured',
+  opts: { positionId?: string; shapeUsdc?: string; splitStepPct?: string } = {},
+): URLSearchParams {
+  const q = new URLSearchParams();
+  if (rungs === 'configured') {
+    q.set('shape', 'configured');
+    if (opts.shapeUsdc && opts.shapeUsdc.trim() !== '') q.set('shape_usdc', opts.shapeUsdc.trim());
+  } else {
+    if (rungs.length === 0 || rungs.length > 4) throw new Error('a ladder of rungs has 1 to 4 rungs');
+    rungs.forEach((r, i) => {
+      if (!['cap', 'near', 'deep'].includes(r.rung)) throw new Error(`r${i + 1}_rung is required (cap, near or deep)`);
+      const n = `r${i + 1}_`;
+      q.set(`${n}rung`, r.rung);
+      for (const k of ['usdc', 'nock', 'low', 'low_pct', 'high', 'high_pct'] as const) {
+        const v = r[k];
+        if (v != null && v.trim() !== '') q.set(`${n}${k}`, v.trim());
+      }
+    });
+    if (opts.splitStepPct && opts.splitStepPct.trim() !== '') q.set('split_step_pct', opts.splitStepPct.trim());
+  }
+  if (opts.positionId) q.set('position_id', opts.positionId);
+  return q;
 }
 
 /** A 400 or 422 body: kept whole, so the sub-code, nock_needed and bounds are shown. */
@@ -258,6 +468,14 @@ export function ladderSnapshotLine(sim: LadderSimulation): string {
   return `From the snapshot generated ${s.generated_at} (${s.age_minutes} min ago) · worker health: ${s.worker_health}`;
 }
 
+/** Where the reserve gate is read, as the MCP text says it: "at the gate $0.01000000
+ *  (rule)" when the worker states a gate price (operator_profile.ladder_bottom_usd set,
+ *  valid or not, or a ladder of rungs), otherwise "at the bottom". */
+export function ladderGateWhere(sim: LadderSimulation): string {
+  const rc = sim.reserve_check;
+  return rc.gate_price_usd && rc.gate_price_rule ? `at the gate $${rc.gate_price_usd} (${rc.gate_price_rule})` : 'at the bottom';
+}
+
 /** The result as measured lines, in the MCP text's words. */
 export function ladderSummaryLines(sim: LadderSimulation): string[] {
   const lines: string[] = [];
@@ -292,7 +510,7 @@ export function ladderSummaryLines(sim: LadderSimulation): string[] {
     const m = rc.margin_usdc ?? '';
     const verdict = m.startsWith('-') ? `breached: below it by $${m.slice(1)}` : `holds by $${m}`;
     lines.push(
-      `Reserve: stable $${rc.stable_at_bottom_usdc} at the bottom against the $${rc.cash_reserve_usdc} reserve: ${verdict} (this range takes at most $${rc.max_usdc_for_this_range ?? 'unknown'})`,
+      `Reserve: stable $${rc.stable_at_bottom_usdc} ${ladderGateWhere(sim)} against the $${rc.cash_reserve_usdc} reserve: ${verdict} (this range takes at most $${rc.max_usdc_for_this_range ?? 'unknown'})`,
     );
   } else {
     lines.push(`Reserve: ${rc.status}: ${rc.reason ?? ''}`);

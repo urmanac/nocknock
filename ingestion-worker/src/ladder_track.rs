@@ -15,11 +15,11 @@
 //! Baselines considered and rejected as invented: the first snapshot that saw the position
 //! (the database is disposable and the position may already have moved); "it looks
 //! single-sided, so the deposit was 0 NOCK"; the pool price at the block before (a swap
-//! earlier in the same block moves it); and discovering the mint from logs (an ERC721
-//! Transfer from 0x0 for the token id), because a bounded `eth_getLogs` cannot find a mint
-//! older than the node's range limit (200,000 blocks on the public node) without a scan the
-//! worker should not make every cycle. The operator names the transaction; the receipt is
-//! checked against the position before it is used.
+//! earlier in the same block moves it). For a config.yaml entry the operator names the
+//! transaction. For a position found on-chain (position_detect.rs, v0.9.0) the mint is
+//! discovered from the position manager's Transfer logs: the scan keeps a cursor and reads
+//! within the RPC's block-range limit (50,000 blocks on the public node, read 2026-11-21).
+//! Either way the receipt is checked against the position here before it is used.
 //!
 //! Nothing here pushes a notification or suggests a re-centre, a withdrawal or a deposit:
 //! maintenance is #169, which reads `ladders[].state` and `since_deposit`.
@@ -28,10 +28,12 @@ use crate::*;
 /// The one `role` value (#167). Matching is exact and case-sensitive, like `protocol`.
 pub(crate) const LADDER_ROLE: &str = "ladder";
 pub(crate) const SUPPORTED_ROLES: &str = "ladder (or leave role unset)";
-pub(crate) const LADDER_RUNGS: [&str; 2] = ["near", "deep"];
-pub(crate) const SUPPORTED_RUNGS: &str = "near, deep (or leave rung unset)";
+/// The rung vocabulary: a cap (the tick band containing spot, holding the LP NOCK budget),
+/// a near rung and a deep rung (operator decision, 2026-11-20).
+pub(crate) const LADDER_RUNGS: [&str; 3] = ["cap", "near", "deep"];
+pub(crate) const SUPPORTED_RUNGS: &str = "cap, near, deep (or leave rung unset)";
 /// What an unset `rung` reads as. Never a default rung.
-pub(crate) const RUNG_UNSET_NOTE: &str = "rung is not set in config.yaml (near or deep): NockNock assumes neither";
+pub(crate) const RUNG_UNSET_NOTE: &str = "rung is not set in config.yaml (cap, near or deep): NockNock assumes none";
 /// The deviation-matrix row of tracked ladders: measured, no target (#167).
 pub(crate) const LADDER_BUCKET_NAME: &str = "NOCK ladders (measured)";
 
@@ -559,7 +561,7 @@ pub(crate) struct LadderReading {
     pub(crate) position_id: String,
     pub(crate) config_id: String,
     pub(crate) label: String,
-    /// `near` | `deep` from config; null when unset (`rung_note` says so).
+    /// `cap` | `near` | `deep` from config; null when unset (`rung_note` says so).
     pub(crate) rung: Option<String>,
     pub(crate) rung_note: Option<String>,
     /// holds_only_usdc | in_range | holds_only_nock | empty | pool_stale. Named by what
@@ -587,6 +589,10 @@ pub(crate) struct LadderReading {
     pub(crate) fees_usd: String,
     pub(crate) vs_top: LadderVsTop,
     pub(crate) since_deposit: LadderSinceDeposit,
+    /// `tracked` for a ladder that comes from a database row (found on-chain); absent for
+    /// a config.yaml entry. `config_id` then names no config entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) source: Option<String>,
 }
 
 /// One USD-per-NOCK price at a tick of a USDC/NOCK pool, either token order. Pure.
@@ -674,6 +680,8 @@ pub(crate) fn ladder_reading(raw: &RawOnChainData, p: &RawPosition, tag: &Ladder
         nock_spot_from_positions(std::slice::from_ref(&q))
     };
     let state = ladder_state(raw, p);
+    // A ladder found on-chain has no config.yaml entry: its notes say so.
+    let tracked = raw.position_sources.contains_key(&p.position_id);
     let state_text = match state {
         "holds_only_usdc" if !top_open => format!(
             "holds only USDC: the price is above the range, so it converts nothing until NOCK falls into it at ${:.8}",
@@ -694,7 +702,7 @@ pub(crate) fn ladder_reading(raw: &RawOnChainData, p: &RawPosition, tag: &Ladder
         config_id: tag.config_id.clone(),
         label: position_label(p),
         rung: tag.rung.clone(),
-        rung_note: tag.rung.is_none().then(|| RUNG_UNSET_NOTE.to_string()),
+        rung_note: tag.rung.is_none().then(|| if tracked { RUNG_UNSET_NOTE_TRACKED.to_string() } else { RUNG_UNSET_NOTE.to_string() }),
         state: state.to_string(),
         state_text,
         low_price_usd: (!bottom_open).then(|| format!("{:.8}", low)),
@@ -717,6 +725,7 @@ pub(crate) fn ladder_reading(raw: &RawOnChainData, p: &RawPosition, tag: &Ladder
             converted_pct: (!top_open && usdc_at_top > 0.0).then(|| format!("{:.2}", converted / usdc_at_top * 100.0)),
         },
         since_deposit: since_deposit(raw, p, tag, usdc_now, nock_now),
+        source: raw.position_sources.get(&p.position_id).cloned(),
     }
 }
 
@@ -731,9 +740,11 @@ fn since_deposit(raw: &RawOnChainData, p: &RawPosition, tag: &LadderTag, usdc_no
         LadderBaselineRead::NotConfigured => LadderSinceDeposit {
             status: "no_baseline".to_string(),
             current_liquidity,
-            reason: Some(
-                "no deposit_tx is set for this ladder in config.yaml: NockNock has no baseline for what it bought and does not invent one".to_string(),
-            ),
+            reason: Some(if raw.position_sources.contains_key(&p.position_id) {
+                "this position was found on-chain and reached the wallet by transfer, so no mint transaction was found for it: NockNock has no baseline for what it bought and does not invent one".to_string()
+            } else {
+                "no deposit_tx is set for this ladder in config.yaml: NockNock has no baseline for what it bought and does not invent one".to_string()
+            }),
             ..Default::default()
         },
         LadderBaselineRead::Refused { tx, reason } => LadderSinceDeposit {

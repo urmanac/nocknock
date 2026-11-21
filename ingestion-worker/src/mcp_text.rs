@@ -76,6 +76,9 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
     let floor_breach = crate::floor_breach_text::floor_breach_line(data.pointer("/derived_metrics/floor_breach"));
     // Tracked ladders (issue #167), the same lines in both transports. Empty without one.
     let ladders = crate::ladder_track_text::ladders_lines(data);
+    // Positions found on-chain (v0.9.0): what is tracked from the chain and what is found
+    // and not counted. Empty for a snapshot without the field.
+    let found = crate::position_detect_text::position_detection_lines(data);
 
     format!(
         "📈 NockNock Sovereign Portfolio State\n\
@@ -91,6 +94,7 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
          {collectible}\
          {closed}\
          {ladders}\
+         {found}\
          • High-Water Mark: {hwm}\n\
          {cost_basis}\n\
          • Tactical Directive: {advice}"

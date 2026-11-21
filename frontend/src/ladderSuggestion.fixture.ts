@@ -11,12 +11,10 @@ import type { LadderSuggestion } from './ladderSuggestion';
 /** ready: derived_metrics.ladder_suggestion */
 export const LADDER_READY: LadderSuggestion = {
   "after_deposit": {
-    "config_snippets": [
-      "- id: \"nock-ladder-1\"\n  protocol: \"uniswap-v4\"\n  network: \"base\"\n  nft_id: <the new NFT's id>\n  pool_id: \"0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13\"\n  currency0: \"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\"   # USDC\n  currency1: \"0x9B5E262cF9bb04869ab40b19AF91D2dc85761722\"   # NOCK\n  tick_lower: 273900   # the minted ticks; the app may adjust them\n  tick_upper: 276300\n  role: \"ladder\"\n  rung: \"<near or deep: your choice>\"\n  deposit_tx: \"0x<the mint transaction hash>\""
-    ],
-    "is": "the current fallback until NockNock detects the wallet's new position NFTs on-chain",
-    "kind": "manual_config",
-    "text": "Automatic tracking of a new ladder position is not built yet; until it is, a minted rung is tracked only from a config.yaml entry (role: ladder)."
+    "detection_note": null,
+    "detection_status": null,
+    "kind": "tracked_automatically",
+    "text": "After you deposit there is nothing to copy or configure. NockNock looks for the wallet's new position NFT on-chain at the start of every cycle (CHECK NOW runs one at once), so a deposit is normally found in the first cycle after it lands. A position your wallet minted in this pool with exactly a rung's ticks is tracked as a ladder by itself, with its mint as the baseline. Any other range it finds is shown as found on-chain and is not counted until one tap says how to track it."
   },
   "assumptions": [
     "The amount is the most the standing reserve allows at the ladder's bottom; fees and gas are not counted.",
@@ -269,12 +267,10 @@ export const LADDER_READY: LadderSuggestion = {
 /** ready_live: derived_metrics.ladder_suggestion */
 export const LADDER_READY_LIVE: LadderSuggestion = {
   "after_deposit": {
-    "config_snippets": [
-      "- id: \"nock-ladder-1\"\n  protocol: \"uniswap-v4\"\n  network: \"base\"\n  nft_id: <the new NFT's id>\n  pool_id: \"0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13\"\n  currency0: \"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\"   # USDC\n  currency1: \"0x9B5E262cF9bb04869ab40b19AF91D2dc85761722\"   # NOCK\n  tick_lower: 273900   # the minted ticks; the app may adjust them\n  tick_upper: 276300\n  role: \"ladder\"\n  rung: \"<near or deep: your choice>\"\n  deposit_tx: \"0x<the mint transaction hash>\""
-    ],
-    "is": "the current fallback until NockNock detects the wallet's new position NFTs on-chain",
-    "kind": "manual_config",
-    "text": "Automatic tracking of a new ladder position is not built yet; until it is, a minted rung is tracked only from a config.yaml entry (role: ladder)."
+    "detection_note": null,
+    "detection_status": null,
+    "kind": "tracked_automatically",
+    "text": "After you deposit there is nothing to copy or configure. NockNock looks for the wallet's new position NFT on-chain at the start of every cycle (CHECK NOW runs one at once), so a deposit is normally found in the first cycle after it lands. A position your wallet minted in this pool with exactly a rung's ticks is tracked as a ladder by itself, with its mint as the baseline. Any other range it finds is shown as found on-chain and is not counted until one tap says how to track it."
   },
   "assumptions": [
     "The amount is the most the standing reserve allows at the ladder's bottom; fees and gas are not counted.",

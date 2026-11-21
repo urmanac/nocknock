@@ -545,6 +545,7 @@ fn test_profile() -> OperatorProfile {
         target_weights_bps: TargetWeightsBps { treasury: 6500, uniswap_lp: 3000, cash: 500 },
         cash_reserve_usdc: None,
         ladder_bottom_usd: None,
+        ladder_rungs: None,
     }
 }
 
@@ -1100,7 +1101,7 @@ fn test_a_proof_block_must_be_current() {
         assert!(include_str!("closed.rs").contains("proof_block_is_current(clock.now(), clock.max_block_age_seconds, &block)"));
         assert_eq!(adapter.matches("block.tag()").count(), 2, "both proving reads name the proof block");
     }
-    assert!(include_str!("onchain.rs").contains("fetch_raw_data_from(&state.http_client, &alchemy_url, &state.config, Utc::now())"));
+    assert!(include_str!("onchain.rs").contains("fetch_raw_data_merged(&state.http_client, &alchemy_url, &state.config, &merged, Utc::now())"));
 }
 
 #[tokio::test]
@@ -1343,7 +1344,9 @@ async fn test_a_closed_entry_changes_no_figure_and_the_arrays_stay_aligned() {
     assert_eq!(live, vec!["uniswap-v4-nock-usdc-wide", "uniswap-v3-weth-nock", "aero-basic-nock-usdc"]);
     assert_eq!(live_position_configs(&cfg.positions, &[]).len(), 4, "a snapshot that lists none filters none");
     let claims = include_str!("claims.rs");
-    assert!(claims.contains("live_position_configs(&state.config.positions, &snapshot.data.closed_positions)"));
+    // Since v0.9.0 the entries are config.yaml's and the database rows the snapshot holds.
+    assert!(claims.contains("claim_position_configs(&state.config.positions, &tracked_rows, &snapshot.data)"));
+    assert!(claims.contains("live_position_configs(&claim_configs, &snapshot.data.closed_positions)"));
     assert!(!claims.contains(".config\n        .positions\n        .iter()"), "claims.rs builds actions from the live entries only");
     assert_eq!(
         serde_json::to_string(&claim_reward_rows(&with.positions, &[])).unwrap(),
@@ -1596,10 +1599,11 @@ fn test_closed_positions_need_no_new_config_key_and_are_in_the_spec() {
 
     // 2.8.0 brought closed positions; the v0.8.1 burn-down moved it to 2.8.1, and
     // TickBracket.position_id (#152) to 2.8.2, the standing reserve (#162) to 2.8.3 and
-    // the floor-crossing price (#165) to 2.9.0.
-    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.9.0");
+    // the floor-crossing price (#165) to 2.9.0, and the fee yield and the operator's
+    // ladder shape (#166 rungs) to 2.10.0.
+    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.10.0");
     let spec = include_str!("../../specs/core/snapshot.yaml");
-    assert!(spec.contains("  version: 2.9.0"));
+    assert!(spec.contains("  version: 2.10.0"));
     for field in [
         "closed_positions:", "ClosedPosition:", "ClosedEvidence:", "config_id:", "position_manager:", "first_seen_closed_at:",
         "supplies_spot_price:", "closed_positions_count:", "closed_positions_note:",

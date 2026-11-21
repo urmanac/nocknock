@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Positions found on-chain: deposit in the Uniswap app, and NockNock tracks it
+  (#145 for Uniswap v4).** No transaction hash, no NFT id and no `config.yaml` edit. At
+  the start of every cycle, before the position reads, the worker reads the wallet's
+  Uniswap v4 position NFTs from the chain and decides for each:
+  - **Tracked by itself** only when the wallet minted it in a whitelisted pool and its
+    pool and ticks are exactly a rung of the current ladder suggestion. It is tracked as
+    `role: ladder` with that rung (unset while the suggestion names none, never a guessed
+    one) and its mint transaction as the #167 baseline, checked by the same
+    `parse_ladder_deposit` as a config ladder. It is counted in the cycle that finds it.
+  - **Found, not counted** for anything else the wallet holds with liquidity in a
+    whitelisted pool: stated with what it holds, its value at the cycle's prices and why
+    it was not tracked by itself, with one tap to track it as a ladder rung, track it as
+    LP, or set it aside. It is never tracked silently, and the ladder suggestion waits
+    for that tap instead of measuring a second ladder beside it.
+  - **Never listed**: a pool with a token outside the whitelist (dust), a hooked pool, an
+    empty NFT, an NFT the wallet does not own. They are counted by reason.
+  Tracked positions live in the database and are appended after `config.yaml`'s each
+  cycle; `config.yaml` wins a collision. A database-tracked position is never a price
+  source or a rebuild template. A table that cannot be read fails the cycle rather than
+  publish a total without them. An NFT that left the wallet stops being counted and is
+  named; a burned one is reported closed by the #144 proof; an emptied one reads as empty
+  and no longer stands for a deployed rung, so the suggestion measures again.
+  `derived_metrics.position_detection` (snapshot 2.9.0, additive) states whether new
+  positions were looked for, how far back the transfers were read, and what is missing
+  when the check is partial or could not run. The scan reads the position manager's
+  ERC-721 `Transfer` logs: one request where the RPC allows the whole range, resumable
+  45,000-block chunks where it does not, and the RPC's transfer index while the logs do
+  not cover the history. `balanceOf` on the position manager cross-checks it. After a
+  database loss the positions are found again from the chain; one-tap choices are lost
+  and offered again. New: `GET /v1/positions/found` and `POST /v1/positions/track`,
+  `untrack`, `dismiss` and `restore`, each behind the cross-site write guard and taking a
+  JSON body; a "Found on-chain" block under the ladder card on the dashboard and in the
+  phone cockpit, with one-tap buttons and no typed input; the same statement in both MCP
+  transports (`get_portfolio_state`, and `get_shot_advice` when it bears on the totals).
+  The ladder card's after-deposit sentence is now the automatic path. Migration
+  `20261121000013` adds three tables; from it on a deploy is forward-only
+  (AGENTS.md section 13, DEPLOYMENT.md section 5). NockNock still builds no transaction
+  for a ladder and never signs or sends.
+
 - **The floor-crossing price (#165).** `derived_metrics.floor_breach` (snapshot spec
   2.9.0, additive) measures how far NOCK can rise before the deployed ranges sell the
   stack below the floor. Tracked NOCK at a multiple of spot is wallet NOCK, uncollected
@@ -74,6 +113,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1,221.85 USDC + 247.58 NOCK): with the pool fallen into it, it holds 5,551.37 NOCK and
   has net bought 5,303.79 NOCK for $84.35 since its deposit, an average of $0.01590283.
 
+- **Ladders of rungs, the fee yield and the operator's ladder shape (extends #166).**
+  Snapshot spec 2.10.0, additive. A one-rung body is unchanged apart from the new
+  `fee_estimate` and, only when `operator_profile.ladder_bottom_usd` is set, the gate's
+  price and rule.
+  - *A ladder of rungs.* `GET /v1/simulate/ladder` takes up to four rungs (`cap`,
+    `near`, `deep`; a role is required and never assumed) in one pool, through the
+    indexed `r1_`..`r4_` parameters and a `rungs` array in both MCP transports. The
+    flat form is unchanged. The rungs share one reserve gate and one NOCK budget, and
+    every rung enters the floor-crossing figure. Overlaps are listed. A near rung states
+    its round trip: back at the price now it holds what it started with, so its gain is
+    its fees. A deep rung states the NOCK it keeps if pulled at fill. Trade-off tables
+    (the split, the near rung's depth and the deep rung's top) are measurements in the
+    order of the quantity varied, never ranked and with no row marked.
+  - *The reserve gate.* It is read at the lower of the deepest rung's bottom and the
+    new `operator_profile.ladder_bottom_usd` (no default), so a ladder that stops above
+    the bottom cannot recruit the reserve kept for prices below it. With the key unset
+    the gate is the deepest bottom, and the body says so.
+  - *The fee estimate.* Fees per day while in range are measured from our own tracked
+    range, not forecast. `derived_metrics.fee_yield` holds the fees per unit of
+    liquidity, measured from stored snapshot rows:
+    - one measuring range per USDC/NOCK pool (not full range, not staked, not a
+      ladder; the widest when there are several);
+    - skipped intervals counted with their seconds;
+    - true UTC days;
+    - spans on the tick grid;
+    - measured at most hourly, carried forward and priced at the current pool price.
+
+    `pool_mechanics[].active_liquidity_raw` holds the active liquidity behind the
+    diluted figure. Both are left out of the state hash, so an unchanged cycle still
+    stores no row. A rung's estimate is the measuring range's average fee per unit of
+    liquidity times the rung's liquidity: an assumption, stated. It is always shown
+    with the in-range share of stored history and the replay upper bounds, the
+    measurement inside the rung (a per-day figure only from 20 h of intervals) and
+    every day's figure. Stored market volume, which belongs to another pool, is never
+    read. On the recorded chudmax history (2026-11-14 to 11-21, 1,836 intervals over
+    6.33 days) the rate is $6.08 per 1e15 liquidity per day at the current price.
+  - *The operator's shape.* `operator_profile.ladder_rungs` (no default) records it
+    from the top down. It may start with a `cap`: the tick band containing spot,
+    holding the LP NOCK budget and the USDC its curve pairs with it, never more USDC
+    than the near rung's. The near and deep shares divide the rest. It is validated and
+    stated in `global_status.ladder_rungs`, or named as a configuration error in
+    `ladder_rungs_note`. `shape=configured` sizes it to the shared reserve gate's most.
+    `derived_metrics.ladder_shape` carries that result in the snapshot, for a card with
+    no inputs.
+  - *Rung vocabulary.* `cap | near | deep`, for tracked ladders (#167) too.
+  - *The shape is planned against what is deployed.* Tracked ladder rungs in the pool
+    are part of the shape, not existing ranges. The gated total counts their USDC as if
+    it were still in the wallet (a near or deep rung's USDC at its top, a cap's USDC now
+    with its NOCK counted back into the budget). Each is matched to a configured rung by
+    role, then ticks, and each shape rung states its target, what is deployed, what is
+    left and a status (`to_deposit`, `deployed`, `over`, `passed`, `none`). Depositing
+    one rung leaves the others' targets unchanged. Only the remainder is minted, on the
+    matched rung's own ticks. An unmatched tracked ladder is listed and still counts.
+  - *Below a rung, it is passed.* When the price is below a rung's range the rung is
+    `passed` ("a USDC-only deposit there is not possible"), the rungs below are still
+    drawn from the usable tick at or below spot, and with every rung passed the status
+    is `price_at_or_below_bottom`. `shape=configured` never answers a parameter error
+    for a valid setting.
+  - *Exact mints.* A snapped rung states `mint`: the liquidity its USDC and NOCK buy,
+    rounded down with Uniswap's integer formulas, and the amounts a mint of it pulls,
+    rounded up, never more than the amounts stated.
+  - *Stored rows stay small.* The fee measurement's by-day and band detail and the
+    shape's grid and full estimates are kept in the worker's memory and served from the
+    latest snapshot; a stored row keeps the summary and says what it leaves out.
+    Intervals in which the measuring range was staked are skipped and their seconds
+    stated.
+  - *Dashboard.* No form is added (operator, 2026-11-20). The typed client and a
+    fee-yield helper (a quiet line and the by-day spread) are ready for the card.
+
 - **The ladder suggestion (#168).** A card at the top of the dashboard and under the
   directive on the phone, with no input of any kind, states whether a NOCK ladder fits
   your own rules this cycle. `derived_metrics.ladder_suggestion` (snapshot spec 2.9.0,
@@ -112,6 +220,112 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   converted. The Ladder Simulator panel is no longer rendered on the dashboard
   (operator: no forms); the what-if stays in `GET /v1/simulate/ladder` and the
   `simulate_ladder` tool.
+
+- **The ladder card shows your shape: the three-deposit "bottle" (#168 with the rungs
+  of #166).** With `operator_profile.ladder_rungs` set, the ladder suggestion is built
+  from `derived_metrics.ladder_shape` instead of one rung. With no shape set, the card
+  is the single rung above, byte for byte.
+  - *One numbered deposit per rung still to deposit,* numbered as in your shape:
+    "Deposit 1 of 3 (cap): about 86.79 NOCK + $1.22 USDC, in range now", then the near
+    and deep rungs, USDC only. Each states its exact ticks, its bounds in USD per NOCK
+    and in NOCK per USDC (from the ticks), the exact liquidity and raw amounts of its
+    mint (for the transaction builder that follows) and its own Uniswap link, which
+    prefills the pool and the range and never an amount. The amount is printed beside
+    the link, cut (never rounded up) to what is typed.
+  - *The cap states both amounts and its NOCK limit.* The app works out one side from
+    whichever field is typed, so typing the USDC amount can pull more NOCK than the LP
+    NOCK budget. The cap's row says "the NOCK side must not exceed 86.7891 NOCK", names
+    the NOCK field as the one that keeps the limit, and gives the NOCK amount for it.
+  - *The card follows the plan as rungs are deposited.* A tracked ladder no longer hides
+    it. A deployed rung is shown as done with what it holds and is not offered again; a
+    passed rung states its plain reason; a rung over its target says so. The headline
+    counts only what is left ("Ladder: 2 of 3 deposits left, up to $116.08 USDC and
+    about 87 NOCK"), and with every rung deployed the card says the ladder is deployed
+    (new status `ladder_deployed`). How it keeps up while the price moves is the next
+    entry.
+  - *What the deposits leave in the wallet,* in the numbers and on the card: "After
+    these deposits your wallet holds about $779 USDC; the $950 reserve counts the $224
+    of USDC inside your existing NOCK ranges. At $0.01 with every rung converted, the
+    stable balance reads $950.02: the wallet's $778.87 plus $171.15 still inside those
+    ranges." (the test fixture's figures).
+  - *The picture* draws one bar per rung on the price axis: the cap across the spot
+    marker, a deployed rung hatched and muted, each label a dollar amount, placed beside
+    a bar too narrow for it so it stays readable on a phone.
+  - *The outcomes, in plain words:* what a fall to the near rung's bottom buys, what a
+    fall to the ladder's bottom buys in total and at what average, and what a rise
+    does (it sells the cap's NOCK, about 87, for about $1.13 of USDC, and nothing else).
+  - *One muted fee line per rung,* from the shape's fee estimate, never without its
+    sample size, the in-range share of stored history and the replay bound; the reason
+    when it is not measured. No rung is ranked. The estimates are left out of the state
+    hash and of stored rows, like the measurement they come from.
+  - Both MCP transports list the same deposits in `get_shot_advice`, and the phone
+    cockpit shows the same headline, outcomes and deposits. Nothing on the card takes
+    typed input, and it still never changes the directive or sends a push.
+
+- **The ladder card keeps up deposit by deposit while the price moves (review of the
+  bottle, 2026-11-21).** The operator follows the card in the Uniswap app over minutes or
+  hours; before this, one tick of price after the first deposit could hide every
+  remaining deposit behind "no USDC is free", a deployed cap out of its band read "over
+  its target" for good, and a rung minted through the link was offered again.
+  - *Measured by liquidity.* Each rung's target is a liquidity on its own ticks, and a
+    liquidity does not change with the price. A tracked rung is deployed when it holds
+    at least its target's liquidity, wherever the price is; a tracked cap is the cap.
+    What is left is the remaining liquidity on the same ticks, at the price now.
+  - *Frozen by the first deposit.* The first near or deep rung deposited fixes the plan
+    (the earliest by deposit block when the blocks are known, otherwise the one implying
+    the most); the total is no longer re-divided each cycle. The plan is worked out from
+    the tracked rungs, not stored, so the database stays disposable.
+  - *Never all or nothing.* Once the plan is frozen the cap takes what the reserve
+    leaves beside the near and deep rungs, and says when it holds less than the budget.
+    When they alone need more than the reserve allows, each deposit left is cut pro
+    rata and the shortfall is stated in dollars (`fit`). `no_headroom` now means nothing
+    above the $1.00 minimum fits, and its headline says so ("Ladder: 1 of 3 deposits
+    left, but your reserve leaves under $1.00 for them").
+  - *Nothing under a dollar.* A remainder under the $1.00 minimum is never offered, so
+    a harvest or a cent of rounding never brings a deployed ladder back to the top of
+    the page.
+  - *Found on-chain.* A position found on-chain and not yet tracked on exactly a rung's
+    pool and ticks counts for that rung and reads "found on-chain, being tracked"; one
+    another address minted, or worth less than the minimum, never does. One that
+    matches no rung is named on the card and not counted until one tap. Position
+    detection already matches a new mint against the shape's cap, near and deep rungs
+    and tracks it with that rung's role.
+  - *The cap's text* states both limits, which one binds now and the field that keeps
+    it: the USDC field, with "the cap holds less than the budget", when its USDC limit
+    binds. *Passed rungs* give their own reason (the price at or below the rung's
+    bottom, or the cap's band covering what is left of it). *Fee lines* state the
+    diluted figure beside the undiluted one. A remainder that needs NOCK the budget
+    cannot give is held back with the figures that differ. The headline, outcomes and
+    wallet line add the amounts the card says to enter, cut to cents.
+  - *Second review:* only a position the wallet itself minted (its receipt read) counts
+    for a rung; a stranger's position minted or transferred to the wallet never freezes
+    the plan, never reads "found on-chain, being tracked" and never holds the
+    single-rung card back. A withdrawal reads "partly withdrawn" or "withdrawn", never
+    "done", is never offered again and never shrinks the plan (each rung stands for what
+    its verified mint deposited). With near and deep in and no room for the cap, the
+    card reads "Ladder deployed: 2 of 3 deposits are done, and the reserve leaves no
+    room for the cap". A near rung minted a band ago (its top follows the price) is
+    matched by its bottom tick, on the card and by detection. Detection re-reads at most
+    40 untracked NFTs a cycle, in turn, inside a 40-second budget, so dust cannot time it
+    out. After a restart both MCP transports say the stored card is not available until
+    the first cycle.
+  - *Third review:* a rung burned or sent away keeps standing for its deposit:
+    `tracked_positions` remembers each ladder rung's mint liquidity and the most a cycle
+    read it holding (migration `20261121000013` amended in place: it has never been
+    applied), and a rung whose deposit is not known never freezes the plan. Once a rung
+    is pulled the cap is not offered. The re-read rotation resumes where a time cut
+    stopped it (`position_detection_state.refresh_cursor`), and of two mints of one rung
+    in a cycle only the exact one is tracked.
+  - `operator_profile.ladder_rungs` set without `operator_profile.ladder_bottom_usd` is
+    now `needs_setting` (OPERATOR_GUIDANCE section 7, `config.yaml.example`).
+  - The stored snapshot row keeps the card's rungs, ticks, pools and mints and leaves out
+    its links, texts, limits, picture, gates and outcomes (`detail_note`; a stored ready
+    card reads shown false with the reason), so the card no longer adds about 18.7 KB to
+    every row. `derived_metrics.ladder_shape` gains `fit`, `headroom_usdc`,
+    `rest_rule` and, per rung, `target_liquidity`, `tracked_liquidity`,
+    `remaining_liquidity`, `found` and `note`; statuses `found`, `below_minimum`, `held`
+    and `no_room` (snapshot spec 2.10.0). `shape=configured` no longer answers
+    `SHAPE_NO_ROOM`.
 
 ## [0.8.3] - 2026-11-20
 

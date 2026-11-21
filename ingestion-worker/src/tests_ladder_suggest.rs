@@ -14,7 +14,7 @@ fn f(v: &Value, ptr: &str) -> f64 {
 
 /// The poolKeys facts a 2.9.0 cycle now stamps on the v4 position (#168), as the recorded
 /// answer in testdata/closed/cycle_fixture.json states them.
-fn with_pool_key(mut env: SnapshotEnvelope) -> SnapshotEnvelope {
+pub(crate) fn with_pool_key(mut env: SnapshotEnvelope) -> SnapshotEnvelope {
     for p in env.data.positions.iter_mut().filter(|p| p.protocol == "uniswap-v4") {
         p.fee_raw = Some(30000);
         p.hooks = Some(ZERO_HOOKS.to_string());
@@ -24,7 +24,7 @@ fn with_pool_key(mut env: SnapshotEnvelope) -> SnapshotEnvelope {
 
 /// The operator's live snapshot from chudmax (2026-11-21T04:04Z), before the cycle read
 /// fee_raw and hooks; the pool key is added as the cycle now reads it.
-fn live() -> SnapshotEnvelope {
+pub(crate) fn live() -> SnapshotEnvelope {
     let env: SnapshotEnvelope =
         serde_json::from_str(include_str!("../testdata/ladder_suggest/live_snapshot_2026-11-21.json")).expect("live snapshot parses");
     with_pool_key(env)
@@ -39,7 +39,7 @@ fn suggest(env: &SnapshotEnvelope, bottom: Option<f64>) -> Value {
     ladder_suggestion(env, Ok(bottom))
 }
 
-fn text(env: &SnapshotEnvelope, l: &Value, health: Option<&str>) -> String {
+pub(crate) fn text(env: &SnapshotEnvelope, l: &Value, health: Option<&str>) -> String {
     let mut data = serde_json::to_value(&env.data).unwrap();
     data["derived_metrics"]["ladder_suggestion"] = l.clone();
     crate::ladder_suggest_text::ladder_suggestion_lines(&data, health)
@@ -377,9 +377,9 @@ fn test_ladder_suggest_each_gate_states_its_reason() {
     // Bottom invalid (a number at or below 0; non-numbers stop the boot, see below).
     for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         let p = OperatorProfile { ladder_bottom_usd: Some(bad), ..OperatorProfile::default() };
-        assert_eq!(ladder_bottom_setting(&p), Err(LADDER_BOTTOM_INVALID_NOTE));
+        assert_eq!(ladder_bottom_setting(&p), Err(LADDER_SUGGEST_BOTTOM_INVALID_NOTE));
         let l = ladder_suggestion(&sim_fixture(), ladder_bottom_setting(&p));
-        assert_eq!((s(&l, "/status"), s(&l, "/reason")), ("invalid", LADDER_BOTTOM_INVALID_NOTE));
+        assert_eq!((s(&l, "/status"), s(&l, "/reason")), ("invalid", LADDER_SUGGEST_BOTTOM_INVALID_NOTE));
     }
     assert_eq!(ladder_bottom_setting(&OperatorProfile { ladder_bottom_usd: Some(0.01), ..OperatorProfile::default() }), Ok(Some(0.01)));
     // Reserve unset.
@@ -448,7 +448,8 @@ fn test_ladder_suggest_stale_snapshot_is_not_shown() {
     assert!(fresh.contains("Deposit link (pool and range prefilled): https://app.uniswap.org/positions/add/new?"), "{fresh}");
     assert!(fresh.contains("prefilled): https://app.uniswap.org/positions/add/new?") && fresh.contains("&step=1\n    Amount to enter in the app: $766.99 USDC\n"), "{fresh}");
     assert!(fresh.contains(LADDER_LINK_FORMAT_NOTE), "{fresh}");
-    assert!(fresh.contains("After you deposit (current fallback): Automatic tracking of a new ladder position is not built yet"), "{fresh}");
+    assert!(fresh.contains("After you deposit: After you deposit there is nothing to copy or configure."), "{fresh}");
+    assert!(!fresh.contains("current fallback") && !fresh.contains("config.yaml"), "{fresh}");
     assert!(!fresh.contains("#3163450"), "the pool is named by itself, not by an NFT: {fresh}");
     assert_eq!(s(&l, "/freshness_rule"), LADDER_FRESHNESS_RULE);
 }
@@ -480,20 +481,101 @@ fn test_ladder_suggest_two_rungs_render_as_a_numbered_list() {
 }
 
 #[test]
-fn test_ladder_suggest_after_deposit_is_one_isolated_fallback() {
+fn test_ladder_suggest_after_deposit_is_tracked_automatically() {
     let l = suggest(&sim_fixture(), Some(0.01));
     let a = &l["after_deposit"];
-    assert_eq!(s(a, "/kind"), "manual_config");
-    assert!(s(a, "/is").contains("fallback"));
-    assert_eq!(s(a, "/text"), "Automatic tracking of a new ladder position is not built yet; until it is, a minted rung is tracked only from a config.yaml entry (role: ladder).");
-    let snip = s(a, "/config_snippets/0");
-    for needle in ["protocol: \"uniswap-v4\"", "tick_lower: 273900", "tick_upper: 276300", "role: \"ladder\"", "deposit_tx:", "rung:"] {
-        assert!(snip.contains(needle), "{needle}: {snip}");
+    assert_eq!(s(a, "/kind"), "tracked_automatically");
+    assert_eq!(s(a, "/text"), LADDER_AFTER_DEPOSIT_TEXT);
+    // No config entry, no hash and no NFT id is asked for anywhere on the card.
+    let whole = l.to_string();
+    for banned in ["config.yaml", "deploy.sh", "config_snippets", "manual_config", "transaction hash", "nft_id: <"] {
+        assert!(!whole.contains(banned), "{banned}: {whole}");
     }
-    let mut rest = l.clone();
-    rest.as_object_mut().unwrap().remove("after_deposit");
-    let other = rest.to_string();
-    assert!(!other.contains("config.yaml") && !other.contains("deploy.sh"), "{other}");
+    // The wording promises no number of minutes: it says what the worker does.
+    let t = s(a, "/text");
+    assert!(t.contains("at the start of every cycle") && t.contains("normally found in the first cycle after it lands"), "{t}");
+    assert!(!t.chars().any(|c| c.is_ascii_digit()), "no promised duration: {t}");
+    // With no detection block (a fixture) nothing is claimed about this cycle's check.
+    assert!(a["detection_status"].is_null() && a["detection_note"].is_null());
+
+    // A cycle whose check could not run says so beside it, with the worker's own reason.
+    let mut env = sim_fixture();
+    env.data.derived_metrics.position_detection = Some(json!({
+        "status": "unavailable",
+        "reason": "New positions could not be checked this cycle (transfer logs: the request timed out): a deposit made since the last check would not be counted yet.",
+        "found_not_counted": { "count": 0, "positions": [] },
+    }));
+    let l = suggest(&env, Some(0.01));
+    assert_eq!(s(&l, "/status"), "ready", "a failed check does not hide the card");
+    assert_eq!(s(&l, "/after_deposit/detection_status"), "unavailable");
+    let note = s(&l, "/after_deposit/detection_note");
+    assert!(note.starts_with("This cycle's check did not run: New positions could not be checked this cycle") && note.ends_with("A deposit made now is found once the check runs again."), "{note}");
+    let t = text(&env, &l, Some("ok"));
+    assert!(t.contains("until one tap says how to track it. This cycle's check did not run:"), "{t}");
+}
+
+#[test]
+fn test_an_emptied_ladder_is_not_a_deployed_rung() {
+    // A tracked ladder that holds something: no new one is suggested, as on main.
+    let mut env = sim_fixture();
+    env.data.positions[0].role = Some(LADDER_ROLE.to_string());
+    env.data.positions[0].source = Some(POSITION_SOURCE_TRACKED.to_string());
+    let l = suggest(&env, Some(0.01));
+    assert_eq!(s(&l, "/status"), "ladder_tracked");
+    assert_eq!(s(&l, "/tracked/0/source"), "tracked");
+    assert!(s(&l, "/reason").contains("uniswap-v4 #3163450, found on-chain"), "{}", s(&l, "/reason"));
+
+    // The same ladder emptied (NFT still in the wallet): listed, and a ladder is measured.
+    let empty = LadderReading { position_id: V4_ID.to_string(), label: "v4 USDC/NOCK 3.00% #3163450".to_string(), state: "empty".to_string(), ..Default::default() };
+    env.data.ladders = vec![empty];
+    let l = suggest(&env, Some(0.01));
+    assert_ne!(s(&l, "/status"), "ladder_tracked", "an emptied rung must not read as deployed for ever");
+    assert_eq!(s(&l, "/tracked/0/state"), "empty");
+    assert_eq!(s(&l, "/gates/ladder_tracked/reason"), "every tracked ladder is empty (#167)");
+    assert!(s(&l, "/sentence").starts_with("No tracked ladder holds anything (v4 USDC/NOCK 3.00% #3163450 is empty: emptied, its NFT still in the wallet, so not a deployed rung). A new USDC-only position"), "{}", s(&l, "/sentence"));
+    assert!(s(&l, "/what_changed").contains("so not a deployed rung). Now the"), "{}", s(&l, "/what_changed"));
+}
+
+#[test]
+fn test_a_found_position_waiting_for_a_tap_stops_a_new_suggestion() {
+    let mut env = sim_fixture();
+    let wallet = env.data.positions[0].wallet.clone();
+    let found_by = |choices: Value, minted_by: Value, received_from: Value| {
+        json!({
+            "status": "ok",
+            "found_not_counted": { "count": 1, "value_usd": "115.03", "positions": [{
+                "nft_id": 3243807, "pool_label": "v4 USDC/NOCK 3.00%", "value_usd": "115.03", "choices": choices,
+                "minted_by": minted_by, "received_from": received_from,
+            }] },
+        })
+    };
+    let found = |choices: Value| found_by(choices, json!(wallet.to_lowercase()), json!(null));
+    env.data.derived_metrics.position_detection = Some(found(json!(["ladder:near", "ladder:deep", "lp", "dismiss"])));
+    let l = suggest(&env, Some(0.01));
+    assert_eq!(s(&l, "/status"), "found_untracked");
+    assert_eq!(l["shown"], json!(false));
+    assert!(l["rungs"].as_array().unwrap().is_empty(), "no deposit is offered beside an uncounted one");
+    assert_eq!(s(&l, "/headline"), "Ladder: a position found on-chain is waiting for one tap.");
+    assert_eq!(
+        s(&l, "/reason"),
+        "A USDC/NOCK position the wallet holds was found on-chain and is not tracked or counted yet (v4 USDC/NOCK 3.00% #3243807, worth $115.03). No new ladder is measured until it is tracked or set aside (one tap, under Found on-chain)."
+    );
+    assert_eq!(l["found_untracked"][0]["nft_id"], json!(3243807));
+    // A found position that cannot be a ladder (a WETH/USDC range) does not stop the card.
+    env.data.derived_metrics.position_detection = Some(found(json!(["lp", "dismiss"])));
+    assert_eq!(s(&suggest(&env, Some(0.01)), "/status"), "ready");
+    // A stranger's USDC/NOCK position, minted to the wallet or transferred to it (dust is
+    // cheap), never holds the card back (second review of the bottle): nor one whose mint
+    // receipt is not read yet.
+    let ladder = json!(["ladder:near", "ladder:deep", "lp", "dismiss"]);
+    for (by, from) in [
+        (json!("0x4598b3ba7d6714091b18da5d110b64f56e94e826"), json!(null)),
+        (json!(null), json!("0x4598b3ba7d6714091b18da5d110b64f56e94e826")),
+        (json!(null), json!(null)),
+    ] {
+        env.data.derived_metrics.position_detection = Some(found_by(ladder.clone(), by.clone(), from.clone()));
+        assert_eq!(s(&suggest(&env, Some(0.01)), "/status"), "ready", "{by} {from}");
+    }
 }
 
 /// Every status the card can take, for the wording checks.
@@ -532,36 +614,46 @@ fn test_ladder_suggest_wording_is_a_measurement() {
     for want in ["ready", "needs_setting", "bottom_at_or_above_top", "price_at_or_below_bottom", "invalid", "ladder_tracked", "no_target_pool", "no_headroom", "several_pools"] {
         assert!(statuses.contains(want), "{want} not covered: {statuses:?}");
     }
+    for (env, l) in every_status() {
+        assert_measurement_wording(&env, &l);
+    }
+}
+
+/// The wording rules for one card, in its fields and in the text both MCP transports print:
+/// no advice words, and no sentence that opens with an imperative. Also used for the
+/// states of a configured shape (tests_ladder_bottle.rs).
+pub(crate) fn assert_measurement_wording(env: &SnapshotEnvelope, l: &Value) {
     let banned = ["should", "recommend", "you must", "you need to", "buy now", "deposit $", "please", "we suggest", "make sure"];
     // An imperative opens a sentence: "Set your …", "Deposit 765 USDC …". "Deposit 1 of 2"
     // is a list label, and NockNock's own steps ("NockNock signs …") are statements.
-    let imperatives = ["set", "add", "put", "buy", "sell", "deposit", "move", "withdraw", "open", "go", "use", "type", "enter", "click", "tap", "edit", "run", "consider"];
-    for (env, l) in every_status() {
-        // The fields a person reads (status words like "set" are data, not prose).
-        let mut prose: Vec<String> = ["/headline", "/reason", "/sentence", "/what_changed", "/statement", "/after_deposit/text"]
-            .iter()
-            .filter_map(|p| l.pointer(p).and_then(|v| v.as_str()).map(|v| v.to_string()))
-            .collect();
-        for arr in ["/outcomes", "/stated/lines", "/assumptions", "/rungs", "/excluded"] {
-            for x in l.pointer(arr).and_then(|v| v.as_array()).into_iter().flatten() {
-                for p in ["/text", "/would_sign", "/reason", ""] {
-                    if let Some(v) = (if p.is_empty() { Some(x) } else { x.pointer(p) }).and_then(|v| v.as_str()) {
-                        prose.push(v.to_string());
-                    }
+    let imperatives = [
+        "set", "add", "put", "buy", "sell", "deposit", "move", "withdraw", "open", "go", "use", "type", "enter", "click", "tap", "edit", "run", "consider", "read",
+        "keep", "sign", "send",
+    ];
+    // The fields a person reads (status words like "set" are data, not prose).
+    let mut prose: Vec<String> = ["/headline", "/reason", "/sentence", "/what_changed", "/statement", "/after_deposit/text", "/wallet_after/text"]
+        .iter()
+        .filter_map(|p| l.pointer(p).and_then(|v| v.as_str()).map(|v| v.to_string()))
+        .collect();
+    for arr in ["/outcomes", "/stated/lines", "/assumptions", "/rungs", "/excluded", "/shape/rungs", "/picture/bars"] {
+        for x in l.pointer(arr).and_then(|v| v.as_array()).into_iter().flatten() {
+            for p in ["/text", "/would_sign", "/reason", "/summary", "/deep_link/amount_to_enter", "/nock_limit/text", "/label", "/cap/note", ""] {
+                if let Some(v) = (if p.is_empty() { Some(x) } else { x.pointer(p) }).and_then(|v| v.as_str()) {
+                    prose.push(v.to_string());
                 }
             }
         }
-        for t in [prose.join("\n"), text(&env, &l, Some("ok"))] {
-            let low = t.to_lowercase();
-            for bad in banned {
-                assert!(!low.contains(bad), "'{bad}' in {} text: {t}", s(&l, "/status"));
-            }
-            for sentence in low.split(|c| c == '.' || c == '\n' || c == ':' || c == '"').map(|x| x.trim_start_matches(|c: char| c == ' ' || c == '-' || c == '•')) {
-                let mut words = sentence.split_whitespace();
-                let (Some(first), second) = (words.next(), words.next()) else { continue };
-                let list_label = first == "deposit" && second.map_or(false, |w| w == "link" || w.chars().all(|c| c.is_ascii_digit()));
-                assert!(list_label || !imperatives.contains(&first), "imperative '{sentence}' in {} text", s(&l, "/status"));
-            }
+    }
+    for t in [prose.join("\n"), text(env, l, Some("ok"))] {
+        let low = t.to_lowercase();
+        for bad in banned {
+            assert!(!low.contains(bad), "'{bad}' in {} text: {t}", s(l, "/status"));
+        }
+        for sentence in low.split(|c| c == '.' || c == '\n' || c == ':' || c == '"').map(|x| x.trim_start_matches(|c: char| c == ' ' || c == '-' || c == '•')) {
+            let mut words = sentence.split_whitespace();
+            let (Some(first), second) = (words.next(), words.next()) else { continue };
+            let list_label = first == "deposit" && second.map_or(false, |w| w == "link" || w.chars().all(|c| c.is_ascii_digit()));
+            assert!(list_label || !imperatives.contains(&first), "imperative '{sentence}' in {} text", s(l, "/status"));
         }
     }
 }
@@ -600,7 +692,7 @@ fn test_ladder_bottom_usd_through_the_real_config_loader() {
     // A number at or below 0 loads and is reported as invalid on the card.
     for v in ["0", "-0.01"] {
         let p = load(&format!("  ladder_bottom_usd: {v}\n")).unwrap().profile();
-        assert_eq!(ladder_bottom_setting(&p), Err(LADDER_BOTTOM_INVALID_NOTE), "{v}");
+        assert_eq!(ladder_bottom_setting(&p), Err(LADDER_SUGGEST_BOTTOM_INVALID_NOTE), "{v}");
     }
     // A value that is not a number stops the boot with a config error, like every
     // numeric key (documented in config.yaml.example).

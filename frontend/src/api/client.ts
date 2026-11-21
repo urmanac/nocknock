@@ -334,7 +334,66 @@ export const api = {
 
   // The ladder simulator (#166): a read-only what-if over the stored snapshot.
   simulateLadder: (query: URLSearchParams) => simulateLadder(query),
+
+  // Positions found on-chain (v0.9.0, #145). One tap each: no hash, no amount and no
+  // config is ever typed. `track` and `untrack` change what is counted, so the worker
+  // runs a cycle after them and reports it as `cycle`. Nothing here builds a transaction.
+  foundPositions: () => request<FoundPositionsResponse>('/positions/found', { cache: 'no-store' }),
+
+  trackFoundPosition: (nftId: number, as: string) =>
+    request<PositionTapResponse>('/positions/track', {
+      method: 'POST',
+      body: JSON.stringify({ nft_id: nftId, as }),
+    }),
+
+  untrackPosition: (positionId: string) =>
+    request<PositionTapResponse>('/positions/untrack', {
+      method: 'POST',
+      body: JSON.stringify({ position_id: positionId }),
+    }),
+
+  dismissFoundPosition: (nftId: number) =>
+    request<PositionTapResponse>('/positions/dismiss', {
+      method: 'POST',
+      body: JSON.stringify({ nft_id: nftId }),
+    }),
+
+  restoreFoundPosition: (nftId: number) =>
+    request<PositionTapResponse>('/positions/restore', {
+      method: 'POST',
+      body: JSON.stringify({ nft_id: nftId }),
+    }),
 };
+
+/** A one-tap write on a found or tracked position (POST /v1/positions/*). */
+export interface PositionTapResponse {
+  status: string;
+  nft_id?: number;
+  position_id?: string;
+  role?: string | null;
+  rung?: string | null;
+  deposit_tx?: string | null;
+  changed?: boolean;
+  note?: string;
+  /** 'ok', or why the cycle after the write failed (the write is stored). */
+  cycle?: string;
+}
+
+/** GET /v1/positions/found: the snapshot's detection block and the database rows. */
+export interface FoundPositionsResponse {
+  detection: import('../foundPositions').PositionDetection | null;
+  tracked_rows: {
+    position_id: string;
+    nft_id: number;
+    role: string | null;
+    rung: string | null;
+    source: string;
+    deposit_tx: string | null;
+    tracked_at: string | null;
+    config_entry: string;
+  }[];
+  rollback_note: string;
+}
 
 /**
  * GET /v1/simulate/ladder (#166). Its own fetch, because a 400 or 422 body is a result

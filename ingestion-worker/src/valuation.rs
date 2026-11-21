@@ -108,6 +108,8 @@ pub(crate) fn build_position_snapshots(raw_positions: &[RawPosition], nock_usd: 
                 // Stamped by apply_ladder_roles for a position configured role: ladder (#167).
                 role: None,
                 rung: None,
+                // Stamped by snapshot_positions for a position that comes from a database row.
+                source: None,
             }
         })
         .collect()
@@ -172,6 +174,11 @@ pub(crate) fn snapshot_positions(raw: &RawOnChainData) -> Vec<Position> {
         &raw.aero,
     );
     apply_ladder_roles(&mut positions, &raw.ladders);
+    // A position found on-chain and tracked from the database says so; a config entry
+    // carries no source, so a snapshot without such a row keeps its bytes.
+    for p in positions.iter_mut() {
+        p.source = raw.position_sources.get(&p.position_id).cloned();
+    }
     positions
 }
 
@@ -207,9 +214,21 @@ pub(crate) fn build_pool_mechanics(raw_positions: &[RawPosition], nock_usd: f64,
                 fee_tier_bps: p.fee_tier_bps,
                 tick_current: Some(p.tick),
                 sqrt_price_x96: Some(format!("{:032x}{:032x}", p.sqrt_price_x96.0, p.sqrt_price_x96.1)),
+                active_liquidity_raw: None,
             }
         })
         .collect()
+}
+
+/// Stamp each pool row with its pool's in-range liquidity read this cycle (2.10.0): the
+/// rows are built one per position, in positions order, so row i is position i's pool.
+/// A failed read leaves the field absent: unknown, never 0. Pure.
+pub(crate) fn stamp_active_liquidity(pool_mechanics: &mut [PoolMechanic], raw_positions: &[RawPosition], pool_liquidity: &HashMap<String, String>) {
+    for (m, p) in pool_mechanics.iter_mut().zip(raw_positions) {
+        if m.pool_id == p.pool_id {
+            m.active_liquidity_raw = pool_liquidity.get(&p.position_id).filter(|v| v.parse::<u128>().is_ok()).cloned();
+        }
+    }
 }
 
 /// One ContractFee per tracked position with its unclaimed fees. A position listed in

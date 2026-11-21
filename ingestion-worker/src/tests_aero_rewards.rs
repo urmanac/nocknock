@@ -374,6 +374,7 @@ pub(super) fn example_profile() -> OperatorProfile {
         target_weights_bps: TargetWeightsBps { treasury: 8000, uniswap_lp: 1500, cash: 500 },
         cash_reserve_usdc: None,
         ladder_bottom_usd: None,
+        ladder_rungs: None,
     }
 }
 

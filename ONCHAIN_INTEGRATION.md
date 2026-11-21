@@ -1487,3 +1487,107 @@ and NOCK in. A claim never pays out, so a 3-topic ERC-20 `Transfer` from the wal
 transaction `value` above 0, refuses the recording. Withdrawals often burn the position NFT,
 which is a 4-topic ERC-721 `Transfer` from the wallet. That is not a payment and is allowed.
 The receipt is a fixture in `ingestion-worker/testdata/harvest/`.
+
+---
+
+## 15. Finding the Wallet's Uniswap v4 Position NFTs (v0.9.0, issue #145) — Verified Record
+
+Read on Base on 2026-11-21 through `https://base-rpc.publicnode.com`, at block 58646285
+(the block of the §13 cycle fixture) unless a line says otherwise. The code is
+`ingestion-worker/src/position_detect.rs` and `tracked.rs`; the answers are in
+`ingestion-worker/testdata/position_detect/chain_fixture.json`.
+
+**Contracts and selectors.** All on the Uniswap v4 PositionManager
+`0x7c5f5a4bbd8fd63184577525326123b519429bdc` unless named.
+
+| Read | Selector / topic | What it answers |
+|---|---|---|
+| ERC-721 `Transfer(address indexed from, address indexed to, uint256 indexed id)` | `0xddf252ad…b3ef` | topics `[Transfer, from, to, id]`, empty data. A mint has `from` = the zero address. The wallet is an indexed topic, so the filter `[Transfer, null, wallet]` is scoped to it. |
+| `balanceOf(address)` | `0x70a08231` | How many position NFTs the wallet holds: 43. |
+| `ownerOf(uint256)` | `0x6352211e` | The owner; reverts `Error("NOT_MINTED")` for an id that does not exist (§13). |
+| `getPoolAndPositionInfo(uint256)` | `0x7ba03aad` | Six words: the pool key (currency0, currency1, fee, tickSpacing, hooks) and one packed word. Six zero words for an id that does not exist. |
+| `getPositionLiquidity(uint256)` | `0x1efeed33` | The NFT's liquidity; 0 for an empty NFT and for one that does not exist. |
+| PoolManager `0x498581ff…2b2b` `ModifyLiquidity(bytes32 indexed id, address indexed sender, int24, int24, int256, bytes32 salt)` | `0xf208f491…d5ec` | In a mint's receipt: topic 1 is the full pool id, topic 2 the PositionManager, and `salt` is the NFT id. |
+| StateView `0xa3c0c9b6…7a71` `getSlot0(bytes32)` | `0xc815641c` | The pool's price, for what a found position holds. |
+
+**The packed word** is `poolId[25 bytes] | tickUpper (int24) | tickLower (int24) |
+hasSubscriber (uint8)`. For NFT #3163450 it is
+`0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf044ebc04003800`: the first 25 bytes
+are the first 25 of pool id `0x064a5df2…6b13`, `0x044ebc` is 282300 and `0x040038` is
+262200, the NFT's own ticks. The worker has no keccak, so it never computes a pool id: it
+takes the full id from the mint receipt's `ModifyLiquidity` (whose salt is the NFT id) and
+requires its first 25 bytes to equal the packed word's, or uses a pool id it already reads
+when the prefix names one.
+
+**The wallet's 43 NFTs** (every one a mint to the wallet; none was ever burned or sent
+out). By the pool key each one stores:
+
+| | Count | What NockNock does |
+|---|---|---|
+| A token outside the registry | 37 | Counted as not on the whitelist. Never offered. |
+| Whitelisted pool, zero liquidity | 5 | Counted as empty. Its liquidity is read again each cycle. |
+| Whitelisted pool, with liquidity | 1 | #3163450, the tracked v4 range (`config.yaml`'s own). |
+
+The six in whitelisted pools are #2179 and #2181 (ETH/USDC), #3126000 (ETH/NOCK), and
+#3163431, #3163432 and #3163450 (USDC/NOCK). #3163450 was minted in transaction
+`0x6cdabada1ff062b6d3b4ba87bfe04158dd8b14a91e93cabe11dc3e35b587e89e` (block 53008241,
+sent by the wallet): 33.60 USDC and 976.1141 NOCK for liquidity 48295502692597. That
+receipt passes `parse_ladder_deposit` unchanged. Liquidity was added later (it is
+249864729574523 at the fixture block), which is why its ladder reading says
+`liquidity_changed` in the tests.
+
+A second scenario is the wallet `0x4598b3ba…e826` at block 59660587, the block in which it
+minted NFT #3240369 (the #167 fixture receipt `0xafe42fe2…7a58`, ticks 270900..887100 in
+the same 3% pool). It holds 285 v4 NFTs. It is the fully recorded case of "a wallet
+minted a position and the scan found it".
+
+**How far back a node serves logs.** `eth_getLogs` with the wallet-scoped Transfer filter:
+
+| RPC | Whole history (`fromBlock 0x0`) | 45,000-block chunk |
+|---|---|---|
+| base-rpc.publicnode.com | Refused: HTTP 403 with JSON-RPC error -32602 "Archive requests require a personal token" (2026-11-21). A range over 50,000 blocks inside its window is refused with -32701 "exceed maximum block range: 50000" (read by the design's explorer the same day). | Served for recent blocks (0x3285a9e..0x3290a65 returned the three newest mints; block 52,931,286 onward was served). Refused with the same 403 for old blocks (25,800,001..25,845,000). |
+| The operator's Alchemy key | Served: 43 logs in about 2 seconds (the design's explorer, 2026-11-21, with the key never printed). | Served. |
+| Alchemy's free tier | Not tested. Alchemy documents a 10-block limit for it. | Not tested; refused if the documented limit holds. |
+
+So the scan asks for the whole range once. On a refusal it reads 45,000-block chunks, at
+most 12 requests a cycle: forward from its stored cursor first, then backward. A chunk the
+node refuses ends the backfill at that block, and the snapshot says transfers before it
+are not read. When the newest chunk itself is refused (a ten-block limit), logs are not
+used on that RPC for an hour. Refusals are learned per process and expire after an hour.
+The scan reads 5 blocks behind the node's latest, because a load-balanced endpoint can
+refuse a block one of its nodes just reported (seen twice by the explorer).
+
+**The RPC's transfer index.** `alchemy_getAssetTransfers` with `category: ["erc721"]`,
+`contractAddresses: [PositionManager]` and `toAddress` has no block-range limit and is read
+only while the logs do not cover the history. The public node answers it with -32601
+"Method not found". The design's explorer read it on the operator's key (43 transfers in
+one page, each with `hash`, `blockNum`, `from` and `tokenId` as a 32-byte hex word).
+
+**What a cycle costs** (requests to the RPC, from the recorded tests):
+
+| Cycle | Requests |
+|---|---|
+| The first after a database loss, operator's wallet, an RPC that serves the whole range | 96: the head, one log request, two reads per NFT (43), the liquidity of the six whitelisted, one mint receipt, `balanceOf`. |
+| A steady cycle, nothing offered or tracked from the chain | 7 with an unchanged head (the head, `balanceOf`, the liquidity of the five empty whitelisted NFTs); 8 on a moving chain (one log request for the new blocks). |
+| Per position found and not counted (offered or set aside) | 2 more (its liquidity, its owner), and one `getSlot0` per pool. |
+| Per position tracked from the database | 1 more (`ownerOf`, before the position reads), on top of the v4 adapter's own reads of the position. |
+
+**Not verified:**
+- **The transfer index page.** No `alchemy_getAssetTransfers` ERC-721 answer was recorded
+  here: it needs an Alchemy key, and none was used. The test fixture for its parser is
+  assembled in the documented shape from the real logs. A page that does not parse is
+  reported as unavailable, never read as an empty history.
+- **How far the transfer index trails the chain.** Unmeasured. The log scan has no such
+  delay and is the one read every cycle wherever the RPC serves it.
+- **The scan on Alchemy's free tier.** If its 10-block log limit holds, logs are unusable
+  there and detection rests on the transfer index alone.
+- **The PositionManager's first block.** The public node refuses archive reads, so it was
+  not established. The scan starts from block 0, which costs nothing where one request
+  covers the range and only wasted chunks where it does not.
+- **A real ladder rung.** The operator has deployed none yet. The near and deep rung
+  mints in `testdata/position_detect/simulated_rung_mints.json` are simulated
+  (`eth_simulateV1`), not mined; the test that uses them says so.
+- **Uniswap v3 and Aero CL positions** are not looked for; #145 stays open for them.
+- **A position whose NFT was received by transfer** from another address has no mint to
+  the wallet, so it gets no baseline; this was reasoned from the receipt shape, not
+  observed (the wallet has received none).

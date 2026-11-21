@@ -108,8 +108,20 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // backfilled candles for any period the worker was offline.
     ensure_price_history(state).await;
 
+    // Positions found on-chain (v0.9.0, #145): looked for before the position reads, so a
+    // deposit that landed before this cycle is counted in it. It never fails the cycle;
+    // when it cannot check, the snapshot says why and how far it had read.
+    let detection = detect_positions_for_cycle(state).await;
+
     // Fetch raw data from Alchemy (parallelized on-chain calls)
     let raw_data = fetch_raw_data(state).await?;
+    // What detection found, valued at this cycle's prices, with what became of each
+    // database row in this cycle's reads.
+    let position_detection = position_detection_block(&detection, &raw_data);
+    // What each database-tracked ladder stands for after this cycle's reads (its mint's
+    // liquidity, the most it was read holding), so a rung withdrawn, burned or sent away
+    // later keeps standing for it. Never fails the cycle.
+    record_tracked_liquidity(&PositionStore::of(state), state.config.tracked_wallets.first().map(String::as_str), &raw_data).await;
 
     // Persistent high-water mark: the peak stored total and the earliest row that reached
     // it (issue #94, N2). An empty table (a fresh start) has no mark yet. A database error
@@ -289,6 +301,7 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     let fill_detection = detect_fills(state, &plan_ctx).await;
     let mut derived_metrics = compute_derived_metrics_with_fills(&raw_data, prev_hwm, &profile, structural_channels,
         &counterfactual_history, &ledger_agg, &regime, &plan_ctx, fill_detection.as_ref());
+    derived_metrics.position_detection = Some(position_detection);
     {
         let gs = &mut derived_metrics.global_status;
         let current_total: f64 = gs.total_portfolio_usd.parse().unwrap_or(f64::INFINITY);
@@ -324,8 +337,15 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
         let prev = state.latest_snapshot.lock().await;
         cycle_snapshot_data(raw_data, derived_metrics, prev.as_ref().map(|s| &s.data), &Utc::now().to_rfc3339())
     };
+    // Fees measured on our own ranges (2.10.0): at most one history query an hour, carried
+    // forward between and priced at this cycle's pool price. Left out of the state hash.
+    snapshot_data.derived_metrics.fee_yield = Some(fee_yield_for_cycle(&state.db, &snapshot_data, Utc::now()).await);
+    // The operator's configured ladder shape, sized to the shared reserve gate (2.10.0):
+    // from this snapshot alone, for a card with no inputs. Left out of the state hash.
+    snapshot_data.derived_metrics.ladder_shape = ladder_shape_block(&snapshot_data, Utc::now());
     // The ladder suggestion (#168), measured on the assembled snapshot after the
-    // directive strings were captured: it never changes the directive or a push.
+    // directive strings were captured: it never changes the directive or a push. It reads
+    // this cycle's position detection, attached above.
     attach_ladder_suggestion(&mut snapshot_data, &profile, Utc::now());
 
     // Compute deterministic state hash
@@ -459,10 +479,23 @@ pub(crate) fn canonical_state_json(data: &SnapshotData) -> serde_json::Value {
 }
 
 pub(crate) fn strip_volatile_time_fields(value: &mut serde_json::Value) {
-    const VOLATILE_KEYS: [&str; 9] = [
+    const VOLATILE_KEYS: [&str; 14] = [
+        // Position detection's scan block (v0.9.0): the chain's head moves every cycle.
+        "checked_at_block",
         // Route quotes for a due tranche (issue #115): contract reads at a stated
         // block, fresh every cycle. They say nothing about the wallet's state.
         "route_quotes",
+        // Fees measured over stored history (2.10.0): derived from the rows already
+        // stored, re-priced every cycle. Hashing it would store a row every cycle.
+        "fee_yield",
+        // The pool's in-range liquidity (2.10.0): the pool's state, not the wallet's.
+        "active_liquidity_raw",
+        // The configured ladder shape (2.10.0): worked out from the hashed state and the
+        // fee measurement, so it adds nothing to the state.
+        "ladder_shape",
+        // A rung's fee estimate on the ladder suggestion: the same measurement, re-measured
+        // at most hourly. The rest of the suggestion follows from the hashed state.
+        "fee_estimate",
         // Fill detection's check time (issue #118): fresh every cycle, no state.
         "last_checked_at",
         "updated_at",
@@ -509,7 +542,8 @@ pub(crate) async fn store_snapshot(db: &PgPool, envelope: &SnapshotEnvelope) -> 
         }
     }
 
-    let data_json = serde_json::to_value(&envelope.data)?;
+    let mut data_json = serde_json::to_value(&envelope.data)?;
+    slim_stored_data(&mut data_json);
     sqlx::query!(
         r#"
         INSERT INTO snapshots (snapshot_id, generated_at, state_hash, version, data)
@@ -529,4 +563,124 @@ pub(crate) async fn store_snapshot(db: &PgPool, envelope: &SnapshotEnvelope) -> 
     .execute(db)
     .await?;
     Ok(())
+}
+
+/// What a stored row leaves out (review of #166 rungs, finding 8). The fee measurement's
+/// by-day and per-band detail and the ladder shape's grid and full fee estimates are
+/// re-derived every cycle and are kept in the worker's memory (the latest snapshot,
+/// served by the API and both MCP transports); a stored row keeps the summary, with a
+/// note naming what is left out. That keeps each row's added size to a few KB, so the
+/// scans over stored rows (the hourly fee query, the high-water mark) stay bounded. Pure.
+pub(crate) const STORED_DETAIL_NOTE: &str = "left out of the stored row: the latest snapshot in the worker's memory carries it, and the next cycle measures it again";
+
+pub(crate) fn slim_stored_data(data: &mut serde_json::Value) {
+    if let Some(pools) = data.pointer_mut("/derived_metrics/fee_yield/pools").and_then(|p| p.as_array_mut()) {
+        for p in pools {
+            if let Some(o) = p.as_object_mut() {
+                o.remove("by_day");
+                o.remove("spans");
+                o.insert("detail_note".to_string(), serde_json::json!(format!("by_day and spans are {STORED_DETAIL_NOTE}")));
+            }
+        }
+    }
+    if let Some(shape) = data.pointer_mut("/derived_metrics/ladder_shape").and_then(|v| v.as_object_mut()) {
+        shape.remove("grid");
+        shape.remove("tracked_note");
+        if let Some(fb) = shape.get_mut("floor_breach_effect").filter(|v| v.is_object()) {
+            *fb = serde_json::json!({ "status": fb["status"], "reason": fb["reason"] });
+        }
+        if let Some(rungs) = shape.get_mut("rungs").and_then(|r| r.as_array_mut()) {
+            for r in rungs {
+                if let Some(o) = r.as_object_mut() {
+                    for k in ["mint_note", "remaining_note", "round_trip", "if_pulled_at_fill"] {
+                        o.remove(k);
+                    }
+                    if let Some(cap) = o.get_mut("cap").and_then(|c| c.as_object_mut()) {
+                        cap.remove("note");
+                        cap.remove("band_rule");
+                    }
+                }
+                let Some(fe) = r.get("fee_estimate").cloned() else { continue };
+                let g = |p: &str| fe.pointer(p).cloned().unwrap_or(serde_json::Value::Null);
+                r["fee_estimate"] = serde_json::json!({
+                    "status": g("/status"),
+                    "reason": g("/reason"),
+                    "per_day_in_range_usd": g("/per_day_in_range_usd"),
+                    "per_day_in_range_diluted_usd": g("/per_day_in_range_diluted_usd"),
+                    "measured_days": g("/measured_days"),
+                    "intervals": g("/intervals"),
+                    "in_range_share_pct": g("/in_range_share_stored_history/share_pct"),
+                    "replay_inside_upper_usd": g("/stored_history_replay/inside_upper_usd"),
+                    "replay_edge_upper_usd": g("/stored_history_replay/edge_upper_usd"),
+                    "band_usd_per_day": g("/band_measured/usd_per_day"),
+                    "detail_note": format!("the full estimate is {STORED_DETAIL_NOTE}"),
+                });
+            }
+        }
+        shape.insert("detail_note".to_string(), serde_json::json!(format!("the grid, the full fee estimates, the floor-crossing detail, round trips and notes are {STORED_DETAIL_NOTE}")));
+    }
+    // The ladder suggestion's fee estimates are outside the state hash (re-measured
+    // hourly), so a stored row would keep whichever one it was first stored with: it
+    // states that they are left out instead.
+    if let Some(rungs) = data.pointer_mut("/derived_metrics/ladder_suggestion/rungs").and_then(|r| r.as_array_mut()) {
+        for r in rungs {
+            if r.get("fee_estimate").map_or(false, |f| f.is_object()) {
+                r["fee_estimate"] = serde_json::json!({ "status": "unavailable", "reason": format!("the fee estimate is {STORED_DETAIL_NOTE}") });
+            }
+        }
+    }
+    slim_stored_ladder_suggestion(data);
+}
+
+/// Why a stored ladder card is not shown (it is read back after a restart).
+pub(crate) const STORED_LADDER_NOTE: &str = "This is the stored row of the ladder card: its links, amounts to enter, limits, picture and outcomes are left out of it. The next cycle shows the whole card again.";
+
+/// The ladder card in a stored row (review of the bottle, finding 1): what it said and
+/// what each deposit was (its rung, ticks, pool and exact mint, which position detection
+/// matches a new NFT against after a restart), without the links, texts, picture, gates
+/// and outcomes, which the worker's memory carries. A stored ready card is not shown: it
+/// says so, and the next cycle shows the whole card again. Pure.
+pub(crate) fn slim_stored_ladder_suggestion(data: &mut serde_json::Value) {
+    let Some(l) = data.pointer_mut("/derived_metrics/ladder_suggestion").and_then(|v| v.as_object_mut()) else {
+        return;
+    };
+    for k in ["assumptions", "stated", "picture", "outcomes", "after_deposit", "gates", "wallet_after", "mint_note", "candidates", "fit"] {
+        if l.contains_key(k) {
+            l.insert(k.to_string(), serde_json::Value::Null);
+        }
+    }
+    let keep = |v: &serde_json::Value, keys: &[&str]| -> serde_json::Value {
+        match v.as_object() {
+            Some(o) => serde_json::Value::Object(keys.iter().filter_map(|k| o.get(*k).map(|x| (k.to_string(), x.clone()))).collect()),
+            None => serde_json::Value::Null,
+        }
+    };
+    if let Some(rungs) = l.get_mut("rungs").and_then(|r| r.as_array_mut()) {
+        for r in rungs.iter_mut() {
+            *r = serde_json::json!({
+                "index": r["index"],
+                "of": r["of"],
+                "rung": r["rung"],
+                "status": r["status"],
+                "summary": r["summary"],
+                "tick_lower": r["tick_lower"],
+                "tick_upper": r["tick_upper"],
+                "pool": keep(&r["pool"], &["position_id", "protocol", "network", "pool_id", "label"]),
+                "usdc": keep(&r["usdc"], &["amount", "raw", "to_enter"]),
+                "nock": keep(&r["nock"], &["amount", "raw", "to_enter"]),
+                "mint": r["mint"],
+                "fee_estimate": r["fee_estimate"],
+            });
+        }
+    }
+    if let Some(rows) = l.get_mut("shape").and_then(|s| s.get_mut("rungs")).and_then(|r| r.as_array_mut()) {
+        for r in rows.iter_mut() {
+            *r = keep(r, &["index", "of", "rung", "status", "text", "tick_lower", "tick_upper", "remaining_usdc", "counterparts", "found"]);
+        }
+    }
+    if l.get("shown").and_then(|v| v.as_bool()) == Some(true) {
+        l.insert("shown".to_string(), serde_json::json!(false));
+        l.insert("reason".to_string(), serde_json::json!(STORED_LADDER_NOTE));
+    }
+    l.insert("detail_note".to_string(), serde_json::json!(format!("the deposit links, texts, limits, picture, gates and outcomes are {STORED_DETAIL_NOTE}")));
 }

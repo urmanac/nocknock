@@ -156,10 +156,11 @@ at boot and survive logout.
    installs the quadlets into `~/.config/containers/systemd/` and restarts the stack.
    Re-run it to upgrade; the database volume and password are kept. Upgrades are forward-only: a build older than the newest migration already applied will not start (see AGENTS.md section 13).
    Any change to `config.yaml` reaches the host only through this step, because the
-   worker reads the stored secret. That includes a new ladder entry (`role: ladder`,
-   #167) and its `deposit_tx`: after deploying a ladder rung, add its entry and mint
-   transaction to `config.yaml`, then re-run `deploy.sh <host>`. The receipt is checked
-   on the next cycle; the ladder's reading says `verified`, or why not.
+   worker reads the stored secret. A ladder rung deposited in the Uniswap app needs no
+   such change since v0.9.0: the worker finds the new position NFT on-chain and tracks
+   it from the database (a "Found on-chain" block shows it, with one tap when its range
+   is not exactly the suggested rung's). A `role: ladder` entry in `config.yaml` (#167)
+   still works and wins over a database row for the same NFT.
 
 3. **Endpoints**: dashboard on `http://<host>:3000`, API and HTTP MCP on
    `http://<host>:8081` (host port 8080 is left free). PostgreSQL is reachable only
@@ -224,6 +225,26 @@ public certificate authority can vouch for the name, see
 1. **No backups.** The database is disposable; the wallet and the chain are the record
    (operator decision 2026-11-14, issue #96 closed as not planned).
 
+   **After a database loss (v0.9.0).** Positions tracked from the chain are found again:
+   the first cycle reads the wallet's position-NFT transfers and lists every position it
+   finds, with its value, as found and not counted. From the next cycle one whose pool and
+   ticks are exactly a suggested rung's is tracked by itself, with its mint as the
+   baseline; any other is tracked with one tap. What is lost with the database is the
+   taps themselves (a position tracked or set aside by hand is offered again) and the
+   snapshot history.
+
+   **Going back to a release older than v0.9.0.** Two things stop it. sqlx refuses to
+   start a build that lacks migration `20261121000013` (AGENTS.md section 13). And an
+   older build does not read the `tracked_positions` table: the wallet's USDC is lower by
+   what the rungs hold, the rungs are in no total, and nothing says so. Before running an
+   older build, read `GET /v1/positions/found` and add each row's `config_entry` under
+   `positions:` in `config.yaml` (it carries the NFT id, pool, ticks, role, rung and
+   `deposit_tx`), redeploy the secret, and only then remove the migration row. The
+   ladder card's plan is worked out from the tracked rungs; the database keeps only what
+   each rung was deposited with and the most it held (`tracked_positions`). A rung
+   left out of `config.yaml` this way is a rung the older card offers again: do not
+   deposit from an older build's card until every row is copied.
+
 2. **Deduplication Safeguard**:
    The ingestion worker includes built-in deduplication. If on-chain balances and pool reserves do not change between intervals, `store_snapshot` refreshes the `generated_at` timestamp on the active record rather than inserting redundant rows. Storage footprint remains under 50 MB/year.
 
@@ -232,7 +253,8 @@ public certificate authority can vouch for the name, see
 ## 6. Operational Monitoring & Runbook
 
 * **Liveness Probe**: `GET /health` returns HTTP 200 with `status: "ok"` and `ingestion_lag_seconds`.
-* **Force Manual Ingest**: `POST /v1/ingest` triggers an immediate Alchemy sync without waiting for the 5-minute cron.
+* **Force Manual Ingest**: `POST /v1/ingest` triggers an immediate Alchemy sync without waiting for the 5-minute cron. Each cycle first looks for new position NFTs in the wallet (v0.9.0); the dashboard's CHECK NOW button is this call.
+* **Positions found on-chain**: `GET /v1/positions/found` returns the latest check (status, how far back the transfers were read, what is found and not counted) and the rows tracked from the database.
 * **Logs Inspection**:
   ```bash
   # Docker Compose

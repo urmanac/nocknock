@@ -21,7 +21,7 @@ fn rel(a: f64, b: f64) -> f64 {
 }
 
 /// sqrtPriceX96 of a raw price (token1_raw per token0_raw), as the Aero adapter builds it.
-fn sqrt_x96_of_raw(raw_price: f64) -> U256 {
+pub(crate) fn sqrt_x96_of_raw(raw_price: f64) -> U256 {
     let v = raw_price.sqrt() * 79228162514264337593543950336.0;
     let two128 = 340282366920938463463374607431768211456.0f64;
     let hi = (v / two128).floor();
@@ -144,6 +144,7 @@ fn generated_at() -> DateTime<Utc> {
 pub(crate) fn envelope_of(mut raw: RawOnChainData, profile: &OperatorProfile) -> SnapshotEnvelope {
     let positions = snapshot_positions(&raw);
     raw.pool_mechanics = build_pool_mechanics(&raw.positions, raw.spot_price_nock_usd, raw.live_eth_price_usd);
+    stamp_active_liquidity(&mut raw.pool_mechanics, &raw.positions, &raw.pool_liquidity);
     raw.contract_fees = build_contract_fees(&positions, raw.live_gas_cost_usd, &raw.fees_not_lp_claimable);
     let derived_metrics = compute_derived_metrics_with_plan(
         &raw,
@@ -992,8 +993,111 @@ fn test_ladder_specs_document_the_endpoint_and_the_new_fields() {
 }
 
 
+/// The fixture with ladder rungs deposited and tracked (`role: ladder`): each `(nft id,
+/// rung, ticks, liquidity)` is a new position in the 3% pool, its amounts read from its
+/// liquidity at the pool price, and the wallet pays exactly those amounts (review of
+/// #166 rungs, finding 1).
+pub(crate) fn fixture_with_rungs(rungs: &[(u64, Option<&str>, i32, i32, u128)]) -> SnapshotEnvelope {
+    let mut positions = fixture_positions();
+    let mut tags: HashMap<String, LadderTag> = HashMap::new();
+    let (mut usdc_out, mut nock_out) = (0.0, 0.0);
+    for &(nft, rung, tl, tu, l) in rungs {
+        let p = with_amounts(RawPosition {
+            position_id: format!("uniswap-v4:base:{nft}"),
+            nft_id: nft,
+            liquidity: l,
+            tick_lower: tl,
+            tick_upper: tu,
+            fee0: 0.0,
+            fee1: 0.0,
+            in_range: tl <= 273743 && 273743 < tu,
+            is_price_source: false,
+            ..v4()
+        });
+        usdc_out += p.amount0;
+        nock_out += p.amount1;
+        tags.insert(p.position_id.clone(), LadderTag { config_id: format!("ladder-{nft}"), rung: rung.map(str::to_string), deposit_tx: None });
+        positions.push(p);
+    }
+    let mut raw = raw_book(positions);
+    raw.wallet_balances = vec![
+        row("USDC", USDC_BASE, &format!("{:.6}", 1545.8357 - usdc_out)),
+        row("NOCK", NOCK_BASE, &format!("{:.10}", 90086.7891 - nock_out)),
+    ];
+    raw.ladders = tags;
+    envelope_of(raw, &profile(Some(950.0)))
+}
+
+/// Rungs minted at the fixture's spot ($0.012944; the wallet pays what each took then),
+/// then every v4 position read with the pool moved `ticks_up` ticks up in USD terms (NOCK
+/// is token1, so the pool's tick falls), and the Aero pool moved by the same ratio along
+/// its curve (review of the bottle: the card must follow the operator deposit by deposit
+/// while the price moves).
+pub(crate) fn fixture_with_rungs_moved(rungs: &[(u64, Option<&str>, i32, i32, u128)], ticks_up: f64) -> SnapshotEnvelope {
+    let old_raw = sqrt_price_x96_to_raw(spot_sqrt());
+    let new_raw = old_raw * 1.0001f64.powf(-ticks_up);
+    let sqrt = if ticks_up == 0.0 { spot_sqrt() } else { sqrt_x96_of_raw(new_raw) };
+    let new_tick = (sqrt_price_x96_to_raw(sqrt).ln() / 1.0001f64.ln()).floor() as i32;
+    // USD per NOCK is multiplied by m.
+    let m = old_raw / sqrt_price_x96_to_raw(sqrt);
+    let mut v = v4();
+    v.sqrt_price_x96 = sqrt;
+    v.tick = new_tick;
+    let v = with_amounts(RawPosition { fee0: 0.213182, fee1: 113.759403, ..v });
+    let mut gas2 = gas_range_v3();
+    gas2.position_id = "uniswap-v3:base:6607226".to_string();
+    gas2.nft_id = 6607226;
+    let mut positions = vec![v.clone(), aero(111.367340 * m.sqrt(), 8408.058135 / m.sqrt()), gas_range_v3(), gas2];
+    let mut tags: HashMap<String, LadderTag> = HashMap::new();
+    let (mut usdc_out, mut nock_out) = (0.0, 0.0);
+    for &(nft, rung, tl, tu, l) in rungs {
+        // What left the wallet: the amounts at the price it was minted at.
+        let at_mint = with_amounts(RawPosition { position_id: format!("uniswap-v4:base:{nft}"), nft_id: nft, liquidity: l, tick_lower: tl, tick_upper: tu, fee0: 0.0, fee1: 0.0, is_price_source: false, ..v4() });
+        usdc_out += at_mint.amount0;
+        nock_out += at_mint.amount1;
+        if rung == Some("untracked") {
+            continue; // minted, but in no position list: found on-chain, not yet tracked
+        }
+        let p = with_amounts(RawPosition {
+            position_id: format!("uniswap-v4:base:{nft}"),
+            nft_id: nft,
+            liquidity: l,
+            tick_lower: tl,
+            tick_upper: tu,
+            fee0: 0.0,
+            fee1: 0.0,
+            in_range: tl <= new_tick && new_tick < tu,
+            is_price_source: false,
+            ..v.clone()
+        });
+        tags.insert(p.position_id.clone(), LadderTag { config_id: format!("ladder-{nft}"), rung: rung.map(str::to_string), deposit_tx: None });
+        positions.push(p);
+    }
+    let mut raw = raw_book(positions);
+    raw.wallet_balances = vec![
+        row("USDC", USDC_BASE, &format!("{:.6}", 1545.8357 - usdc_out)),
+        row("NOCK", NOCK_BASE, &format!("{:.10}", 90086.7891 - nock_out)),
+    ];
+    raw.ladders = tags;
+    envelope_of(raw, &profile(Some(950.0)))
+}
+
+/// The tracked ladders' readings, each as if its mint receipt had been verified with the
+/// liquidity it holds now (the operator's flow: detection tracks a rung from its mint).
+/// A rung's deposit is what freezes the ladder plan (third review of the bottle); one
+/// with no known deposit never does. Pure.
+pub(crate) fn readings_with_deposits(data: &SnapshotData) -> Vec<LadderReading> {
+    let mut rs = ladder_readings(&stored_book(data).raw);
+    for r in rs.iter_mut() {
+        if r.since_deposit.deposit_liquidity.is_none() {
+            r.since_deposit.deposit_liquidity = Some(r.since_deposit.current_liquidity.clone());
+        }
+    }
+    rs
+}
+
 /// The fixture with the price-source pool at another sqrtPriceX96 (#166 review).
-fn fixture_at_sqrt(sqrt: U256) -> SnapshotEnvelope {
+pub(crate) fn fixture_at_sqrt(sqrt: U256) -> SnapshotEnvelope {
     let mut v = v4();
     v.sqrt_price_x96 = sqrt;
     v.tick = (sqrt_price_x96_to_raw(sqrt).ln() / 1.0001f64.ln()).floor() as i32;
