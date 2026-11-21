@@ -74,6 +74,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1,221.85 USDC + 247.58 NOCK): with the pool fallen into it, it holds 5,551.37 NOCK and
   has net bought 5,303.79 NOCK for $84.35 since its deposit, an average of $0.01590283.
 
+- **Ladders of rungs, the fee yield and the operator's ladder shape (extends #166).**
+  Snapshot spec 2.10.0, additive. A one-rung body is unchanged apart from the new
+  `fee_estimate` and, only when `operator_profile.ladder_bottom_usd` is set, the gate's
+  price and rule.
+  - *A ladder of rungs.* `GET /v1/simulate/ladder` takes up to four rungs (`cap`,
+    `near`, `deep`; a role is required and never assumed) in one pool, through the
+    indexed `r1_`..`r4_` parameters and a `rungs` array in both MCP transports. The
+    flat form is unchanged. The rungs share one reserve gate and one NOCK budget, and
+    every rung enters the floor-crossing figure. Overlaps are listed. A near rung states
+    its round trip: back at the price now it holds what it started with, so its gain is
+    its fees. A deep rung states the NOCK it keeps if pulled at fill. Trade-off tables
+    (the split, the near rung's depth and the deep rung's top) are measurements in the
+    order of the quantity varied, never ranked and with no row marked.
+  - *The reserve gate.* It is read at the lower of the deepest rung's bottom and the
+    new `operator_profile.ladder_bottom_usd` (no default), so a ladder that stops above
+    the bottom cannot recruit the reserve kept for prices below it. With the key unset
+    the gate is the deepest bottom, and the body says so.
+  - *The fee estimate.* Fees per day while in range are measured from our own tracked
+    range, not forecast. `derived_metrics.fee_yield` holds the fees per unit of
+    liquidity, measured from stored snapshot rows:
+    - one measuring range per USDC/NOCK pool (not full range, not staked, not a
+      ladder; the widest when there are several);
+    - skipped intervals counted with their seconds;
+    - true UTC days;
+    - spans on the tick grid;
+    - measured at most hourly, carried forward and priced at the current pool price.
+
+    `pool_mechanics[].active_liquidity_raw` holds the active liquidity behind the
+    diluted figure. Both are left out of the state hash, so an unchanged cycle still
+    stores no row. A rung's estimate is the measuring range's average fee per unit of
+    liquidity times the rung's liquidity: an assumption, stated. It is always shown
+    with the in-range share of stored history and the replay upper bounds, the
+    measurement inside the rung (a per-day figure only from 20 h of intervals) and
+    every day's figure. Stored market volume, which belongs to another pool, is never
+    read. On the recorded chudmax history (2026-11-14 to 11-21, 1,836 intervals over
+    6.33 days) the rate is $6.08 per 1e15 liquidity per day at the current price.
+  - *The operator's shape.* `operator_profile.ladder_rungs` (no default) records it
+    from the top down. It may start with a `cap`: the tick band containing spot,
+    holding the LP NOCK budget and the USDC its curve pairs with it, never more USDC
+    than the near rung's. The near and deep shares divide the rest. It is validated and
+    stated in `global_status.ladder_rungs`, or named as a configuration error in
+    `ladder_rungs_note`. `shape=configured` sizes it to the shared reserve gate's most.
+    `derived_metrics.ladder_shape` carries that result in the snapshot, for a card with
+    no inputs.
+  - *Rung vocabulary.* `cap | near | deep`, for tracked ladders (#167) too.
+  - *Dashboard.* No form is added (operator, 2026-11-20). The typed client and a
+    fee-yield helper (a quiet line and the by-day spread) are ready for the card.
+
 ## [0.8.3] - 2026-11-20
 
 A patch release: the protected cash reserve is a standing rule, and dry powder honours it.
