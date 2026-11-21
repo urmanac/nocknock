@@ -287,6 +287,7 @@ pub(crate) async fn detect(store: &PositionStore, n: &Node, cfg: &AppConfig, pre
         config_positions: &cfg.positions,
         prev,
         now,
+        read_budget: None,
     })
     .await
 }
@@ -1387,6 +1388,7 @@ async fn test_when_it_cannot_check_it_says_so_keeps_what_it_found_and_never_prin
         config_positions: &cfg.positions,
         prev: Some(&prev),
         now: later,
+        read_budget: None,
     })
     .await;
     assert_eq!(out.status, "unavailable");
@@ -1413,10 +1415,10 @@ async fn test_when_it_cannot_check_it_says_so_keeps_what_it_found_and_never_prin
     }
 
     // No key, no wallet, no database: each says which.
-    let no_key = detect_positions(&DetectionInputs { store: &store, http: &Client::new(), rpc_url: None, wallet: Some(OPERATOR), config_positions: &cfg.positions, prev: None, now: later }).await;
+    let no_key = detect_positions(&DetectionInputs { store: &store, http: &Client::new(), rpc_url: None, wallet: Some(OPERATOR), config_positions: &cfg.positions, prev: None, now: later, read_budget: None }).await;
     assert_eq!(no_key.status, "unavailable");
     assert!(no_key.reason.unwrap().starts_with("New positions could not be checked this cycle (no Alchemy RPC key is configured)"));
-    let no_wallet = detect_positions(&DetectionInputs { store: &store, http: &Client::new(), rpc_url: Some(&dead), wallet: None, config_positions: &cfg.positions, prev: None, now: later }).await;
+    let no_wallet = detect_positions(&DetectionInputs { store: &store, http: &Client::new(), rpc_url: Some(&dead), wallet: None, config_positions: &cfg.positions, prev: None, now: later, read_budget: None }).await;
     assert_eq!((no_wallet.status.as_str(), no_wallet.reason.as_deref()), ("not_run", Some("no tracked wallet is configured")));
     if let PositionStore::Mem(m) = &store {
         m.lock().unwrap().unreadable = true;
@@ -1687,7 +1689,7 @@ async fn test_golden_position_detection_blocks_and_text() {
     // The check could not run; what was found before stays listed.
     let store = store_at(clock("operator"));
     detect(&store, &n, &without_v4, None, clock("operator")).await;
-    let out = detect_positions(&DetectionInputs { store: &store, http: &Client::new(), rpc_url: None, wallet: Some(OPERATOR), config_positions: &without_v4.positions, prev: None, now: clock("operator") + chrono::Duration::seconds(300) }).await;
+    let out = detect_positions(&DetectionInputs { store: &store, http: &Client::new(), rpc_url: None, wallet: Some(OPERATOR), config_positions: &without_v4.positions, prev: None, now: clock("operator") + chrono::Duration::seconds(300), read_budget: None }).await;
     add("unavailable", position_detection_block(&out, &raw));
 
     let actual = format!("{}\n", serde_json::to_string_pretty(&Value::Object(doc.clone())).unwrap());
@@ -1843,6 +1845,8 @@ fn test_the_specs_document_the_block_and_the_five_routes() {
 fn test_the_rereads_rotate_within_their_cap() {
     let ids: Vec<u64> = (1..=10).collect();
     assert_eq!(refresh_batch(&ids, 0, 20), (ids.clone(), 0), "under the cap: all, nothing deferred");
+    // Under the cap it still starts at the cursor: a cycle cut short resumes where it stopped.
+    assert_eq!(refresh_batch(&ids, 3, 20), (vec![4, 5, 6, 7, 8, 9, 10, 1, 2, 3], 0));
     assert_eq!(refresh_batch(&ids, 0, 4), (vec![1, 2, 3, 4], 6));
     assert_eq!(refresh_batch(&ids, 8, 4), (vec![9, 10, 1, 2], 6), "it wraps");
     // Cycle after cycle, every one is read in turn.
@@ -1888,4 +1892,63 @@ async fn test_dust_in_a_whitelisted_pool_is_reread_at_most_the_cap_per_cycle_and
         asked.extend(dust.iter().filter(|id| keys.iter().any(|k| k.contains(&format!("{:064x}", id)))));
     }
     assert_eq!(asked.len(), dust.len(), "every dust NFT is read in turn");
+}
+
+/// A node answering the operator's recorded chain plus `dust` empty NFTs the wallet holds.
+async fn node_with_dust(dust: &[u64]) -> Node {
+    let mut swaps = vec![wide_logs_swap("operator")];
+    let empty = format!("0x{}", "0".repeat(64));
+    swaps.extend(dust.iter().map(|id| (key_liquidity(*id), Swap::Json(json!({ "result": empty })))));
+    let balance_key = call_key(UNISWAP_V4_POSM_BASE, &format!("{ERC721_BALANCE_OF}{:0>64}", OPERATOR.trim_start_matches("0x")));
+    swaps.push((balance_key, Swap::Json(json!({ "result": format!("0x{:064x}", 43 + dust.len()) }))));
+    node("operator", swaps).await
+}
+
+#[tokio::test]
+async fn test_a_scan_cut_short_by_its_budget_resumes_where_it_stopped() {
+    // Third review of the bottle: the cursor moved 40 whatever was read, so a scan cut
+    // short re-read the same lowest ids and the rest starved. The budget is injected:
+    // 13 reads a cycle, for 30 dust NFTs (under the cap of 40) and the 5 empty ones.
+    let dust: Vec<u64> = (900_000_000..900_000_030).collect();
+    let n = node_with_dust(&dust).await;
+    let store = store_at(clock("operator"));
+    let cfg = book_without_v4();
+    let http = Client::new();
+    let inputs = |budget: Option<usize>| DetectionInputs {
+        store: &store,
+        http: &http,
+        rpc_url: Some(&n.url),
+        wallet: Some(OPERATOR),
+        config_positions: &cfg.positions,
+        prev: None,
+        now: clock("operator"),
+        read_budget: budget,
+    };
+    detect_positions(&inputs(None)).await;
+    for id in &dust {
+        let mut row = candidate(*id);
+        row.has_liquidity = Some(false);
+        store.upsert_candidate(&row).await.unwrap();
+    }
+    let mut asked: HashSet<u64> = HashSet::new();
+    let mut found_read = 0;
+    let mut cursors: Vec<i64> = Vec::new();
+    for _ in 0..3 {
+        n.forget();
+        let out = detect_positions(&inputs(Some(13))).await;
+        assert_eq!(out.status, "partial");
+        assert!(out.reason.clone().unwrap().contains("the check stopped starting reads at its 40-second budget; the rest is read next cycle"), "{:?}", out.reason);
+        let keys = n.keys();
+        asked.extend(dust.iter().filter(|id| keys.iter().any(|k| k.contains(&format!("{:064x}", id)))));
+        // The found position (the wallet's own v4 range, not in config.yaml) is read in its
+        // turn: its liquidity is cached by its re-read, so step 4 never cuts it.
+        if out.found.iter().any(|f| f.row.nft_id == 3163450 && f.read.is_some()) {
+            found_read += 1;
+        }
+        cursors.push(store.scan_state(OPERATOR, TRACKED_PROTOCOL_V4, TRACKED_NETWORK_BASE).await.unwrap().refresh_cursor);
+    }
+    assert_eq!(asked.len(), dust.len(), "every one read within three cycles of 13");
+    assert!(found_read >= 1, "the found position is read in its turn");
+    // The stored cursor moved by what was read, not by the cap.
+    assert!(cursors.windows(2).all(|w| w[0] != w[1]), "{cursors:?}");
 }
