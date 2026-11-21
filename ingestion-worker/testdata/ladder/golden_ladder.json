@@ -25,6 +25,52 @@
         "tick_lower": 273600,
         "tick_upper": 277200
       },
+      "fee_estimate": {
+        "assumptions": [
+          "Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one).",
+          "Fees per unit of liquidity are shared by every range that contains the price (the same pool, the same fee tier).",
+          "The pool's swap volume is taken as unchanged by the new liquidity: only its share dilutes.",
+          "Dilution uses the pool's active liquidity at the current tick, read at 'latest' in the snapshot's cycle (not at the snapshot's block); the liquidity at the range's own ticks is not read and is taken as the same.",
+          "The NOCK fee leg is valued at the current pool price, not at the price when it accrued.",
+          "Intervals where the measuring range's liquidity changed or its fees fell (a collect, or a v4 add that collects) are skipped, so the measurement slightly undercounts; the seconds skipped are stated.",
+          "Gas is not counted. Past fees are not a forecast.",
+          "The stored market volume of another pool (market_price_history) is never used."
+        ],
+        "band_measured": null,
+        "band_reason": null,
+        "constants": {
+          "band_min_seconds": 72000.0,
+          "day_min_seconds": null,
+          "max_gap_seconds": null,
+          "note": "display constants, not settings",
+          "window_days": null
+        },
+        "coverage": null,
+        "dilution": null,
+        "dilution_reason": null,
+        "in_range_share_reason": null,
+        "in_range_share_stored_history": null,
+        "intervals": null,
+        "measured_at": null,
+        "measured_by": null,
+        "measured_days": null,
+        "measured_label": null,
+        "measured_seconds": null,
+        "measurement_age_seconds": null,
+        "per_100_usd_per_day_in_range_usd": null,
+        "per_day_in_range_diluted_usd": null,
+        "per_day_in_range_nock_leg": null,
+        "per_day_in_range_usd": null,
+        "per_day_in_range_usdc_leg": null,
+        "rate": null,
+        "reason": "this snapshot has no fee_yield (2.10.0): fees are not measured in it",
+        "replay_reason": null,
+        "skipped": null,
+        "skipped_seconds": null,
+        "spread": null,
+        "status": "unavailable",
+        "stored_history_replay": null
+      },
       "floor_check": {
         "budget_note": null,
         "floor_breach_effect": {
@@ -309,7 +355,7 @@
         "snapshot_id": "00000000-0000-0000-0000-000000000000",
         "spot_source": "price-source pool sqrtPriceX96 (v4 USDC/NOCK 3.00% #3163450)",
         "spot_usd": "0.01294400",
-        "version": "2.9.0",
+        "version": "2.10.0",
         "worker_health": "ok"
       },
       "statement": "A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.",
@@ -341,7 +387,7 @@
       ],
       "top_neighbours_reason": null
     },
-    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Range: $0.00916134 – $0.01313098 (-29.22% / +1.44% of the pool price $0.01294400), snapped to v4 USDC/NOCK 3.00% #3163450 (tick spacing 300; top: the nearest usable tick)\n• Pool: a ladder in this pool is a NEW position (a new NFT); add it to config.yaml to be tracked\n• Sizing: $900.00 USDC and 3,130 NOCK at spot (liquidity 49842.6403)\n• Tops next to spot: $0.01274292 (-1.55%) needs 0 NOCK (fits the budget); $0.01313098 (+1.44%) needs 3,130 NOCK (exceeds the budget)\n• Price grid (NOCK bought by the ladder, USDC left in it; stable balance and reserve headroom):\n  +1.44% $0.01313098: 3,130 NOCK sold, $940.81 USDC left; stable $1813.48 (reserve +$863.48) [top]\n  0.00% $0.01294400: 0 NOCK bought, $900.00 USDC left; stable $1769.54 (reserve +$819.54) [spot]\n  -5.00% $0.01229680: 11,381 NOCK bought, $756.42 USDC left; stable $1614.97 (reserve +$664.97)\n  -10.00% $0.01164960: 23,698 NOCK bought, $609.00 USDC left; stable $1456.26 (reserve +$506.26)\n  -15.00% $0.01100240: 37,086 NOCK bought, $457.43 USDC left; stable $1293.09 (reserve +$343.09)\n  -20.00% $0.01035520: 51,710 NOCK bought, $301.33 USDC left; stable $1125.04 (reserve +$175.04)\n  -25.00% $0.00970800: 67,773 NOCK bought, $140.27 USDC left; stable $951.65 (reserve +$1.65)\n  -29.22% $0.00916134: 82,647 NOCK bought, $0.00 USDC left; stable $800.64 (reserve -$149.36) [bottom]\n  -30.00% $0.00906080: 82,647 NOCK bought, $0.00 USDC left; stable $798.63 (reserve -$151.37)\n  -35.00% $0.00841360: 82,647 NOCK bought, $0.00 USDC left; stable $785.42 (reserve -$164.58)\n  -40.00% $0.00776640: 82,647 NOCK bought, $0.00 USDC left; stable $771.69 (reserve -$178.31)\n• Bottom: fully NOCK at $0.00916134 (-29.22%): 85,778 NOCK held, 82,647 bought, average $0.01088964\n• Top: out of range above at $0.01313098 (+1.44%): $940.81 USDC; the NOCK held at spot sells at an average $0.01303715\n• Reserve: stable $800.64 at the bottom against the $950.00 reserve: breached: below it by $149.36 (this range takes at most $750.64; the existing NOCK ranges hold $154.81 USDC there). The gate is the stable balance at the ladder's own bottom (operator decision, 2026-11-20).\n• Below the bottom: at $0.00776640 (-40.00%) stable $771.69 (reserve -$178.31). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• At the top: stable $1813.48 (reserve +$863.48) at $0.01313098. Out of range above (read at the top), the ladder holds only USDC: its NOCK has sold on the way up.\n• Stated, not gates: no accumulation plan (no accumulation_plan is configured); the $0.00 tax reserve\n• Floor budget: needs 3,130 of the 87 NOCK that may go into LP: exceeds; $24.95 is the most USDC this range holds within it. The rebuild's suggestions this cycle also draw 0 NOCK of the same budget: an alternative use of it, not subtracted\n• Floor-crossing price: lowers: the ladder's NOCK leaves the wallet and sells as NOCK rises to the top (without the ladder $0.025404 (+96.3%), with it $0.019842 (+53.3%))\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
+    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Range: $0.00916134 – $0.01313098 (-29.22% / +1.44% of the pool price $0.01294400), snapped to v4 USDC/NOCK 3.00% #3163450 (tick spacing 300; top: the nearest usable tick)\n• Pool: a ladder in this pool is a NEW position (a new NFT); add it to config.yaml to be tracked\n• Sizing: $900.00 USDC and 3,130 NOCK at spot (liquidity 49842.6403)\n• Tops next to spot: $0.01274292 (-1.55%) needs 0 NOCK (fits the budget); $0.01313098 (+1.44%) needs 3,130 NOCK (exceeds the budget)\n• Price grid (NOCK bought by the ladder, USDC left in it; stable balance and reserve headroom):\n  +1.44% $0.01313098: 3,130 NOCK sold, $940.81 USDC left; stable $1813.48 (reserve +$863.48) [top]\n  0.00% $0.01294400: 0 NOCK bought, $900.00 USDC left; stable $1769.54 (reserve +$819.54) [spot]\n  -5.00% $0.01229680: 11,381 NOCK bought, $756.42 USDC left; stable $1614.97 (reserve +$664.97)\n  -10.00% $0.01164960: 23,698 NOCK bought, $609.00 USDC left; stable $1456.26 (reserve +$506.26)\n  -15.00% $0.01100240: 37,086 NOCK bought, $457.43 USDC left; stable $1293.09 (reserve +$343.09)\n  -20.00% $0.01035520: 51,710 NOCK bought, $301.33 USDC left; stable $1125.04 (reserve +$175.04)\n  -25.00% $0.00970800: 67,773 NOCK bought, $140.27 USDC left; stable $951.65 (reserve +$1.65)\n  -29.22% $0.00916134: 82,647 NOCK bought, $0.00 USDC left; stable $800.64 (reserve -$149.36) [bottom]\n  -30.00% $0.00906080: 82,647 NOCK bought, $0.00 USDC left; stable $798.63 (reserve -$151.37)\n  -35.00% $0.00841360: 82,647 NOCK bought, $0.00 USDC left; stable $785.42 (reserve -$164.58)\n  -40.00% $0.00776640: 82,647 NOCK bought, $0.00 USDC left; stable $771.69 (reserve -$178.31)\n• Bottom: fully NOCK at $0.00916134 (-29.22%): 85,778 NOCK held, 82,647 bought, average $0.01088964\n• Top: out of range above at $0.01313098 (+1.44%): $940.81 USDC; the NOCK held at spot sells at an average $0.01303715\n• Reserve: stable $800.64 at the bottom against the $950.00 reserve: breached: below it by $149.36 (this range takes at most $750.64; the existing NOCK ranges hold $154.81 USDC there). The gate is the stable balance at the ladder's own bottom (operator decision, 2026-11-20).\n• Below the bottom: at $0.00776640 (-40.00%) stable $771.69 (reserve -$178.31). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• At the top: stable $1813.48 (reserve +$863.48) at $0.01313098. Out of range above (read at the top), the ladder holds only USDC: its NOCK has sold on the way up.\n• Stated, not gates: no accumulation plan (no accumulation_plan is configured); the $0.00 tax reserve\n• Floor budget: needs 3,130 of the 87 NOCK that may go into LP: exceeds; $24.95 is the most USDC this range holds within it. The rebuild's suggestions this cycle also draw 0 NOCK of the same budget: an alternative use of it, not subtracted\n• Floor-crossing price: lowers: the ladder's NOCK leaves the wallet and sells as NOCK rises to the top (without the ladder $0.025404 (+96.3%), with it $0.019842 (+53.3%))\n• Fees while in range: not estimated: this snapshot has no fee_yield (2.10.0): fees are not measured in it\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
     "query": {
       "high_pct": "2",
       "low_pct": "-30",
@@ -374,6 +420,52 @@
         "low_usd": "0.00906080",
         "tick_lower": null,
         "tick_upper": null
+      },
+      "fee_estimate": {
+        "assumptions": [
+          "Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one).",
+          "Fees per unit of liquidity are shared by every range that contains the price (the same pool, the same fee tier).",
+          "The pool's swap volume is taken as unchanged by the new liquidity: only its share dilutes.",
+          "Dilution uses the pool's active liquidity at the current tick, read at 'latest' in the snapshot's cycle (not at the snapshot's block); the liquidity at the range's own ticks is not read and is taken as the same.",
+          "The NOCK fee leg is valued at the current pool price, not at the price when it accrued.",
+          "Intervals where the measuring range's liquidity changed or its fees fell (a collect, or a v4 add that collects) are skipped, so the measurement slightly undercounts; the seconds skipped are stated.",
+          "Gas is not counted. Past fees are not a forecast.",
+          "The stored market volume of another pool (market_price_history) is never used."
+        ],
+        "band_measured": null,
+        "band_reason": null,
+        "constants": {
+          "band_min_seconds": 72000.0,
+          "day_min_seconds": null,
+          "max_gap_seconds": null,
+          "note": "display constants, not settings",
+          "window_days": null
+        },
+        "coverage": null,
+        "dilution": null,
+        "dilution_reason": null,
+        "in_range_share_reason": null,
+        "in_range_share_stored_history": null,
+        "intervals": null,
+        "measured_at": null,
+        "measured_by": null,
+        "measured_days": null,
+        "measured_label": null,
+        "measured_seconds": null,
+        "measurement_age_seconds": null,
+        "per_100_usd_per_day_in_range_usd": null,
+        "per_day_in_range_diluted_usd": null,
+        "per_day_in_range_nock_leg": null,
+        "per_day_in_range_usd": null,
+        "per_day_in_range_usdc_leg": null,
+        "rate": null,
+        "reason": "this snapshot has no fee_yield (2.10.0): fees are not measured in it",
+        "replay_reason": null,
+        "skipped": null,
+        "skipped_seconds": null,
+        "spread": null,
+        "status": "unavailable",
+        "stored_history_replay": null
       },
       "floor_check": {
         "budget_note": null,
@@ -645,7 +737,7 @@
         "snapshot_id": "00000000-0000-0000-0000-000000000000",
         "spot_source": "price-source pool sqrtPriceX96 (v4 USDC/NOCK 3.00% #3163450)",
         "spot_usd": "0.01294400",
-        "version": "2.9.0",
+        "version": "2.10.0",
         "worker_health": "ok"
       },
       "statement": "A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.",
@@ -660,7 +752,7 @@
       "top_neighbours": null,
       "top_neighbours_reason": "unsnapped: there is no tick grid, so there are no neighbouring tops"
     },
-    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Range: $0.00906080 – $0.01320288 (-30.00% / +2.00% of the pool price $0.01294400), unsnapped: no position_id or tick_spacing was given\n• Sizing: $900.00 USDC and 4,194 NOCK at spot (liquidity 48430.1458)\n• Tops next to spot: none listed (unsnapped: there is no tick grid, so there are no neighbouring tops)\n• Price grid (NOCK bought by the ladder, USDC left in it; stable balance and reserve headroom):\n  +2.00% $0.01320288: 4,194 NOCK sold, $954.83 USDC left; stable $1828.69 (reserve +$878.69) [top]\n  0.00% $0.01294400: 0 NOCK bought, $900.00 USDC left; stable $1769.54 (reserve +$819.54) [spot]\n  -5.00% $0.01229680: 11,058 NOCK bought, $760.48 USDC left; stable $1619.03 (reserve +$669.03)\n  -10.00% $0.01164960: 23,026 NOCK bought, $617.25 USDC left; stable $1464.51 (reserve +$514.51)\n  -15.00% $0.01100240: 36,035 NOCK bought, $469.97 USDC left; stable $1305.63 (reserve +$355.63)\n  -20.00% $0.01035520: 50,245 NOCK bought, $318.30 USDC left; stable $1142.01 (reserve +$192.01)\n  -25.00% $0.00970800: 65,853 NOCK bought, $161.80 USDC left; stable $973.18 (reserve +$23.18)\n  -30.00% $0.00906080: 83,105 NOCK bought, $0.00 USDC left; stable $798.63 (reserve -$151.37) [bottom]\n  -35.00% $0.00841360: 83,105 NOCK bought, $0.00 USDC left; stable $785.42 (reserve -$164.58)\n  -40.00% $0.00776640: 83,105 NOCK bought, $0.00 USDC left; stable $771.69 (reserve -$178.31)\n• Bottom: fully NOCK at $0.00906080 (-30.00%): 87,299 NOCK held, 83,105 bought, average $0.01082973\n• Top: out of range above at $0.01320288 (+2.00%): $954.83 USDC; the NOCK held at spot sells at an average $0.01307280\n• Reserve: stable $798.63 at the bottom against the $950.00 reserve: breached: below it by $151.37 (this range takes at most $748.63; the existing NOCK ranges hold $152.80 USDC there). The gate is the stable balance at the ladder's own bottom (operator decision, 2026-11-20).\n• Below the bottom: at $0.00776640 (-40.00%) stable $771.69 (reserve -$178.31). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• At the top: stable $1828.69 (reserve +$878.69) at $0.01320288. Out of range above (read at the top), the ladder holds only USDC: its NOCK has sold on the way up.\n• Stated, not gates: no accumulation plan (no accumulation_plan is configured); the $0.00 tax reserve\n• Floor budget: needs 4,194 of the 87 NOCK that may go into LP: exceeds; $18.62 is the most USDC this range holds within it. The rebuild's suggestions this cycle also draw 0 NOCK of the same budget: an alternative use of it, not subtracted\n• Floor-crossing price: lowers: the ladder's NOCK leaves the wallet and sells as NOCK rises to the top (without the ladder $0.025404 (+96.3%), with it $0.018363 (+41.9%))\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
+    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Range: $0.00906080 – $0.01320288 (-30.00% / +2.00% of the pool price $0.01294400), unsnapped: no position_id or tick_spacing was given\n• Sizing: $900.00 USDC and 4,194 NOCK at spot (liquidity 48430.1458)\n• Tops next to spot: none listed (unsnapped: there is no tick grid, so there are no neighbouring tops)\n• Price grid (NOCK bought by the ladder, USDC left in it; stable balance and reserve headroom):\n  +2.00% $0.01320288: 4,194 NOCK sold, $954.83 USDC left; stable $1828.69 (reserve +$878.69) [top]\n  0.00% $0.01294400: 0 NOCK bought, $900.00 USDC left; stable $1769.54 (reserve +$819.54) [spot]\n  -5.00% $0.01229680: 11,058 NOCK bought, $760.48 USDC left; stable $1619.03 (reserve +$669.03)\n  -10.00% $0.01164960: 23,026 NOCK bought, $617.25 USDC left; stable $1464.51 (reserve +$514.51)\n  -15.00% $0.01100240: 36,035 NOCK bought, $469.97 USDC left; stable $1305.63 (reserve +$355.63)\n  -20.00% $0.01035520: 50,245 NOCK bought, $318.30 USDC left; stable $1142.01 (reserve +$192.01)\n  -25.00% $0.00970800: 65,853 NOCK bought, $161.80 USDC left; stable $973.18 (reserve +$23.18)\n  -30.00% $0.00906080: 83,105 NOCK bought, $0.00 USDC left; stable $798.63 (reserve -$151.37) [bottom]\n  -35.00% $0.00841360: 83,105 NOCK bought, $0.00 USDC left; stable $785.42 (reserve -$164.58)\n  -40.00% $0.00776640: 83,105 NOCK bought, $0.00 USDC left; stable $771.69 (reserve -$178.31)\n• Bottom: fully NOCK at $0.00906080 (-30.00%): 87,299 NOCK held, 83,105 bought, average $0.01082973\n• Top: out of range above at $0.01320288 (+2.00%): $954.83 USDC; the NOCK held at spot sells at an average $0.01307280\n• Reserve: stable $798.63 at the bottom against the $950.00 reserve: breached: below it by $151.37 (this range takes at most $748.63; the existing NOCK ranges hold $152.80 USDC there). The gate is the stable balance at the ladder's own bottom (operator decision, 2026-11-20).\n• Below the bottom: at $0.00776640 (-40.00%) stable $771.69 (reserve -$178.31). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• At the top: stable $1828.69 (reserve +$878.69) at $0.01320288. Out of range above (read at the top), the ladder holds only USDC: its NOCK has sold on the way up.\n• Stated, not gates: no accumulation plan (no accumulation_plan is configured); the $0.00 tax reserve\n• Floor budget: needs 4,194 of the 87 NOCK that may go into LP: exceeds; $18.62 is the most USDC this range holds within it. The rebuild's suggestions this cycle also draw 0 NOCK of the same budget: an alternative use of it, not subtracted\n• Floor-crossing price: lowers: the ladder's NOCK leaves the wallet and sells as NOCK rises to the top (without the ladder $0.025404 (+96.3%), with it $0.018363 (+41.9%))\n• Fees while in range: not estimated: this snapshot has no fee_yield (2.10.0): fees are not measured in it\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
     "query": {
       "high_pct": "2",
       "low_pct": "-30",
@@ -744,6 +836,52 @@
         "low_usd": "0.01002405",
         "tick_lower": 273900,
         "tick_upper": 276300
+      },
+      "fee_estimate": {
+        "assumptions": [
+          "Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one).",
+          "Fees per unit of liquidity are shared by every range that contains the price (the same pool, the same fee tier).",
+          "The pool's swap volume is taken as unchanged by the new liquidity: only its share dilutes.",
+          "Dilution uses the pool's active liquidity at the current tick, read at 'latest' in the snapshot's cycle (not at the snapshot's block); the liquidity at the range's own ticks is not read and is taken as the same.",
+          "The NOCK fee leg is valued at the current pool price, not at the price when it accrued.",
+          "Intervals where the measuring range's liquidity changed or its fees fell (a collect, or a v4 add that collects) are skipped, so the measurement slightly undercounts; the seconds skipped are stated.",
+          "Gas is not counted. Past fees are not a forecast.",
+          "The stored market volume of another pool (market_price_history) is never used."
+        ],
+        "band_measured": null,
+        "band_reason": null,
+        "constants": {
+          "band_min_seconds": 72000.0,
+          "day_min_seconds": null,
+          "max_gap_seconds": null,
+          "note": "display constants, not settings",
+          "window_days": null
+        },
+        "coverage": null,
+        "dilution": null,
+        "dilution_reason": null,
+        "in_range_share_reason": null,
+        "in_range_share_stored_history": null,
+        "intervals": null,
+        "measured_at": null,
+        "measured_by": null,
+        "measured_days": null,
+        "measured_label": null,
+        "measured_seconds": null,
+        "measurement_age_seconds": null,
+        "per_100_usd_per_day_in_range_usd": null,
+        "per_day_in_range_diluted_usd": null,
+        "per_day_in_range_nock_leg": null,
+        "per_day_in_range_usd": null,
+        "per_day_in_range_usdc_leg": null,
+        "rate": null,
+        "reason": "this snapshot has no fee_yield (2.10.0): fees are not measured in it",
+        "replay_reason": null,
+        "skipped": null,
+        "skipped_seconds": null,
+        "spread": null,
+        "status": "unavailable",
+        "stored_history_replay": null
       },
       "floor_check": {
         "budget_note": null,
@@ -1029,7 +1167,7 @@
         "snapshot_id": "00000000-0000-0000-0000-000000000000",
         "spot_source": "price-source pool sqrtPriceX96 (v4 USDC/NOCK 3.00% #3163450)",
         "spot_usd": "0.01294400",
-        "version": "2.9.0",
+        "version": "2.10.0",
         "worker_health": "ok"
       },
       "statement": "A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.",
@@ -1061,7 +1199,7 @@
       ],
       "top_neighbours_reason": null
     },
-    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Range: $0.01002405 – $0.01274292 (-22.56% / -1.55% of the pool price $0.01294400), snapped to v4 USDC/NOCK 3.00% #3163450 (tick spacing 300; top: the usable tick at or below the pool price (high = spot): it holds no NOCK)\n• Pool: a ladder in this pool is a NEW position (a new NFT); add it to config.yaml to be tracked\n• Sizing: $741.00 USDC and 0 NOCK at spot (liquidity 58052.3879)\n• Tops next to spot: $0.01274292 (-1.55%) needs 0 NOCK (fits the budget); $0.01313098 (+1.44%) needs 3,409 NOCK (exceeds the budget)\n• Price grid (NOCK bought by the ladder, USDC left in it; stable balance and reserve headroom):\n  0.00% $0.01294400: 0 NOCK bought, $741.00 USDC left; stable $1769.54 (reserve +$819.54) [spot]\n  -1.55% $0.01274292: 0 NOCK bought, $741.00 USDC left; stable $1766.16 (reserve +$816.16) [top]\n  -5.00% $0.01229680: 9,245 NOCK bought, $625.27 USDC left; stable $1642.82 (reserve +$692.82)\n  -10.00% $0.01164960: 23,591 NOCK bought, $453.57 USDC left; stable $1459.83 (reserve +$509.83)\n  -15.00% $0.01100240: 39,184 NOCK bought, $277.03 USDC left; stable $1271.69 (reserve +$321.69)\n  -20.00% $0.01035520: 56,217 NOCK bought, $95.22 USDC left; stable $1077.93 (reserve +$127.93)\n  -22.56% $0.01002405: 65,563 NOCK bought, $0.00 USDC left; stable $976.45 (reserve +$26.45) [bottom]\n  -25.00% $0.00970800: 65,563 NOCK bought, $0.00 USDC left; stable $970.38 (reserve +$20.38)\n  -30.00% $0.00906080: 65,563 NOCK bought, $0.00 USDC left; stable $957.63 (reserve +$7.63)\n  -35.00% $0.00841360: 65,563 NOCK bought, $0.00 USDC left; stable $944.42 (reserve -$5.58)\n  -40.00% $0.00776640: 65,563 NOCK bought, $0.00 USDC left; stable $930.69 (reserve -$19.31)\n• Bottom: fully NOCK at $0.01002405 (-22.56%): 65,563 NOCK held, 65,563 bought, average $0.01130202\n• Top: $0.01274292 (-1.55%): out of range above now, all USDC ($741.00); it enters range when NOCK falls to $0.01274292\n• Reserve: stable $976.45 at the bottom against the $950.00 reserve: holds by $26.45 (this range takes at most $767.45; the existing NOCK ranges hold $171.62 USDC there). The gate is the stable balance at the ladder's own bottom (operator decision, 2026-11-20).\n• Below the bottom: at $0.00776640 (-40.00%) stable $930.69 (reserve -$19.31). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• At the top: stable $1769.54 (reserve +$819.54) at $0.01294400. The ladder is out of range above now and holds only USDC: the stable balance at spot is unchanged by it, and a rise takes none of it.\n• Stated, not gates: no accumulation plan (no accumulation_plan is configured); the $0.00 tax reserve\n• Floor budget: needs 0 of the 87 NOCK that may go into LP: fits. The rebuild's suggestions this cycle also draw 0 NOCK of the same budget: an alternative use of it, not subtracted\n• Floor-crossing price: none: the ladder holds no NOCK at or above spot, so a rise sells none of it (without the ladder $0.025404 (+96.3%), with it $0.025404 (+96.3%))\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
+    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Range: $0.01002405 – $0.01274292 (-22.56% / -1.55% of the pool price $0.01294400), snapped to v4 USDC/NOCK 3.00% #3163450 (tick spacing 300; top: the usable tick at or below the pool price (high = spot): it holds no NOCK)\n• Pool: a ladder in this pool is a NEW position (a new NFT); add it to config.yaml to be tracked\n• Sizing: $741.00 USDC and 0 NOCK at spot (liquidity 58052.3879)\n• Tops next to spot: $0.01274292 (-1.55%) needs 0 NOCK (fits the budget); $0.01313098 (+1.44%) needs 3,409 NOCK (exceeds the budget)\n• Price grid (NOCK bought by the ladder, USDC left in it; stable balance and reserve headroom):\n  0.00% $0.01294400: 0 NOCK bought, $741.00 USDC left; stable $1769.54 (reserve +$819.54) [spot]\n  -1.55% $0.01274292: 0 NOCK bought, $741.00 USDC left; stable $1766.16 (reserve +$816.16) [top]\n  -5.00% $0.01229680: 9,245 NOCK bought, $625.27 USDC left; stable $1642.82 (reserve +$692.82)\n  -10.00% $0.01164960: 23,591 NOCK bought, $453.57 USDC left; stable $1459.83 (reserve +$509.83)\n  -15.00% $0.01100240: 39,184 NOCK bought, $277.03 USDC left; stable $1271.69 (reserve +$321.69)\n  -20.00% $0.01035520: 56,217 NOCK bought, $95.22 USDC left; stable $1077.93 (reserve +$127.93)\n  -22.56% $0.01002405: 65,563 NOCK bought, $0.00 USDC left; stable $976.45 (reserve +$26.45) [bottom]\n  -25.00% $0.00970800: 65,563 NOCK bought, $0.00 USDC left; stable $970.38 (reserve +$20.38)\n  -30.00% $0.00906080: 65,563 NOCK bought, $0.00 USDC left; stable $957.63 (reserve +$7.63)\n  -35.00% $0.00841360: 65,563 NOCK bought, $0.00 USDC left; stable $944.42 (reserve -$5.58)\n  -40.00% $0.00776640: 65,563 NOCK bought, $0.00 USDC left; stable $930.69 (reserve -$19.31)\n• Bottom: fully NOCK at $0.01002405 (-22.56%): 65,563 NOCK held, 65,563 bought, average $0.01130202\n• Top: $0.01274292 (-1.55%): out of range above now, all USDC ($741.00); it enters range when NOCK falls to $0.01274292\n• Reserve: stable $976.45 at the bottom against the $950.00 reserve: holds by $26.45 (this range takes at most $767.45; the existing NOCK ranges hold $171.62 USDC there). The gate is the stable balance at the ladder's own bottom (operator decision, 2026-11-20).\n• Below the bottom: at $0.00776640 (-40.00%) stable $930.69 (reserve -$19.31). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• At the top: stable $1769.54 (reserve +$819.54) at $0.01294400. The ladder is out of range above now and holds only USDC: the stable balance at spot is unchanged by it, and a rise takes none of it.\n• Stated, not gates: no accumulation plan (no accumulation_plan is configured); the $0.00 tax reserve\n• Floor budget: needs 0 of the 87 NOCK that may go into LP: fits. The rebuild's suggestions this cycle also draw 0 NOCK of the same budget: an alternative use of it, not subtracted\n• Floor-crossing price: none: the ladder holds no NOCK at or above spot, so a rise sells none of it (without the ladder $0.025404 (+96.3%), with it $0.025404 (+96.3%))\n• Fees while in range: not estimated: this snapshot has no fee_yield (2.10.0): fees are not measured in it\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
     "query": {
       "high": "spot",
       "low": "0.01",
@@ -1094,6 +1232,52 @@
         "low_usd": "0.01000000",
         "tick_lower": null,
         "tick_upper": null
+      },
+      "fee_estimate": {
+        "assumptions": [
+          "Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one).",
+          "Fees per unit of liquidity are shared by every range that contains the price (the same pool, the same fee tier).",
+          "The pool's swap volume is taken as unchanged by the new liquidity: only its share dilutes.",
+          "Dilution uses the pool's active liquidity at the current tick, read at 'latest' in the snapshot's cycle (not at the snapshot's block); the liquidity at the range's own ticks is not read and is taken as the same.",
+          "The NOCK fee leg is valued at the current pool price, not at the price when it accrued.",
+          "Intervals where the measuring range's liquidity changed or its fees fell (a collect, or a v4 add that collects) are skipped, so the measurement slightly undercounts; the seconds skipped are stated.",
+          "Gas is not counted. Past fees are not a forecast.",
+          "The stored market volume of another pool (market_price_history) is never used."
+        ],
+        "band_measured": null,
+        "band_reason": null,
+        "constants": {
+          "band_min_seconds": 72000.0,
+          "day_min_seconds": null,
+          "max_gap_seconds": null,
+          "note": "display constants, not settings",
+          "window_days": null
+        },
+        "coverage": null,
+        "dilution": null,
+        "dilution_reason": null,
+        "in_range_share_reason": null,
+        "in_range_share_stored_history": null,
+        "intervals": null,
+        "measured_at": null,
+        "measured_by": null,
+        "measured_days": null,
+        "measured_label": null,
+        "measured_seconds": null,
+        "measurement_age_seconds": null,
+        "per_100_usd_per_day_in_range_usd": null,
+        "per_day_in_range_diluted_usd": null,
+        "per_day_in_range_nock_leg": null,
+        "per_day_in_range_usd": null,
+        "per_day_in_range_usdc_leg": null,
+        "rate": null,
+        "reason": "this snapshot has no fee_yield (2.10.0): fees are not measured in it",
+        "replay_reason": null,
+        "skipped": null,
+        "skipped_seconds": null,
+        "spread": null,
+        "status": "unavailable",
+        "stored_history_replay": null
       },
       "floor_check": {
         "budget_note": null,
@@ -1364,7 +1548,7 @@
         "snapshot_id": "00000000-0000-0000-0000-000000000000",
         "spot_source": "price-source pool sqrtPriceX96 (v4 USDC/NOCK 3.00% #3163450)",
         "spot_usd": "0.01294400",
-        "version": "2.9.0",
+        "version": "2.10.0",
         "worker_health": "ok"
       },
       "statement": "A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.",
@@ -1379,7 +1563,7 @@
       "top_neighbours": null,
       "top_neighbours_reason": "unsnapped: there is no tick grid, so there are no neighbouring tops"
     },
-    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Range: $0.01000000 – $0.01294400 (-22.74% / 0.00% of the pool price $0.01294400), unsnapped: no position_id or tick_spacing was given\n• Sizing: $741.00 USDC and 0 NOCK at spot (liquidity 53805.9887)\n• Tops next to spot: none listed (unsnapped: there is no tick grid, so there are no neighbouring tops)\n• Price grid (NOCK bought by the ladder, USDC left in it; stable balance and reserve headroom):\n  0.00% $0.01294400: 0 NOCK bought, $741.00 USDC left; stable $1769.54 (reserve +$819.54) [spot, top]\n  -5.00% $0.01229680: 12,286 NOCK bought, $586.00 USDC left; stable $1603.55 (reserve +$653.55)\n  -10.00% $0.01164960: 25,582 NOCK bought, $426.86 USDC left; stable $1433.12 (reserve +$483.12)\n  -15.00% $0.01100240: 40,035 NOCK bought, $263.24 USDC left; stable $1257.90 (reserve +$307.90)\n  -20.00% $0.01035520: 55,822 NOCK bought, $94.73 USDC left; stable $1077.44 (reserve +$127.44)\n  -22.74% $0.01000000: 65,130 NOCK bought, $0.00 USDC left; stable $975.99 (reserve +$25.99) [bottom]\n  -25.00% $0.00970800: 65,130 NOCK bought, $0.00 USDC left; stable $970.38 (reserve +$20.38)\n  -30.00% $0.00906080: 65,130 NOCK bought, $0.00 USDC left; stable $957.63 (reserve +$7.63)\n  -35.00% $0.00841360: 65,130 NOCK bought, $0.00 USDC left; stable $944.42 (reserve -$5.58)\n  -40.00% $0.00776640: 65,130 NOCK bought, $0.00 USDC left; stable $930.69 (reserve -$19.31)\n• Bottom: fully NOCK at $0.01000000 (-22.74%): 65,130 NOCK held, 65,130 bought, average $0.01137717\n• Top: $0.01294400 (0.00%): out of range above now, all USDC ($741.00); it enters range when NOCK falls to $0.01294400\n• Reserve: stable $975.99 at the bottom against the $950.00 reserve: holds by $25.99 (this range takes at most $766.99; the existing NOCK ranges hold $171.16 USDC there). The gate is the stable balance at the ladder's own bottom (operator decision, 2026-11-20).\n• Below the bottom: at $0.00776640 (-40.00%) stable $930.69 (reserve -$19.31). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• At the top: stable $1769.54 (reserve +$819.54) at $0.01294400. The ladder is out of range above now and holds only USDC: the stable balance at spot is unchanged by it, and a rise takes none of it.\n• Stated, not gates: no accumulation plan (no accumulation_plan is configured); the $0.00 tax reserve\n• Floor budget: needs 0 of the 87 NOCK that may go into LP: fits. The rebuild's suggestions this cycle also draw 0 NOCK of the same budget: an alternative use of it, not subtracted\n• Floor-crossing price: none: the ladder holds no NOCK at or above spot, so a rise sells none of it (without the ladder $0.025404 (+96.3%), with it $0.025404 (+96.3%))\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
+    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Range: $0.01000000 – $0.01294400 (-22.74% / 0.00% of the pool price $0.01294400), unsnapped: no position_id or tick_spacing was given\n• Sizing: $741.00 USDC and 0 NOCK at spot (liquidity 53805.9887)\n• Tops next to spot: none listed (unsnapped: there is no tick grid, so there are no neighbouring tops)\n• Price grid (NOCK bought by the ladder, USDC left in it; stable balance and reserve headroom):\n  0.00% $0.01294400: 0 NOCK bought, $741.00 USDC left; stable $1769.54 (reserve +$819.54) [spot, top]\n  -5.00% $0.01229680: 12,286 NOCK bought, $586.00 USDC left; stable $1603.55 (reserve +$653.55)\n  -10.00% $0.01164960: 25,582 NOCK bought, $426.86 USDC left; stable $1433.12 (reserve +$483.12)\n  -15.00% $0.01100240: 40,035 NOCK bought, $263.24 USDC left; stable $1257.90 (reserve +$307.90)\n  -20.00% $0.01035520: 55,822 NOCK bought, $94.73 USDC left; stable $1077.44 (reserve +$127.44)\n  -22.74% $0.01000000: 65,130 NOCK bought, $0.00 USDC left; stable $975.99 (reserve +$25.99) [bottom]\n  -25.00% $0.00970800: 65,130 NOCK bought, $0.00 USDC left; stable $970.38 (reserve +$20.38)\n  -30.00% $0.00906080: 65,130 NOCK bought, $0.00 USDC left; stable $957.63 (reserve +$7.63)\n  -35.00% $0.00841360: 65,130 NOCK bought, $0.00 USDC left; stable $944.42 (reserve -$5.58)\n  -40.00% $0.00776640: 65,130 NOCK bought, $0.00 USDC left; stable $930.69 (reserve -$19.31)\n• Bottom: fully NOCK at $0.01000000 (-22.74%): 65,130 NOCK held, 65,130 bought, average $0.01137717\n• Top: $0.01294400 (0.00%): out of range above now, all USDC ($741.00); it enters range when NOCK falls to $0.01294400\n• Reserve: stable $975.99 at the bottom against the $950.00 reserve: holds by $25.99 (this range takes at most $766.99; the existing NOCK ranges hold $171.16 USDC there). The gate is the stable balance at the ladder's own bottom (operator decision, 2026-11-20).\n• Below the bottom: at $0.00776640 (-40.00%) stable $930.69 (reserve -$19.31). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• At the top: stable $1769.54 (reserve +$819.54) at $0.01294400. The ladder is out of range above now and holds only USDC: the stable balance at spot is unchanged by it, and a rise takes none of it.\n• Stated, not gates: no accumulation plan (no accumulation_plan is configured); the $0.00 tax reserve\n• Floor budget: needs 0 of the 87 NOCK that may go into LP: fits. The rebuild's suggestions this cycle also draw 0 NOCK of the same budget: an alternative use of it, not subtracted\n• Floor-crossing price: none: the ladder holds no NOCK at or above spot, so a rise sells none of it (without the ladder $0.025404 (+96.3%), with it $0.025404 (+96.3%))\n• Fees while in range: not estimated: this snapshot has no fee_yield (2.10.0): fees are not measured in it\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
     "query": {
       "high": "spot",
       "low": "0.01",
@@ -1388,7 +1572,7 @@
     "status": 200
   },
   "tool": {
-    "description": "Read-only what-if for a USDC/NOCK range (a 'ladder') below spot, from the latest stored snapshot: the liquidity and NOCK the inputs imply, NOCK bought and USDC left at each price down the grid, the full-conversion price and average buy price, the price where it is out of range above (all USDC), the stable balance at the ladder's bottom against the protected cash reserve (counting the existing NOCK ranges' USDC converting on the way down), and whether its NOCK fits the floor + tolerance budget, with its effect on the floor-crossing price. Bounds snap to a tracked pool's tick spacing (position_id) or a spacing you give (tick_spacing). Nothing is read on-chain, signed or sent; the amounts are yours.",
+    "description": "Read-only what-if for a USDC/NOCK range (a 'ladder') below spot, or a ladder of up to 4 rungs (cap, near and deep) in one pool, from the latest stored snapshot: the liquidity and NOCK the inputs imply, NOCK bought and USDC left at each price down the grid, the full-conversion price and average buy price, the price where it is out of range above (all USDC), the stable balance at the reserve gate (the lower of the deepest bottom and your configured ladder bottom) against the protected cash reserve (counting the existing NOCK ranges' USDC converting on the way down), whether its NOCK fits the floor + tolerance budget, its effect on the floor-crossing price, and estimated fees per day while in range, measured from your own tracked range (with the in-range share of stored history and replay upper bounds beside it). With rungs it also draws trade-off tables (split and depths) as measurements, unranked. shape: 'configured' runs your own operator_profile.ladder_rungs. Bounds snap to a tracked pool's tick spacing (position_id) or a spacing you give (tick_spacing). Nothing is read on-chain, signed or sent; the amounts are yours.",
     "inputSchema": {
       "properties": {
         "grid_step_pct": {
@@ -1400,29 +1584,29 @@
           "type": "number"
         },
         "high": {
-          "description": "Top of the range, USD per NOCK (or high_pct, or high_at_spot).",
+          "description": "One-rung form: top of the range, USD per NOCK (or high_pct, or high_at_spot).",
           "exclusiveMinimum": 0,
           "type": "number"
         },
         "high_at_spot": {
-          "description": "True: the top is the pool price (on a snapped grid, the usable tick at or below it, holding no NOCK).",
+          "description": "One-rung form: true when the top is the pool price (on a snapped grid, the usable tick at or below it, holding no NOCK).",
           "type": "boolean"
         },
         "high_pct": {
-          "description": "Top as % of the pool price, e.g. 2.",
+          "description": "One-rung form: top as % of the pool price, e.g. 2.",
           "type": "number"
         },
         "low": {
-          "description": "Bottom of the range, USD per NOCK (or give low_pct).",
+          "description": "One-rung form: bottom of the range, USD per NOCK (or give low_pct).",
           "exclusiveMinimum": 0,
           "type": "number"
         },
         "low_pct": {
-          "description": "Bottom as % of the pool price, e.g. -30.",
+          "description": "One-rung form: bottom as % of the pool price, e.g. -30.",
           "type": "number"
         },
         "nock": {
-          "description": "Optional: the NOCK you would add with it; checked against what the range needs.",
+          "description": "One-rung form, optional: the NOCK you would add with it; checked against what the range needs.",
           "minimum": 0,
           "type": "number"
         },
@@ -1430,20 +1614,81 @@
           "description": "A tracked USDC/NOCK concentrated position whose pool and tick spacing the ladder would use.",
           "type": "string"
         },
+        "rungs": {
+          "description": "A ladder of rungs in one pool, instead of the one-rung arguments: each {rung: cap|near|deep (required), usdc, nock?, low or low_pct, high or high_pct or high_at_spot}.",
+          "items": {
+            "properties": {
+              "high": {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "high_at_spot": {
+                "type": "boolean"
+              },
+              "high_pct": {
+                "type": "number"
+              },
+              "low": {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              "low_pct": {
+                "type": "number"
+              },
+              "nock": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "rung": {
+                "description": "The rung's role; required, never assumed.",
+                "enum": [
+                  "cap",
+                  "near",
+                  "deep"
+                ],
+                "type": "string"
+              },
+              "usdc": {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "rung",
+              "usdc"
+            ],
+            "type": "object"
+          },
+          "maxItems": 4,
+          "type": "array"
+        },
+        "shape": {
+          "description": "'configured': your own operator_profile.ladder_rungs, instead of rungs or the one-rung arguments.",
+          "enum": [
+            "configured"
+          ],
+          "type": "string"
+        },
+        "shape_usdc": {
+          "description": "With shape: the total USDC to size it to (default: the most the shared reserve gate allows).",
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        "split_step_pct": {
+          "description": "With rungs: the split table's step, % of the total (5 to 50; display default 10).",
+          "type": "number"
+        },
         "tick_spacing": {
           "description": "A tick spacing you state, instead of position_id.",
           "minimum": 1,
           "type": "integer"
         },
         "usdc": {
-          "description": "USDC the ladder holds at spot.",
+          "description": "One-rung form: USDC the ladder holds at spot.",
           "exclusiveMinimum": 0,
           "type": "number"
         }
       },
-      "required": [
-        "usdc"
-      ],
       "type": "object"
     },
     "name": "simulate_ladder"

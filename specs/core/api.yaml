@@ -608,8 +608,35 @@ paths:
         listed with their NOCK need. With neither, the range is unsnapped and says so.
         Percent bounds and high=spot are relative to the ladder pool's own price (spot,
         unless position_id names another pool).
+
+        Since 2.10.0 (extending #166), additive; a one-rung body is unchanged apart from
+        `fee_estimate` and, only when operator_profile.ladder_bottom_usd is set, the gate
+        fields:
+        - A ladder of rungs: the indexed parameters r1_..r4_ (rN_rung cap | near | deep,
+          required; rN_usdc; rN_low | rN_low_pct; rN_high | rN_high=spot | rN_high_pct;
+          optional rN_nock) instead of the flat ones, all in one pool. Mixing the two
+          forms, an index gap, a missing role or a fifth rung is a 400 (LADDER_MAX_RUNGS
+          = 4, a display limit, echoed in combined.max_rungs). Overlapping rungs are
+          allowed and listed in combined.overlaps. One reserve gate and one NOCK budget
+          are shared: the gate is read where every rung is fully NOCK, at the lower of
+          the deepest rung's bottom and GlobalStatus.ladder_bottom_usd (without it, the
+          deepest bottom, stated in gate_price_rule); the NOCK budget is met by the sum.
+          The floor-crossing effect adds every rung as a hypothetical position.
+        - shape=configured: the operator's own operator_profile.ladder_rungs
+          (GlobalStatus.ladder_rungs), sized to shape_usdc or to the shared reserve
+          gate's most (max_usdc_total). A cap, when the shape starts with one, is the
+          tick band containing the pool's tick, holding the LP NOCK budget and the USDC
+          its curve pairs with it, never more USDC than the near rung's.
+        - fee_estimate: fees per day while in range, measured from our own tracked
+          range (snapshot derived_metrics.fee_yield), the measuring range's average fee
+          per unit of liquidity times the range's liquidity, valued at the current pool
+          price; always beside the in-range share of stored history and the replay upper
+          bounds, with the measurement inside the range (band_measured), the daily spread
+          over UTC days and the assumptions. Null with a reason when it cannot be stated.
+        - tradeoff (two or more rungs): measurement tables (split, near rung's depth,
+          deep rung's top) in the order of the quantity varied, never ranked, none marked.
       parameters:
-        - { name: usdc, in: query, required: true, schema: { type: number, exclusiveMinimum: true, minimum: 0 }, description: USDC the ladder holds at spot }
+        - { name: usdc, in: query, required: false, schema: { type: number, exclusiveMinimum: true, minimum: 0 }, description: 'One-rung form (required there): USDC the ladder holds at spot' }
         - { name: nock, in: query, required: false, schema: { type: number, minimum: 0 }, description: NOCK to check against what the range needs (within the larger of 1 NOCK and 10 bps) }
         - { name: low, in: query, required: false, schema: { type: number, exclusiveMinimum: true, minimum: 0 }, description: Bottom in USD per NOCK; exactly one of low and low_pct }
         - { name: low_pct, in: query, required: false, schema: { type: number, exclusiveMinimum: true, minimum: -100 }, description: Bottom as percent of the pool price }
@@ -619,6 +646,16 @@ paths:
         - { name: tick_spacing, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 32767 }, description: A spacing the caller states, instead of position_id }
         - { name: grid_to_pct, in: query, required: false, schema: { type: number, minimum: -95, maximum: -1, default: -40 } }
         - { name: grid_step_pct, in: query, required: false, schema: { type: number, minimum: 0.5, maximum: 20, default: 5 }, description: At most 60 rows }
+        - { name: r1_rung, in: query, required: false, schema: { type: string, enum: [cap, near, deep] }, description: 'A ladder of rungs: rung 1''s role, required for it, never assumed (r2_..r4_ likewise)' }
+        - { name: r1_usdc, in: query, required: false, schema: { type: number, exclusiveMinimum: true, minimum: 0 }, description: Rung 1's USDC at spot }
+        - { name: r1_nock, in: query, required: false, schema: { type: number, minimum: 0 }, description: Rung 1's NOCK, checked as nock is }
+        - { name: r1_low, in: query, required: false, schema: { type: number, exclusiveMinimum: true, minimum: 0 }, description: Rung 1's bottom in USD per NOCK; or r1_low_pct }
+        - { name: r1_low_pct, in: query, required: false, schema: { type: number } }
+        - { name: r1_high, in: query, required: false, schema: { type: string }, description: 'Rung 1''s top in USD per NOCK, or "spot"; or r1_high_pct' }
+        - { name: r1_high_pct, in: query, required: false, schema: { type: number } }
+        - { name: split_step_pct, in: query, required: false, schema: { type: number, minimum: 5, maximum: 50, default: 10 }, description: 'Rungs only: the split table''s step, a display step, echoed' }
+        - { name: shape, in: query, required: false, schema: { type: string, enum: [configured] }, description: 'operator_profile.ladder_rungs, instead of the flat or indexed rungs' }
+        - { name: shape_usdc, in: query, required: false, schema: { type: number, exclusiveMinimum: true, minimum: 0 }, description: 'With shape: the total to size it to (default: the shared reserve gate''s most)' }
       responses:
         '200':
           description: The simulation. Amounts are strings; a figure that cannot be stated is null with a stated reason.
@@ -627,12 +664,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/LadderSimulation'
         '400':
-          description: INVALID_PARAMETER (an unknown parameter, a missing or non-finite number, low >= high, both low and low_pct, a closed or untracked position_id, ...)
+          description: INVALID_PARAMETER (an unknown parameter, a missing or non-finite number, low >= high, both low and low_pct, a closed or untracked position_id, flat and indexed parameters mixed, an index gap, a rung with no role, a fifth rung, split_step_pct out of range or on the one-rung form, shape with other rungs, ...)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LadderError' }
         '422':
-          description: LADDER_NOT_SIMULATED; `code` is NOCK_TOO_LITTLE, NOCK_TOO_MUCH, USDC_EXCEEDS_WALLET, RANGE_ABOVE_SPOT, RANGE_TOO_NARROW, RANGE_OUTSIDE_TICKS (an unsnapped bound past MIN_TICK or MAX_TICK, a range that cannot exist), POOL_NOT_SNAPPABLE or SPOT_UNAVAILABLE. A NOCK mismatch carries nock_needed (a measured figure) and the bounds.
+          description: LADDER_NOT_SIMULATED; `code` is NOCK_TOO_LITTLE, NOCK_TOO_MUCH, USDC_EXCEEDS_WALLET, RANGE_ABOVE_SPOT, RANGE_TOO_NARROW, RANGE_OUTSIDE_TICKS (an unsnapped bound past MIN_TICK or MAX_TICK, a range that cannot exist), POOL_NOT_SNAPPABLE or SPOT_UNAVAILABLE; for rungs also RUNG_TOO_NARROW and RUNGS_EXCEED_WALLET (a rung's own error names it first, as r2 (deep)); for shape=configured SHAPE_NOT_CONFIGURED (none set, or the configuration error named), SHAPE_TOTAL_UNKNOWN (no reserve to size by, so give shape_usdc), SHAPE_NO_ROOM and SHAPE_NEEDS_TICK_SPACING (a cap needs position_id). A NOCK mismatch carries nock_needed (a measured figure) and the bounds.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LadderError' }
@@ -1044,7 +1081,7 @@ components:
         error: { type: string, enum: [INVALID_PARAMETER, LADDER_NOT_SIMULATED] }
         code:
           type: string
-          enum: [NOCK_TOO_LITTLE, NOCK_TOO_MUCH, USDC_EXCEEDS_WALLET, RANGE_ABOVE_SPOT, RANGE_TOO_NARROW, RANGE_OUTSIDE_TICKS, POOL_NOT_SNAPPABLE, SPOT_UNAVAILABLE]
+          enum: [NOCK_TOO_LITTLE, NOCK_TOO_MUCH, USDC_EXCEEDS_WALLET, RANGE_ABOVE_SPOT, RANGE_TOO_NARROW, RANGE_OUTSIDE_TICKS, POOL_NOT_SNAPPABLE, SPOT_UNAVAILABLE, RUNG_TOO_NARROW, RUNGS_EXCEED_WALLET, SHAPE_NOT_CONFIGURED, SHAPE_TOTAL_UNKNOWN, SHAPE_NO_ROOM, SHAPE_NEEDS_TICK_SPACING]
         detail: { type: string }
         nock_needed: { type: string, description: NOCK the range needs at the pool price for this USDC, 4 dp }
         bounds: { $ref: '#/components/schemas/LadderBounds' }
@@ -1058,7 +1095,8 @@ components:
         high_pct: { type: string }
         tick_lower: { type: integer, nullable: true, description: Null when unsnapped }
         tick_upper: { type: integer, nullable: true }
-        high_rule: { type: string, description: 'the nearest usable tick | the usable tick at or below the pool price (high = spot) | unsnapped' }
+        high_rule: { type: string, description: 'the nearest usable tick | the usable tick at or below the pool price (high = spot) | unsnapped | the tick band containing the pool''s tick (the cap) | per rung' }
+        describes: { type: string, description: 'Rungs only: what the top-level figures sum over' }
 
     LadderGridRow:
       type: object
@@ -1074,7 +1112,12 @@ components:
         stable_usdc: { type: string, nullable: true, description: Wallet USDC less the ladder's, plus the ladder's and the existing NOCK ranges' USDC }
         reserve_headroom_usdc: { type: string, nullable: true, description: Null with no valid reserve }
         total_tracked_nock: { type: string, nullable: true, description: Wallet NOCK less the ladder's, plus the ladder's, the existing ranges' and uncollected NOCK fees }
-        markers: { type: array, items: { type: string, enum: [spot, top, bottom] } }
+        markers: { type: array, items: { type: string }, description: 'spot, top, bottom; for rungs "rN top", "rN bottom" and gate' }
+        rungs: { type: array, description: 'Rungs only: each rung''s USDC and NOCK at this price and whether the price is inside it (tickLower <= tick < tickUpper)', items: { type: object } }
+        rungs_in_range: { type: array, items: { type: integer }, description: Rungs only }
+        est_fee_usd_per_day: { type: string, nullable: true, description: 'Rungs only: the summed fee per day of the rungs in range here (est_fee_reason when null or partial)' }
+        est_fee_usd_per_day_diluted: { type: string, nullable: true }
+        est_fee_reason: { type: string, nullable: true }
 
     LadderSimulation:
       type: object
@@ -1164,6 +1207,8 @@ components:
             accumulation_plan_unspent: { type: object, nullable: true, description: Stated, not a gate }
             accumulation_plan_unspent_reason: { type: string, nullable: true }
             existing_ladders: { type: array, items: { type: string }, description: 'Tracked ladders (#167) among the existing NOCK ranges, by position_id; absent when none is tracked' }
+            gate_price_usd: { type: string, description: 'Where the gate is read (2.10.0): always for rungs; for one rung only when ladder_bottom_usd is set' }
+            gate_price_rule: { type: string }
             tax_reserve_usd: { type: object, nullable: true, description: Stated, not a gate }
             reason: { type: string, nullable: true }
         floor_check:
@@ -1176,6 +1221,7 @@ components:
             rebuild_suggested_nock: { type: string }
             rebuild_note: { type: string }
             max_usdc_within_budget: { type: string, nullable: true }
+            nock_needed_by_rung: { type: array, items: { type: object }, description: Rungs only }
             floor_breach_effect:
               type: object
               properties:
@@ -1185,8 +1231,109 @@ components:
                 reason: { type: string }
                 assumption: { type: string, nullable: true }
             reason: { type: string, nullable: true }
+        fee_estimate:
+          allOf: [{ $ref: '#/components/schemas/LadderFeeEstimate' }]
+          nullable: true
+          description: One rung only; for rungs it is null and each rung carries its own (fee_estimate_reason)
+        fee_estimate_reason: { type: string, description: Rungs only }
+        rungs: { type: array, items: { $ref: '#/components/schemas/LadderRung' }, description: Rungs and shape=configured only }
+        combined: { $ref: '#/components/schemas/LadderCombined' }
+        tradeoff: { allOf: [{ $ref: '#/components/schemas/LadderTradeoff' }], nullable: true }
+        tradeoff_reason: { type: string, nullable: true }
         assumptions: { type: array, items: { type: string } }
         statement: { type: string }
+
+    LadderFeeEstimate:
+      type: object
+      description: |
+        Fees per day while in range (2.10.0), measured from our own tracked range: the
+        measuring range's average fee per unit of liquidity (derived_metrics.fee_yield)
+        times this range's liquidity, the NOCK leg valued at the current pool price. Fee
+        intensity per unit of liquidity is taken as uniform across the measuring range's
+        ticks (assumptions[0]); band_measured is the measurement inside the range. The
+        in-range share and the replay always stand beside it: a high rate while in range
+        is not a rate per day. Replay figures are upper bounds. Null fields carry a reason.
+      properties:
+        status: { type: string, enum: [measured, unavailable] }
+        reason: { type: string, nullable: true }
+        measured_by: { type: string, nullable: true }
+        measured_label: { type: string, nullable: true }
+        measured_at: { type: string, nullable: true, description: fee_yield.computed_at }
+        measurement_age_seconds: { type: integer, nullable: true }
+        measured_seconds: { type: number, nullable: true }
+        measured_days: { type: string, nullable: true }
+        intervals: { type: integer, nullable: true }
+        skipped: { type: object, nullable: true }
+        skipped_seconds: { type: object, nullable: true }
+        rate: { type: object, nullable: true, description: 'usdc_per_liquidity_day, nock_per_liquidity_day, usd_per_1e15_liquidity_day and the pool price it is valued at' }
+        per_day_in_range_usd: { type: string, nullable: true }
+        per_day_in_range_usdc_leg: { type: string, nullable: true }
+        per_day_in_range_nock_leg: { type: string, nullable: true, description: NOCK per day }
+        per_100_usd_per_day_in_range_usd: { type: string, nullable: true, description: Per $100 of the range's value at spot (its USDC plus its NOCK at the pool price) }
+        per_day_in_range_diluted_usd: { type: string, nullable: true, description: 'x A/(A + L_new): A the pool''s active liquidity at the current tick (read at latest), L_new the hypothetical liquidity in range with it' }
+        dilution: { type: object, nullable: true }
+        dilution_reason: { type: string, nullable: true }
+        spread: { type: object, nullable: true, description: 'Every UTC day at this range''s liquidity; min, true median and max over the days with at least day_min_seconds measured' }
+        band_measured: { type: object, nullable: true, description: 'Stored intervals wholly inside this range: dollars and seconds; a per-day figure only from band_min_seconds' }
+        band_reason: { type: string, nullable: true }
+        in_range_share_stored_history: { type: object, nullable: true }
+        in_range_share_reason: { type: string, nullable: true }
+        stored_history_replay: { type: object, nullable: true, description: 'inside_upper_usd and edge_upper_usd: at most, from endpoint ticks sampled every ~5 minutes; no lower bound' }
+        replay_reason: { type: string, nullable: true }
+        coverage: { type: object, nullable: true, description: The part of the range inside the measuring range }
+        constants: { type: object, description: 'window_days, max_gap_seconds, day_min_seconds, band_min_seconds: display constants, not settings' }
+        assumptions: { type: array, items: { type: string } }
+
+    LadderRung:
+      type: object
+      properties:
+        index: { type: integer }
+        rung: { type: string, enum: [cap, near, deep] }
+        inputs: { type: object }
+        bounds: { $ref: '#/components/schemas/LadderBounds' }
+        sizing: { type: object, description: 'liquidity_raw, liquidity_human, usdc_at_spot, nock_needed_at_spot, nock_given, nock_check, usdc_raw, nock_raw' }
+        bottom: { type: object }
+        top: { type: object }
+        max_usdc_with_the_others_as_given: { type: string, nullable: true }
+        fee_estimate: { $ref: '#/components/schemas/LadderFeeEstimate' }
+        round_trip: { type: object, nullable: true, description: 'cap and near: a fall to the bottom and a return to the price now hand back what it started with; its gain is its fees' }
+        if_pulled_at_fill: { type: object, nullable: true, description: 'deep: the NOCK kept if pulled when fully NOCK (a withdrawal the operator signs)' }
+        cap: { type: object, description: 'shape=configured cap only: the band, the pool tick, band_rule, lp_nock_budget, nock, usdc and bound_by (lp_nock_budget | near_usdc | total_usdc)' }
+
+    LadderCombined:
+      type: object
+      properties:
+        rung_count: { type: integer }
+        max_rungs: { type: integer }
+        max_rungs_note: { type: string }
+        total_usdc: { type: string }
+        total_nock_needed: { type: string }
+        deepest_bottom_usd: { type: string }
+        nock_held_at_deepest_bottom: { type: string }
+        nock_bought_at_deepest_bottom: { type: string }
+        avg_buy_price_usd: { type: string, nullable: true }
+        deep_rungs: { type: integer }
+        nock_kept_if_deep_rungs_pulled: { type: string }
+        nock_bought_by_deep_rungs: { type: string }
+        avg_kept_price_usd: { type: string, nullable: true }
+        max_usdc_total: { type: string, nullable: true, description: The most the rungs take in all with the stable balance at the gate still at the reserve }
+        overlaps: { type: array, items: { type: object } }
+        gate_price_usd: { type: string }
+        gate_price_rule: { type: string }
+
+    LadderTradeoff:
+      type: object
+      description: Measurement tables; rows in the order of the quantity varied, never ranked, none marked. The statement is the same in every surface.
+      properties:
+        split: { type: object, nullable: true, description: 'Two rungs only; the same total re-divided in steps of split_step_pct, plus the operator''s own split' }
+        split_reason: { type: string, nullable: true }
+        near_depth: { type: object, nullable: true, description: 'One near and one deep rung, snapped; the near rung''s bottom at each usable tick down to the deep rung''s top (at most max_rows)' }
+        near_depth_reason: { type: string, nullable: true }
+        deep_top: { type: object, nullable: true }
+        deep_top_reason: { type: string, nullable: true }
+        statement: { type: string }
+        order: { type: string }
+        columns_note: { type: string }
 
     ClaimFeesPayload:
       type: object

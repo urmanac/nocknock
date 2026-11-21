@@ -199,6 +199,8 @@ fn test_role_unset_and_ladder_are_accepted_with_no_default() {
         "role: ladder\n".to_string(),
         "role: ladder\nrung: near\n".to_string(),
         "role: ladder\nrung: deep\n".to_string(),
+        // The bottle's cap (operator decision, 2026-11-20).
+        "role: ladder\nrung: cap\n".to_string(),
         format!("role: ladder\nrung: deep\ndeposit_tx: \"{MINT_TX}\"\n"),
         // An explicit false cannot be told from unset, and is not refused.
         "role: ladder\nrebuild_when_out_of_range: false\n".to_string(),
@@ -233,7 +235,7 @@ fn test_a_ladder_refuses_every_key_that_would_steer_it() {
         ("role: ladder\nrebuild_weight_bps: 5000\n", "sets rebuild_weight_bps (5000)"),
         ("role: ladder\nrebuild_when_out_of_range: true\n", "sets rebuild_when_out_of_range: true"),
         ("role: ladder\ndeposit_url: \"https://app.uniswap.org\"\n", "sets deposit_url, which only rebuild suggestions use"),
-        ("role: ladder\nrung: Near\n", "has unknown rung 'Near'. Supported: near, deep (or leave rung unset)"),
+        ("role: ladder\nrung: Near\n", "has unknown rung 'Near'. Supported: cap, near, deep (or leave rung unset)"),
         ("role: ladder\nrung: mid\n", "has unknown rung 'mid'"),
         ("role: ladder\ndeposit_tx: \"0x1234\"\n", "has deposit_tx '0x1234', which is not a transaction hash (0x and 64 hex characters)"),
         ("role: ladder\ndeposit_tx: \"afe42fe29de67337d5b489226dbfdf8a8b315e2deabaf6c744b47c2dd9ff7a58\"\n", "which is not a transaction hash"),
@@ -1088,7 +1090,7 @@ fn test_the_example_config_documents_role_rung_and_deposit_tx_and_sets_none() {
     let text = std::fs::read_to_string(path).unwrap();
     for k in [
         "#   role        unset (the default meaning since #151: classified by its pair) or",
-        "#   rung        optional, ladder only: \"near\"",
+        "#   rung        optional, ladder only: \"cap\" (the tick band containing spot, holding the",
         "#   deposit_tx  optional, ladder only: the transaction that minted this NFT",
         "#   role: \"ladder\"",
         "#   rung: \"deep\"",

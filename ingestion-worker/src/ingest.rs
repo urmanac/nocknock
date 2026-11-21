@@ -320,10 +320,16 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
 
     // Build snapshot data (cycle_snapshot_data). What the previous snapshot held
     // decides a closed position's first-seen time and whether its closing is pushed.
-    let (snapshot_data, closed_notes) = {
+    let (mut snapshot_data, closed_notes) = {
         let prev = state.latest_snapshot.lock().await;
         cycle_snapshot_data(raw_data, derived_metrics, prev.as_ref().map(|s| &s.data), &Utc::now().to_rfc3339())
     };
+    // Fees measured on our own ranges (2.10.0): at most one history query an hour, carried
+    // forward between and priced at this cycle's pool price. Left out of the state hash.
+    snapshot_data.derived_metrics.fee_yield = Some(fee_yield_for_cycle(&state.db, &snapshot_data, Utc::now()).await);
+    // The operator's configured ladder shape, sized to the shared reserve gate (2.10.0):
+    // from this snapshot alone, for a card with no inputs. Left out of the state hash.
+    snapshot_data.derived_metrics.ladder_shape = ladder_shape_block(&snapshot_data, Utc::now());
 
     // Compute deterministic state hash
     let state_hash = compute_state_hash(&snapshot_data);
@@ -456,10 +462,18 @@ pub(crate) fn canonical_state_json(data: &SnapshotData) -> serde_json::Value {
 }
 
 pub(crate) fn strip_volatile_time_fields(value: &mut serde_json::Value) {
-    const VOLATILE_KEYS: [&str; 9] = [
+    const VOLATILE_KEYS: [&str; 12] = [
         // Route quotes for a due tranche (issue #115): contract reads at a stated
         // block, fresh every cycle. They say nothing about the wallet's state.
         "route_quotes",
+        // Fees measured over stored history (2.10.0): derived from the rows already
+        // stored, re-priced every cycle. Hashing it would store a row every cycle.
+        "fee_yield",
+        // The pool's in-range liquidity (2.10.0): the pool's state, not the wallet's.
+        "active_liquidity_raw",
+        // The configured ladder shape (2.10.0): worked out from the hashed state and the
+        // fee measurement, so it adds nothing to the state.
+        "ladder_shape",
         // Fill detection's check time (issue #118): fresh every cycle, no state.
         "last_checked_at",
         "updated_at",

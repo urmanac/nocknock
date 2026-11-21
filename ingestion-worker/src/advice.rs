@@ -762,6 +762,17 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             lp_nock_budget: Some(format!("{:.4}", lp_nock_budget(wallet_nock, floor, profile.lp_floor_tolerance_bps).0 + 0.0)),
             lp_nock_budget_note: lp_nock_budget_note(wallet_nock, floor, profile.lp_floor_tolerance_bps),
             lp_floor_tolerance_bps: Some(profile.lp_floor_tolerance_bps),
+            ladder_bottom_usd: profile.ladder_bottom_usd.filter(|v| v.is_finite() && *v > 0.0).map(|v| format!("{:.8}", v)),
+            ladder_bottom_note: profile
+                .ladder_bottom_usd
+                .filter(|v| !(v.is_finite() && *v > 0.0))
+                .map(|_| LADDER_BOTTOM_INVALID_NOTE.to_string()),
+            ladder_rungs: profile
+                .ladder_rungs
+                .as_ref()
+                .filter(|r| validate_ladder_rungs(r, profile.ladder_bottom_usd).is_ok())
+                .map(|r| ladder_rung_settings(r)),
+            ladder_rungs_note: profile.ladder_rungs.as_ref().and_then(|r| validate_ladder_rungs(r, profile.ladder_bottom_usd).err()),
         },
         asset_aggregation_series: AssetAggregationSeries {
             time_points: vec![now_str.clone()],
@@ -958,6 +969,10 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         cost_basis: None,
         // The floor-crossing price (#165): a measurement of the deployed ranges.
         floor_breach: Some(floor_breach(raw, profile)),
+        // Measured over stored history by the cycle (fee_yield_for_cycle), never here.
+        fee_yield: None,
+        // Worked out by the cycle once fee_yield is known (ladder_shape_block).
+        ladder_shape: None,
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: fee_entries
                 .iter()
@@ -1017,6 +1032,8 @@ pub(crate) fn lp_nock_budget_note(wallet_nock: f64, floor: f64, tolerance_bps: u
 }
 
 /// Why an invalid standing reserve is not applied (#162).
+/// Why a configured ladder bottom is not applied (2.10.0).
+pub(crate) const LADDER_BOTTOM_INVALID_NOTE: &str = "operator_profile.ladder_bottom_usd must be above 0 USD per NOCK; it is not applied";
 pub(crate) const RESERVE_INVALID_NOTE: &str = "operator_profile.cash_reserve_usdc must be zero or positive";
 
 /// The standing protected cash reserve of one cycle (#162).

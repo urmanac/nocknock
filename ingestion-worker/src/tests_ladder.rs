@@ -21,7 +21,7 @@ fn rel(a: f64, b: f64) -> f64 {
 }
 
 /// sqrtPriceX96 of a raw price (token1_raw per token0_raw), as the Aero adapter builds it.
-fn sqrt_x96_of_raw(raw_price: f64) -> U256 {
+pub(crate) fn sqrt_x96_of_raw(raw_price: f64) -> U256 {
     let v = raw_price.sqrt() * 79228162514264337593543950336.0;
     let two128 = 340282366920938463463374607431768211456.0f64;
     let hi = (v / two128).floor();
@@ -144,6 +144,7 @@ fn generated_at() -> DateTime<Utc> {
 pub(crate) fn envelope_of(mut raw: RawOnChainData, profile: &OperatorProfile) -> SnapshotEnvelope {
     let positions = snapshot_positions(&raw);
     raw.pool_mechanics = build_pool_mechanics(&raw.positions, raw.spot_price_nock_usd, raw.live_eth_price_usd);
+    stamp_active_liquidity(&mut raw.pool_mechanics, &raw.positions, &raw.pool_liquidity);
     raw.contract_fees = build_contract_fees(&positions, raw.live_gas_cost_usd, &raw.fees_not_lp_claimable);
     let derived_metrics = compute_derived_metrics_with_plan(
         &raw,
@@ -993,7 +994,7 @@ fn test_ladder_specs_document_the_endpoint_and_the_new_fields() {
 
 
 /// The fixture with the price-source pool at another sqrtPriceX96 (#166 review).
-fn fixture_at_sqrt(sqrt: U256) -> SnapshotEnvelope {
+pub(crate) fn fixture_at_sqrt(sqrt: U256) -> SnapshotEnvelope {
     let mut v = v4();
     v.sqrt_price_x96 = sqrt;
     v.tick = (sqrt_price_x96_to_raw(sqrt).ln() / 1.0001f64.ln()).floor() as i32;

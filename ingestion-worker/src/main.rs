@@ -90,6 +90,8 @@ mod ladder_text;
 mod ladder_track;
 use ladder_track::*;
 mod ladder_track_text;
+mod fee_yield;
+use fee_yield::*;
 
 // ============================================================
 // Configuration
@@ -117,6 +119,37 @@ pub struct OperatorProfile {
     /// draws below it. Unset = no rule, never a default.
     #[serde(default)]
     pub cash_reserve_usdc: Option<f64>,
+    /// The bottom of the operator's ladder zone in USD per NOCK (operator decision,
+    /// 2026-11-20). The ladder simulator reads its reserve gate at the lower of the
+    /// deepest rung's bottom and this price, so a ladder that stops above it cannot
+    /// recruit the reserve kept for prices below it. Also a labelled prefill for the
+    /// deep rung's bottom on the dashboard. Unset = no rule, never a default.
+    #[serde(default)]
+    pub ladder_bottom_usd: Option<f64>,
+    /// The operator's ladder shape (operator decision, 2026-11-20), ordered from the top
+    /// down: each rung's role, its share of the ladder's USDC and its bottom. The first
+    /// rung's top is the usable tick at or below spot; each later rung's top is the rung
+    /// above's bottom. Shares are above 0 and sum to 1, bottoms strictly decrease, and
+    /// the last bottom is at or above `ladder_bottom_usd` when that is set. An invalid
+    /// shape is a configuration error, stated in every snapshot; never completed with a
+    /// default. Unset = no shape.
+    #[serde(default)]
+    pub ladder_rungs: Option<Vec<LadderRungConfig>>,
+}
+
+/// One rung of `operator_profile.ladder_rungs`.
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+pub struct LadderRungConfig {
+    /// cap | near | deep. A cap is the first rung, at most one: the tick band containing
+    /// spot, holding the LP NOCK budget.
+    pub rung: String,
+    /// near and deep: its share of the ladder's USDC left after the cap, above 0 and at
+    /// most 1. A cap takes none.
+    #[serde(default)]
+    pub share: Option<f64>,
+    /// near and deep: its bottom, USD per NOCK. A cap takes none.
+    #[serde(default)]
+    pub low_usd: Option<f64>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -158,6 +191,8 @@ impl Default for OperatorProfile {
             tax_reserve_ratio: default_tax_reserve_ratio(),
             target_weights_bps: default_target_weights(),
             cash_reserve_usdc: None,
+            ladder_bottom_usd: None,
+            ladder_rungs: None,
         }
     }
 }
@@ -905,6 +940,12 @@ struct PoolMechanic {
     fee_tier_bps: u32,
     tick_current: Option<i32>,
     sqrt_price_x96: Option<String>,
+    /// The pool's in-range (active) liquidity at its current tick, raw, as read this
+    /// cycle at `latest` (2.10.0). The worker read it every cycle before and kept only
+    /// `positions[].pool_active`. Absent when the read failed: unknown, never 0. Left out
+    /// of the state hash: it is the pool's state, not the wallet's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    active_liquidity_raw: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -980,6 +1021,131 @@ struct DerivedMetrics {
     /// stored before the field existed: not reported, never "safe".
     #[serde(default)]
     floor_breach: Option<FloorBreach>,
+    /// Fees measured on our own tracked ranges, per unit of liquidity (snapshot 2.10.0):
+    /// the ladder simulator's fee estimate. Measured from stored snapshot history at most
+    /// once an hour and carried forward between (`computed_at` says when). Left out of
+    /// the state hash. Absent in a snapshot stored before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fee_yield: Option<FeeYield>,
+    /// The operator's configured ladder shape (`operator_profile.ladder_rungs`) worked out
+    /// by the cycle and sized to the shared reserve gate's most (2.10.0), for a card with
+    /// no inputs. Absent when no shape is configured. Left out of the state hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ladder_shape: Option<serde_json::Value>,
+}
+
+/// Fees per unit of liquidity measured on our own tracked ranges (2.10.0). One pool
+/// entry per USDC/NOCK pool with a measuring range. Everything in it is measured from
+/// stored snapshots of our own positions; the stored market volume of another pool is
+/// never read. See fee_yield.rs for the rules.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct FeeYield {
+    /// measured | unavailable
+    status: String,
+    reason: Option<String>,
+    /// When the history was last measured (RFC 3339).
+    computed_at: Option<String>,
+    /// The trailing window, the longest gap between two rows that still counts, the
+    /// fewest measured seconds a day needs to enter the spread, and how often the history
+    /// is measured. Measurement and display constants, echoed; not operator settings.
+    window_days: i64,
+    max_gap_seconds: i64,
+    day_min_seconds: i64,
+    refresh_seconds: i64,
+    constants_note: String,
+    pools: Vec<FeeYieldPool>,
+    /// Positions with a NOCK leg that do not measure, each with its reason.
+    excluded: Vec<FeeYieldExcluded>,
+    statement: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct FeeYieldExcluded {
+    position_id: String,
+    reason: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct FeeYieldPool {
+    pool_id: String,
+    label: String,
+    /// The one measuring range of this pool (position_id).
+    measured_by: String,
+    fee_tier_bps: u32,
+    tick_spacing: Option<i32>,
+    /// The measuring range's own ticks [lower, upper): outside them nothing is measured.
+    covered_tick_lower: i32,
+    covered_tick_upper: i32,
+    /// measured | no_intervals
+    status: String,
+    reason: Option<String>,
+    /// From the first to the last stored row read (RFC 3339).
+    from: Option<String>,
+    to: Option<String>,
+    rows: u32,
+    intervals: u32,
+    /// Gaps longer than max_gap_seconds whose two rows hold the same fees, liquidity and
+    /// tick: counted as zero-fee time (the worker stores no row while nothing changes).
+    zero_fee_gap_intervals: u32,
+    measured_seconds: f64,
+    skipped: FeeYieldSkips,
+    skipped_seconds: FeeYieldSkipSeconds,
+    /// Fees per raw unit of liquidity per day, in token units, e-notation.
+    usdc_per_liquidity_day: Option<String>,
+    nock_per_liquidity_day: Option<String>,
+    /// Stamped every cycle: this cycle's pool price, the NOCK leg valued at it, and the
+    /// USD figure per 1e15 raw liquidity per day.
+    pool_price_usd: Option<String>,
+    usd_per_liquidity_day: Option<String>,
+    usd_per_1e15_liquidity_day: Option<String>,
+    /// One entry per UTC date (an interval counts on the date it starts).
+    by_day: Vec<FeeYieldDay>,
+    /// Intervals aggregated by the tick-spacing bins of their two endpoint ticks.
+    spans: Vec<FeeYieldSpan>,
+    spans_reason: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq)]
+struct FeeYieldSkips {
+    liquidity_changed: u32,
+    zero_liquidity: u32,
+    fees_fell: u32,
+    pool_inactive: u32,
+    out_of_range: u32,
+    gap: u32,
+    unreadable: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq)]
+struct FeeYieldSkipSeconds {
+    liquidity_changed: f64,
+    zero_liquidity: f64,
+    fees_fell: f64,
+    pool_inactive: f64,
+    out_of_range: f64,
+    gap: f64,
+    unreadable: f64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct FeeYieldDay {
+    /// A UTC date, YYYY-MM-DD.
+    date: String,
+    seconds: f64,
+    usdc_per_liquidity_day: String,
+    nock_per_liquidity_day: String,
+    /// Stamped every cycle at that cycle's pool price.
+    usd_per_liquidity_day: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct FeeYieldSpan {
+    /// The tick-spacing bins of the lower and the higher endpoint tick.
+    bin_lo: i32,
+    bin_hi: i32,
+    seconds: f64,
+    usdc_per_liquidity: String,
+    nock_per_liquidity: String,
 }
 
 /// NOCK cost basis in two layers (v0.6.0, issue #98). `plan_buys` is exact: it comes only
@@ -1658,10 +1824,41 @@ struct GlobalStatus {
     /// snapshot reads it from there and never from config. Null in an older snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     lp_floor_tolerance_bps: Option<u32>,
+    /// `operator_profile.ladder_bottom_usd` (2.10.0), 8 dp: where the ladder simulator
+    /// reads its reserve gate when it is below a ladder's deepest bottom. Absent when the
+    /// operator set none, or set one that is not above 0 (`ladder_bottom_note` says so).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ladder_bottom_usd: Option<String>,
+    /// Why `operator_profile.ladder_bottom_usd` is not applied (2.10.0). Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ladder_bottom_note: Option<String>,
+    /// `operator_profile.ladder_rungs` as validated (2.10.0), top down: the operator's
+    /// ladder shape. Absent when none is set or it is invalid (`ladder_rungs_note`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ladder_rungs: Option<Vec<LadderRungSetting>>,
+    /// Why `operator_profile.ladder_rungs` is not applied: the configuration error, named
+    /// (2.10.0). Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ladder_rungs_note: Option<String>,
+}
+
+/// One rung of the operator's ladder shape as the snapshot states it (2.10.0).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+struct LadderRungSetting {
+    /// cap | near | deep
+    rung: String,
+    /// Its share of the USDC left after the cap, as configured; null for the cap.
+    share: Option<String>,
+    /// Its top: `band` for the cap (the tick band containing spot), `spot` (the usable
+    /// tick at or below the pool price) for the first other rung, otherwise the rung
+    /// above's bottom, USD per NOCK (8 dp).
+    high: String,
+    /// Its bottom, USD per NOCK (8 dp); null for the cap.
+    low_usd: Option<String>,
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
-const SNAPSHOT_SPEC_VERSION: &str = "2.9.0";
+const SNAPSHOT_SPEC_VERSION: &str = "2.10.0";
 
 /// The gas (wallet ETH + WETH) and ETH pillar figures, each None when it cannot be
 /// measured: unread wallet balances or an unpriced ETH. Never a zero stand-in.
@@ -1862,6 +2059,11 @@ async fn main() -> Result<()> {
     // A half-filled cost_basis.opening does not stop the worker: every cycle reports it
     // as `whole_stack.status = invalid` with this reason. Say it once in the log too.
     if let OpeningBasisState::Invalid(reason) = resolve_opening_basis(config.opening_basis(), Utc::now()) {
+        tracing::error!("Configuration error: {reason}");
+    }
+    // An invalid ladder shape is stated in every snapshot (ladder_rungs_note); say it once
+    // in the log too.
+    if let Some(Err(reason)) = config.operator_profile.ladder_rungs.as_ref().map(|r| validate_ladder_rungs(r, config.operator_profile.ladder_bottom_usd)) {
         tracing::error!("Configuration error: {reason}");
     }
 
@@ -2239,3 +2441,7 @@ mod tests_floor_breach;
 mod tests_ladder;
 #[cfg(test)]
 mod tests_ladder_track;
+#[cfg(test)]
+mod tests_fee_yield;
+#[cfg(test)]
+mod tests_ladder_rungs;

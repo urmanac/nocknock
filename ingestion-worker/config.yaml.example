@@ -133,8 +133,9 @@ positions:
   #   role        unset (the default meaning since #151: classified by its pair) or
   #               "ladder". Nothing else is accepted: any other value fails every cycle
   #               with a configuration error, exactly like an unknown protocol.
-  #   rung        optional, ladder only: "near" (trades both ways near spot, for fees) or
-  #               "deep" (waits near the bottom to accumulate). No default: unset is
+  #   rung        optional, ladder only: "cap" (the tick band containing spot, holding the
+  #               NOCK that may go into LP), "near" (trades both ways near spot, for fees)
+  #               or "deep" (waits near the bottom to accumulate). No default: unset is
   #               reported as unset. Later maintenance (#169) treats the two differently.
   #   deposit_tx  optional, ladder only: the transaction that minted this NFT (0x + 64 hex).
   #               Its receipt is the baseline for "net NOCK bought since deposit". It is
@@ -207,6 +208,38 @@ operator_profile:
   # not use it up; buying NOCK does; a gas-side ETH/USDC range does not count). No dry
   # powder is reported above it and no plan buy draws below it. Unset = no rule.
   # cash_reserve_usdc: 950
+
+  # Optional bottom of your ladder zone, USD per NOCK (2.10.0). The ladder simulator
+  # reads its reserve gate at the lower of a ladder's deepest bottom and this price, so
+  # a ladder that stops above it is still gated where the reserve is meant to start (a
+  # near-only ladder cannot recruit the reserve kept for prices below it). The dashboard
+  # may prefill a deep rung's bottom from it, labelled as your setting. Unset = no rule:
+  # the gate is the ladder's own deepest bottom. No default.
+  # ladder_bottom_usd: 0.01
+
+  # Optional ladder shape (2.10.0), top down, your numbers; there is no default. Each
+  # entry is one rung (each rung is its own position):
+  #   rung     cap | near | deep. A cap is optional, at most one, and first: the tick
+  #            band containing spot, holding the NOCK that may go into LP
+  #            (lp_nock_budget) and the USDC its curve pairs with it, never more USDC
+  #            than the near rung's. It takes no share and no low_usd.
+  #   share    near and deep: the share of the ladder's USDC left after the cap; the
+  #            shares add up to 1.
+  #   low_usd  near and deep: the rung's bottom, USD per NOCK. Bottoms strictly
+  #            decrease; the last is at or above ladder_bottom_usd when that is set.
+  # The first near or deep rung's top is the usable tick at or below spot; each later
+  # rung's top is the rung above's bottom. NockNock sizes the shape to the most the
+  # reserve gate allows (derived_metrics.ladder_shape, and GET
+  # /v1/simulate/ladder?shape=configured). An invalid shape is a configuration error,
+  # named in every snapshot (global_status.ladder_rungs_note) and never completed.
+  # ladder_rungs:
+  #   - rung: cap
+  #   - rung: near
+  #     share: 0.15
+  #     low_usd: 0.0110
+  #   - rung: deep
+  #     share: 0.85
+  #     low_usd: 0.01
 
   # Target allocation weights in Portfolio Deviation Matrix (basis points, sum = 10000).
   # v2.0.0: Aerodrome tranche liquidated — the LP bucket is the aggregate across the

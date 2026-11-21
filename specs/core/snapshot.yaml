@@ -1,9 +1,41 @@
 openapi: 3.0.3
 info:
   title: NockNock Snapshot Data Model
-  version: 2.9.0
+  version: 2.10.0
   description: |
     Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
+
+    2.10.0 (the fee yield and the operator's ladder shape, extending #166), additive:
+    - DerivedMetrics.fee_yield (absent before 2.10.0): swap fees per unit of liquidity
+      measured on our own tracked ranges from stored snapshot rows, per USDC/NOCK pool
+      (FeeYield). One measuring range per pool: a tracked concentrated USDC/NOCK range
+      whose fees accrue to the LP (not full range, not staked in a gauge, not a tracked
+      ladder); with several, the widest, and the others are listed in `excluded` with
+      the reason, so measured seconds stay wall-clock seconds. Between consecutive rows
+      of that range an interval counts when its liquidity is the same and not 0, its
+      uncollected fees did not fall, the pool was active and the range in range at both
+      ends, and the rows are at most max_gap_seconds apart (a longer gap counts as
+      zero-fee time when both rows hold the same fees, liquidity and tick: the worker
+      stores no row while nothing changes); every other interval is counted, with its
+      seconds, under skipped. Measured at most once an hour (refresh_seconds) over the
+      trailing window_days, carried forward between (computed_at), and re-priced every
+      cycle at that cycle's pool price (the NOCK leg is valued at the current pool
+      price, not at accrual). by_day[].date is a UTC date. The stored market volume of
+      another pool (market_price_history) is never used. Left out of the state hash.
+    - PoolMechanic.active_liquidity_raw: the pool's in-range liquidity at its current
+      tick, read at latest in the cycle (it was read before and kept only as
+      Position.pool_active). Absent when the read failed. Left out of the state hash.
+    - GlobalStatus.ladder_bottom_usd / ladder_bottom_note: operator_profile.
+      ladder_bottom_usd (no default), where the ladder simulator reads its reserve gate
+      when it is below a ladder's deepest bottom. GlobalStatus.ladder_rungs /
+      ladder_rungs_note: operator_profile.ladder_rungs as validated (the operator's
+      ladder shape, top down: an optional cap, then near and deep rungs with their
+      shares and bottoms), or the configuration error named. Never completed with a
+      default.
+    - DerivedMetrics.ladder_shape (absent with no shape configured): that shape worked
+      out by the cycle in the price-source pool and sized to the shared reserve gate's
+      most (LadderShape), for a card with no inputs. Left out of the state hash.
+    - Position.rung and LadderReading.rung accept cap (cap | near | deep).
 
     2.9.0 (the floor-crossing price, issue #165), additive:
     - DerivedMetrics.floor_breach (new, nullable): the lowest NOCK price at or above
@@ -29,7 +61,7 @@ info:
       lp_floor_tolerance_bps: the parameter of lp_nock_budget and floor_breach.tolerated.
     - A deployed ladder tracked as `role: ladder` (issue #167), also additive. With no
       position configured `role: ladder` no byte of the snapshot changes.
-      Position.role ("ladder", absent otherwise) and Position.rung (near | deep, absent
+      Position.role ("ladder", absent otherwise) and Position.rung (cap | near | deep since 2.10.0, absent
       when unset). SnapshotData.ladders (absent when empty): one LadderReading per
       ladder, in positions order, named by what the range holds (holds_only_usdc |
       in_range | holds_only_nock | empty | pool_stale, never by a direction), its bounds
@@ -524,7 +556,7 @@ components:
             position, which is classified by its pair as before (#151).
         rung:
           type: string
-          enum: [near, deep]
+          enum: [cap, near, deep]
           description: >
             A ladder's rung from config (2.9.0, #167). Absent when unset (stated as
             unset in ladders[].rung_note, never assumed) and on every other position.
@@ -586,6 +618,12 @@ components:
           type: string
           description: Total liquidity in USD (decimal string)
           example: "500000.00"
+        active_liquidity_raw:
+          type: string
+          description: >
+            The pool's in-range (active) liquidity at its current tick, raw, as read this
+            cycle at latest (2.10.0). Absent when the read failed: unknown, never 0. Left
+            out of the state hash: it is the pool's state, not the wallet's.
         fee_accrued_usd:
           type: string
           description: >
@@ -854,6 +892,152 @@ components:
             The floor-crossing price (2.9.0, issue #165). Always emitted by a 2.9.0
             worker; null or absent in a snapshot stored before 2.9.0: not reported,
             never "safe".
+        fee_yield:
+          allOf:
+            - $ref: '#/components/schemas/FeeYield'
+          description: >
+            Fees per unit of liquidity measured on our own tracked ranges (2.10.0). Absent
+            in a snapshot stored before 2.10.0. Left out of the state hash.
+        ladder_shape:
+          allOf:
+            - $ref: '#/components/schemas/LadderShape'
+          description: >
+            The operator's configured ladder shape worked out and sized by the cycle
+            (2.10.0). Absent when no shape is configured. Left out of the state hash.
+
+    FeeYield:
+      type: object
+      description: >
+        Swap fees our own tracked ranges earned per unit of liquidity while in range,
+        measured from stored snapshot rows (2.10.0). A past measurement, not a forecast.
+        The stored market volume of another pool is never used.
+      properties:
+        status: { type: string, enum: [measured, unavailable] }
+        reason: { type: string, nullable: true }
+        computed_at: { type: string, nullable: true, description: When the history was last measured; it is carried forward for up to refresh_seconds }
+        window_days: { type: integer, example: 30 }
+        max_gap_seconds: { type: integer, example: 7200 }
+        day_min_seconds: { type: integer, example: 72000 }
+        refresh_seconds: { type: integer, example: 3600 }
+        constants_note: { type: string, description: 'The four constants are measurement and display constants, not settings' }
+        pools: { type: array, items: { $ref: '#/components/schemas/FeeYieldPool' } }
+        excluded:
+          type: array
+          description: Positions with a NOCK leg that do not measure, each with its reason (full range, staked, a tracked ladder, a WETH/NOCK pool, or another range measures the pool)
+          items:
+            type: object
+            properties:
+              position_id: { type: string }
+              reason: { type: string }
+        statement: { type: string }
+
+    FeeYieldPool:
+      type: object
+      properties:
+        pool_id: { type: string }
+        label: { type: string }
+        measured_by: { type: string, description: The measuring range's position_id }
+        fee_tier_bps: { type: integer }
+        tick_spacing: { type: integer, nullable: true }
+        covered_tick_lower: { type: integer, description: 'The measuring range''s own ticks; outside [lower, upper) nothing is measured' }
+        covered_tick_upper: { type: integer }
+        status: { type: string, enum: [measured, no_intervals] }
+        reason: { type: string, nullable: true }
+        from: { type: string, nullable: true }
+        to: { type: string, nullable: true }
+        rows: { type: integer }
+        intervals: { type: integer }
+        zero_fee_gap_intervals: { type: integer }
+        measured_seconds: { type: number }
+        skipped: { type: object, description: 'liquidity_changed, zero_liquidity, fees_fell, pool_inactive, out_of_range, gap, unreadable' }
+        skipped_seconds: { type: object }
+        usdc_per_liquidity_day: { type: string, nullable: true, description: 'USDC per raw unit of liquidity per day, e-notation' }
+        nock_per_liquidity_day: { type: string, nullable: true }
+        pool_price_usd: { type: string, nullable: true, description: 'This cycle''s pool price, the NOCK leg''s valuation' }
+        usd_per_liquidity_day: { type: string, nullable: true }
+        usd_per_1e15_liquidity_day: { type: string, nullable: true }
+        by_day:
+          type: array
+          description: One entry per UTC date (YYYY-MM-DD, a UTC date); an interval counts on the date it starts
+          items:
+            type: object
+            properties:
+              date: { type: string }
+              seconds: { type: number }
+              usdc_per_liquidity_day: { type: string }
+              nock_per_liquidity_day: { type: string }
+              usd_per_liquidity_day: { type: string, nullable: true }
+        spans:
+          type: array
+          description: Intervals aggregated by the tick-spacing bins of their two endpoint ticks (bin_lo <= bin_hi), so any range on that grid is measured exactly; per-liquidity sums, not rates
+          items:
+            type: object
+            properties:
+              bin_lo: { type: integer }
+              bin_hi: { type: integer }
+              seconds: { type: number }
+              usdc_per_liquidity: { type: string }
+              nock_per_liquidity: { type: string }
+        spans_reason: { type: string, nullable: true }
+
+    LadderShape:
+      type: object
+      description: >
+        operator_profile.ladder_rungs worked out by the cycle from this snapshot alone in
+        the price-source pool and sized to the shared reserve gate's most (2.10.0), the
+        same figures as GET /v1/simulate/ladder?shape=configured. A measurement for a
+        card with no inputs: NockNock does not choose the shape, and nothing is signed or
+        sent. status unavailable carries the reason (the configuration error named, or
+        why it cannot be drawn) and no figures.
+      properties:
+        status: { type: string, enum: [computed, unavailable] }
+        reason: { type: string, nullable: true }
+        source: { type: string }
+        statement: { type: string }
+        computed_at: { type: string }
+        pool: { type: object, description: 'position_id, label, tick_spacing, pool_price_usd, pool_tick' }
+        total_usdc: { type: string }
+        total_rule: { type: string }
+        rest_usdc: { type: string, description: 'The USDC left after the cap, which the near and deep shares divide' }
+        cap: { type: string, enum: [sized, none, not in the shape] }
+        cap_reason: { type: string, nullable: true }
+        rungs: { type: array, items: { $ref: '#/components/schemas/LadderShapeRung' } }
+        combined: { type: object }
+        gate: { type: object, description: 'price_usd, rule, cash_reserve_usdc, stable_at_gate_usdc, margin_usdc, max_usdc_total, status' }
+        nock_budget: { type: object, description: 'lp_nock_budget, nock_needed (the cap''s), nock_needed_by_rung, status' }
+        floor_breach_effect: { type: object, description: 'The floor-crossing price before and after, with every rung as a hypothetical position' }
+        grid: { type: array, items: { type: object } }
+
+    LadderShapeRung:
+      type: object
+      properties:
+        index: { type: integer }
+        rung: { type: string, enum: [cap, near, deep] }
+        share: { type: string, nullable: true, description: Null for the cap }
+        tick_lower: { type: integer, nullable: true }
+        tick_upper: { type: integer, nullable: true }
+        low_usd: { type: string }
+        high_usd: { type: string }
+        low_pct: { type: string }
+        high_pct: { type: string }
+        nock_per_usdc_at_low: { type: string, nullable: true, description: The bound as NOCK per USDC }
+        nock_per_usdc_at_high: { type: string, nullable: true }
+        high_rule: { type: string }
+        in_range_now: { type: boolean, nullable: true, description: tick_lower <= pool tick < tick_upper }
+        out_of_range_above_now: { type: boolean }
+        liquidity_raw: { type: string }
+        liquidity_human: { type: string }
+        usdc: { type: string, nullable: true, description: 6 dp }
+        usdc_raw: { type: string }
+        nock: { type: string, nullable: true, description: 'The NOCK it needs at the pool price, 8 dp' }
+        nock_raw: { type: string }
+        nock_held_at_bottom: { type: string }
+        nock_bought_at_bottom: { type: string }
+        avg_buy_price_usd: { type: string, nullable: true }
+        fee_estimate: { type: object, description: 'The simulator''s fee estimate (api.yaml LadderFeeEstimate); for the cap, in range at spot, the rate per day while in range applies now' }
+        cap: { type: object, nullable: true, description: 'The cap only: band, pool tick, band_rule, lp_nock_budget, nock, usdc, bound_by (lp_nock_budget | near_usdc | total_usdc) and note' }
+        round_trip: { type: object, nullable: true }
+        if_pulled_at_fill: { type: object, nullable: true }
 
     FloorBreach:
       type: object
@@ -981,7 +1165,7 @@ components:
         position_id: { type: string }
         config_id: { type: string, description: The entry's id in config.yaml }
         label: { type: string }
-        rung: { type: string, nullable: true, enum: [near, deep], description: Null when unset (rung_note says so) }
+        rung: { type: string, nullable: true, enum: [cap, near, deep], description: Null when unset (rung_note says so) }
         rung_note: { type: string, nullable: true }
         state:
           type: string
@@ -2010,6 +2194,34 @@ components:
             of floor_breach.tolerated, stated so a what-if over the stored snapshot reads
             it from there. Absent before 2.9.0. (#166)
           example: 1000
+        ladder_bottom_usd:
+          type: string
+          description: >
+            operator_profile.ladder_bottom_usd, 8 dp (2.10.0): where the ladder simulator
+            reads its reserve gate when it is below a ladder's deepest bottom. Absent when
+            unset or not above 0 (ladder_bottom_note). No default.
+          example: "0.01000000"
+        ladder_bottom_note:
+          type: string
+          description: Why operator_profile.ladder_bottom_usd is not applied (2.10.0). Absent otherwise.
+        ladder_rungs:
+          type: array
+          description: >
+            operator_profile.ladder_rungs as validated (2.10.0), top down: at most one cap,
+            first (the tick band containing spot; no share, no low_usd), then near and deep
+            rungs whose shares of the USDC left after the cap add up to 1 and whose bottoms
+            strictly decrease, the last at or above ladder_bottom_usd. Absent when unset
+            or invalid (ladder_rungs_note).
+          items:
+            type: object
+            properties:
+              rung: { type: string, enum: [cap, near, deep] }
+              share: { type: string, nullable: true }
+              high: { type: string, description: 'band (the cap), spot (the first other rung: the usable tick at or below the pool price) or the rung above''s bottom' }
+              low_usd: { type: string, nullable: true }
+        ladder_rungs_note:
+          type: string
+          description: The configuration error of operator_profile.ladder_rungs, named (2.10.0). Absent otherwise.
 
     AssetAggregationSeries:
       type: object

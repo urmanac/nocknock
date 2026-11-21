@@ -395,7 +395,8 @@ pub(crate) async fn fetch_raw_data_from(
 
     let positions =
         snapshot_positions_from(&raw_positions, spot_price, live_eth_price_usd, &pool_liquidity, &position_facts, &aero);
-    let pool_mechanics = build_pool_mechanics(&raw_positions, spot_price, live_eth_price_usd);
+    let mut pool_mechanics = build_pool_mechanics(&raw_positions, spot_price, live_eth_price_usd);
+    stamp_active_liquidity(&mut pool_mechanics, &raw_positions, &pool_liquidity);
     let contract_fees = build_contract_fees(&positions, live_gas_cost_usd, &fees_not_lp_claimable);
 
     tracing::info!(

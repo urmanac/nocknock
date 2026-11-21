@@ -28,10 +28,12 @@ use crate::*;
 /// The one `role` value (#167). Matching is exact and case-sensitive, like `protocol`.
 pub(crate) const LADDER_ROLE: &str = "ladder";
 pub(crate) const SUPPORTED_ROLES: &str = "ladder (or leave role unset)";
-pub(crate) const LADDER_RUNGS: [&str; 2] = ["near", "deep"];
-pub(crate) const SUPPORTED_RUNGS: &str = "near, deep (or leave rung unset)";
+/// The rung vocabulary: a cap (the tick band containing spot, holding the LP NOCK budget),
+/// a near rung and a deep rung (operator decision, 2026-11-20).
+pub(crate) const LADDER_RUNGS: [&str; 3] = ["cap", "near", "deep"];
+pub(crate) const SUPPORTED_RUNGS: &str = "cap, near, deep (or leave rung unset)";
 /// What an unset `rung` reads as. Never a default rung.
-pub(crate) const RUNG_UNSET_NOTE: &str = "rung is not set in config.yaml (near or deep): NockNock assumes neither";
+pub(crate) const RUNG_UNSET_NOTE: &str = "rung is not set in config.yaml (cap, near or deep): NockNock assumes none";
 /// The deviation-matrix row of tracked ladders: measured, no target (#167).
 pub(crate) const LADDER_BUCKET_NAME: &str = "NOCK ladders (measured)";
 
@@ -559,7 +561,7 @@ pub(crate) struct LadderReading {
     pub(crate) position_id: String,
     pub(crate) config_id: String,
     pub(crate) label: String,
-    /// `near` | `deep` from config; null when unset (`rung_note` says so).
+    /// `cap` | `near` | `deep` from config; null when unset (`rung_note` says so).
     pub(crate) rung: Option<String>,
     pub(crate) rung_note: Option<String>,
     /// holds_only_usdc | in_range | holds_only_nock | empty | pool_stale. Named by what

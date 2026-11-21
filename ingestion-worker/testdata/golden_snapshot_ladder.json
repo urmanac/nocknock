@@ -497,7 +497,7 @@
           "pool_price_usd": "0.02066445",
           "position_id": "uniswap-v4:base:3299001",
           "rung": null,
-          "rung_note": "rung is not set in config.yaml (near or deep): NockNock assumes neither",
+          "rung_note": "rung is not set in config.yaml (cap, near or deep): NockNock assumes none",
           "since_deposit": {
             "avg_buy_price_usd": null,
             "current_liquidity": "400000000000000",
@@ -787,7 +787,7 @@
         }
       ]
     },
-    "state_hash": "5fb1c31efcf2bd9bd82b6ecaad8a880889426cf18b27ff9a51febd7203f6e83f"
+    "state_hash": "16154a7fec670b424f86c4abee2357f46d0a8c546ee5be37e82c8b98c1e8ddfc"
   },
   "near_rung_bought_plan_due": {
     "mcp_text": {
@@ -1306,7 +1306,7 @@
           "pool_price_usd": "0.01480505",
           "position_id": "uniswap-v4:base:3299001",
           "rung": null,
-          "rung_note": "rung is not set in config.yaml (near or deep): NockNock assumes neither",
+          "rung_note": "rung is not set in config.yaml (cap, near or deep): NockNock assumes none",
           "since_deposit": {
             "avg_buy_price_usd": null,
             "current_liquidity": "400000000000000",
@@ -1596,6 +1596,6 @@
         }
       ]
     },
-    "state_hash": "02803d0b1c4d45ee0df7aa5757d1d8c0116acfb0edbd59bfb94fe81b80de5e1d"
+    "state_hash": "6412bcea4ac63417367518bcfee893de1c7563f6d6c28f29e1c5077bea2017cd"
   }
 }

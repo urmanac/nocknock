@@ -55,6 +55,8 @@
             tax_reserve_ratio: 0.40,
             target_weights_bps: TargetWeightsBps { treasury: 8000, uniswap_lp: 1500, cash: 500 },
             cash_reserve_usdc: None,
+            ladder_bottom_usd: None,
+            ladder_rungs: None,
         }
     }
 
@@ -1812,6 +1814,8 @@ database_url: "postgresql://localhost/test"
                 lp_rebuild: LpRebuild::default(),
                 cost_basis: None,
                 floor_breach: None,
+                fee_yield: None,
+                ladder_shape: None,
                 asset_aggregation_series: AssetAggregationSeries {
                     time_points: vec!["2026-10-11T00:00:00Z".to_string()],
                     safe_haven_series: vec!["48.00".to_string()],
