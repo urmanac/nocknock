@@ -354,6 +354,7 @@ pub(crate) fn aero_cl_position_from_reads(
         tick_spacing: Some(decoded.tick_spacing),
         staked_in_gauge,
         fees_note: fees.note().map(|n| n.to_string()),
+        ..Default::default()
     };
     Ok((raw, facts))
 }

@@ -138,6 +138,62 @@
           "wallet_gas_eth": null,
           "wallet_gas_usd": null
         },
+        "ladder_suggestion": {
+          "after_deposit": null,
+          "assumptions": [
+            "The amount is the most the standing reserve allows at the ladder's bottom; fees and gas are not counted.",
+            "The top is the usable tick at or below spot: the range holds only USDC now and earns no fees until NOCK falls to its top.",
+            "Below the bottom the other NOCK ranges keep converting; that reading is stated, not the gate.",
+            "The ladder's USDC is outside the NOCK LP target and the rebuild: the two are separate figures.",
+            "No fee estimate is stated yet; it joins this card with the rung settings."
+          ],
+          "candidates": {
+            "note": "candidate bottoms, a measurement; none is picked",
+            "reason": "No tracked USDC/NOCK concentrated pool can hold a ladder this cycle; each pool's reason is listed.",
+            "rows": []
+          },
+          "excluded": [
+            {
+              "position_id": "uniswap-v4:base:3163432",
+              "reason": "ETH/NOCK pool; a ladder is a USDC/NOCK range"
+            },
+            {
+              "position_id": "uniswap-v4:base:3163431",
+              "reason": "the pool's fee was not read this cycle (poolKeys)"
+            },
+            {
+              "position_id": "uniswap-v3:base:6336662",
+              "reason": "WETH/NOCK pool; a ladder is a USDC/NOCK range"
+            },
+            {
+              "position_id": "uniswap-v4:base:3163450",
+              "reason": "the pool's fee was not read this cycle (poolKeys)"
+            }
+          ],
+          "freshness_rule": "Shown only while the snapshot is fresh: the dashboard's sync status is not stale, or the worker's health is ok.",
+          "gates": null,
+          "headline": "Ladder: needs your bottom price (operator_profile.ladder_bottom_usd) before one is measured.",
+          "id": "ladder_suggestion:NOCK",
+          "minimum_usdc": "1.00",
+          "missing": [
+            "operator_profile.ladder_bottom_usd",
+            "operator_profile.cash_reserve_usdc"
+          ],
+          "numbers": null,
+          "outcomes": [],
+          "picture": null,
+          "reason": "No ladder is tracked. A suggestion needs operator_profile.ladder_bottom_usd (your bottom price; NockNock does not choose one) and operator_profile.cash_reserve_usdc (the reserve that sizes it).",
+          "rungs": [],
+          "sentence": null,
+          "shown": false,
+          "stated": null,
+          "statement": "A measurement from this cycle's reads of what the range would do. NockNock does not choose the bottom or the amount, builds no transaction, and signs and sends nothing.",
+          "status": "needs_setting",
+          "tier": "top",
+          "token": "NOCK",
+          "tracked": [],
+          "what_changed": null
+        },
         "lp_rebuild": {
           "actual_usd": "452.51",
           "excluded": [],
@@ -551,7 +607,7 @@
         }
       ]
     },
-    "state_hash": "2ebaccecbd2e1c2db10d88a81da1d9245c0a842d148ec0f30b9c46b465772dd1"
+    "state_hash": "16dbe0e088af299439461a7ad371eebaa7abd74427e93912411a6f28f259c555"
   },
   "from_zero": {
     "mcp_text": {
@@ -629,6 +685,45 @@
           "wallet_aero_usd": null,
           "wallet_gas_eth": "0.000000",
           "wallet_gas_usd": "0.00"
+        },
+        "ladder_suggestion": {
+          "after_deposit": null,
+          "assumptions": [
+            "The amount is the most the standing reserve allows at the ladder's bottom; fees and gas are not counted.",
+            "The top is the usable tick at or below spot: the range holds only USDC now and earns no fees until NOCK falls to its top.",
+            "Below the bottom the other NOCK ranges keep converting; that reading is stated, not the gate.",
+            "The ladder's USDC is outside the NOCK LP target and the rebuild: the two are separate figures.",
+            "No fee estimate is stated yet; it joins this card with the rung settings."
+          ],
+          "candidates": {
+            "note": "candidate bottoms, a measurement; none is picked",
+            "reason": "No tracked USDC/NOCK concentrated pool can hold a ladder this cycle; each pool's reason is listed.",
+            "rows": []
+          },
+          "excluded": [],
+          "freshness_rule": "Shown only while the snapshot is fresh: the dashboard's sync status is not stale, or the worker's health is ok.",
+          "gates": null,
+          "headline": "Ladder: needs your bottom price (operator_profile.ladder_bottom_usd) before one is measured.",
+          "id": "ladder_suggestion:NOCK",
+          "minimum_usdc": "1.00",
+          "missing": [
+            "operator_profile.ladder_bottom_usd",
+            "operator_profile.cash_reserve_usdc"
+          ],
+          "numbers": null,
+          "outcomes": [],
+          "picture": null,
+          "reason": "No ladder is tracked. A suggestion needs operator_profile.ladder_bottom_usd (your bottom price; NockNock does not choose one) and operator_profile.cash_reserve_usdc (the reserve that sizes it).",
+          "rungs": [],
+          "sentence": null,
+          "shown": false,
+          "stated": null,
+          "statement": "A measurement from this cycle's reads of what the range would do. NockNock does not choose the bottom or the amount, builds no transaction, and signs and sends nothing.",
+          "status": "needs_setting",
+          "tier": "top",
+          "token": "NOCK",
+          "tracked": [],
+          "what_changed": null
         },
         "lp_rebuild": {
           "actual_usd": "0.00",
@@ -738,7 +833,7 @@
         }
       ]
     },
-    "state_hash": "d1662d2e36bf6ce392c814a9501342d8598903203b0e989d79b611b148752f91"
+    "state_hash": "d435c51e5c2df7d098ef10626cef79f86fb555f464dc8208e59e0ce74e6375eb"
   },
   "whole_book_plan_due": {
     "mcp_text": {
@@ -970,6 +1065,66 @@
           "wallet_aero_usd": null,
           "wallet_gas_eth": "0.114226",
           "wallet_gas_usd": "271.07"
+        },
+        "ladder_suggestion": {
+          "after_deposit": null,
+          "assumptions": [
+            "The amount is the most the standing reserve allows at the ladder's bottom; fees and gas are not counted.",
+            "The top is the usable tick at or below spot: the range holds only USDC now and earns no fees until NOCK falls to its top.",
+            "Below the bottom the other NOCK ranges keep converting; that reading is stated, not the gate.",
+            "The ladder's USDC is outside the NOCK LP target and the rebuild: the two are separate figures.",
+            "No fee estimate is stated yet; it joins this card with the rung settings."
+          ],
+          "candidates": {
+            "note": "candidate bottoms, a measurement; none is picked",
+            "reason": "No tracked USDC/NOCK concentrated pool can hold a ladder this cycle; each pool's reason is listed.",
+            "rows": []
+          },
+          "excluded": [
+            {
+              "position_id": "uniswap-v4:base:3163432",
+              "reason": "ETH/NOCK pool; a ladder is a USDC/NOCK range"
+            },
+            {
+              "position_id": "uniswap-v4:base:3163431",
+              "reason": "the pool's fee was not read this cycle (poolKeys)"
+            },
+            {
+              "position_id": "uniswap-v3:base:6336662",
+              "reason": "WETH/NOCK pool; a ladder is a USDC/NOCK range"
+            },
+            {
+              "position_id": "uniswap-v4:base:3163450",
+              "reason": "the pool's fee was not read this cycle (poolKeys)"
+            },
+            {
+              "position_id": "aerodrome:base:0x85f1aa3a70fedd1c52705c15baed143e675cd626",
+              "reason": "a basic Aero pool is full range; it cannot hold a ladder"
+            }
+          ],
+          "freshness_rule": "Shown only while the snapshot is fresh: the dashboard's sync status is not stale, or the worker's health is ok.",
+          "gates": null,
+          "headline": "Ladder: needs your bottom price (operator_profile.ladder_bottom_usd) before one is measured.",
+          "id": "ladder_suggestion:NOCK",
+          "minimum_usdc": "1.00",
+          "missing": [
+            "operator_profile.ladder_bottom_usd",
+            "operator_profile.cash_reserve_usdc"
+          ],
+          "numbers": null,
+          "outcomes": [],
+          "picture": null,
+          "reason": "No ladder is tracked. A suggestion needs operator_profile.ladder_bottom_usd (your bottom price; NockNock does not choose one) and operator_profile.cash_reserve_usdc (the reserve that sizes it).",
+          "rungs": [],
+          "sentence": null,
+          "shown": false,
+          "stated": null,
+          "statement": "A measurement from this cycle's reads of what the range would do. NockNock does not choose the bottom or the amount, builds no transaction, and signs and sends nothing.",
+          "status": "needs_setting",
+          "tier": "top",
+          "token": "NOCK",
+          "tracked": [],
+          "what_changed": null
         },
         "lp_rebuild": {
           "actual_usd": "76.06",
@@ -1575,6 +1730,6 @@
         }
       ]
     },
-    "state_hash": "3008f3c73846e9989249757b9420f66ff5b8609ae4dcb1b9dd95b8abe3efc2e1"
+    "state_hash": "78c30889dee9b6c79128bd310a90170e3c42562af644e2040a375593b5870ed2"
   }
 }

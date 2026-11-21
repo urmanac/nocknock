@@ -958,6 +958,8 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         cost_basis: None,
         // The floor-crossing price (#165): a measurement of the deployed ranges.
         floor_breach: Some(floor_breach(raw, profile)),
+        // Filled from the assembled snapshot (#168): ladder_suggest::attach_ladder_suggestion.
+        ladder_suggestion: None,
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: fee_entries
                 .iter()

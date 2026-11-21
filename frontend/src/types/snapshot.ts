@@ -45,6 +45,8 @@ export interface DerivedMetrics {
   cost_basis?: import('../costBasis').CostBasis | null;
   /** The floor-crossing price (2.9.0, #165); null/absent from a worker that predates it */
   floor_breach?: import('../floor').FloorBreach | null;
+  /** The ladder suggestion (2.9.0, #168): a top-of-page event; absent from a worker that predates it */
+  ladder_suggestion?: import('../ladderSuggestion').LadderSuggestion | null;
 }
 
 /** Plan progress, derived from config + receipt-verified buys only (2.1.0) */
@@ -561,6 +563,9 @@ export interface Position {
   role?: 'ladder';
   /** A ladder's rung from config; absent when unset (2.9.0, #167). */
   rung?: 'near' | 'deep';
+  /** Uniswap v4: the pool fee from poolKeys in hundredths of a bip, and the hooks address (2.9.0, #168). */
+  fee_raw?: number;
+  hooks?: string;
 }
 
 /** One tracked ladder, measured (2.9.0, #167): data.ladders[]. */

@@ -15,6 +15,8 @@ import { LITE_TONE_COLOR, freshnessAt, liteStatusView } from '../liteStatus';
 import { detectPlatform, installHint, isStandalone } from '../pwa';
 import { AccumulationPlanPanel } from './AccumulationPlanPanel';
 import { NotificationTestPanel } from './NotificationTestPanel';
+import { LadderSuggestionLiteCard } from './LadderSuggestionCard';
+import { ladderSuggestionOf } from '../ladderSuggestion';
 
 const card: React.CSSProperties = {
   background: '#161b22',
@@ -98,6 +100,16 @@ export function LiteStatusCard() {
           {view.freshness}
         </div>
       </section>
+      {/* The ladder suggestion (#168): right under the directive, the same headline,
+          outcomes and deposits as the dashboard. */}
+      {snapshot ? (
+        <LadderSuggestionLiteCard
+          suggestion={ladderSuggestionOf(snapshot.data)}
+          syncStatus={now?.syncStatus ?? freshness.syncStatus}
+          cardStyle={card}
+          labelStyle={label}
+        />
+      ) : null}
       {snapshot && metrics?.accumulation_plan ? (
         <section style={card}>
           <div style={label}>ACCUMULATION PLAN</div>
