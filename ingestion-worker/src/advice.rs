@@ -980,6 +980,7 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         // Filled from the assembled snapshot (#169): events::attach_maintenance_and_events.
         ladder_maintenance: None,
         events: None,
+        ladder_profile: None,
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: fee_entries
                 .iter()

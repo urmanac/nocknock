@@ -322,8 +322,44 @@ fn fill_offer_events(data: &SnapshotData) -> Vec<Value> {
 fn found_positions_event(data: &SnapshotData) -> Option<Value> {
     let d = data.derived_metrics.position_detection.as_ref()?;
     let n = d.pointer("/found_not_counted/count").and_then(|v| v.as_u64()).unwrap_or(0);
+    let status = d.get("status").and_then(|v| v.as_str()).unwrap_or("unavailable");
+    if n == 0 && status != "ok" {
+        // The check did not run or ran in part: a real call to action (operator, 2026-11-21).
+        let reason = d.get("reason").and_then(|v| v.as_str()).unwrap_or("the check did not complete");
+        return Some(json!({
+            "id": "found_positions",
+            "kind": "found_positions",
+            "tier": "top",
+            "title": "FOUND ON-CHAIN: CHECK NOT COMPLETE",
+            "what_changed": format!("Looking for the wallet's new positions on-chain is {status}."),
+            "text": format!("New positions were not fully looked for this cycle ({status}): {reason}. A deposit made now is found once the check runs again."),
+            "numbers": {},
+            "links": [],
+            "would_sign": Value::Null,
+            "card": "found_positions",
+            "source": "derived_metrics.position_detection",
+        }));
+    }
     if n == 0 {
-        return None;
+        // Nothing to decide: one quiet line.
+        let tracked = d.get("tracked").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+        if tracked == 0 {
+            return None;
+        }
+        let block = d.get("checked_at_block").and_then(|v| v.as_i64()).map(|b| format!(" · checked at block {b}")).unwrap_or_default();
+        return Some(json!({
+            "id": "found_positions",
+            "kind": "found_positions",
+            "tier": "quiet",
+            "title": "FOUND ON-CHAIN",
+            "what_changed": "Nothing new to decide.",
+            "text": format!("{tracked} position{} tracked from the chain{block}", if tracked == 1 { "" } else { "s" }),
+            "numbers": { "tracked": tracked.to_string() },
+            "links": [],
+            "would_sign": Value::Null,
+            "card": "found_positions",
+            "source": "derived_metrics.position_detection",
+        }));
     }
     let value = d.pointer("/found_not_counted/value_usd").and_then(|v| v.as_str()).map(|v| format!(" worth ${v}")).unwrap_or_default();
     Some(json!({
@@ -343,6 +379,24 @@ fn found_positions_event(data: &SnapshotData) -> Option<Value> {
 
 fn ladder_suggestion_event(data: &SnapshotData) -> Option<Value> {
     let l = data.derived_metrics.ladder_suggestion.as_ref()?;
+    if l.get("status").and_then(|v| v.as_str()) == Some("ladder_deployed") {
+        // Nothing left to deposit: one quiet line in the ladder section (operator, 2026-11-21).
+        let of = l.pointer("/shape/of").and_then(|v| v.as_u64()).unwrap_or(0);
+        let deployed = l.pointer("/shape/deployed").and_then(|v| v.as_u64()).unwrap_or(0);
+        return Some(json!({
+            "id": l.get("id").cloned().unwrap_or(json!(LADDER_SUGGEST_ID)),
+            "kind": "ladder_suggestion",
+            "tier": "quiet",
+            "title": "LADDER",
+            "what_changed": "Nothing is left to deposit.",
+            "text": format!("Ladder: all {deployed} rung{} deployed", if deployed == 1 { "" } else { "s" }),
+            "numbers": { "deployed": deployed.to_string(), "of": of.to_string() },
+            "links": [],
+            "would_sign": Value::Null,
+            "card": "ladder_suggestion",
+            "source": "derived_metrics.ladder_suggestion",
+        }));
+    }
     if l.get("shown").and_then(|v| v.as_bool()) != Some(true) {
         return None;
     }
@@ -509,6 +563,7 @@ pub(crate) fn attach_maintenance_and_events(
         gap_limit_seconds,
     };
     data.derived_metrics.ladder_maintenance = ladder_maintenance_block(data, profile.ladder_maintenance.as_ref(), &carry, now);
+    data.derived_metrics.ladder_profile = ladder_profile_block(data);
     let prev_events = prev.and_then(|p| p.data.derived_metrics.events.as_ref());
     data.derived_metrics.events = Some(events_block(data, prev_events, continuous, now));
 }

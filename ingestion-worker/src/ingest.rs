@@ -488,7 +488,9 @@ pub(crate) fn canonical_state_json(data: &SnapshotData) -> serde_json::Value {
 }
 
 pub(crate) fn strip_volatile_time_fields(value: &mut serde_json::Value) {
-    const VOLATILE_KEYS: [&str; 16] = [
+    const VOLATILE_KEYS: [&str; 17] = [
+        // The ladder shape (#169): worked out from the hashed positions and ladders.
+        "ladder_profile",
         // Ladder maintenance and the calls-to-action events (#169): worked out from the
         // hashed state, the clocks carried from the previous snapshot and this cycle's
         // time ("out of range above for 3.2 h"). Hashing them would store a row every cycle.

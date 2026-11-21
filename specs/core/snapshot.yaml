@@ -50,7 +50,25 @@ info:
       snapshot's eth_price_usd), with the WETH still in them there, or that they cover it
       already. Every event's deep_link is an element id on the dashboard and in the Lite
       cockpit: the strip for top entries, else the place its `card` names. The pushes
-      are unchanged (notify.rs does not read events). Left out of the state hash.
+      are unchanged (notify.rs does not read events). Left out of the state hash. A
+      ladder suggestion with nothing left to deposit (ladder_deployed) is a quiet entry
+      ("Ladder: all 3 rungs deployed"), and positions found on-chain with nothing to
+      decide are a quiet entry ("3 positions tracked from the chain · checked at block
+      N"); an offer waiting for a tap or a check that did not complete is top.
+    - DerivedMetrics.ladder_profile (absent without a tracked ladder): the ladder shape.
+      bars[] {position_id, label, name, role (cap | near | deep | ladder | other),
+      low_usd, high_usd, capital_usd (null when unknown), capital_basis (usdc_at_top for
+      a ladder rung: its value as all USDC at its top, constant with the price;
+      value_now for any other range), density (capital / ln(high/low), so on a log price
+      axis the bar's area is its capital; null when capital is unknown), status
+      (measured | capital_unknown), clipped_low, clipped_high, clip_text, text}; segments[]
+      {low_usd, high_usd, density, includes_unknown, position_ids}: the stacked depth
+      between consecutive bar edges; view_low_usd / view_high_usd: the ladder zone (its
+      rungs, the ladder bottom and spot) widened by 5% on the log axis, where wider ranges
+      are clipped (their density stays the full-width one); spot_usd, ladder_bottom_usd,
+      cash_reserve_usdc and reserve_note for the markers; full_range[] (no finite width,
+      not drawn) and not_drawn[] (a pair whose bounds are not USD prices). Left out of the
+      state hash.
 
     2.10.0 (the fee yield and the operator's ladder shape, extending #166), additive:
     - DerivedMetrics.fee_yield (absent before 2.10.0): swap fees per unit of liquidity
@@ -1100,6 +1118,14 @@ components:
             Calls to action as structured events (2.11.0, issue #169), top tier first.
             Absent in a snapshot stored before 2.11.0: not reported, never "nothing
             needs you". Left out of the state hash.
+        ladder_profile:
+          type: object
+          additionalProperties: true
+          description: |
+            The ladder shape (2.11.0, issue #169): bars whose area on a log price axis is
+            their capital, the stacked depth, the view window and the markers; see the
+            2.11.0 notes at the top of this file. Absent without a tracked ladder. Left out
+            of the state hash.
         position_detection:
           type: object
           nullable: true

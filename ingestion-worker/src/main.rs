@@ -108,6 +108,8 @@ mod ladder_maintenance;
 use ladder_maintenance::*;
 mod events;
 use events::*;
+mod ladder_profile;
+use ladder_profile::*;
 mod events_text;
 
 // ============================================================
@@ -1151,6 +1153,13 @@ struct DerivedMetrics {
     /// the state hash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     events: Option<serde_json::Value>,
+    /// The ladder shape (snapshot 2.11.0, #169): every deployed NOCK range as a bar on a log
+    /// USD-per-NOCK axis, its height capital / ln(high/low) so its area is its capital, the
+    /// stacked depth, the view window and the markers. Built by
+    /// `ladder_profile::ladder_profile_block`. Absent without a tracked ladder. Left out of
+    /// the state hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ladder_profile: Option<serde_json::Value>,
 }
 
 /// Fees per unit of liquidity measured on our own tracked ranges (2.10.0). One pool
@@ -2588,3 +2597,5 @@ mod tests_tracked;
 mod tests_position_detect;
 #[cfg(test)]
 mod tests_ladder_maintenance;
+#[cfg(test)]
+mod tests_ladder_profile;

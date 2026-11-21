@@ -62,6 +62,7 @@ pub fn events_lines(data: &Value, health: Option<&str>) -> String {
         }
     }
     out.push_str(&maintenance_lines(data));
+    out.push_str(&profile_lines(data));
     out
 }
 
@@ -83,6 +84,60 @@ pub fn maintenance_lines(data: &Value) -> String {
             st(r, "/status").unwrap_or("?"),
             st(r, "/text").unwrap_or("")
         ));
+    }
+    out
+}
+
+fn price4(v: f64) -> String {
+    if !(v > 0.0) || !v.is_finite() {
+        return "?".to_string();
+    }
+    let digits = (3 - v.log10().floor() as i32).max(0) as usize;
+    format!("{:.*}", digits, v)
+}
+
+fn num(v: &Value, k: &str) -> Option<f64> {
+    v.get(k).and_then(|x| x.as_str()).and_then(|s| s.parse::<f64>().ok())
+}
+
+/// The ladder shape as a short table (#169): one line per bar, low to high, with its capital
+/// and what that capital is; the markers; what is not drawn. Empty without the block. Pure.
+pub fn profile_lines(data: &Value) -> String {
+    let Some(p) = data.pointer("/derived_metrics/ladder_profile").filter(|v| v.is_object()) else {
+        return String::new();
+    };
+    let mut bars: Vec<&Value> = p.get("bars").and_then(|b| b.as_array()).map(|a| a.iter().collect()).unwrap_or_default();
+    bars.sort_by(|a, b| num(a, "low_usd").unwrap_or(0.0).partial_cmp(&num(b, "low_usd").unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal));
+    let mut out = "• Ladder shape (each bar on a log price axis; height capital / ln(high/low), so area = capital):\n".to_string();
+    for b in bars {
+        let capital = match st(b, "/capital_usd") {
+            Some(c) => format!("${c} ({})", if st(b, "/capital_basis") == Some("usdc_at_top") { "all USDC at its top" } else { "value now" }),
+            None => "capital unknown".to_string(),
+        };
+        out.push_str(&format!(
+            "  – {} ({}): ${}–${}, {capital}, density {}\n",
+            st(b, "/name").unwrap_or("?"),
+            st(b, "/label").unwrap_or(""),
+            price4(num(b, "low_usd").unwrap_or(0.0)),
+            price4(num(b, "high_usd").unwrap_or(0.0)),
+            st(b, "/density").unwrap_or("unknown")
+        ));
+    }
+    let mut marks = Vec::new();
+    if let Some(s) = num(p, "spot_usd") {
+        marks.push(format!("spot ${}", price4(s)));
+    }
+    if let Some(b) = num(p, "ladder_bottom_usd") {
+        marks.push(format!("ladder bottom ${}", price4(b)));
+    }
+    if let Some(r) = st(p, "/reserve_note") {
+        marks.push(r.to_string());
+    }
+    if !marks.is_empty() {
+        out.push_str(&format!("  Markers: {}.\n", marks.join("; ")));
+    }
+    for fr in p.get("full_range").and_then(|v| v.as_array()).into_iter().flatten() {
+        out.push_str(&format!("  Not drawn: {}.\n", st(fr, "/text").unwrap_or("")));
     }
     out
 }

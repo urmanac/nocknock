@@ -765,7 +765,11 @@ fn a_completed_near_move_is_tracked_and_its_gap_to_the_deep_rung_is_stated() {
 
 fn text_case(env: &SnapshotEnvelope, health: Option<&str>) -> Value {
     let data = serde_json::to_value(&env.data).unwrap();
-    let dm = json!({ "derived_metrics": { "events": data["derived_metrics"]["events"], "ladder_maintenance": data["derived_metrics"]["ladder_maintenance"] } });
+    let dm = json!({ "derived_metrics": {
+        "events": data["derived_metrics"]["events"],
+        "ladder_maintenance": data["derived_metrics"]["ladder_maintenance"],
+        "ladder_profile": data["derived_metrics"]["ladder_profile"],
+    } });
     json!({ "data": dm, "health": health, "text": crate::events_text::events_lines(&dm, health) })
 }
 
