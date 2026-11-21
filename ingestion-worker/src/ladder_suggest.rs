@@ -1295,7 +1295,7 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
             ("below_minimum", "under the minimum"),
             ("held", "held back"),
             ("none", "with no cap this cycle"),
-            ("not_deposited", "not deposited (the reserve leaves no room)"),
+            ("not_deposited", "not deposited"),
             ("partly_withdrawn", "partly withdrawn"),
             ("withdrawn", "withdrawn"),
         ]

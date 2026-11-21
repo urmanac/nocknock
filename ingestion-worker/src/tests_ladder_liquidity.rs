@@ -425,7 +425,7 @@ fn test_an_over_rung_is_stated_by_deposit_order_and_changes_nothing_else() {
     // The cap is the last rung and the reserve has no room for it: nothing is left to
     // deposit, and the card says why (second review of the bottle, item 3).
     assert_eq!((st(&l, "/status"), &l["shown"]), ("ladder_deployed", &json!(false)));
-    assert_eq!(st(&l, "/headline"), "Ladder: nothing is left to deposit (1 deployed, 1 over target, 1 not deposited (the reserve leaves no room)).");
+    assert_eq!(st(&l, "/headline"), "Ladder: nothing is left to deposit (1 deployed, 1 over target, 1 not deposited).");
     assert!(st(row(&l, "cap"), "/text").starts_with("Deposit 1 of 3 (cap): not deposited: the reserve leaves $"), "{}", st(row(&l, "cap"), "/text"));
     // Without the deposit order, the rung implying the most freezes the plan: the deep rung
     // then has a remainder to deposit rather than the near rung reading over.
