@@ -384,7 +384,10 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         // The reserve the plan honours is the larger of its own and the standing one
         // (#162), so the plan panel and its advice name the one that binds.
         if let Some(standing) = reserve.amount() {
-            if cfg.cash_reserve_usdc.map_or(true, |own| standing > own) {
+            // An invalid plan reserve stays named by the plan's Invalid status; the
+            // standing amount never stands in for it.
+            let own_valid = cfg.cash_reserve_usdc.map_or(true, |own| own >= 0.0 && own.is_finite());
+            if own_valid && cfg.cash_reserve_usdc.map_or(true, |own| standing > own) {
                 status.cash_reserve_usdc = Some(format!("{:.2}", standing));
             }
         }
@@ -732,7 +735,8 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             cash_reserve_usdc: reserve.amount().map(|r| format!("{:.2}", r)),
             reserve_stable_usdc: reserve.stable().map(|v| format!("{:.2}", v)),
             reserve_headroom_usdc: reserve.headroom().map(|v| format!("{:.2}", v)),
-            dry_powder_usdc: Some(format!("{:.2}", deployable_usdc)),
+            dry_powder_usdc: (reserve != StandingReserve::Invalid).then(|| format!("{:.2}", deployable_usdc)),
+            reserve_note: (reserve == StandingReserve::Invalid).then(|| RESERVE_INVALID_NOTE.to_string()),
         },
         asset_aggregation_series: AssetAggregationSeries {
             time_points: vec![now_str.clone()],
@@ -944,6 +948,9 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     }
 }
 
+/// Why an invalid standing reserve is not applied (#162).
+pub(crate) const RESERVE_INVALID_NOTE: &str = "operator_profile.cash_reserve_usdc must be zero or positive";
+
 /// The standing protected cash reserve of one cycle (#162).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum StandingReserve {
@@ -974,7 +981,10 @@ pub(crate) fn standing_reserve(configured: Option<f64>, wallet_usdc: f64, nock_l
         Some(r) if !(r >= 0.0) || !r.is_finite() => StandingReserve::Invalid,
         Some(amount) => {
             let stable = wallet_usdc + nock_lp_usdc;
-            StandingReserve::Set { amount, nock_lp_usdc, stable, headroom: stable - amount }
+            // Whole cents, and never -0.00: every surface rounds the headroom the same way
+            // and agrees which side of the reserve the balance is on.
+            let headroom = ((stable - amount) * 100.0).round() / 100.0 + 0.0;
+            StandingReserve::Set { amount, nock_lp_usdc, stable, headroom }
         }
     }
 }
@@ -985,9 +995,7 @@ pub(crate) fn standing_reserve(configured: Option<f64>, wallet_usdc: f64, nock_l
 pub(crate) fn reserve_dry_powder_sentence(base: String, reserve: &StandingReserve, wallet_deployable: f64) -> String {
     match reserve {
         StandingReserve::Unset => base,
-        StandingReserve::Invalid => {
-            "Liquid dry powder: not reported: operator_profile.cash_reserve_usdc must be zero or positive.".to_string()
-        }
+        StandingReserve::Invalid => format!("Liquid dry powder: not reported: {}.", RESERVE_INVALID_NOTE),
         StandingReserve::Set { amount, nock_lp_usdc, stable, headroom } => {
             let measured = format!(
                 "The ${:.2} protected cash reserve is measured on wallet USDC plus the ${:.2} of USDC in NOCK LP: ${:.2},",

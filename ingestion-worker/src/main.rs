@@ -23,6 +23,7 @@ use calldata::*;
 mod contracts;
 use contracts::*;
 mod mcp_text;
+mod reserve_text;
 use mcp_text::*;
 mod plan;
 use plan::*;
@@ -1479,9 +1480,14 @@ struct GlobalStatus {
     reserve_headroom_usdc: Option<String>,
     /// Liquid dry powder in USDC (2.8.3, #162): wallet USDC less the larger of the cash
     /// target and the virtual tax reserve, and never more than `reserve_headroom_usdc`.
-    /// The same figure the advice names. "0.00" when there is none.
+    /// The same figure the advice names. "0.00" when there is none; absent when the
+    /// standing reserve is invalid (`reserve_note` says so): unknown, never a made-up 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     dry_powder_usdc: Option<String>,
+    /// Why the configured standing reserve is not applied (2.8.3, #162): it is not zero
+    /// or positive. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reserve_note: Option<String>,
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).

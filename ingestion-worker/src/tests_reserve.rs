@@ -7,6 +7,7 @@
 //! wallet USDC plus USDC inside NOCK-pair LP; gas-side ETH/USDC ranges are left out.
 //! Nothing here touches the network or needs a database or a config.yaml.
 use super::*;
+use crate::reserve_text::reserve_line;
 use crate::tests_gas_lp::{nock_only, profile, with_gas_ranges};
 use chrono::TimeZone;
 
@@ -150,8 +151,12 @@ fn test_an_invalid_reserve_reports_no_dry_powder_and_blocks_the_plan() {
     let raw = nock_only();
     let ctx = PlanContext { cfg: Some(plan(None)), fills: PlanFills::default(), ledger_unavailable: false, now: now() };
     let m = metrics_for(&raw, &with_reserve(Some(-5.0)), &ctx);
-    assert_eq!(m.global_status.dry_powder_usdc.as_deref(), Some("0.00"));
+    // Unknown, never a made-up 0.00 (#162 review), and named on every surface.
+    assert_eq!(m.global_status.dry_powder_usdc, None);
     assert_eq!(m.global_status.cash_reserve_usdc, None);
+    assert_eq!(m.global_status.reserve_note.as_deref(), Some("operator_profile.cash_reserve_usdc must be zero or positive"));
+    let text = format_portfolio_state_text(&serde_json::json!({ "derived_metrics": &m }));
+    assert!(text.contains("• Protected cash reserve: not applied: operator_profile.cash_reserve_usdc must be zero or positive\n"), "{text}");
     let p = m.accumulation_plan.expect("plan");
     assert_eq!(p.status, "invalid");
     let advice = format!("{} {}", m.global_status.shot_advice_action, m.global_status.shot_advice_details);
@@ -228,4 +233,26 @@ fn test_both_mcp_transports_state_the_reserve() {
     let none = metrics_for(&raw, &with_reserve(None), &PlanContext::none());
     let text = format_portfolio_state_text(&serde_json::json!({ "derived_metrics": none }));
     assert!(!text.contains("Protected cash reserve"), "{text}");
+}
+
+#[test]
+fn test_a_fraction_of_a_cent_is_never_minus_zero() {
+    // #162 review: -0.004 printed "-0.00", read "below" by the advice and "above" by the tile.
+    let r = standing_reserve(Some(950.0), 949.996, 0.0);
+    assert_eq!(format!("{:.2}", r.headroom().unwrap()), "0.00");
+    assert!(!r.headroom().unwrap().is_sign_negative());
+    let base = "Liquid dry powder: none (wallet USDC $949.996 less the $0.00 cash target).".to_string();
+    assert!(reserve_dry_powder_sentence(base, &r, 0.0).ends_with("$950.00, $0.00 above it."));
+    let under = standing_reserve(Some(950.0), 949.994, 0.0);
+    assert_eq!(format!("{:.2}", under.headroom().unwrap()), "-0.01");
+    assert_eq!(standing_reserve(Some(950.0), 1768.181, 0.0).headroom(), Some(818.18));
+}
+
+#[test]
+fn test_an_invalid_plan_reserve_is_not_replaced_by_the_standing_one() {
+    let raw = nock_only();
+    let ctx = PlanContext { cfg: Some(plan(Some(-5.0))), fills: PlanFills::default(), ledger_unavailable: false, now: now() };
+    let p = metrics_for(&raw, &with_reserve(Some(950.0)), &ctx).accumulation_plan.expect("plan");
+    assert_eq!(p.status, "invalid");
+    assert_eq!(p.cash_reserve_usdc.as_deref(), Some("-5.00"));
 }

@@ -12,6 +12,8 @@ info:
       Absent when the operator set no reserve.
     - GlobalStatus.dry_powder_usdc (new, optional): the liquid dry powder the advice
       names, never more than reserve_headroom_usdc.
+    - GlobalStatus.reserve_note (new, optional): why a configured reserve is not
+      applied (it is not zero or positive).
     - AccumulationPlanStatus.cash_reserve_usdc names the reserve the plan honours: the
       larger of the plan's own and the standing one.
 
@@ -1654,9 +1656,17 @@ components:
           description: >
             Liquid dry powder: wallet USDC less the larger of the cash target and the
             virtual tax reserve, and never more than reserve_headroom_usdc (never below
-            0.00). The figure the advice's "Liquid dry powder" sentence names; "0.00"
-            when the reserve is invalid. Absent on a snapshot from before 2.8.3. (#162)
+            0.00). The figure the advice's "Liquid dry powder" sentence names. Absent
+            when the configured reserve is invalid (reserve_note says why: unknown,
+            never 0.00) and on a snapshot from before 2.8.3. (#162)
           example: "818.18"
+        reserve_note:
+          type: string
+          description: >
+            Why the configured standing reserve is not applied: it is not zero or
+            positive. Present only then; cash_reserve_usdc and dry_powder_usdc are then
+            absent. (2.8.3, #162)
+          example: "operator_profile.cash_reserve_usdc must be zero or positive"
 
     AssetAggregationSeries:
       type: object

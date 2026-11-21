@@ -17,11 +17,17 @@ function num(v: string | null | undefined): number | null {
 export function reserveText(global: {
   cash_reserve_usdc?: string | null;
   reserve_headroom_usdc?: string | null;
+  reserve_note?: string | null;
 } | null | undefined): string | null {
   const reserve = num(global?.cash_reserve_usdc);
-  if (reserve === null) return null;
-  const headroom = num(global?.reserve_headroom_usdc);
-  if (headroom === null) return `${money(reserve)} protected reserve: not measured this cycle`;
+  if (reserve === null) {
+    // A configured reserve that is not applied is said, never shown as no reserve.
+    return global?.reserve_note ? `protected reserve not applied: ${global.reserve_note}` : null;
+  }
+  const raw = num(global?.reserve_headroom_usdc);
+  if (raw === null) return `${money(reserve)} protected reserve: not measured this cycle`;
+  // "-0.00" parses to -0: it is zero, never "$-0.00 above it".
+  const headroom = raw === 0 ? 0 : raw;
   const side = headroom < 0 ? `${money(-headroom)} below it` : `${money(headroom)} above it`;
   return `${money(reserve)} protected reserve (wallet + NOCK LP USDC): ${side}`;
 }

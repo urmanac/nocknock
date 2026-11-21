@@ -18,4 +18,14 @@ describe('the standing cash reserve line (#162)', () => {
     expect(reserveText({ cash_reserve_usdc: '' })).toBeNull();
     expect(reserveText({ cash_reserve_usdc: '950.00' })).toBe('$950.00 protected reserve: not measured this cycle');
   });
+
+  it('reads -0.00 as zero, above the reserve (#162 review)', () => {
+    expect(reserveText({ cash_reserve_usdc: '950.00', reserve_headroom_usdc: '-0.00' })).toBe('$950.00 protected reserve (wallet + NOCK LP USDC): $0.00 above it');
+  });
+
+  it('names a reserve that is not applied', () => {
+    expect(reserveText({ reserve_note: 'operator_profile.cash_reserve_usdc must be zero or positive' })).toBe(
+      'protected reserve not applied: operator_profile.cash_reserve_usdc must be zero or positive',
+    );
+  });
 });

@@ -294,6 +294,8 @@ export interface GlobalStatus {
   reserve_headroom_usdc?: string;
   /** Liquid dry powder, never above the headroom (2.8.3). */
   dry_powder_usdc?: string;
+  /** Why a configured standing reserve is not applied (2.8.3). */
+  reserve_note?: string;
 }
 
 /** A gauge reward stated as collectible earnings (#142): what is there and where it is

@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     plan panel names the one that binds.
   - The snapshot (spec 2.8.3) adds `cash_reserve_usdc`, `reserve_stable_usdc`,
     `reserve_headroom_usdc` and `dry_powder_usdc` to `global_status`. The Total USDC
-    Stack tile and `get_portfolio_state` state the reserve.
+    Stack tile and `get_portfolio_state` (both MCP transports) state the reserve.
   - Moving USDC into a NOCK range does not use the reserve up; buying NOCK does.
   - Unset means no rule. A reserve that is not zero or positive is named, and no dry
     powder is reported until it is fixed.
