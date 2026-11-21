@@ -359,11 +359,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Call-to-action audit (#169).** Top of the page: DEFENSIVE LOCK, DCA TRANCHE DUE and
   DCA PLAN INVALID, a plan buy to confirm, a position found on-chain, the shown ladder
-  suggestion, the ladder's maintenance, and a reserve dip the NOCK ranges' buying does
-  not explain. Quiet: every other directive, collectable LP fees (still pushed at the
-  $5.00 BATCH HARVEST rule), AERO rewards, closed positions, the floor-crossing price,
-  a cap that sold its NOCK, and a reserve dip the ranges' buying explains (stated with
-  the wallet / NOCK LP / ladder split). The pushes are unchanged.
+  suggestion, the ladder's maintenance, and wallet USDC below the standing reserve. Quiet:
+  every other directive, collectable LP fees (still pushed at the $5.00 BATCH HARVEST
+  rule), AERO rewards, closed positions, the floor-crossing price and a cap that sold its
+  NOCK. The pushes are unchanged.
+- **Wallet USDC below the reserve is at the top (operator's choice, 2026-11-21: "Top when
+  wallet < $950").** No exceptions. The event states the wallet / NOCK LP / ladder split of
+  the stable balance the gate counts, and one measured line on the gas-side ETH/USDC ranges
+  (still outside the gate, #151 and #162): their USDC and WETH now, wallet USDC if they
+  were withdrawn now, and the ETH price at which their USDC side alone would cover the
+  wallet's shortfall, with the WETH still in them there (operator, 2026-11-21: "we can plan
+  to pull the ETH LPs some time after it would cover the $950 usdc reserve").
+- **Ladder maintenance, after review (#169).** A deep pull whose
+  `deep_pull_recovery_pct` is at or above the rung's width can never fire (the rung sells
+  all its NOCK back first): that is now a top-of-page statement naming the setting and the
+  width, and no number is picked. A stated pull says how much of the NOCK the rung held at
+  most it has sold back since the low. A near move from a pool tick on a spacing multiple
+  opens out of range. A standing near move survives a pool_stale cycle, unknown reads and a
+  dip to within one spacing above the top; only a real return into the range clears it. A
+  completed near move (minted by the wallet with USDC only on the moved ticks) is tracked as
+  the near rung by itself, and the move states the stretch to the deep rung's top that no
+  rung would cover. Every event's deep link lands on an element of the page.
 
 ## [0.8.3] - 2026-11-20
 
