@@ -301,7 +301,8 @@ export function buildPositionSeriesDefs(
     return {
       key: `lp${i}`,
       positionId: id,
-      name: pos ? positionLabel(pos) : `${shortPositionId(id)} (no longer tracked)`,
+      // A tracked ladder (#167) holds NOCK and stacks like any range, named as a ladder.
+      name: pos ? (pos.role === 'ladder' ? `${positionLabel(pos)} (ladder)` : positionLabel(pos)) : `${shortPositionId(id)} (no longer tracked)`,
       retired,
     };
   });

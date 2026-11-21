@@ -290,10 +290,14 @@ export interface GlobalStatus {
   closed_positions_note?: string;
   /** operator_profile.cash_reserve_usdc (2.8.3, #162); absent when none is set. */
   cash_reserve_usdc?: string;
-  /** Wallet USDC + USDC in NOCK-pair LP, the balance the reserve is measured on (2.8.3). */
+  /** Wallet USDC + USDC in NOCK-pair LP (ladders included since 2.9.0, #167), the
+   *  balance the reserve is measured on (2.8.3). */
   reserve_stable_usdc?: string;
   /** reserve_stable_usdc minus cash_reserve_usdc, signed (2.8.3). */
   reserve_headroom_usdc?: string;
+  /** The USDC inside tracked ladders that reserve_stable_usdc includes (2.9.0, #167).
+   *  Absent with no reserve or no ladder. */
+  reserve_ladder_usdc?: string;
   /** Liquid dry powder, never above the headroom (2.8.3). */
   dry_powder_usdc?: string;
   /** Why a configured standing reserve is not applied (2.8.3). */
@@ -552,6 +556,57 @@ export interface Position {
    *  a reward, also when the gauge was not read (status 'not_read'). Absent otherwise
    *  and on an older snapshot */
   collectible_reward?: CollectibleReward;
+  /** 'ladder' for a position configured role: ladder (2.9.0, #167): counted, not NOCK LP.
+   *  Absent for every other position. */
+  role?: 'ladder';
+  /** A ladder's rung from config; absent when unset (2.9.0, #167). */
+  rung?: 'near' | 'deep';
+}
+
+/** One tracked ladder, measured (2.9.0, #167): data.ladders[]. */
+export interface LadderReading {
+  position_id: string;
+  config_id: string;
+  label: string;
+  rung: 'near' | 'deep' | null;
+  rung_note: string | null;
+  /** What the range holds, by its own pool's tick. */
+  state: 'holds_only_usdc' | 'in_range' | 'holds_only_nock' | 'empty' | 'pool_stale';
+  state_text: string;
+  low_price_usd: string;
+  high_price_usd: string;
+  low_pct_of_spot: string | null;
+  high_pct_of_spot: string | null;
+  spot_price_usd: string | null;
+  pool_price_usd: string | null;
+  usdc_now: string;
+  nock_now: string;
+  value_usd: string | null;
+  fees_usd: string;
+  /** Holdings against the range's own all-USDC top: not trades. */
+  vs_top: {
+    usdc_at_top: string;
+    nock_at_bottom: string;
+    nock_held_vs_top: string;
+    usdc_converted_vs_top: string;
+    curve_avg_price_usd: string | null;
+    converted_pct: string | null;
+  };
+  /** From the deposit_tx receipt only; every non-verified status has null figures. */
+  since_deposit: {
+    status: 'verified' | 'no_baseline' | 'refused' | 'unverified' | 'liquidity_changed';
+    deposit_tx: string | null;
+    deposit_block: number | null;
+    deposited_at: string | null;
+    deposited_usdc: string | null;
+    deposited_nock: string | null;
+    deposit_liquidity: string | null;
+    current_liquidity: string;
+    net_nock_bought: string | null;
+    net_usdc_spent: string | null;
+    avg_buy_price_usd: string | null;
+    reason: string | null;
+  };
 }
 
 /** One read that proved a position closed (2.8.0, #144). */
@@ -601,5 +656,7 @@ export interface RawSnapshotData {
    *  `positions`; nothing of them is in any total. Absent when there are none and on
    *  every older snapshot */
   closed_positions?: ClosedPosition[];
+  /** One reading per tracked ladder (2.9.0, #167). Absent when there is none. */
+  ladders?: LadderReading[];
   derived_metrics: DerivedMetrics;
 }

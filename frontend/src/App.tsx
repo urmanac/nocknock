@@ -34,7 +34,7 @@ const SOURCE_LABELS: Record<string, string> = {
   aerodrome_rpc: 'Aerodrome RPC (historical)',
 };
 import type { DerivedMetrics } from './types/snapshot';
-import { POSITION_COLORS, ethBracketRows, fullRangeEthUsdcCount, hasNockLeg, nockBracketRows, notDrawnRangesText, positionBracket, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText } from './positions.ts';
+import { POSITION_COLORS, ethBracketRows, fullRangeEthUsdcCount, nockBracketRows, notDrawnRangesText, positionBracket, positionLabel, positionRangeText, positionsSummary, protocolBadge, rangeStatus, statValueText } from './positions.ts';
 import { isAeroProtocol, positionFeesText } from './aeroCl.ts';
 import { PositionStakingLine, RangeSideList } from './components/PositionRangeNotes.tsx';
 import { EthBracketChart } from './components/EthBracketChart.tsx';
@@ -47,6 +47,8 @@ import { aeroRewardsSentence, aeroStatSubtitle, compositionAeroText, composition
 import { AeroPillarLines, PositionAeroLine } from './components/AeroPillar.tsx';
 import { PositionEarningsLines, hasPositionEarnings } from './components/CollectibleEarnings.tsx';
 import { ClosedPositionsCard } from './components/ClosedPositions.tsx';
+import { LaddersCard } from './components/Ladders';
+import { isLadder, isNockLp, ladderCountClause, ladderReadingFor, laddersOf } from './ladderTrack';
 import { FloorBreachNote } from './components/FloorBreachNote.tsx';
 import { LadderSimulatorPanel } from './components/LadderSimulatorPanel';
 import { priceSourceIsClosedText } from './closedPositions.ts';
@@ -134,8 +136,9 @@ function Dashboard() {
   const { assetSeries, valueVsBaseline, composition, channel: channelSeries, positionSeriesDefs, spansMultipleDays } = charts;
   const positionsList: any[] = rawData?.positions || [];
   // Goal 1 counts only the ranges that hold NOCK (#151): a gas-side WETH/USDC range
-  // holds none.
-  const nockLpCount = positionsList.filter(hasNockLeg).length;
+  // holds none. A tracked ladder (#167) holds NOCK but is not NOCK LP: it is named apart.
+  const nockLpCount = positionsList.filter(isNockLp).length;
+  const ladderReads = laddersOf(rawData);
   // Built one per position, in the same order: a card's LP-fee reason comes from its row.
   const contractFees: any[] = rawData?.contract_fees || [];
   const compositionHasEth = composition.rows.some((r: any) => r.eth != null);
@@ -365,7 +368,7 @@ function Dashboard() {
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>Goal 1 (NOCK Accretion):</span>
             <span style={styles.shotPillText}>
-              {totalNockVal} NOCK total across the Sovereign Treasury wallet and {nockLpCount} tracked NOCK LP position{nockLpCount === 1 ? '' : 's'}. {floorKnown ? `DEFENSIVE LOCK if total < ${floorTargetFormatted}.` : floorNone ? 'No floor configured.' : 'Floor unavailable.'}
+              {totalNockVal} NOCK total across the Sovereign Treasury wallet and {nockLpCount} tracked NOCK LP position{nockLpCount === 1 ? '' : 's'}{ladderCountClause(positionsList)}. {floorKnown ? `DEFENSIVE LOCK if total < ${floorTargetFormatted}.` : floorNone ? 'No floor configured.' : 'Floor unavailable.'}
             </span>
           </div>
           <div style={styles.shotPill}>
@@ -377,7 +380,7 @@ function Dashboard() {
           <div style={styles.shotPill}>
             <span style={styles.shotPillLabel}>LP Positions / Range Risk:</span>
             <span style={styles.shotPillText}>
-              {positionsSummary(positionsList)} LP fees are read on-chain. {aeroRewardsSentence(global, positionsList)}
+              {positionsSummary(positionsList, ladderReads)} LP fees are read on-chain. {aeroRewardsSentence(global, positionsList)}
             </span>
           </div>
         </div>
@@ -401,18 +404,29 @@ function Dashboard() {
                 }}>
                   {protocolBadge(p.protocol)} · {p.fee_tier_bps / 100}%
                 </span>
+                {isLadder(p) && (
+                  <span
+                    data-testid="ladder-tag"
+                    style={{ ...styles.positionBadge, background: '#1f2937', color: '#cbd5e1', border: '1px solid #475569' }}
+                    title="Tracked as role: ladder (#167): counted in every total, the reserve and the floor-crossing price; not in the LP target or the rebuild"
+                  >
+                    LADDER{p.rung ? ` · ${String(p.rung).toUpperCase()}` : ''}
+                  </span>
+                )}
               </div>
               <div style={styles.positionCardMid}>
                 <span style={styles.positionValue}>${p.amount_usd}</span>
                 <span style={{
                   ...styles.rangePill,
-                  ...(rangeStatus(p).tone === 'good'
+                  ...(rangeStatus(p, ladderReadingFor(p, ladderReads)).tone === 'good'
                     ? { background: '#064e3b', color: '#a7f3d0', border: '1px solid #059669' }
-                    : rangeStatus(p).tone === 'stale'
+                    : rangeStatus(p, ladderReadingFor(p, ladderReads)).tone === 'stale'
                       ? { background: '#3f1d1d', color: '#fca5a5', border: '1px solid #b91c1c' }
-                      : { background: '#78350f', color: '#fcd34d', border: '1px solid #d97706' }),
-                }} title={rangeStatus(p).tone === 'stale' ? 'This pool has no in-range liquidity, so its price is frozen.' : undefined}>
-                  {rangeStatus(p).label}
+                      : rangeStatus(p, ladderReadingFor(p, ladderReads)).tone === 'neutral'
+                        ? { background: '#1f2937', color: '#cbd5e1', border: '1px solid #475569' }
+                        : { background: '#78350f', color: '#fcd34d', border: '1px solid #d97706' }),
+                }} title={rangeStatus(p, ladderReadingFor(p, ladderReads)).tone === 'stale' ? 'This pool has no in-range liquidity, so its price is frozen.' : ladderReadingFor(p, ladderReads)?.state_text}>
+                  {rangeStatus(p, ladderReadingFor(p, ladderReads)).label}
                 </span>
               </div>
               <div style={styles.positionCardMeta}>
@@ -450,6 +464,8 @@ function Dashboard() {
         {/* Closed positions (#144): configured positions whose NFT no longer exists.
             Stated beside the live cards, never as one, and counted nowhere. */}
         <ClosedPositionsCard data={rawData} />
+        {/* Tracked ladders (#167): measured readings, no button. Absent without one. */}
+        <LaddersCard data={rawData} />
       </section>
 
       {/* Storyboard Canvas — Real Charts (structural channel panel appears when band data exists) */}
@@ -660,7 +676,7 @@ function Dashboard() {
             <span><span style={{ color: '#10b981' }}>■</span> Actual: On Target</span>
             <span><span style={{ color: '#f59e0b' }}>■</span> Actual: Under-Funded</span>
             <span><span style={{ color: '#ef4444' }}>■</span> Actual: Over-Funded</span>
-            <span><span style={{ color: '#8b949e' }}>■</span> Actual: No Target Set (incl. Gas, AERO and non-NOCK LP: counted, never rebalanced)</span>
+            <span><span style={{ color: '#8b949e' }}>■</span> Actual: No Target Set (incl. Gas, AERO{deviationData.some((d: any) => d.name === 'NOCK ladders (measured)') ? ', non-NOCK LP and ladders' : ' and non-NOCK LP'}: counted, never rebalanced)</span>
           </div>
         </CanvasPanel>
 

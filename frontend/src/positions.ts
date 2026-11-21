@@ -1,11 +1,17 @@
 /**
  * Position display helpers (v2.0.0 Uniswap-only portfolio).
  *
+ * Tracked ladders (#167) have their own wording in ./ladderTrack.ts; here they are left
+ * out of the in/out-of-range counts and named in a closing clause, as the worker does.
+ *
  * Shared by the Dashboard position cards / chart legends and the contract tests,
  * so the rendering conventions stay pinned to the discovery fixtures.
  */
 
 /** Series colors for the per-position stacked chart. */
+import { isLadder, ladderStatus, ladderSummaryClause } from './ladderTrack';
+import type { LadderReading } from './types/snapshot';
+
 export const POSITION_COLORS = ['#38bdf8', '#a855f7', '#f59e0b', '#ec4899', '#14b8a6', '#f97316'];
 
 /** Human label for a tracked position: pair + protocol badge + fee tier. */
@@ -29,10 +35,14 @@ export function positionLabel(p: any): string {
  * "concentrated Uniswap position", counting a dead pool as in range.
  */
 export function positionsSummary(
-  positions: Array<{ in_range: boolean; full_range?: boolean; pool_active?: boolean | null }>,
+  allPositions: Array<{ in_range: boolean; full_range?: boolean; pool_active?: boolean | null; role?: string | null; position_id?: string }>,
+  ladders: LadderReading[] = [],
 ): string {
+  // Tracked ladders (#167) are measured by what they hold, never "out of range".
+  const ladderClause = ladderSummaryClause(allPositions, ladders);
+  const positions = allPositions.filter((p) => !isLadder(p));
   const n = positions.length;
-  if (n === 0) return 'No LP positions tracked.';
+  if (n === 0) return ladderClause ? `No NOCK LP positions tracked.${ladderClause}` : 'No LP positions tracked.';
   const full = positions.filter((p) => p.full_range).length;
   const stale = positions.filter((p) => !p.full_range && p.pool_active === false).length;
   const ranged = positions.filter((p) => !p.full_range);
@@ -46,7 +56,7 @@ export function positionsSummary(
     parts.push(`${ranged.length} ranged (${detail.join(', ')})`);
   }
   if (full > 0) parts.push(`${full} full range`);
-  return `${n} LP position${n === 1 ? '' : 's'} tracked live: ${parts.join(', ')}.`;
+  return `${n} LP position${n === 1 ? '' : 's'} tracked live: ${parts.join(', ')}.${ladderClause}`;
 }
 
 /**
@@ -95,10 +105,15 @@ export function positionRangeText(p: any): string {
  * frozen price, so "in range" judged against that pool's own tick says nothing about
  * the market: show STALE POOL instead of a reassuring green pill.
  */
-export function rangeStatus(p: { in_range: boolean; pool_active?: boolean | null; full_range?: boolean }): {
+export function rangeStatus(
+  p: { in_range: boolean; pool_active?: boolean | null; full_range?: boolean; role?: string | null },
+  ladder?: LadderReading,
+): {
   label: string;
-  tone: 'good' | 'warn' | 'stale';
+  tone: 'good' | 'warn' | 'stale' | 'neutral';
 } {
+  // A ladder (#167) is badged by what it holds: above its range is normal, never "OUT OF RANGE".
+  if (isLadder(p)) return ladderStatus(ladder);
   if (p.pool_active === false) return { label: '● STALE POOL', tone: 'stale' };
   if (p.full_range) return { label: '● FULL RANGE', tone: 'good' };
   return p.in_range ? { label: '● IN RANGE', tone: 'good' } : { label: '● OUT OF RANGE', tone: 'warn' };
@@ -199,6 +214,8 @@ export interface NockBracketRow {
   distance: number | null;
   converted: boolean;
   fullRange: boolean;
+  /** A tracked ladder (#167): drawn and named apart from NOCK LP. */
+  ladder: boolean;
 }
 
 /**
@@ -231,8 +248,9 @@ export function nockBracketRows(
     const distance = converted && spot > 0 && lower > 0
       ? Math.min(Math.max(spot - lower, 0), Math.max(upper - spot, 0)) / spot * 100
       : (b.distance_bps != null ? b.distance_bps / 100 : null);
+    const ladder = isLadder(pos);
     rows.push({
-      name: positionLabel(pos),
+      name: ladder ? `${positionLabel(pos)} (ladder)` : positionLabel(pos),
       lower,
       upper,
       displayLower: b.lower_price,
@@ -242,6 +260,7 @@ export function nockBracketRows(
       distance,
       converted,
       fullRange: !!b.full_range,
+      ladder,
     });
   });
   return rows;

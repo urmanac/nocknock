@@ -77,6 +77,8 @@ export interface WholeStackBasis {
   unrealized_pct?: string | null;
   /** NOCK read this cycle, to the nearest whole NOCK. */
   held_nock?: string | null;
+  /** Verified net buys of tracked ladders in the basis (2.9.0, #167); absent with none. */
+  ladder_buys_since?: { ladders_counted: number; nock: string; usdc: string; not_counted?: string[] } | null;
   includes?: string[];
   excludes?: string[];
 }

@@ -2,8 +2,9 @@
  * The standing protected cash reserve on the Total USDC Stack tile (#162).
  *
  * `operator_profile.cash_reserve_usdc` is measured on wallet USDC plus USDC inside
- * NOCK-pair LP; the tile's own total also counts the gas-side ETH/USDC ranges, so the
- * line names what it is measured on. Null when no reserve is set: never a default.
+ * NOCK-pair LP and tracked ladders (#167); the tile's own total also counts the gas-side
+ * ETH/USDC ranges, so the line names what it is measured on. Null when no reserve is
+ * set: never a default.
  */
 const money = (v: number) => `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -17,6 +18,7 @@ function num(v: string | null | undefined): number | null {
 export function reserveText(global: {
   cash_reserve_usdc?: string | null;
   reserve_headroom_usdc?: string | null;
+  reserve_ladder_usdc?: string | null;
   reserve_note?: string | null;
 } | null | undefined): string | null {
   const reserve = num(global?.cash_reserve_usdc);
@@ -29,5 +31,10 @@ export function reserveText(global: {
   // "-0.00" parses to -0: it is zero, never "$-0.00 above it".
   const headroom = raw === 0 ? 0 : raw;
   const side = headroom < 0 ? `${money(-headroom)} below it` : `${money(headroom)} above it`;
-  return `${money(reserve)} protected reserve (wallet + NOCK LP USDC): ${side}`;
+  // Tracked ladders (#167) are named when they hold USDC, as the MCP reserve line does.
+  const ladders = num(global?.reserve_ladder_usdc);
+  const what = ladders !== null && ladders >= 0.005
+    ? `wallet + NOCK LP and ladder USDC, ${money(ladders)} in ladders`
+    : 'wallet + NOCK LP USDC';
+  return `${money(reserve)} protected reserve (${what}): ${side}`;
 }
