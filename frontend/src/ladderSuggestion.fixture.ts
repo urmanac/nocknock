@@ -1,9 +1,10 @@
 /**
- * The ladder suggestion (#168) as the worker states it over the #166 fixture (spot
- * $0.012944, wallet USDC 1545.8357, reserve $950, bottom $0.01), copied from
+ * The ladder suggestion (#168) as the worker states it, copied from
  * ingestion-worker/testdata/ladder_suggest/golden_ladder_suggest.json, which
- * ingestion-worker/src/tests_ladder_suggest.rs writes. ladderSuggestion.test.ts checks
- * the copy against the file when the worker directory is present.
+ * ingestion-worker/src/tests_ladder_suggest.rs writes. LADDER_READY is the #166 fixture
+ * (spot $0.012944, wallet USDC 1545.8357, reserve $950, bottom $0.01); LADDER_READY_LIVE
+ * is the live snapshot of 2026-11-21. ladderSuggestion.test.ts checks the copy against
+ * the file when the worker directory is present.
  */
 import type { LadderSuggestion } from './ladderSuggestion';
 
@@ -15,7 +16,7 @@ export const LADDER_READY: LadderSuggestion = {
     ],
     "is": "the current fallback until NockNock detects the wallet's new position NFTs on-chain",
     "kind": "manual_config",
-    "text": "NockNock does not yet find a new ladder position by itself. Until it does, a minted rung is tracked by its config.yaml entry (role: ladder, with the minted ticks, the NFT id and the mint transaction as deposit_tx) and a redeploy; the deposit is then verified on-chain from that transaction's receipt (#167)."
+    "text": "Automatic tracking of a new ladder position is not built yet; until it is, a minted rung is tracked only from a config.yaml entry (role: ladder)."
   },
   "assumptions": [
     "The amount is the most the standing reserve allows at the ladder's bottom; fees and gas are not counted.",
@@ -50,50 +51,56 @@ export const LADDER_READY: LadderSuggestion = {
       "status": "fits"
     },
     "reserve": {
+      "binding": "reserve",
       "cash_reserve_usdc": "950.00",
       "key": "operator_profile.cash_reserve_usdc",
-      "margin_usdc": "0.00",
-      "max_usdc_for_this_range": "767.45",
+      "max_usdc": "766.99",
       "minimum_usdc": "1.00",
-      "rule": "the stable balance at the ladder's bottom stays at or above the reserve",
-      "stable_at_bottom_usdc": "950.00",
-      "status": "allows"
+      "read_at_rule": "the lower of the snapped bottom and your ladder_bottom_usd",
+      "read_at_usd": "0.01000000",
+      "reserve_allows_usdc": "766.99",
+      "rule": "the stable balance at your bottom stays at or above the reserve",
+      "stable_at_gate_usdc": "950.00",
+      "status": "allows",
+      "wallet_usdc": "1545.83"
     }
   },
-  "headline": "Ladder ready: $767.45 of idle USDC in 1 deposit, 0 NOCK.",
+  "headline": "Ladder ready: up to $766.99 USDC in 1 deposit, 0 NOCK.",
   "id": "ladder_suggestion:NOCK",
   "minimum_usdc": "1.00",
   "missing": [],
   "numbers": {
     "avg_buy_price_usd": "0.01130202",
+    "binding": "reserve",
     "cash_reserve_usdc": "950.00",
-    "existing_ranges_usdc_at_bottom": "171.62",
+    "existing_ranges_usdc_at_gate": "171.16",
+    "gate_price_usd": "0.01000000",
     "lp_nock_budget": "86.7891",
-    "nock_at_bottom": "67903.7807",
+    "nock_at_bottom": "67863.0800",
     "nock_now": "0.0000",
     "spot_usd": "0.01294400",
-    "stable_at_bottom_usdc": "950.00",
-    "usdc_max": "767.45",
+    "stable_at_gate_usdc": "950.00",
+    "usdc_max": "766.99",
     "wallet_usdc": "1545.84"
   },
   "outcomes": [
     {
-      "avg_buy_price_usd": "0.01184077",
+      "avg_buy_price_usd": "0.01184072",
       "kind": "fall_inside",
-      "nock_bought": "40583",
-      "pct_of_spot": "-15.00",
+      "nock_bought": "40558",
+      "pct_of_spot": "-15%",
       "price_usd": "0.01100240",
-      "text": "A fall to $0.01100240 (-15.00%) would buy about 40,583 NOCK for $480.53 of the USDC, an average of $0.01184077.",
-      "usdc_spent": "480.53"
+      "text": "A fall to $0.01100 (-15%) would buy about 40,558 NOCK for $480.24 of the USDC, an average of $0.01184.",
+      "usdc_spent": "480.24"
     },
     {
       "avg_buy_price_usd": "0.01130202",
       "kind": "fall_to_bottom",
-      "nock_bought": "67904",
-      "pct_of_spot": "-22.56",
+      "nock_bought": "67863",
+      "pct_of_spot": "-23%",
       "price_usd": "0.01002405",
-      "text": "A fall to the ladder bottom $0.01002405 (-22.56%) would buy about 67,904 NOCK with all $767.45, an average of $0.01130202.",
-      "usdc_spent": "767.45"
+      "text": "A fall to the ladder bottom $0.01002 (-23%) would buy about 67,863 NOCK with all $766.99, an average of $0.01130.",
+      "usdc_spent": "766.99"
     },
     {
       "kind": "rise",
@@ -105,9 +112,9 @@ export const LADDER_READY: LadderSuggestion = {
       {
         "high_usd": "0.01274292",
         "index": 1,
-        "label": "$767.45",
+        "label": "$766.99",
         "low_usd": "0.01002405",
-        "usdc": "767.45"
+        "usdc": "766.99"
       }
     ],
     "bottom_requested_usd": "0.01",
@@ -121,11 +128,11 @@ export const LADDER_READY: LadderSuggestion = {
     {
       "at_bottom": {
         "avg_buy_price_usd": "0.01130202",
-        "nock_held": "67903.7807"
+        "nock_held": "67863.0800"
       },
       "at_top": {
         "out_of_range_above_now": true,
-        "usdc_held": "767.45"
+        "usdc_held": "766.99"
       },
       "bottom": {
         "pct_of_spot": "-22.56",
@@ -135,26 +142,25 @@ export const LADDER_READY: LadderSuggestion = {
         "tick": 276300
       },
       "bounds_nock_per_usdc": {
-        "high": "99.7601",
-        "low": "78.4749"
+        "high": "99.7600",
+        "low": "78.4750"
       },
       "bounds_usd": {
         "high": "0.01274292",
         "low": "0.01002405"
       },
       "deep_link": {
-        "format_note": "The link format is the app's own and undocumented: check the pool, fee and range in the app against the ticks and prices stated here.",
+        "format_note": "The link format is the app's own and undocumented: check the pool, range and amount in the app against the figures here.",
         "host": "app.uniswap.org",
-        "not_prefilled": [
-          "amount"
-        ],
+        "not_prefilled": [],
         "prefilled": [
           "pair",
           "fee and tick spacing",
-          "range ticks"
+          "range ticks",
+          "amount"
         ],
         "reason": null,
-        "url": "https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&step=1"
+        "url": "https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&depositState=%7B%22exactAmounts%22%3A%7B%22TOKEN0%22%3A%22766.99%22%7D%2C%22exactField%22%3A%22TOKEN0%22%7D&step=1"
       },
       "index": 1,
       "nock": {
@@ -168,9 +174,10 @@ export const LADDER_READY: LadderSuggestion = {
         "fee_raw": 30000,
         "fee_tier_bps": 300,
         "hooks": "0x0000000000000000000000000000000000000000",
-        "label": "v4 USDC/NOCK 3.00% #3163450",
+        "label": "the USDC/NOCK 3% v4 pool",
         "network": "base",
-        "note": "a ladder is a NEW position (a new NFT) in this pool",
+        "new_position": true,
+        "note": "a NEW position (a new NFT) in this pool; position_id is the tracked position the pool was read from",
         "npm_address": null,
         "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
         "pool_price_usd": "0.01294400",
@@ -209,7 +216,7 @@ export const LADDER_READY: LadderSuggestion = {
         },
         {
           "fits_budget": false,
-          "nock_needed": "3530.6246",
+          "nock_needed": "3528.5084",
           "pct_of_spot": "+1.44",
           "price_usd": "0.01313098",
           "selected": false,
@@ -218,24 +225,31 @@ export const LADDER_READY: LadderSuggestion = {
       ],
       "usdc": {
         "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-        "amount": "767.45",
+        "amount": "766.99",
         "decimals": 6,
-        "raw": "767450000"
+        "raw": "766990000"
       },
-      "would_sign": "In the Uniswap web app, with your own wallet: one new position in v4 USDC/NOCK 3.00% #3163450, ticks 273900 to 276300, holding up to $767.45 USDC and 0 NOCK (the app may first ask for a USDC approval). NockNock builds no transaction and signs nothing."
+      "would_sign": "In the Uniswap web app, with your own wallet: one new position in the USDC/NOCK 3% v4 pool, ticks 273900 to 276300, holding up to $766.99 USDC and 0 NOCK (the app may first ask for a USDC approval). NockNock builds no transaction and signs nothing."
     }
   ],
-  "sentence": "No ladder is tracked. A USDC-only range in v4 USDC/NOCK 3.00% #3163450 from $0.01274292 (tick 273900, the usable tick at or below spot, -1.55%) down to $0.01002405 (tick 276300, your $0.01 bottom snapped, -22.56%) would hold up to $767.45 USDC and 0 NOCK now: the most that leaves the stable balance at your $950.00 reserve when fully converted at the bottom. Fully converted it would hold about 67,904 NOCK, an average of $0.01130202.",
+  "sentence": "No ladder is tracked. A new USDC-only position in the USDC/NOCK 3% v4 pool from $0.01274 (-1.6%) down to $0.01002 (-23%) would hold up to $766.99 USDC and 0 NOCK now: the most that leaves the stable balance at your $950.00 reserve at your $0.01 bottom. Fully converted it would hold about 67,863 NOCK, an average of $0.01130.",
   "shown": true,
   "stated": {
     "accumulation_plan_unspent": null,
+    "cash_target_usd": null,
     "existing_ranges_below_bottom": {
-      "headroom_usdc": "-45.76",
+      "headroom_usdc": "-45.30",
       "note": "The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.",
       "pct_of_spot": "-40.00",
       "price_usd": "0.00776640",
-      "stable_usdc": "904.24"
+      "stable_usdc": "904.70"
     },
+    "lines": [
+      "No accumulation plan is configured.",
+      "Tax reserve: $0.00 (stated, not a gate).",
+      "No cash target is set.",
+      "Below the bottom the other NOCK ranges keep converting: at $0.007766 the stable balance would be $904.70 (a measurement, not the gate)."
+    ],
     "note": "The plan budget, the tax reserve and the cash target are stated, not gates: only the standing reserve gates the ladder's USDC.",
     "tax_reserve_usd": {
       "is": "stated, not a gate",
@@ -247,7 +261,267 @@ export const LADDER_READY: LadderSuggestion = {
   "tier": "top",
   "token": "NOCK",
   "tracked": [],
-  "what_changed": "No ladder is tracked, and the standing reserve allows $767.45 in v4 USDC/NOCK 3.00% #3163450 down to your $0.01 bottom."
+  "what_changed": "No ladder is tracked, and the standing reserve allows $766.99 in the USDC/NOCK 3% v4 pool down to your $0.01 bottom."
+} as any;
+
+/** ready_live: derived_metrics.ladder_suggestion */
+export const LADDER_READY_LIVE: LadderSuggestion = {
+  "after_deposit": {
+    "config_snippets": [
+      "- id: \"nock-ladder-1\"\n  protocol: \"uniswap-v4\"\n  network: \"base\"\n  nft_id: <the new NFT's id>\n  pool_id: \"0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13\"\n  currency0: \"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\"   # USDC\n  currency1: \"0x9B5E262cF9bb04869ab40b19AF91D2dc85761722\"   # NOCK\n  tick_lower: 273900   # the minted ticks; the app may adjust them\n  tick_upper: 276300\n  role: \"ladder\"\n  rung: \"<near or deep: your choice>\"\n  deposit_tx: \"0x<the mint transaction hash>\""
+    ],
+    "is": "the current fallback until NockNock detects the wallet's new position NFTs on-chain",
+    "kind": "manual_config",
+    "text": "Automatic tracking of a new ladder position is not built yet; until it is, a minted rung is tracked only from a config.yaml entry (role: ladder)."
+  },
+  "assumptions": [
+    "The amount is the most the standing reserve allows at the ladder's bottom; fees and gas are not counted.",
+    "The top is the usable tick at or below spot: the range holds only USDC now and earns no fees until NOCK falls to its top.",
+    "Below the bottom the other NOCK ranges keep converting; that reading is stated, not the gate.",
+    "The ladder's USDC is outside the NOCK LP target and the rebuild: the two are separate figures.",
+    "No fee estimate is stated yet; it joins this card with the rung settings."
+  ],
+  "candidates": null,
+  "excluded": [
+    {
+      "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+      "reason": "a basic Aero pool is full range; it cannot hold a ladder"
+    }
+  ],
+  "freshness_rule": "Shown only while the snapshot is fresh: the dashboard's sync status is not stale, or the worker's health is ok.",
+  "gates": {
+    "bottom_setting": {
+      "key": "operator_profile.ladder_bottom_usd",
+      "status": "set",
+      "value": "0.01"
+    },
+    "floor_breach_effect": "none",
+    "ladder_tracked": {
+      "reason": "no ladder is tracked (#167)",
+      "status": "none"
+    },
+    "nock_budget": {
+      "lp_nock_budget": "86.7891",
+      "nock_needed": "0.0000",
+      "reason": null,
+      "status": "fits"
+    },
+    "reserve": {
+      "binding": "reserve",
+      "cash_reserve_usdc": "950.00",
+      "key": "operator_profile.cash_reserve_usdc",
+      "max_usdc": "765.86",
+      "minimum_usdc": "1.00",
+      "read_at_rule": "the lower of the snapped bottom and your ladder_bottom_usd",
+      "read_at_usd": "0.01000000",
+      "reserve_allows_usdc": "765.86",
+      "rule": "the stable balance at your bottom stays at or above the reserve",
+      "stable_at_gate_usdc": "950.01",
+      "status": "allows",
+      "wallet_usdc": "1545.83"
+    }
+  },
+  "headline": "Ladder ready: up to $765.86 USDC in 1 deposit, 0 NOCK.",
+  "id": "ladder_suggestion:NOCK",
+  "minimum_usdc": "1.00",
+  "missing": [],
+  "numbers": {
+    "avg_buy_price_usd": "0.01130202",
+    "binding": "reserve",
+    "cash_reserve_usdc": "950.00",
+    "existing_ranges_usdc_at_gate": "170.03",
+    "gate_price_usd": "0.01000000",
+    "lp_nock_budget": "86.7891",
+    "nock_at_bottom": "67763.0979",
+    "nock_now": "0.0000",
+    "spot_usd": "0.01294450",
+    "stable_at_gate_usdc": "950.01",
+    "usdc_max": "765.86",
+    "wallet_usdc": "1545.84"
+  },
+  "outcomes": [
+    {
+      "avg_buy_price_usd": "0.01184095",
+      "kind": "fall_inside",
+      "nock_bought": "40488",
+      "pct_of_spot": "-15%",
+      "price_usd": "0.01100283",
+      "text": "A fall to $0.01100 (-15%) would buy about 40,488 NOCK for $479.41 of the USDC, an average of $0.01184.",
+      "usdc_spent": "479.41"
+    },
+    {
+      "avg_buy_price_usd": "0.01130202",
+      "kind": "fall_to_bottom",
+      "nock_bought": "67763",
+      "pct_of_spot": "-23%",
+      "price_usd": "0.01002405",
+      "text": "A fall to the ladder bottom $0.01002 (-23%) would buy about 67,763 NOCK with all $765.86, an average of $0.01130.",
+      "usdc_spent": "765.86"
+    },
+    {
+      "kind": "rise",
+      "text": "A rise sells nothing: the ladder holds 0 NOCK, so its USDC stays USDC."
+    }
+  ],
+  "picture": {
+    "bars": [
+      {
+        "high_usd": "0.01274292",
+        "index": 1,
+        "label": "$765.86",
+        "low_usd": "0.01002405",
+        "usdc": "765.86"
+      }
+    ],
+    "bottom_requested_usd": "0.01",
+    "bottom_usd": "0.01002405",
+    "reserve_label": "$950 kept for below $0.01",
+    "reserve_usdc": "950.00",
+    "spot_usd": "0.01294450"
+  },
+  "reason": null,
+  "rungs": [
+    {
+      "at_bottom": {
+        "avg_buy_price_usd": "0.01130202",
+        "nock_held": "67763.0979"
+      },
+      "at_top": {
+        "out_of_range_above_now": true,
+        "usdc_held": "765.86"
+      },
+      "bottom": {
+        "pct_of_spot": "-22.56",
+        "price_usd": "0.01002405",
+        "requested_usd": "0.01",
+        "rule": "your ladder_bottom_usd, snapped to the nearest usable tick",
+        "tick": 276300
+      },
+      "bounds_nock_per_usdc": {
+        "high": "99.7600",
+        "low": "78.4750"
+      },
+      "bounds_usd": {
+        "high": "0.01274292",
+        "low": "0.01002405"
+      },
+      "deep_link": {
+        "format_note": "The link format is the app's own and undocumented: check the pool, range and amount in the app against the figures here.",
+        "host": "app.uniswap.org",
+        "not_prefilled": [],
+        "prefilled": [
+          "pair",
+          "fee and tick spacing",
+          "range ticks",
+          "amount"
+        ],
+        "reason": null,
+        "url": "https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&depositState=%7B%22exactAmounts%22%3A%7B%22TOKEN0%22%3A%22765.86%22%7D%2C%22exactField%22%3A%22TOKEN0%22%7D&step=1"
+      },
+      "index": 1,
+      "nock": {
+        "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+        "amount": "0.0000",
+        "decimals": 16,
+        "raw": "0"
+      },
+      "of": 1,
+      "pool": {
+        "fee_raw": 30000,
+        "fee_tier_bps": 300,
+        "hooks": "0x0000000000000000000000000000000000000000",
+        "label": "the USDC/NOCK 3% v4 pool",
+        "network": "base",
+        "new_position": true,
+        "note": "a NEW position (a new NFT) in this pool; position_id is the tracked position the pool was read from",
+        "npm_address": null,
+        "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+        "pool_price_usd": "0.01294450",
+        "position_id": "uniswap-v4:base:3163450",
+        "protocol": "uniswap-v4",
+        "tick_spacing": 300,
+        "token0": {
+          "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "decimals": 6,
+          "symbol": "USDC"
+        },
+        "token1": {
+          "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+          "decimals": 16,
+          "symbol": "NOCK"
+        }
+      },
+      "rung": null,
+      "rung_note": "one rung for now; near and deep rungs are operator settings that join this card later",
+      "tick_lower": 273900,
+      "tick_upper": 276300,
+      "top": {
+        "pct_of_spot": "-1.56",
+        "price_usd": "0.01274292",
+        "rule": "the usable tick at or below spot: the range holds no NOCK now",
+        "tick": 273900
+      },
+      "top_neighbours": [
+        {
+          "fits_budget": true,
+          "nock_needed": "0.0000",
+          "pct_of_spot": "-1.56",
+          "price_usd": "0.01274292",
+          "selected": true,
+          "tick": 273900
+        },
+        {
+          "fits_budget": false,
+          "nock_needed": "3513.2226",
+          "pct_of_spot": "+1.44",
+          "price_usd": "0.01313098",
+          "selected": false,
+          "tick": 273600
+        }
+      ],
+      "usdc": {
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "amount": "765.86",
+        "decimals": 6,
+        "raw": "765860000"
+      },
+      "would_sign": "In the Uniswap web app, with your own wallet: one new position in the USDC/NOCK 3% v4 pool, ticks 273900 to 276300, holding up to $765.86 USDC and 0 NOCK (the app may first ask for a USDC approval). NockNock builds no transaction and signs nothing."
+    }
+  ],
+  "sentence": "No ladder is tracked. A new USDC-only position in the USDC/NOCK 3% v4 pool from $0.01274 (-1.6%) down to $0.01002 (-23%) would hold up to $765.86 USDC and 0 NOCK now: the most that leaves the stable balance at your $950.00 reserve at your $0.01 bottom. Fully converted it would hold about 67,763 NOCK, an average of $0.01130.",
+  "shown": true,
+  "stated": {
+    "accumulation_plan_unspent": {
+      "is": "stated, not a gate",
+      "note": null,
+      "usdc": "0.00"
+    },
+    "cash_target_usd": "184.18",
+    "existing_ranges_below_bottom": {
+      "headroom_usdc": "-45.15",
+      "note": "The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.",
+      "pct_of_spot": "-40.00",
+      "price_usd": "0.00776670",
+      "stable_usdc": "904.85"
+    },
+    "lines": [
+      "Plan budget not yet spent: $0.00 (stated, not a gate).",
+      "Tax reserve: $8.70 (stated, not a gate).",
+      "Cash target: $184.18 (5% of the portfolio; stated, not a gate).",
+      "Below the bottom the other NOCK ranges keep converting: at $0.007767 the stable balance would be $904.85 (a measurement, not the gate)."
+    ],
+    "note": "The plan budget, the tax reserve and the cash target are stated, not gates: only the standing reserve gates the ladder's USDC.",
+    "tax_reserve_usd": {
+      "is": "stated, not a gate",
+      "usd": "8.70"
+    }
+  },
+  "statement": "A measurement from this cycle's reads of what the range would do. NockNock does not choose the bottom or the amount, builds no transaction, and signs and sends nothing.",
+  "status": "ready",
+  "tier": "top",
+  "token": "NOCK",
+  "tracked": [],
+  "what_changed": "No ladder is tracked, and the standing reserve allows $765.86 in the USDC/NOCK 3% v4 pool down to your $0.01 bottom."
 } as any;
 
 /** needs_setting: derived_metrics.ladder_suggestion */
@@ -366,7 +640,7 @@ export const LADDER_NEEDS_SETTING: LadderSuggestion = {
   ],
   "freshness_rule": "Shown only while the snapshot is fresh: the dashboard's sync status is not stale, or the worker's health is ok.",
   "gates": null,
-  "headline": "Ladder: set your bottom price (operator_profile.ladder_bottom_usd) to see one.",
+  "headline": "Ladder: needs your bottom price (operator_profile.ladder_bottom_usd) before one is measured.",
   "id": "ladder_suggestion:NOCK",
   "minimum_usdc": "1.00",
   "missing": [
@@ -407,7 +681,7 @@ export const LADDER_BOTTOM_ABOVE_TOP: LadderSuggestion = {
   ],
   "freshness_rule": "Shown only while the snapshot is fresh: the dashboard's sync status is not stale, or the worker's health is ok.",
   "gates": null,
-  "headline": "Ladder: the price is at or near your bottom, so there is nothing to buy below it.",
+  "headline": "Ladder: NOCK is within one tick spacing of your bottom, so the range would be empty.",
   "id": "ladder_suggestion:NOCK",
   "minimum_usdc": "1.00",
   "missing": [],
@@ -421,6 +695,88 @@ export const LADDER_BOTTOM_ABOVE_TOP: LadderSuggestion = {
   "stated": null,
   "statement": "A measurement from this cycle's reads of what the range would do. NockNock does not choose the bottom or the amount, builds no transaction, and signs and sends nothing.",
   "status": "bottom_at_or_above_top",
+  "tier": "top",
+  "token": "NOCK",
+  "tracked": [],
+  "what_changed": null
+} as any;
+
+/** price_at_or_below_bottom: derived_metrics.ladder_suggestion */
+export const LADDER_PRICE_BELOW_BOTTOM: LadderSuggestion = {
+  "after_deposit": null,
+  "assumptions": [
+    "The amount is the most the standing reserve allows at the ladder's bottom; fees and gas are not counted.",
+    "The top is the usable tick at or below spot: the range holds only USDC now and earns no fees until NOCK falls to its top.",
+    "Below the bottom the other NOCK ranges keep converting; that reading is stated, not the gate.",
+    "The ladder's USDC is outside the NOCK LP target and the rebuild: the two are separate figures.",
+    "No fee estimate is stated yet; it joins this card with the rung settings."
+  ],
+  "candidates": null,
+  "excluded": [
+    {
+      "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+      "reason": "a basic Aero pool is full range; it cannot hold a ladder"
+    }
+  ],
+  "freshness_rule": "Shown only while the snapshot is fresh: the dashboard's sync status is not stale, or the worker's health is ok.",
+  "gates": null,
+  "headline": "Ladder: NOCK is at or below your $0.02 ladder bottom, so none is measured above it.",
+  "id": "ladder_suggestion:NOCK",
+  "minimum_usdc": "1.00",
+  "missing": [],
+  "numbers": null,
+  "outcomes": [],
+  "picture": null,
+  "reason": "NOCK is at or below your $0.02 ladder bottom (NOCK $0.01294 in the USDC/NOCK 3% v4 pool): no ladder is measured above it.",
+  "rungs": [],
+  "sentence": null,
+  "shown": false,
+  "stated": null,
+  "statement": "A measurement from this cycle's reads of what the range would do. NockNock does not choose the bottom or the amount, builds no transaction, and signs and sends nothing.",
+  "status": "price_at_or_below_bottom",
+  "tier": "top",
+  "token": "NOCK",
+  "tracked": [],
+  "what_changed": null
+} as any;
+
+/** no_target_pool: derived_metrics.ladder_suggestion */
+export const LADDER_NO_TARGET_POOL: LadderSuggestion = {
+  "after_deposit": null,
+  "assumptions": [
+    "The amount is the most the standing reserve allows at the ladder's bottom; fees and gas are not counted.",
+    "The top is the usable tick at or below spot: the range holds only USDC now and earns no fees until NOCK falls to its top.",
+    "Below the bottom the other NOCK ranges keep converting; that reading is stated, not the gate.",
+    "The ladder's USDC is outside the NOCK LP target and the rebuild: the two are separate figures.",
+    "No fee estimate is stated yet; it joins this card with the rung settings."
+  ],
+  "candidates": null,
+  "excluded": [
+    {
+      "position_id": "uniswap-v4:base:3163450",
+      "reason": "this pool has no in-range liquidity, so its price is frozen"
+    },
+    {
+      "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+      "reason": "a basic Aero pool is full range; it cannot hold a ladder"
+    }
+  ],
+  "freshness_rule": "Shown only while the snapshot is fresh: the dashboard's sync status is not stale, or the worker's health is ok.",
+  "gates": null,
+  "headline": "Ladder: no tracked USDC/NOCK pool can hold one this cycle.",
+  "id": "ladder_suggestion:NOCK",
+  "minimum_usdc": "1.00",
+  "missing": [],
+  "numbers": null,
+  "outcomes": [],
+  "picture": null,
+  "reason": "No tracked USDC/NOCK concentrated pool can hold a ladder this cycle; each pool's reason is listed.",
+  "rungs": [],
+  "sentence": null,
+  "shown": false,
+  "stated": null,
+  "statement": "A measurement from this cycle's reads of what the range would do. NockNock does not choose the bottom or the amount, builds no transaction, and signs and sends nothing.",
+  "status": "no_target_pool",
   "tier": "top",
   "token": "NOCK",
   "tracked": [],

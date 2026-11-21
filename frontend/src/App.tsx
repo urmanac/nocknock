@@ -251,6 +251,10 @@ function Dashboard() {
           </div>
         </div>
 
+        {/* The ladder suggestion (#168): the top-of-page ladder surface, under the title
+            row and above the stat tiles. No input. */}
+        <LadderSuggestionCard suggestion={ladderSuggestionOf(rawData)} syncStatus={freshness.syncStatus} />
+
         {/* Primary Dual-Goal Metrics Bar */}
         <div style={styles.globalStats}>
           <StatCard
@@ -386,9 +390,6 @@ function Dashboard() {
           </div>
         </div>
       </section>
-
-      {/* The ladder suggestion (#168): the top-of-page ladder surface, no input. */}
-      <LadderSuggestionCard suggestion={ladderSuggestionOf(rawData)} syncStatus={freshness.syncStatus} />
 
       {/* Tracked Positions — one card per live Uniswap position (v2.0.0) */}
       <section style={styles.positionsSection}>

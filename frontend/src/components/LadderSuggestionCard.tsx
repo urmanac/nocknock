@@ -15,13 +15,17 @@ import {
   type LadderRung,
   type LadderSuggestion,
   candidateLines,
+  excludedLines,
   ladderCardView,
   ladderDepositUrl,
   ladderLinkLabel,
+  linkFormatNote,
   missingSettingSentence,
   pictureGeometry,
+  price4,
   rungRangeLines,
   rungTitle,
+  statedLines,
 } from '../ladderSuggestion';
 
 const MUTED = '#8b949e';
@@ -30,11 +34,15 @@ const GREEN = '#10b981';
 const WRAP: CSSProperties = { overflowWrap: 'anywhere' };
 
 /** The ladder on a USD-per-NOCK axis: spot, each rung's bar with its amount, the bottom
- *  line and the protected reserve's zone below it. */
-export function LadderPicture({ picture }: { picture: LadderPictureData }) {
-  const g = pictureGeometry(picture);
+ *  line and the protected reserve's zone below it, with the reserve's label in its own
+ *  legend row so it never runs across the bottom line. `width` is the drawing's unit
+ *  width (narrow on the phone, so its labels stay readable). */
+export function LadderPicture({ picture, width = 520 }: { picture: LadderPictureData; width?: number }) {
+  const g = pictureGeometry(picture, width);
   if (!g) return null;
-  const axisY = g.height - 22;
+  const fs = g.fontSize;
+  const { labels, axis, axisLabels, legend } = g.rows;
+  // The spot label sits left of its line, the bottom label right of its line.
   return (
     <svg
       data-testid="ladder-picture"
@@ -42,31 +50,33 @@ export function LadderPicture({ picture }: { picture: LadderPictureData }) {
       width="100%"
       role="img"
       aria-label="The ladder on a price axis"
-      style={{ maxWidth: g.width, display: 'block', margin: '8px 0' }}
+      style={{ maxWidth: g.width * 1.2, display: 'block', margin: '8px 0' }}
     >
       {/* The reserve zone: below the ladder bottom. */}
-      <rect data-testid="ladder-reserve-zone" x={8} y={14} width={Math.max(0, g.bottomX - 8)} height={axisY - 14} fill="#1e3a8a" fillOpacity={0.35} />
-      <text x={12} y={axisY - 6} fontSize={10} fill="#93c5fd">{picture.reserve_label}</text>
+      <rect data-testid="ladder-reserve-zone" x={8} y={labels + 6} width={Math.max(0, g.bottomX - 8)} height={axis - labels - 6} fill="#1e3a8a" fillOpacity={0.35} />
       {/* The ladder bottom. */}
-      <line data-testid="ladder-bottom-line" x1={g.bottomX} x2={g.bottomX} y1={10} y2={axisY} stroke="#93c5fd" strokeDasharray="4 3" />
-      <text x={g.bottomX + 3} y={12} fontSize={10} fill="#93c5fd">bottom ${picture.bottom_usd}</text>
+      <line data-testid="ladder-bottom-line" x1={g.bottomX} x2={g.bottomX} y1={labels + 4} y2={axis} stroke="#93c5fd" strokeDasharray="4 3" />
+      <text x={g.bottomX + 3} y={labels} fontSize={fs} fill="#93c5fd">bottom ${price4(Number(picture.bottom_usd))}</text>
       {/* Each rung. */}
       {g.bars.map((b) => (
         <g key={b.label + b.x} data-testid="ladder-bar">
-          <rect x={b.x} y={b.y} width={b.w} height={18} rx={3} fill={GREEN} fillOpacity={0.6} stroke={GREEN} />
-          <text x={b.x + b.w / 2} y={b.y + 13} fontSize={11} fill="#ecfdf5" textAnchor="middle">{b.label}</text>
+          <rect x={b.x} y={b.y} width={b.w} height={20} rx={3} fill={GREEN} fillOpacity={0.6} stroke={GREEN} />
+          <text x={b.x + b.w / 2} y={b.y + 14} fontSize={fs} fill="#ecfdf5" textAnchor="middle">{b.label}</text>
         </g>
       ))}
       {/* Spot. */}
       {g.spotX != null && (
         <g data-testid="ladder-spot-marker">
-          <line x1={g.spotX} x2={g.spotX} y1={10} y2={axisY} stroke="#f59e0b" strokeWidth={2} />
-          <text x={g.spotX - 3} y={24} fontSize={10} fill="#f59e0b" textAnchor="end">spot ${picture.spot_usd}</text>
+          <line x1={g.spotX} x2={g.spotX} y1={labels + 18} y2={axis} stroke="#f59e0b" strokeWidth={2} />
+          <text x={g.spotX} y={labels + 14} fontSize={fs} fill="#f59e0b" textAnchor="end">spot ${price4(Number(picture.spot_usd))}</text>
         </g>
       )}
-      <line x1={8} x2={g.width - 8} y1={axisY} y2={axisY} stroke="#30363d" />
-      <text x={8} y={g.height - 6} fontSize={10} fill={MUTED}>${g.min.toFixed(5)}</text>
-      <text x={g.width - 8} y={g.height - 6} fontSize={10} fill={MUTED} textAnchor="end">${g.max.toFixed(5)} per NOCK</text>
+      <line x1={8} x2={g.width - 8} y1={axis} y2={axis} stroke="#30363d" />
+      <text x={8} y={axisLabels} fontSize={fs} fill={MUTED}>${price4(g.min)}</text>
+      <text x={g.width - 8} y={axisLabels} fontSize={fs} fill={MUTED} textAnchor="end">${price4(g.max)} per NOCK</text>
+      {/* The reserve's legend, in its own row. */}
+      <rect x={8} y={legend - fs + 2} width={10} height={10} fill="#1e3a8a" fillOpacity={0.8} />
+      <text data-testid="ladder-reserve-label" x={22} y={legend} fontSize={fs} fill="#93c5fd">{picture.reserve_label}</text>
     </svg>
   );
 }
@@ -107,14 +117,23 @@ function Body({
   rungAction?: (r: LadderRung) => ReactNode;
 }) {
   const view = ladderCardView(s, syncStatus);
+  const muted: CSSProperties = { color: MUTED, fontSize: compact ? 11 : '0.72rem' };
   if (view.mode !== 'ready') {
     const missing = missingSettingSentence(s);
-    const candidates = candidateLines(s);
+    const candidates = view.mode === 'line' ? candidateLines(s) : [];
+    const excluded = view.mode === 'line' && s.status === 'no_target_pool' ? excludedLines(s) : [];
     return (
       <>
         <div data-testid="ladder-headline" style={{ fontSize: compact ? 14 : '0.95rem', fontWeight: 700, color: '#e6edf3' }}>{view.headline}</div>
         {missing ? <div style={{ color: TEXT }}>{missing}</div> : view.line ? <div style={{ color: MUTED }}>{view.line}</div> : null}
-        {view.mode === 'line' && candidates.length > 0 && (
+        {excluded.length > 0 && (
+          <ul data-testid="ladder-excluded" style={{ margin: '2px 0 0', paddingLeft: 18, ...muted }}>
+            {excluded.map((e) => (
+              <li key={e}>{e}</li>
+            ))}
+          </ul>
+        )}
+        {candidates.length > 0 && (
           <>
             <div style={{ color: MUTED, marginTop: 6 }}>Candidate bottoms (a measurement; none is picked):</div>
             <ul data-testid="ladder-candidates" style={{ margin: '2px 0 0', paddingLeft: 18, color: TEXT }}>
@@ -127,10 +146,12 @@ function Body({
       </>
     );
   }
+  const note = linkFormatNote(s);
+  const stated = statedLines(s);
   return (
     <>
       <div data-testid="ladder-headline" style={{ fontSize: compact ? 15 : '1rem', fontWeight: 700, color: '#e6edf3' }}>{view.headline}</div>
-      {s.picture && <LadderPicture picture={s.picture} />}
+      {s.picture && <LadderPicture picture={s.picture} width={compact ? 340 : 520} />}
       <ul data-testid="ladder-outcomes" style={{ margin: '4px 0 8px', paddingLeft: 18, color: TEXT }}>
         {s.outcomes.map((o) => (
           <li key={o.kind}>{o.text}</li>
@@ -141,17 +162,28 @@ function Body({
           <RungBlock key={r.index} r={r} compact={compact} action={rungAction?.(r)} />
         ))}
       </ol>
-      {s.after_deposit && (
-        <div data-testid="ladder-after-deposit" style={{ color: MUTED, fontSize: '0.72rem', marginTop: 4 }}>
-          After you deposit{s.after_deposit.kind === 'manual_config' ? ' (current fallback)' : ''}: {s.after_deposit.text}
+      {note && <div data-testid="ladder-link-note" style={muted}>{note}</div>}
+      {stated.length > 0 && (
+        <div data-testid="ladder-stated" style={{ marginTop: 6 }}>
+          {stated.map((line) => (
+            <div key={line} style={muted}>{line}</div>
+          ))}
         </div>
       )}
-      <div style={{ color: MUTED, fontSize: '0.7rem', marginTop: 4 }}>{s.statement}</div>
+      {s.after_deposit && (
+        <div data-testid="ladder-after-deposit" style={{ ...muted, marginTop: 4 }}>
+          {s.after_deposit.text}
+        </div>
+      )}
+      {!compact && (s.assumptions?.length ?? 0) > 0 && (
+        <div data-testid="ladder-assumptions" style={{ ...muted, marginTop: 4 }}>Assumptions: {s.assumptions!.join(' ')}</div>
+      )}
+      <div style={{ ...muted, marginTop: 4 }}>{s.statement}</div>
     </>
   );
 }
 
-/** The dashboard card, directly under the directive banner. Nothing without a suggestion. */
+/** The dashboard card, at the top of the page. Nothing without a suggestion. */
 export function LadderSuggestionCard({
   suggestion,
   syncStatus,
@@ -173,7 +205,7 @@ export function LadderSuggestionCard({
   );
 }
 
-/** The phone cockpit's card: the same headline, outcomes and deposits; the picture too. */
+/** The phone cockpit's card: the same headline, picture, outcomes and deposits. */
 export function LadderSuggestionLiteCard({
   suggestion,
   syncStatus,

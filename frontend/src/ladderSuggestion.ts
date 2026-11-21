@@ -81,6 +81,9 @@ export interface LadderSuggestion {
   candidates: { rows: LadderCandidateRow[]; to_pct?: string; step_pct?: string; reason?: string | null } | null;
   after_deposit: { kind: string; is?: string; text: string; config_snippets?: string[] } | null;
   statement: string;
+  excluded?: { position_id: string; reason: string }[];
+  stated?: { lines?: string[]; note?: string } | null;
+  assumptions?: string[];
 }
 
 export const LADDER_TITLE = 'Ladder suggestion (a measurement, not advice)';
@@ -122,9 +125,40 @@ export function ladderLinkLabel(r: LadderRung): string {
   if (!url) return '';
   const host = new URL(url).hostname;
   if (host === 'app.aero.xyz') return 'OPEN POOL DEPOSIT ON AERO.XYZ ↗ (nothing prefilled)';
-  return (r.deep_link.prefilled ?? []).includes('range ticks')
-    ? 'OPEN NEW POSITION IN UNISWAP ↗ (range prefilled, amount not)'
-    : 'OPEN UNISWAP ↗ (amount not prefilled)';
+  const pre = r.deep_link.prefilled ?? [];
+  const parts = [
+    pre.includes('pair') || pre.includes('fee and tick spacing') ? 'pool' : null,
+    pre.includes('range ticks') ? 'range' : null,
+    pre.includes('amount') ? 'amount' : null,
+  ].filter((x): x is string => !!x);
+  if (parts.length === 0) return 'OPEN IN UNISWAP ↗ (nothing prefilled)';
+  const words = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+  return `OPEN IN UNISWAP ↗ (${words} prefilled)`;
+}
+
+/** The link-format note, once per card: the worker's own words, or null. */
+export function linkFormatNote(s: LadderSuggestion): string | null {
+  for (const r of s.rungs ?? []) {
+    if (r.deep_link?.url && r.deep_link.format_note) return r.deep_link.format_note;
+  }
+  return null;
+}
+
+/** The lines that are stated, not gates (plan budget, tax reserve, cash target). */
+export function statedLines(s: LadderSuggestion): string[] {
+  return Array.isArray(s.stated?.lines) ? s.stated!.lines! : [];
+}
+
+/** Each excluded pool and why, for "no pool can hold one". */
+export function excludedLines(s: LadderSuggestion): string[] {
+  return (s.excluded ?? []).map((e) => `${e.position_id}: ${e.reason}`);
+}
+
+/** A price with 4 significant digits for the plain lines: $0.01274, $0.01002. */
+export function price4(v: number): string {
+  if (!(Number.isFinite(v) && v > 0)) return v.toFixed(2);
+  const dp = Math.max(0, 3 - Math.floor(Math.log10(v)));
+  return v.toFixed(dp);
 }
 
 /** "Deposit 1 of 2 (near rung): $115.12 USDC + 0 NOCK" */
@@ -140,7 +174,7 @@ export function rungRangeLines(r: LadderRung): string[] {
   if (r.bounds_nock_per_usdc?.low && r.bounds_nock_per_usdc?.high) {
     lines.push(`${r.bounds_nock_per_usdc.low} to ${r.bounds_nock_per_usdc.high} NOCK per USDC (the app's form)`);
   }
-  lines.push(`ticks ${r.tick_lower} to ${r.tick_upper} in ${r.pool.label}`);
+  lines.push(`ticks ${r.tick_lower} to ${r.tick_upper}, a new position in ${r.pool.label}`);
   return lines;
 }
 
@@ -174,25 +208,37 @@ export interface PictureGeometry {
   spotX: number | null;
   bottomX: number;
   bars: { x: number; w: number; y: number; label: string; low: number; high: number }[];
+  /** Rows (y) of the drawing: top labels, the axis line, the axis labels, the reserve legend. */
+  rows: { labels: number; axis: number; axisLabels: number; legend: number };
+  fontSize: number;
 }
 
-/** A linear USD-per-NOCK axis from below the bottom to above spot. Pure. */
-export function pictureGeometry(p: LadderPictureData, width = 520, height = 150): PictureGeometry | null {
+/**
+ * A linear USD-per-NOCK axis from below the bottom to above spot, never below $0. Pure.
+ * `width` is the drawing's own unit width: the phone uses a narrow one so its 12-unit
+ * labels stay about 11 CSS px at 375px.
+ */
+export function pictureGeometry(p: LadderPictureData, width = 520): PictureGeometry | null {
   const bottom = Number(p.bottom_usd);
   const spot = p.spot_usd != null ? Number(p.spot_usd) : NaN;
   const highs = p.bars.map((b) => Number(b.high_usd)).filter(Number.isFinite);
   const top = Math.max(...highs, Number.isFinite(spot) ? spot : -Infinity);
   if (!Number.isFinite(bottom) || !Number.isFinite(top) || !(top > bottom)) return null;
   const span = top - bottom;
-  const min = bottom - span * 0.25;
+  const min = Math.max(0, bottom - span * 0.25);
   const max = top + span * 0.1;
+  const fontSize = 12;
   const left = 8;
   const right = width - 8;
   const x = (usd: number) => left + ((usd - min) / (max - min)) * (right - left);
+  const labels = 16;
+  const barTop = 44;
   const bars = p.bars.map((b, i) => {
     const low = Number(b.low_usd);
     const high = Number(b.high_usd);
-    return { x: x(low), w: Math.max(2, x(high) - x(low)), y: 34 + i * 30, label: b.label, low, high };
+    return { x: x(low), w: Math.max(2, x(high) - x(low)), y: barTop + i * 28, label: b.label, low, high };
   });
-  return { width, height, x, min, max, spotX: Number.isFinite(spot) ? x(spot) : null, bottomX: x(bottom), bars };
+  const axis = barTop + p.bars.length * 28 + 6;
+  const rows = { labels, axis, axisLabels: axis + 16, legend: axis + 34 };
+  return { width, height: rows.legend + 8, x, min, max, spotX: Number.isFinite(spot) ? x(spot) : null, bottomX: x(bottom), bars, rows, fontSize };
 }
