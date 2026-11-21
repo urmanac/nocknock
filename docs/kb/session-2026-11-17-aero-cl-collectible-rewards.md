@@ -127,3 +127,22 @@ v0.8.0 stack review remain open.
 - Released as v0.8.2 at the operator's word, deployed to chudmax, and the withdrawal's
   fees recorded there.
 
+## v0.8.3: the standing cash reserve, and ETH/USDC brackets (2026-11-18 to 2026-11-20)
+
+- **#160 (PR #161):** the gas-side WETH/USDC ranges are drawn on the tick bracket panel, in
+  USD per ETH. It was merged and deployed from `main` on 2026-11-18.
+- **#162 (PR #163):** about $1,000 of USDC was deposited on 2026-11-20. The advice then
+  reported "Liquid dry powder: $1360.77", because the $950 reserve lived only under the
+  completed accumulation plan. The operator's intent: $950 is a standing dry-powder floor,
+  kept for buying lower after a drawdown, and USDC inside a NOCK range counts toward it.
+  `operator_profile.cash_reserve_usdc` now holds it. A scratch run on live data gave
+  $818.83 of headroom. A review confirmed three findings (the stdio MCP line, a "-0.00"
+  headroom, an invalid reserve shown as 0), all fixed before merge.
+- **Release:** v0.8.3 was tagged from `main` with the display-only chart. That is an
+  exception to the patch-cadence rule, chosen by the operator.
+- **Workstation:** since macOS 27.2.1, release-mode proc-macro dylibs fail to load ("mis-aligned
+  LINKEDIT string pool"), so `make dist` fails locally. CI and chudmax build on Linux.
+- **Next (v0.9.0, planned, not built):** a mostly-USDC "ladder" range, possibly one each
+  for NOCK, AERO and ETH; the never-built floor-breach price; and the dry-powder reserve
+  held at the ladder's bottom.
+
