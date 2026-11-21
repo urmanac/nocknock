@@ -1,0 +1,3176 @@
+{
+ "data": {
+  "concentrated_liquidity": [],
+  "contract_fees": [
+   {
+    "amount": "0.446924 USDC + 113.77007200 NOCK",
+    "amount_usd": "1.989355",
+    "claimable": true,
+    "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+    "fee_token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "fee_token_symbol": "USDC+NOCK (Uniswap V4 #3163450)",
+    "gas_break_even_usd": "0.0035"
+   },
+   {
+    "amount": "not LP-claimable (claimFees() reverts); unclaimed AERO 1.590710 ($0.63)",
+    "amount_usd": "0.000000",
+    "claimable": false,
+    "contract_address": "0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+    "earnings_kind": "gauge_reward",
+    "fee_token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "fee_token_symbol": "USDC+NOCK (Aerodrome)",
+    "gas_break_even_usd": "0.0035",
+    "lp_fees_note": "not LP-claimable (claimFees() reverts)",
+    "reward": {
+     "amount": "1.590710",
+     "collect_url": "https://app.aero.xyz",
+     "collected_in": "the Aero app",
+     "gauge": "0xc82782ee66d82c4d19db0429652091a085083526",
+     "note": null,
+     "status": "read",
+     "token_address": "0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee",
+     "token_symbol": "AERO",
+     "usd": "0.63"
+    }
+   },
+   {
+    "amount": "0.00030200 WETH + 0.492043 USDC",
+    "amount_usd": "0.998884",
+    "claimable": true,
+    "contract_address": "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1",
+    "fee_token_address": "0x4200000000000000000000000000000000000006",
+    "fee_token_symbol": "WETH+USDC (Uniswap V3 #6607225)",
+    "gas_break_even_usd": "0.0035"
+   },
+   {
+    "amount": "not LP-claimable (staked: swap fees on staked liquidity go to the gauge); unclaimed AERO 2.744889 ($1.09)",
+    "amount_usd": "0.000000",
+    "claimable": false,
+    "contract_address": "0x46a9dca72d78366571be583aa69c1dc16e6889fb",
+    "earnings_kind": "gauge_reward",
+    "fee_token_address": "0x4200000000000000000000000000000000000006",
+    "fee_token_symbol": "WETH+USDC (Aero CL #3449558)",
+    "gas_break_even_usd": "0.0035",
+    "lp_fees_note": "not LP-claimable (staked: swap fees on staked liquidity go to the gauge)",
+    "reward": {
+     "amount": "2.744889",
+     "collect_url": "https://app.aero.xyz",
+     "collected_in": "the Aero app",
+     "gauge": "0x46a9dca72d78366571be583aa69c1dc16e6889fb",
+     "note": null,
+     "status": "read",
+     "token_address": "0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee",
+     "token_symbol": "AERO",
+     "usd": "1.09"
+    }
+   },
+   {
+    "amount": "0.036289 USDC + 0.00000000 NOCK",
+    "amount_usd": "0.036289",
+    "claimable": true,
+    "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+    "fee_token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "fee_token_symbol": "USDC+NOCK (Uniswap V4 #3244699)",
+    "gas_break_even_usd": "0.0035"
+   },
+   {
+    "amount": "0.000000 USDC + 0.00000000 NOCK",
+    "amount_usd": "0.000000",
+    "claimable": false,
+    "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+    "fee_token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "fee_token_symbol": "USDC+NOCK (Uniswap V4 #3244700)",
+    "gas_break_even_usd": "0.0035"
+   },
+   {
+    "amount": "0.000000 USDC + 0.00000000 NOCK",
+    "amount_usd": "0.000000",
+    "claimable": false,
+    "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+    "fee_token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "fee_token_symbol": "USDC+NOCK (Uniswap V4 #3244701)",
+    "gas_break_even_usd": "0.0035"
+   }
+  ],
+  "derived_metrics": {
+   "accumulation_plan": {
+    "acquired_nock": "7717.6498",
+    "avg_price_usd": "0.012957",
+    "binding_constraint": null,
+    "budget_usdc": "100.00",
+    "cash_reserve_usdc": "950.00",
+    "fill_detection": {
+     "checked_back_to": null,
+     "detail": "the plan's budget is spent, so no further buys are looked for",
+     "dismissed": [],
+     "last_checked_at": "2026-11-18T03:11:21.445565+00:00",
+     "offers": [],
+     "status": "not_run"
+    },
+    "fills": 5,
+    "last_fill_at": "2026-11-18T03:14:39+00:00",
+    "lump_sum_nock": "7989.6710",
+    "next_due_at": null,
+    "nominal_tranche_usdc": "20.00",
+    "plan_id": "2026-11-reentry",
+    "remaining_usdc": "0.00",
+    "route_quotes": null,
+    "spent_usdc": "100.00",
+    "status": "complete",
+    "tranche_index": 5,
+    "tranche_usdc": "0.00",
+    "tranches_total": 5,
+    "venue": "Aero"
+   },
+   "asset_aggregation_series": {
+    "active_protocol_series": [
+     "1746.48"
+    ],
+    "positions_nock": [
+     {
+      "position_id": "uniswap-v4:base:3163450",
+      "series": [
+       "10363.25"
+      ]
+     },
+     {
+      "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+      "series": [
+       "8216.28"
+      ]
+     },
+     {
+      "position_id": "uniswap-v4:base:3244699",
+      "series": [
+       "0.00"
+      ]
+     },
+     {
+      "position_id": "uniswap-v4:base:3244700",
+      "series": [
+       "0.00"
+      ]
+     },
+     {
+      "position_id": "uniswap-v4:base:3244701",
+      "series": [
+       "0.00"
+      ]
+     }
+    ],
+    "safe_haven_series": [
+     "1220.17"
+    ],
+    "time_points": [
+     "2026-11-21T16:10:35.793937656+00:00"
+    ],
+    "wallet_nock_series": [
+     "90000.0161"
+    ]
+   },
+   "cost_basis": {
+    "plan_buys": {
+     "acquired_nock": "7717.6498",
+     "avg_cost_usd": "0.012957",
+     "excludes": [
+      "NOCK held before the first recorded buy, and any buy that was not recorded.",
+      "Everything that is not a buy: sells, NOCK that LP ranges sell or buy back, fees earned.",
+      "Gas paid in ETH."
+     ],
+     "fills": 5,
+     "first_fill_at": "2026-11-14T06:02:25+00:00",
+     "includes": [
+      "Every receipt-verified buy in the accumulation ledger, across all plans: the USDC that left the wallet and the NOCK that entered it in each recorded transaction. Swap fees and price impact are inside those amounts."
+     ],
+     "last_fill_at": "2026-11-18T03:14:39+00:00",
+     "plans": [
+      {
+       "acquired_nock": "7717.6498",
+       "avg_cost_usd": "0.012957",
+       "fills": 5,
+       "first_fill_at": "2026-11-14T06:02:25+00:00",
+       "last_fill_at": "2026-11-18T03:14:39+00:00",
+       "plan_id": "2026-11-reentry",
+       "spent_usdc": "100.00"
+      }
+     ],
+     "reason": null,
+     "spent_usdc": "100.00",
+     "status": "ok",
+     "unrealized_pct": "4.63",
+     "unrealized_usd": "4.63",
+     "value_at_spot_usd": "104.63"
+    },
+    "spot_price_usd": "0.013557",
+    "whole_stack": {
+     "as_of": "2026-11-21T02:30:00+00:00",
+     "avg_cost_usd": "0.016929",
+     "basis_cost_usd": "1525.05",
+     "basis_nock": "90086.7900",
+     "bought_since_nock": "0.0000",
+     "bought_since_usdc": "0.00",
+     "excludes": [
+      "Buys confirmed at or before 2026-11-21T02:30:00+00:00: they are taken to be inside the opening figures and are not added again.",
+      "Everything after 2026-11-21T02:30:00+00:00 that is not a recorded buy: sells, NOCK that LP ranges sell or buy back, fees earned, transfers in or out, unrecorded buys.",
+      "Realized gains and losses, and gas paid in ETH.",
+      "Tracked ladders left out: uniswap-v4:base:3244699: no net buy since its deposit (-86.7731 NOCK for $-1.17); uniswap-v4:base:3244700: no net buy since its deposit (0.0000 NOCK for $0.00); uniswap-v4:base:3244701: no net buy since its deposit (0.0000 NOCK for $0.00)."
+     ],
+     "fills_since": 0,
+     "held_nock": "108693",
+     "includes": [
+      "The opening figures entered in config: 90086.7900 NOCK for $1525.05 as of 2026-11-21T02:30:00+00:00, source: Uniswap portfolio page, NOCK row: 90,086.79 NOCK worth $1,181.26, unrealized -$343.79 (wallet only, pools excluded). NockNock did not read or check them.",
+      "Every receipt-verified buy confirmed after 2026-11-21T02:30:00+00:00: 0 so far.",
+      "The net NOCK bought by 0 of 3 tracked ladders since a receipt-verified deposit after 2026-11-21T02:30:00+00:00: 0.0000 NOCK for $0.00, measured from each deposit_tx receipt to now."
+     ],
+     "ladder_buys_since": {
+      "ladders_counted": 0,
+      "nock": "0.0000",
+      "not_counted": [
+       "uniswap-v4:base:3244699: no net buy since its deposit (-86.7731 NOCK for $-1.17)",
+       "uniswap-v4:base:3244700: no net buy since its deposit (0.0000 NOCK for $0.00)",
+       "uniswap-v4:base:3244701: no net buy since its deposit (0.0000 NOCK for $0.00)"
+      ],
+      "usdc": "0.00"
+     },
+     "opening_avg_cost_usd": "0.016929",
+     "opening_cost_usd": "1525.05",
+     "opening_nock": "90086.7900",
+     "reason": null,
+     "source": "Uniswap portfolio page, NOCK row: 90,086.79 NOCK worth $1,181.26, unrealized -$343.79 (wallet only, pools excluded)",
+     "status": "ok",
+     "unrealized_pct": "-19.91",
+     "unrealized_usd": "-303.70",
+     "value_at_spot_usd": "1221.35"
+    }
+   },
+   "fee_yield": {
+    "computed_at": "2026-11-21T15:25:31Z",
+    "constants_note": "window_days, max_gap_seconds, day_min_seconds and refresh_seconds are measurement and display constants, not settings",
+    "day_min_seconds": 72000,
+    "excluded": [
+     {
+      "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+      "reason": "a full-range position (a basic Aero pool): it has no range to measure, and its claimFees reverts"
+     }
+    ],
+    "max_gap_seconds": 7200,
+    "pools": [
+     {
+      "by_day": [
+       {
+        "date": "2026-11-14",
+        "nock_per_liquidity_day": "2.582094e-13",
+        "seconds": 30699.262,
+        "usd_per_liquidity_day": "3.997644e-15",
+        "usdc_per_liquidity_day": "4.969857e-16"
+       },
+       {
+        "date": "2026-11-15",
+        "nock_per_liquidity_day": "1.846029e-13",
+        "seconds": 86488.395,
+        "usd_per_liquidity_day": "5.122875e-15",
+        "usdc_per_liquidity_day": "2.620133e-15"
+       },
+       {
+        "date": "2026-11-16",
+        "nock_per_liquidity_day": "1.651645e-13",
+        "seconds": 86006.946,
+        "usd_per_liquidity_day": "7.293388e-15",
+        "usdc_per_liquidity_day": "5.054181e-15"
+       },
+       {
+        "date": "2026-11-17",
+        "nock_per_liquidity_day": "3.273413e-13",
+        "seconds": 71106.303,
+        "usd_per_liquidity_day": "9.936337e-15",
+        "usdc_per_liquidity_day": "5.498428e-15"
+       },
+       {
+        "date": "2026-11-18",
+        "nock_per_liquidity_day": "6.401196e-14",
+        "seconds": 86146.129,
+        "usd_per_liquidity_day": "3.135691e-15",
+        "usdc_per_liquidity_day": "2.267853e-15"
+       },
+       {
+        "date": "2026-11-19",
+        "nock_per_liquidity_day": "2.296357e-13",
+        "seconds": 85799.496,
+        "usd_per_liquidity_day": "8.130751e-15",
+        "usdc_per_liquidity_day": "5.017479e-15"
+       },
+       {
+        "date": "2026-11-20",
+        "nock_per_liquidity_day": "3.507609e-13",
+        "seconds": 86399.664,
+        "usd_per_liquidity_day": "5.506890e-15",
+        "usdc_per_liquidity_day": "7.514707e-16"
+       },
+       {
+        "date": "2026-11-21",
+        "nock_per_liquidity_day": "7.883166e-14",
+        "seconds": 55107.829,
+        "usd_per_liquidity_day": "1.733902e-15",
+        "usdc_per_liquidity_day": "6.651463e-16"
+       }
+      ],
+      "covered_tick_lower": 262200,
+      "covered_tick_upper": 282300,
+      "fee_tier_bps": 300,
+      "from": "2026-11-14T04:38:29Z",
+      "intervals": 1972,
+      "label": "v4 USDC/NOCK 3.00% #3163450",
+      "measured_by": "uniswap-v4:base:3163450",
+      "measured_seconds": 587754.023,
+      "nock_per_liquidity_day": "2.062785e-13",
+      "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+      "pool_price_usd": "0.01355744",
+      "reason": null,
+      "rows": 2121,
+      "skipped": {
+       "fees_fell": 6,
+       "gap": 1,
+       "liquidity_changed": 4,
+       "out_of_range": 0,
+       "pool_inactive": 0,
+       "staked": 0,
+       "unreadable": 0,
+       "zero_liquidity": 137
+      },
+      "skipped_seconds": {
+       "fees_fell": 1776.479,
+       "gap": 14179.252,
+       "liquidity_changed": 1202.24,
+       "out_of_range": 0.0,
+       "pool_inactive": 0.0,
+       "staked": 0.0,
+       "unreadable": 0.0,
+       "zero_liquidity": 38413.578
+      },
+      "spans": [
+       {
+        "bin_hi": 269700,
+        "bin_lo": 269700,
+        "nock_per_liquidity": "0.000000e0",
+        "seconds": 299.659,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 270000,
+        "bin_lo": 269700,
+        "nock_per_liquidity": "1.787259e-14",
+        "seconds": 300.093,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 271200,
+        "bin_lo": 269700,
+        "nock_per_liquidity": "0.000000e0",
+        "seconds": 300.153,
+        "usdc_per_liquidity": "3.115372e-15"
+       },
+       {
+        "bin_hi": 270000,
+        "bin_lo": 270000,
+        "nock_per_liquidity": "2.799415e-14",
+        "seconds": 34799.363,
+        "usdc_per_liquidity": "6.345010e-20"
+       },
+       {
+        "bin_hi": 270300,
+        "bin_lo": 270000,
+        "nock_per_liquidity": "4.943626e-14",
+        "seconds": 599.576,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 270900,
+        "bin_lo": 270000,
+        "nock_per_liquidity": "0.000000e0",
+        "seconds": 300.176,
+        "usdc_per_liquidity": "1.867136e-15"
+       },
+       {
+        "bin_hi": 270300,
+        "bin_lo": 270300,
+        "nock_per_liquidity": "1.909862e-14",
+        "seconds": 14100.257,
+        "usdc_per_liquidity": "3.525006e-20"
+       },
+       {
+        "bin_hi": 270600,
+        "bin_lo": 270300,
+        "nock_per_liquidity": "2.374865e-14",
+        "seconds": 600.184,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 270600,
+        "bin_lo": 270600,
+        "nock_per_liquidity": "3.188204e-14",
+        "seconds": 13200.372,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 270900,
+        "bin_lo": 270600,
+        "nock_per_liquidity": "4.512589e-14",
+        "seconds": 599.649,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 270900,
+        "bin_lo": 270900,
+        "nock_per_liquidity": "3.272684e-14",
+        "seconds": 38699.706,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 271200,
+        "bin_lo": 270900,
+        "nock_per_liquidity": "5.865831e-15",
+        "seconds": 299.779,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 271200,
+        "bin_lo": 271200,
+        "nock_per_liquidity": "1.082447e-14",
+        "seconds": 12300.212,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 271500,
+        "bin_lo": 271200,
+        "nock_per_liquidity": "2.975228e-14",
+        "seconds": 600.094,
+        "usdc_per_liquidity": "3.668015e-16"
+       },
+       {
+        "bin_hi": 271500,
+        "bin_lo": 271500,
+        "nock_per_liquidity": "4.492832e-14",
+        "seconds": 63023.308,
+        "usdc_per_liquidity": "8.238283e-16"
+       },
+       {
+        "bin_hi": 271800,
+        "bin_lo": 271500,
+        "nock_per_liquidity": "1.404995e-14",
+        "seconds": 899.969,
+        "usdc_per_liquidity": "1.070560e-15"
+       },
+       {
+        "bin_hi": 272100,
+        "bin_lo": 271500,
+        "nock_per_liquidity": "7.411948e-14",
+        "seconds": 299.749,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 271800,
+        "bin_lo": 271800,
+        "nock_per_liquidity": "4.845599e-15",
+        "seconds": 26425.043,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 272100,
+        "bin_lo": 272100,
+        "nock_per_liquidity": "3.245414e-14",
+        "seconds": 38398.187,
+        "usdc_per_liquidity": "1.818740e-16"
+       },
+       {
+        "bin_hi": 272400,
+        "bin_lo": 272100,
+        "nock_per_liquidity": "4.307908e-14",
+        "seconds": 1485.877,
+        "usdc_per_liquidity": "7.386827e-16"
+       },
+       {
+        "bin_hi": 272700,
+        "bin_lo": 272100,
+        "nock_per_liquidity": "6.140030e-14",
+        "seconds": 299.94,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 273000,
+        "bin_lo": 272100,
+        "nock_per_liquidity": "1.142992e-13",
+        "seconds": 300.068,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 273300,
+        "bin_lo": 272100,
+        "nock_per_liquidity": "0.000000e0",
+        "seconds": 300.244,
+        "usdc_per_liquidity": "1.852655e-15"
+       },
+       {
+        "bin_hi": 272400,
+        "bin_lo": 272400,
+        "nock_per_liquidity": "5.005972e-14",
+        "seconds": 20423.574,
+        "usdc_per_liquidity": "6.373314e-16"
+       },
+       {
+        "bin_hi": 272700,
+        "bin_lo": 272400,
+        "nock_per_liquidity": "3.952374e-14",
+        "seconds": 1200.263,
+        "usdc_per_liquidity": "6.637412e-16"
+       },
+       {
+        "bin_hi": 272700,
+        "bin_lo": 272700,
+        "nock_per_liquidity": "4.806875e-14",
+        "seconds": 17699.992,
+        "usdc_per_liquidity": "2.081465e-16"
+       },
+       {
+        "bin_hi": 273000,
+        "bin_lo": 272700,
+        "nock_per_liquidity": "7.264259e-14",
+        "seconds": 1500.088,
+        "usdc_per_liquidity": "9.967422e-16"
+       },
+       {
+        "bin_hi": 273000,
+        "bin_lo": 273000,
+        "nock_per_liquidity": "6.132246e-14",
+        "seconds": 32096.18,
+        "usdc_per_liquidity": "6.569999e-16"
+       },
+       {
+        "bin_hi": 273300,
+        "bin_lo": 273000,
+        "nock_per_liquidity": "2.549960e-14",
+        "seconds": 899.951,
+        "usdc_per_liquidity": "8.287011e-16"
+       },
+       {
+        "bin_hi": 273300,
+        "bin_lo": 273300,
+        "nock_per_liquidity": "1.222792e-14",
+        "seconds": 23099.99,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 273600,
+        "bin_lo": 273300,
+        "nock_per_liquidity": "5.024297e-14",
+        "seconds": 900.101,
+        "usdc_per_liquidity": "5.610666e-16"
+       },
+       {
+        "bin_hi": 273600,
+        "bin_lo": 273600,
+        "nock_per_liquidity": "3.760828e-17",
+        "seconds": 50907.56,
+        "usdc_per_liquidity": "3.630244e-16"
+       },
+       {
+        "bin_hi": 273900,
+        "bin_lo": 273600,
+        "nock_per_liquidity": "0.000000e0",
+        "seconds": 300.107,
+        "usdc_per_liquidity": "1.221905e-16"
+       },
+       {
+        "bin_hi": 273900,
+        "bin_lo": 273900,
+        "nock_per_liquidity": "0.000000e0",
+        "seconds": 599.945,
+        "usdc_per_liquidity": "4.363339e-16"
+       },
+       {
+        "bin_hi": 274800,
+        "bin_lo": 273900,
+        "nock_per_liquidity": "0.000000e0",
+        "seconds": 300.022,
+        "usdc_per_liquidity": "1.446881e-15"
+       },
+       {
+        "bin_hi": 274800,
+        "bin_lo": 274800,
+        "nock_per_liquidity": "3.050288e-14",
+        "seconds": 61868.354,
+        "usdc_per_liquidity": "1.677700e-16"
+       },
+       {
+        "bin_hi": 275100,
+        "bin_lo": 274800,
+        "nock_per_liquidity": "2.977878e-14",
+        "seconds": 917.596,
+        "usdc_per_liquidity": "7.359993e-16"
+       },
+       {
+        "bin_hi": 275400,
+        "bin_lo": 274800,
+        "nock_per_liquidity": "7.231376e-14",
+        "seconds": 300.049,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 275100,
+        "bin_lo": 275100,
+        "nock_per_liquidity": "3.601733e-14",
+        "seconds": 92976.057,
+        "usdc_per_liquidity": "5.041188e-16"
+       },
+       {
+        "bin_hi": 275400,
+        "bin_lo": 275100,
+        "nock_per_liquidity": "1.057090e-13",
+        "seconds": 1500.555,
+        "usdc_per_liquidity": "1.235485e-15"
+       },
+       {
+        "bin_hi": 275400,
+        "bin_lo": 275400,
+        "nock_per_liquidity": "3.826870e-15",
+        "seconds": 30932.013,
+        "usdc_per_liquidity": "4.631253e-16"
+       },
+       {
+        "bin_hi": 275700,
+        "bin_lo": 275400,
+        "nock_per_liquidity": "0.000000e0",
+        "seconds": 299.953,
+        "usdc_per_liquidity": "5.501705e-16"
+       },
+       {
+        "bin_hi": 276000,
+        "bin_lo": 275400,
+        "nock_per_liquidity": "8.197511e-14",
+        "seconds": 299.874,
+        "usdc_per_liquidity": "0.000000e0"
+       },
+       {
+        "bin_hi": 276000,
+        "bin_lo": 275700,
+        "nock_per_liquidity": "0.000000e0",
+        "seconds": 300.14,
+        "usdc_per_liquidity": "1.804107e-16"
+       }
+      ],
+      "spans_reason": null,
+      "status": "measured",
+      "tick_spacing": 300,
+      "to": "2026-11-21T15:20:35Z",
+      "usd_per_1e15_liquidity_day": "5.8506",
+      "usd_per_liquidity_day": "5.850575e-15",
+      "usdc_per_liquidity_day": "3.053967e-15",
+      "zero_fee_gap_intervals": 0
+     }
+    ],
+    "reason": null,
+    "refresh_seconds": 3600,
+    "statement": "Measured from stored snapshots of our own tracked ranges: swap fees per unit of liquidity while in range. A past measurement, not a forecast. The stored market volume of another pool is never used.",
+    "status": "measured",
+    "window_days": 30
+   },
+   "floor_breach": {
+    "assumption": "Each pool is moved by the same multiple from its own current price. WETH/NOCK ranges hold ETH/USD constant (a NOCK/USD multiple is the same NOCK/ETH multiple). Full-range pools follow x*y=k on the wallet's share and never sell out. Uncollected NOCK fees count as held. Gas-side ranges with no NOCK leg hold no NOCK.",
+    "crossing": {
+     "level_nock": "100000",
+     "multiple": "1.8603",
+     "pct_above_spot": "86.0",
+     "price_usd": "0.025221",
+     "status": "crosses"
+    },
+    "fees_nock": "114",
+    "first_to_sell_out": "v4 USDC/NOCK 3.00% #3163450",
+    "floor_nock": "100000",
+    "largest_seller": "v4 USDC/NOCK 3.00% #3163450",
+    "nock_if_all_sold": "90114",
+    "nock_now": "108693",
+    "positions": [
+     {
+      "full_range": false,
+      "label": "v4 USDC/NOCK 3.00% #3163450",
+      "nock_at_crossing": "3862",
+      "nock_now": "10363",
+      "note": null,
+      "position_id": "uniswap-v4:base:3163450",
+      "sold_out_at_multiple": "3.0281",
+      "sold_out_at_price_usd": "0.041054"
+     },
+     {
+      "full_range": true,
+      "label": "Aero USDC/NOCK 0.30% (full range)",
+      "nock_at_crossing": "6024",
+      "nock_now": "8216",
+      "note": "full range: sells gradually as price rises and never empties",
+      "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+      "sold_out_at_multiple": null,
+      "sold_out_at_price_usd": null
+     },
+     {
+      "full_range": false,
+      "label": "v4 USDC/NOCK 3.00% #3244699",
+      "nock_at_crossing": "0",
+      "nock_now": "0",
+      "note": "holds no NOCK at this price",
+      "position_id": "uniswap-v4:base:3244699",
+      "sold_out_at_multiple": null,
+      "sold_out_at_price_usd": null
+     },
+     {
+      "full_range": false,
+      "label": "v4 USDC/NOCK 3.00% #3244700",
+      "nock_at_crossing": "0",
+      "nock_now": "0",
+      "note": "holds no NOCK at this price",
+      "position_id": "uniswap-v4:base:3244700",
+      "sold_out_at_multiple": null,
+      "sold_out_at_price_usd": null
+     },
+     {
+      "full_range": false,
+      "label": "v4 USDC/NOCK 3.00% #3244701",
+      "nock_at_crossing": "0",
+      "nock_now": "0",
+      "note": "holds no NOCK at this price",
+      "position_id": "uniswap-v4:base:3244701",
+      "sold_out_at_multiple": null,
+      "sold_out_at_price_usd": null
+     }
+    ],
+    "reason": null,
+    "spot_price_usd": "0.013557",
+    "status": "crosses",
+    "tolerated": {
+     "level_nock": "90000",
+     "multiple": null,
+     "pct_above_spot": null,
+     "price_usd": null,
+     "status": "never"
+    },
+    "wallet_nock": "90000"
+   },
+   "global_status": {
+    "aero_note": null,
+    "aero_price_usd": "0.397204",
+    "cash_reserve_usdc": "950.00",
+    "collectible_rewards_note": null,
+    "collectible_rewards_usd": "1.72",
+    "dry_powder_usdc": "589.61",
+    "eth_price_usd": "1677.54",
+    "gas_to_fee_delta_usd": "3.02",
+    "high_water_mark_date": "2026-11-21T15:45:35.726150+00:00",
+    "high_water_mark_usd": "3784.83",
+    "ladder_bottom_usd": "0.01000000",
+    "ladder_rungs": [
+     {
+      "high": "band",
+      "low_usd": null,
+      "rung": "cap",
+      "share": null
+     },
+     {
+      "high": "spot",
+      "low_usd": "0.01100000",
+      "rung": "near",
+      "share": "0.15"
+     },
+     {
+      "high": "0.01100000",
+      "low_usd": "0.01000000",
+      "rung": "deep",
+      "share": "0.85"
+     }
+    ],
+    "lp_floor_tolerance_bps": 1000,
+    "lp_nock_budget": "0.0161",
+    "nock_floor_delta": "8693",
+    "nock_floor_target": "100000",
+    "regime": "normal",
+    "reserve_headroom_usdc": "830.87",
+    "reserve_ladder_usdc": "768.24",
+    "reserve_stable_usdc": "1780.87",
+    "rsi_14": "99.0",
+    "rsi_14_1d": "42.4",
+    "shot_advice_action": "HOLD & ACCRETE (Dual Growth Engine Active)",
+    "shot_advice_details": "Total NOCK held is 108693 (+8693 above the 100000 floor). 2 NOCK LP positions tracked: 1 ranged (1 in range), 1 full range. +2 ETH/USDC ranges, measured only (2 in range). +3 ladders, measured only (3 holding only USDC). $3.02 of LP fees uncollected. Liquid dry powder: $589.61 (wallet USDC $778.77 less the larger of the $189.15 cash target and the $8.70 virtual tax reserve). The $950.00 protected cash reserve is measured on wallet USDC plus the $233.87 of USDC in NOCK LP and the $768.24 in ladders: $1780.87, $830.87 above it. The $1002.11 of USDC inside NOCK LP and ladders ($768.24 of it in ladders) is working capital, not dry powder: it stays in its ranges. Standing bias: NOCK LP holds $485.76 against a $756.61 target (20% of portfolio), $270.85 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. No tracked position is eligible for a deposit right now.",
+    "total_collectible_usd": "4.74",
+    "total_eth_amount": "0.252760",
+    "total_eth_usd": "424.02",
+    "total_fees_accrued_usd": "3.02",
+    "total_fees_claimable_usd": "3.02",
+    "total_native_usd": "1472.06",
+    "total_nock_amount": "108693",
+    "total_portfolio_usd": "3783.05",
+    "total_stable_usd": "1879.96",
+    "total_usdc_amount": "1879.96",
+    "unclaimed_aero_amount": "4.335599",
+    "unclaimed_aero_usd": "1.72",
+    "wallet_aero_amount": "17.654015",
+    "wallet_aero_usd": "7.01",
+    "wallet_gas_eth": "0.018252",
+    "wallet_gas_usd": "30.62"
+   },
+   "ladder_shape": {
+    "cap": "sized",
+    "cap_reason": null,
+    "combined": null,
+    "computed_at": "2026-11-21T16:10:35Z",
+    "dust": {
+     "liquidity_tolerance": 1e-06,
+     "note": "display constants, not settings",
+     "usdc": 1.0
+    },
+    "fit": {
+     "allowed_rule": "the shared reserve gate's most at $0.01000000: the wallet's USDC plus the USDC every range holds there, less the $950.00 reserve, and never more than the wallet holds",
+     "allowed_usdc": "0.00",
+     "factor": null,
+     "minimum_usdc": "1.00",
+     "needed_usdc": "0.00",
+     "rule": "once a near or deep rung is deposited the cap takes only what the reserve leaves beside the near and deep rungs still to deposit; when they alone need more than the reserve allows, each deposit left is cut pro rata (by the same fraction), so the shape keeps its proportions, and the shortfall is stated",
+     "shortfall_usdc": null,
+     "status": "nothing_left"
+    },
+    "floor_breach_effect": null,
+    "gate": {
+     "cash_reserve_usdc": null,
+     "margin_usdc": null,
+     "max_usdc_total": "0.00",
+     "price_usd": "0.01000000",
+     "rule": "your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom",
+     "stable_at_gate_usdc": null,
+     "status": null
+    },
+    "grid": null,
+    "headroom_rule": "the shared reserve gate's most at $0.01000000: the wallet's USDC plus the USDC every range holds there, less the $950.00 reserve, and never more than the wallet holds",
+    "headroom_usdc": "0.00",
+    "nock_budget": {
+     "lp_nock_budget": null,
+     "nock_needed": null,
+     "nock_needed_by_rung": null,
+     "status": null
+    },
+    "pool": {
+     "label": "v4 USDC/NOCK 3.00% #3163450",
+     "pool_price_usd": "0.01355744",
+     "pool_tick": 273280,
+     "position_id": "uniswap-v4:base:3163450",
+     "tick_spacing": 300
+    },
+    "reason": "nothing is left to deposit: every configured rung is deployed by liquidity (or passed, found on-chain, under the minimum or with no cap, as each says)",
+    "rest_rule": "frozen by the near rung already deposited (the first deposited, by its deposit block): its $111.09 of USDC at its top is its share of $740.60, which the near and deep shares divide; it does not move with the price",
+    "rest_usdc": "740.60",
+    "rungs": [
+     {
+      "amount0_raw": null,
+      "amount1_raw": null,
+      "avg_buy_price_usd": null,
+      "cap": null,
+      "counterparts": [
+       "uniswap-v4:base:3244699"
+      ],
+      "deployed_nock": "0.0000",
+      "deployed_usdc": "27.633371",
+      "fee_estimate": null,
+      "fit_factor": null,
+      "found": [],
+      "high_pct": null,
+      "high_rule": null,
+      "high_usd": null,
+      "if_pulled_at_fill": null,
+      "in_range_now": false,
+      "index": 1,
+      "liquidity_human": null,
+      "liquidity_raw": null,
+      "low_pct": null,
+      "low_usd": null,
+      "mint_note": null,
+      "nock": null,
+      "nock_bought_at_bottom": null,
+      "nock_held_at_bottom": null,
+      "nock_per_usdc_at_high": null,
+      "nock_per_usdc_at_low": null,
+      "nock_raw": null,
+      "note": null,
+      "out_of_range_above_now": null,
+      "over_by_usdc": null,
+      "reason": null,
+      "remaining_liquidity": "0",
+      "remaining_nock": "0.0000",
+      "remaining_note": null,
+      "remaining_usdc": "0.000000",
+      "remaining_usdc_at_top": null,
+      "round_trip": null,
+      "rung": "cap",
+      "share": null,
+      "status": "deployed",
+      "target_liquidity": "1595712642669859",
+      "target_nock": "0.0000",
+      "target_usdc": "27.633371",
+      "tick_lower": 273300,
+      "tick_upper": 273600,
+      "tracked_liquidity": "1595712642669859",
+      "usdc": null,
+      "usdc_raw": null
+     },
+     {
+      "amount0_raw": null,
+      "amount1_raw": null,
+      "avg_buy_price_usd": null,
+      "cap": null,
+      "counterparts": [
+       "uniswap-v4:base:3244700"
+      ],
+      "deployed_nock": null,
+      "deployed_usdc": "111.090000",
+      "fee_estimate": null,
+      "fit_factor": null,
+      "found": [],
+      "high_pct": null,
+      "high_rule": null,
+      "high_usd": null,
+      "if_pulled_at_fill": null,
+      "in_range_now": false,
+      "index": 2,
+      "liquidity_human": null,
+      "liquidity_raw": null,
+      "low_pct": null,
+      "low_usd": null,
+      "mint_note": null,
+      "nock": null,
+      "nock_bought_at_bottom": null,
+      "nock_held_at_bottom": null,
+      "nock_per_usdc_at_high": null,
+      "nock_per_usdc_at_low": null,
+      "nock_raw": null,
+      "note": null,
+      "out_of_range_above_now": null,
+      "over_by_usdc": null,
+      "reason": null,
+      "remaining_liquidity": "0",
+      "remaining_nock": "0.0000",
+      "remaining_note": null,
+      "remaining_usdc": "0.000000",
+      "remaining_usdc_at_top": "0.000000",
+      "round_trip": null,
+      "rung": "near",
+      "share": "0.15",
+      "status": "deployed",
+      "target_liquidity": "1126422639810375",
+      "target_nock": null,
+      "target_usdc": "111.090000",
+      "tick_lower": 273600,
+      "tick_upper": 275400,
+      "tracked_liquidity": "1126422639810375",
+      "usdc": null,
+      "usdc_raw": null
+     },
+     {
+      "amount0_raw": null,
+      "amount1_raw": null,
+      "avg_buy_price_usd": null,
+      "cap": null,
+      "counterparts": [
+       "uniswap-v4:base:3244701"
+      ],
+      "deployed_nock": null,
+      "deployed_usdc": "629.520000",
+      "fee_estimate": null,
+      "fit_factor": null,
+      "found": [],
+      "high_pct": null,
+      "high_rule": null,
+      "high_usd": null,
+      "if_pulled_at_fill": null,
+      "in_range_now": false,
+      "index": 3,
+      "liquidity_human": null,
+      "liquidity_raw": null,
+      "low_pct": null,
+      "low_usd": null,
+      "mint_note": null,
+      "nock": null,
+      "nock_bought_at_bottom": null,
+      "nock_held_at_bottom": null,
+      "nock_per_usdc_at_high": null,
+      "nock_per_usdc_at_low": null,
+      "nock_raw": null,
+      "note": null,
+      "out_of_range_above_now": null,
+      "over_by_usdc": null,
+      "reason": null,
+      "remaining_liquidity": "0",
+      "remaining_nock": "0.0000",
+      "remaining_note": null,
+      "remaining_usdc": "0.000000",
+      "remaining_usdc_at_top": "0.000000",
+      "round_trip": null,
+      "rung": "deep",
+      "share": "0.85",
+      "status": "deployed",
+      "target_liquidity": "13660995725341992",
+      "target_nock": null,
+      "target_usdc": "629.510000",
+      "tick_lower": 275400,
+      "tick_upper": 276300,
+      "tracked_liquidity": "13661212735329632",
+      "usdc": null,
+      "usdc_raw": null
+     }
+    ],
+    "source": "operator_profile.ladder_rungs",
+    "statement": "The operator's own ladder shape (operator_profile.ladder_rungs), planned from this snapshot against the ladder rungs already tracked and sized to the shared reserve gate's most. A measurement for a card with no inputs: NockNock does not choose the shape, and nothing is signed or sent.",
+    "status": "deployed",
+    "total_rule": "the near and deep rungs' USDC at their tops plus the cap's USDC now",
+    "total_usdc": "768.23",
+    "tracked_note": "Each configured rung's target is a liquidity on its own ticks; a liquidity does not change with the price, so a deployed rung stays deployed when the price moves, in range or out of it. Tracked ladder rungs in this pool (role: ladder) are matched to configured rungs by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order); a position found on-chain and not yet tracked counts for the rung whose pool and ticks it matches exactly. A near or deep rung is measured by what it holds as all USDC at its top (liquidity times the USDC one unit holds there). The plan is frozen by the first near or deep rung deposited: the shares divide what that rung's USDC at its top implies (the largest, when several are deposited), never the total again. Until then the shares divide what the reserve gate allows now, less the cap. A tracked cap is the cap: its liquidity is its target. What is left to deposit is drawn on a matched rung's own ticks.",
+    "tracked_usdc": "768.24",
+    "unmatched": []
+   },
+   "ladder_suggestion": {
+    "after_deposit": null,
+    "assumptions": [
+     "The amounts are your own shape (operator_profile.ladder_rungs): until a near or deep rung is deposited it is sized to what the standing reserve allows at the gate price; from then on that rung fixes the plan. When the reserve allows less than what is left, every deposit is cut in proportion and the shortfall is stated. Fees and gas are not counted in them.",
+     "A cap is in range now and holds NOCK; every other rung holds only USDC now and earns no fees until NOCK falls to its top.",
+     "Each rung is measured by its liquidity, which does not change with the price: a deposited rung stays deposited when the price moves, and only what is left is listed. A remainder under $1.00 is not offered.",
+     "The ladder's USDC is outside the NOCK LP target and the rebuild: the two are separate figures.",
+     "Each fee line is a past measurement on our own tracked range scaled to the rung's liquidity: an estimate, not a forecast."
+    ],
+    "candidates": null,
+    "excluded": [],
+    "fit": null,
+    "found_note": null,
+    "freshness_rule": "Shown only while the snapshot is fresh: the dashboard's sync status is not stale, or the worker's health is ok.",
+    "gates": null,
+    "headline": "Ladder deployed: all 3 deposits are done.",
+    "id": "ladder_suggestion:NOCK",
+    "minimum_usdc": "1.00",
+    "mint_note": null,
+    "missing": [],
+    "numbers": null,
+    "outcomes": [],
+    "picture": null,
+    "reason": "Nothing is left to deposit: of the 3 rungs of your shape, 3 deployed. Their readings are in the Ladders card.",
+    "rungs": [],
+    "sentence": null,
+    "shape": {
+     "below_minimum": 0,
+     "deployed": 3,
+     "found": 0,
+     "held": 0,
+     "left": 0,
+     "none": 0,
+     "of": 3,
+     "over": 0,
+     "passed": 0,
+     "rest_rule": "frozen by the near rung already deposited (the first deposited, by its deposit block): its $111.09 of USDC at its top is its share of $740.60, which the near and deep shares divide; it does not move with the price",
+     "rest_usdc": "740.60",
+     "rungs": [
+      {
+       "bounds_usd": {
+        "high": "0.01353085",
+        "low": "0.01313098"
+       },
+       "counterparts": [
+        "uniswap-v4:base:3244699"
+       ],
+       "deployed_nock": "0.0000",
+       "deployed_usdc": "27.63",
+       "found": [],
+       "holds_now": {
+        "nock": "0.0000",
+        "usdc": "27.63"
+       },
+       "in_range_now": false,
+       "index": 1,
+       "note": null,
+       "of": 3,
+       "over_by_usdc": null,
+       "reason": null,
+       "remaining_nock": "0.0000",
+       "remaining_usdc": "0.00",
+       "rung": "cap",
+       "status": "deployed",
+       "target_liquidity": "1595712642669859",
+       "target_nock": "0.0000",
+       "target_usdc": "27.63",
+       "text": "Deposit 1 of 3 (cap): done. It is deployed in v4 USDC/NOCK 3.00% #3244699, which holds $27.63 USDC and 0 NOCK now.",
+       "tick_lower": 273300,
+       "tick_upper": 273600,
+       "tracked_liquidity": "1595712642669859"
+      },
+      {
+       "bounds_usd": {
+        "high": "0.01313098",
+        "low": "0.01096801"
+       },
+       "counterparts": [
+        "uniswap-v4:base:3244700"
+       ],
+       "deployed_nock": null,
+       "deployed_usdc": "111.09",
+       "found": [],
+       "holds_now": {
+        "nock": "0.0000",
+        "usdc": "111.09"
+       },
+       "in_range_now": false,
+       "index": 2,
+       "note": null,
+       "of": 3,
+       "over_by_usdc": null,
+       "reason": null,
+       "remaining_nock": "0.0000",
+       "remaining_usdc": "0.00",
+       "rung": "near",
+       "status": "deployed",
+       "target_liquidity": "1126422639810375",
+       "target_nock": null,
+       "target_usdc": "111.09",
+       "text": "Deposit 2 of 3 (near rung): done. It is deployed in v4 USDC/NOCK 3.00% #3244700, which holds $111.09 USDC and 0 NOCK now.",
+       "tick_lower": 273600,
+       "tick_upper": 275400,
+       "tracked_liquidity": "1126422639810375"
+      },
+      {
+       "bounds_usd": {
+        "high": "0.01096801",
+        "low": "0.01002405"
+       },
+       "counterparts": [
+        "uniswap-v4:base:3244701"
+       ],
+       "deployed_nock": null,
+       "deployed_usdc": "629.52",
+       "found": [],
+       "holds_now": {
+        "nock": "0.0000",
+        "usdc": "629.52"
+       },
+       "in_range_now": false,
+       "index": 3,
+       "note": null,
+       "of": 3,
+       "over_by_usdc": null,
+       "reason": null,
+       "remaining_nock": "0.0000",
+       "remaining_usdc": "0.00",
+       "rung": "deep",
+       "status": "deployed",
+       "target_liquidity": "13660995725341992",
+       "target_nock": null,
+       "target_usdc": "629.51",
+       "text": "Deposit 3 of 3 (deep rung): done. It is deployed in v4 USDC/NOCK 3.00% #3244701, which holds $629.52 USDC and 0 NOCK now.",
+       "tick_lower": 275400,
+       "tick_upper": 276300,
+       "tracked_liquidity": "13661212735329632"
+      }
+     ],
+     "source": "operator_profile.ladder_rungs",
+     "status": "deployed",
+     "total_usdc": "768.23",
+     "tracked_usdc": "768.24",
+     "unmatched": []
+    },
+    "shown": false,
+    "stated": null,
+    "statement": "A measurement from this cycle's reads of what your ladder shape would do. NockNock does not choose the shape, the bottom or the amounts, builds no transaction, and signs and sends nothing.",
+    "status": "ladder_deployed",
+    "tier": "top",
+    "token": "NOCK",
+    "tracked": [
+     {
+      "label": "v4 USDC/NOCK 3.00% #3244699",
+      "position_id": "uniswap-v4:base:3244699",
+      "rung": "cap",
+      "source": "tracked",
+      "state": "holds_only_usdc"
+     },
+     {
+      "label": "v4 USDC/NOCK 3.00% #3244700",
+      "position_id": "uniswap-v4:base:3244700",
+      "rung": "near",
+      "source": "tracked",
+      "state": "holds_only_usdc"
+     },
+     {
+      "label": "v4 USDC/NOCK 3.00% #3244701",
+      "position_id": "uniswap-v4:base:3244701",
+      "rung": "deep",
+      "source": "tracked",
+      "state": "holds_only_usdc"
+     }
+    ],
+    "wallet_after": null,
+    "what_changed": null
+   },
+   "lp_rebuild": {
+    "actual_usd": "485.76",
+    "excluded": [
+     {
+      "label": "v4 USDC/NOCK 3.00% #3163450",
+      "nft_id": 3163450,
+      "position_id": "uniswap-v4:base:3163450",
+      "reason": "cannot be funded: only 0 NOCK may go into LP: what sits above the hard floor plus the 10000 tolerated below it (a range sells its NOCK as price rises)"
+     },
+     {
+      "label": "Aero USDC/NOCK 0.30% (full range)",
+      "nft_id": 0,
+      "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+      "reason": "cannot be funded: only 0 NOCK may go into LP: what sits above the hard floor plus the 10000 tolerated below it (a range sells its NOCK as price rises)"
+     }
+    ],
+    "floor_tolerance_nock": "10000",
+    "gap_usd": "270.85",
+    "status": "under_target",
+    "suggestions": [],
+    "target_usd": "756.61",
+    "target_weight_bps": 2000,
+    "worst_case_nock": "90000"
+   },
+   "portfolio_deviation_matrix": {
+    "allocations": [
+     {
+      "actual_weight_bps": 3225,
+      "bucket_name": "Sovereign Treasury",
+      "deviation_bps": -4275,
+      "status": "under_funded",
+      "target_weight_bps": 7500
+     },
+     {
+      "actual_weight_bps": 1284,
+      "bucket_name": "NOCK LP (NOCK-pair positions)",
+      "deviation_bps": -716,
+      "status": "under_funded",
+      "target_weight_bps": 2000
+     },
+     {
+      "actual_weight_bps": 2058,
+      "bucket_name": "Liquid USDC (Escrow/Vault)",
+      "deviation_bps": 1558,
+      "status": "over_funded",
+      "target_weight_bps": 500
+     },
+     {
+      "actual_weight_bps": 80,
+      "bucket_name": "Gas (wallet ETH+WETH)",
+      "deviation_bps": 80,
+      "status": "no_target",
+      "target_weight_bps": 0
+     },
+     {
+      "actual_weight_bps": 18,
+      "bucket_name": "AERO (wallet)",
+      "deviation_bps": 18,
+      "status": "no_target",
+      "target_weight_bps": 0
+     },
+     {
+      "actual_weight_bps": 1301,
+      "bucket_name": "ETH/USDC LP (measured)",
+      "deviation_bps": 1301,
+      "status": "no_target",
+      "target_weight_bps": 0
+     },
+     {
+      "actual_weight_bps": 2030,
+      "bucket_name": "NOCK ladders (measured)",
+      "deviation_bps": 2030,
+      "status": "no_target",
+      "target_weight_bps": 0
+     }
+    ]
+   },
+   "position_detection": {
+    "checked_at_block": 60435277,
+    "dismissed": {
+     "count": 0,
+     "positions": [],
+     "value_note": null,
+     "value_usd": null
+    },
+    "found_not_counted": {
+     "count": 0,
+     "positions": [],
+     "value_note": null,
+     "value_usd": null
+    },
+    "ignored": {
+     "empty": 5,
+     "in_config": 1,
+     "not_whitelisted": 37
+    },
+    "last_checked_at": "2026-11-21T16:10:31.858863693+00:00",
+    "onchain_count": {
+     "held": 46,
+     "known": 46
+    },
+    "reason": null,
+    "scan": {
+     "coverage": "complete",
+     "logs_behind_blocks": 0,
+     "logs_from_block": 0,
+     "sources": {
+      "transfer_index": "not_used",
+      "transfer_logs": "used"
+     },
+     "text": "Every Uniswap v4 position NFT sent to the wallet was read from the transfer logs, from the first block to this cycle's block."
+    },
+    "statement": "NockNock reads the wallet's Uniswap v4 position NFTs from the chain. It tracks one by itself only when the wallet minted it and its pool and ticks are exactly a rung of the ladder suggestion; anything else it finds waits for one tap and is not counted until then. It never signs or sends.",
+    "status": "ok",
+    "tracked": [
+     {
+      "choices": [
+       "untrack"
+      ],
+      "config_id": "tracked-v4-3244699",
+      "deposit_liquidity": "1595712642669859",
+      "deposit_tx": "0xd959cc8388c2ff395215683ced32dccb67f79e857490bd63316901999d1a48c9",
+      "max_liquidity_seen": "1595712642669859",
+      "mint_block": 60422895,
+      "nft_id": 3244699,
+      "note": null,
+      "position_id": "uniswap-v4:base:3244699",
+      "role": "ladder",
+      "rung": "cap",
+      "rung_note": null,
+      "source": "detected",
+      "state": "counted",
+      "tick_lower": 273300,
+      "tick_upper": 273600,
+      "tracked_at": "2026-11-21T15:30:32.840345+00:00"
+     },
+     {
+      "choices": [
+       "untrack"
+      ],
+      "config_id": "tracked-v4-3244700",
+      "deposit_liquidity": "1126422639810375",
+      "deposit_tx": "0x16d46ed19bc0e47a375b88793264f1fbbb6e6e36356a88cbc10d5687a52478c4",
+      "max_liquidity_seen": "1126422639810375",
+      "mint_block": 60423156,
+      "nft_id": 3244700,
+      "note": null,
+      "position_id": "uniswap-v4:base:3244700",
+      "role": "ladder",
+      "rung": "near",
+      "rung_note": null,
+      "source": "detected",
+      "state": "counted",
+      "tick_lower": 273600,
+      "tick_upper": 275400,
+      "tracked_at": "2026-11-21T15:30:32.845591+00:00"
+     },
+     {
+      "choices": [
+       "untrack"
+      ],
+      "config_id": "tracked-v4-3244701",
+      "deposit_liquidity": "13661212735329633",
+      "deposit_tx": "0xa9eb576c81bc362071f78ee2e8dbe4d62dd6fbdaf3f52a7c220e5c5cb73a1b96",
+      "max_liquidity_seen": "13661212735329633",
+      "mint_block": 60423311,
+      "nft_id": 3244701,
+      "note": null,
+      "position_id": "uniswap-v4:base:3244701",
+      "role": "ladder",
+      "rung": "deep",
+      "rung_note": null,
+      "source": "detected",
+      "state": "counted",
+      "tick_lower": 275400,
+      "tick_upper": 276300,
+      "tracked_at": "2026-11-21T15:33:09.841854+00:00"
+     }
+    ]
+   },
+   "sovereign_ledger": {
+    "cumulative_harvested_usd": "21.74",
+    "growth_dry_powder_usd": "13.05",
+    "harvest_count": 8,
+    "last_harvest_at": "2026-11-19T02:00:58.150735+00:00",
+    "tax_reserve_ratio": "0.40",
+    "tax_reserve_usd": "8.70",
+    "unpriced_count": 0
+   },
+   "strategy_counterfactual": {
+    "active_portfolio_series": [
+     "3703.12",
+     "3702.31",
+     "3702.08",
+     "3701.38",
+     "3701.73",
+     "3701.82",
+     "3701.27",
+     "3701.25",
+     "3700.39",
+     "3701.18",
+     "3702.22",
+     "3703.90",
+     "3703.38",
+     "3702.33",
+     "3703.54",
+     "3704.29",
+     "3704.44",
+     "3703.60",
+     "3704.83",
+     "3705.37",
+     "3705.22",
+     "3704.54",
+     "3705.76",
+     "3705.32",
+     "3705.31",
+     "3704.94",
+     "3704.73",
+     "3705.07",
+     "3704.55",
+     "3704.62",
+     "3705.71",
+     "3706.89",
+     "3704.99",
+     "3705.81",
+     "3705.76",
+     "3706.33",
+     "3706.76",
+     "3705.96",
+     "3705.80",
+     "3706.55",
+     "3706.02",
+     "3705.63",
+     "3705.75",
+     "3706.13",
+     "3710.14",
+     "3709.47",
+     "3709.24",
+     "3709.21",
+     "3708.46",
+     "3709.03",
+     "3708.64",
+     "3708.41",
+     "3710.07",
+     "3710.39",
+     "3711.16",
+     "3710.45",
+     "3714.21",
+     "3712.45",
+     "3712.78",
+     "3711.63",
+     "3711.79",
+     "3711.55",
+     "3712.47",
+     "3713.83",
+     "3714.13",
+     "3713.69",
+     "3714.54",
+     "3715.34",
+     "3716.94",
+     "3728.23",
+     "3727.72",
+     "3729.24",
+     "3727.82",
+     "3728.57",
+     "3728.68",
+     "3726.68",
+     "3727.84",
+     "3727.15",
+     "3728.38",
+     "3728.01",
+     "3728.43",
+     "3726.66",
+     "3730.35",
+     "3730.04",
+     "3730.22",
+     "3733.02",
+     "3734.93",
+     "3733.49",
+     "3733.82",
+     "3752.01",
+     "3779.62",
+     "3778.63",
+     "3782.48",
+     "3782.95",
+     "3782.91",
+     "3784.83",
+     "3784.64",
+     "3784.11",
+     "3783.95",
+     "3782.99",
+     "3783.05"
+    ],
+    "passive_baseline_series": [
+     "1418.03",
+     "1418.03",
+     "1418.03",
+     "1418.03",
+     "1418.03",
+     "1418.03",
+     "1418.03",
+     "1417.72",
+     "1417.72",
+     "1417.72",
+     "1417.72",
+     "1417.72",
+     "1417.72",
+     "1417.72",
+     "1417.72",
+     "1417.72",
+     "1417.72",
+     "1417.72",
+     "1417.72",
+     "1417.72",
+     "1417.46",
+     "1417.46",
+     "1417.46",
+     "1417.32",
+     "1417.32",
+     "1417.32",
+     "1417.32",
+     "1417.32",
+     "1417.32",
+     "1417.32",
+     "1417.32",
+     "1417.32",
+     "1417.32",
+     "1417.07",
+     "1417.07",
+     "1417.05",
+     "1417.05",
+     "1417.05",
+     "1416.83",
+     "1416.83",
+     "1416.82",
+     "1416.82",
+     "1417.30",
+     "1417.30",
+     "1417.30",
+     "1417.30",
+     "1417.30",
+     "1417.30",
+     "1416.94",
+     "1416.94",
+     "1416.94",
+     "1416.94",
+     "1416.73",
+     "1416.73",
+     "1416.73",
+     "1416.73",
+     "1416.73",
+     "1416.73",
+     "1416.73",
+     "1416.73",
+     "1417.16",
+     "1418.02",
+     "1418.02",
+     "1418.02",
+     "1417.40",
+     "1417.40",
+     "1417.40",
+     "1416.97",
+     "1416.49",
+     "1422.08",
+     "1422.93",
+     "1422.93",
+     "1422.93",
+     "1422.93",
+     "1422.93",
+     "1422.93",
+     "1423.03",
+     "1423.41",
+     "1423.41",
+     "1423.41",
+     "1423.41",
+     "1423.41",
+     "1426.26",
+     "1426.26",
+     "1426.35",
+     "1428.47",
+     "1429.01",
+     "1429.01",
+     "1429.01",
+     "1445.29",
+     "1469.09",
+     "1469.09",
+     "1471.73",
+     "1471.74",
+     "1471.82",
+     "1471.76",
+     "1472.06",
+     "1472.06",
+     "1472.06",
+     "1472.06",
+     "1472.06"
+    ],
+    "time_points": [
+     "2026-11-21T07:55:35.658395+00:00",
+     "2026-11-21T08:00:35.310220+00:00",
+     "2026-11-21T08:05:35.337200+00:00",
+     "2026-11-21T08:10:38.072252+00:00",
+     "2026-11-21T08:15:35.282204+00:00",
+     "2026-11-21T08:20:35.492771+00:00",
+     "2026-11-21T08:25:35.131785+00:00",
+     "2026-11-21T08:30:35.363478+00:00",
+     "2026-11-21T08:35:35.388056+00:00",
+     "2026-11-21T08:40:35.229225+00:00",
+     "2026-11-21T08:45:35.089038+00:00",
+     "2026-11-21T08:50:35.484718+00:00",
+     "2026-11-21T08:55:35.161542+00:00",
+     "2026-11-21T09:00:35.306565+00:00",
+     "2026-11-21T09:05:37.009506+00:00",
+     "2026-11-21T09:10:35.399832+00:00",
+     "2026-11-21T09:15:35.323337+00:00",
+     "2026-11-21T09:20:35.332819+00:00",
+     "2026-11-21T09:25:35.095741+00:00",
+     "2026-11-21T09:30:35.237785+00:00",
+     "2026-11-21T09:35:35.184381+00:00",
+     "2026-11-21T09:40:35.205521+00:00",
+     "2026-11-21T09:45:35.321265+00:00",
+     "2026-11-21T09:50:35.353052+00:00",
+     "2026-11-21T09:55:35.134331+00:00",
+     "2026-11-21T10:00:35.365302+00:00",
+     "2026-11-21T10:05:35.284810+00:00",
+     "2026-11-21T10:10:35.374097+00:00",
+     "2026-11-21T10:15:35.229247+00:00",
+     "2026-11-21T10:20:35.301261+00:00",
+     "2026-11-21T10:25:35.310118+00:00",
+     "2026-11-21T10:30:35.158244+00:00",
+     "2026-11-21T10:35:35.431992+00:00",
+     "2026-11-21T10:40:35.132591+00:00",
+     "2026-11-21T10:45:35.467204+00:00",
+     "2026-11-21T10:50:35.229703+00:00",
+     "2026-11-21T10:55:35.116551+00:00",
+     "2026-11-21T11:00:35.084672+00:00",
+     "2026-11-21T11:05:35.168808+00:00",
+     "2026-11-21T11:10:35.363131+00:00",
+     "2026-11-21T11:15:35.359074+00:00",
+     "2026-11-21T11:20:35.374686+00:00",
+     "2026-11-21T11:25:35.136267+00:00",
+     "2026-11-21T11:30:35.284421+00:00",
+     "2026-11-21T11:35:35.140683+00:00",
+     "2026-11-21T11:40:35.307217+00:00",
+     "2026-11-21T11:45:35.446786+00:00",
+     "2026-11-21T11:50:35.151900+00:00",
+     "2026-11-21T11:55:35.167185+00:00",
+     "2026-11-21T12:00:35.172659+00:00",
+     "2026-11-21T12:05:36.940399+00:00",
+     "2026-11-21T12:10:35.324148+00:00",
+     "2026-11-21T12:15:35.291032+00:00",
+     "2026-11-21T12:20:35.115591+00:00",
+     "2026-11-21T12:25:35.122959+00:00",
+     "2026-11-21T12:30:35.162851+00:00",
+     "2026-11-21T12:35:35.464670+00:00",
+     "2026-11-21T12:40:35.118976+00:00",
+     "2026-11-21T12:45:35.401989+00:00",
+     "2026-11-21T12:50:35.278935+00:00",
+     "2026-11-21T12:55:35.367354+00:00",
+     "2026-11-21T13:00:35.100928+00:00",
+     "2026-11-21T13:05:36.845110+00:00",
+     "2026-11-21T13:10:35.310381+00:00",
+     "2026-11-21T13:15:35.257420+00:00",
+     "2026-11-21T13:20:35.439450+00:00",
+     "2026-11-21T13:25:35.353481+00:00",
+     "2026-11-21T13:30:35.131044+00:00",
+     "2026-11-21T13:35:35.148495+00:00",
+     "2026-11-21T13:40:35.349794+00:00",
+     "2026-11-21T13:45:35.300152+00:00",
+     "2026-11-21T13:50:35.230432+00:00",
+     "2026-11-21T13:55:35.475418+00:00",
+     "2026-11-21T14:00:35.385881+00:00",
+     "2026-11-21T14:05:35.142328+00:00",
+     "2026-11-21T14:10:35.389669+00:00",
+     "2026-11-21T14:15:35.488058+00:00",
+     "2026-11-21T14:20:35.153199+00:00",
+     "2026-11-21T14:25:35.142477+00:00",
+     "2026-11-21T14:30:35.153204+00:00",
+     "2026-11-21T14:35:35.264052+00:00",
+     "2026-11-21T14:40:35.434327+00:00",
+     "2026-11-21T14:45:35.102589+00:00",
+     "2026-11-21T14:50:35.308685+00:00",
+     "2026-11-21T14:55:35.203472+00:00",
+     "2026-11-21T15:00:35.477358+00:00",
+     "2026-11-21T15:05:35.417053+00:00",
+     "2026-11-21T15:10:35.180838+00:00",
+     "2026-11-21T15:15:35.221569+00:00",
+     "2026-11-21T15:20:35.141779+00:00",
+     "2026-11-21T15:25:31.839852+00:00",
+     "2026-11-21T15:30:35.854435+00:00",
+     "2026-11-21T15:33:13.062181+00:00",
+     "2026-11-21T15:35:35.454064+00:00",
+     "2026-11-21T15:40:35.311836+00:00",
+     "2026-11-21T15:45:35.726150+00:00",
+     "2026-11-21T15:50:35.589967+00:00",
+     "2026-11-21T15:55:35.240253+00:00",
+     "2026-11-21T16:00:35.831384+00:00",
+     "2026-11-21T16:05:37.146877+00:00",
+     "2026-11-21T16:10:35.793937656+00:00"
+    ]
+   },
+   "structural_channels": {
+    "channels": [
+     {
+      "break_point": "2026-11-21T16:05:37.146877+00:00",
+      "center_line": [
+       {
+        "time": "2026-11-21T13:40:35.349794+00:00",
+        "value": "3713.13"
+       },
+       {
+        "time": "2026-11-21T13:45:35.300152+00:00",
+        "value": "3714.09"
+       },
+       {
+        "time": "2026-11-21T13:50:35.230432+00:00",
+        "value": "3715.13"
+       },
+       {
+        "time": "2026-11-21T13:55:35.475418+00:00",
+        "value": "3716.02"
+       },
+       {
+        "time": "2026-11-21T14:00:35.385881+00:00",
+        "value": "3716.93"
+       },
+       {
+        "time": "2026-11-21T14:05:35.142328+00:00",
+        "value": "3717.80"
+       },
+       {
+        "time": "2026-11-21T14:10:35.389669+00:00",
+        "value": "3718.61"
+       },
+       {
+        "time": "2026-11-21T14:15:35.488058+00:00",
+        "value": "3719.30"
+       },
+       {
+        "time": "2026-11-21T14:20:35.153199+00:00",
+        "value": "3720.03"
+       },
+       {
+        "time": "2026-11-21T14:25:35.142477+00:00",
+        "value": "3720.81"
+       },
+       {
+        "time": "2026-11-21T14:30:35.153204+00:00",
+        "value": "3721.63"
+       },
+       {
+        "time": "2026-11-21T14:35:35.264052+00:00",
+        "value": "3722.46"
+       },
+       {
+        "time": "2026-11-21T14:40:35.434327+00:00",
+        "value": "3723.22"
+       },
+       {
+        "time": "2026-11-21T14:45:35.102589+00:00",
+        "value": "3724.11"
+       },
+       {
+        "time": "2026-11-21T14:50:35.308685+00:00",
+        "value": "3724.92"
+       },
+       {
+        "time": "2026-11-21T14:55:35.203472+00:00",
+        "value": "3725.73"
+       },
+       {
+        "time": "2026-11-21T15:00:35.477358+00:00",
+        "value": "3726.69"
+       },
+       {
+        "time": "2026-11-21T15:05:35.417053+00:00",
+        "value": "3727.71"
+       },
+       {
+        "time": "2026-11-21T15:10:35.180838+00:00",
+        "value": "3728.62"
+       },
+       {
+        "time": "2026-11-21T15:15:35.221569+00:00",
+        "value": "3729.46"
+       },
+       {
+        "time": "2026-11-21T15:20:35.141779+00:00",
+        "value": "3730.65"
+       },
+       {
+        "time": "2026-11-21T15:25:31.839852+00:00",
+        "value": "3733.25"
+       },
+       {
+        "time": "2026-11-21T15:30:35.854435+00:00",
+        "value": "3735.72"
+       },
+       {
+        "time": "2026-11-21T15:33:13.062181+00:00",
+        "value": "3738.45"
+       },
+       {
+        "time": "2026-11-21T15:35:35.454064+00:00",
+        "value": "3741.17"
+       },
+       {
+        "time": "2026-11-21T15:40:35.311836+00:00",
+        "value": "3743.88"
+       },
+       {
+        "time": "2026-11-21T15:45:35.726150+00:00",
+        "value": "3746.79"
+       },
+       {
+        "time": "2026-11-21T15:50:35.589967+00:00",
+        "value": "3749.63"
+       },
+       {
+        "time": "2026-11-21T15:55:35.240253+00:00",
+        "value": "3752.48"
+       },
+       {
+        "time": "2026-11-21T16:00:35.831384+00:00",
+        "value": "3755.26"
+       },
+       {
+        "time": "2026-11-21T16:05:37.146877+00:00",
+        "value": "3758.00"
+       }
+      ],
+      "end_time": null,
+      "is_active": true,
+      "lower_1sd": [
+       {
+        "time": "2026-11-21T13:40:35.349794+00:00",
+        "value": "3709.07"
+       },
+       {
+        "time": "2026-11-21T13:45:35.300152+00:00",
+        "value": "3709.07"
+       },
+       {
+        "time": "2026-11-21T13:50:35.230432+00:00",
+        "value": "3709.30"
+       },
+       {
+        "time": "2026-11-21T13:55:35.475418+00:00",
+        "value": "3709.69"
+       },
+       {
+        "time": "2026-11-21T14:00:35.385881+00:00",
+        "value": "3710.18"
+       },
+       {
+        "time": "2026-11-21T14:05:35.142328+00:00",
+        "value": "3710.74"
+       },
+       {
+        "time": "2026-11-21T14:10:35.389669+00:00",
+        "value": "3711.51"
+       },
+       {
+        "time": "2026-11-21T14:15:35.488058+00:00",
+        "value": "3711.99"
+       },
+       {
+        "time": "2026-11-21T14:20:35.153199+00:00",
+        "value": "3712.71"
+       },
+       {
+        "time": "2026-11-21T14:25:35.142477+00:00",
+        "value": "3713.48"
+       },
+       {
+        "time": "2026-11-21T14:30:35.153204+00:00",
+        "value": "3714.45"
+       },
+       {
+        "time": "2026-11-21T14:35:35.264052+00:00",
+        "value": "3715.51"
+       },
+       {
+        "time": "2026-11-21T14:40:35.434327+00:00",
+        "value": "3716.69"
+       },
+       {
+        "time": "2026-11-21T14:45:35.102589+00:00",
+        "value": "3717.90"
+       },
+       {
+        "time": "2026-11-21T14:50:35.308685+00:00",
+        "value": "3719.06"
+       },
+       {
+        "time": "2026-11-21T14:55:35.203472+00:00",
+        "value": "3720.31"
+       },
+       {
+        "time": "2026-11-21T15:00:35.477358+00:00",
+        "value": "3721.81"
+       },
+       {
+        "time": "2026-11-21T15:05:35.417053+00:00",
+        "value": "3723.38"
+       },
+       {
+        "time": "2026-11-21T15:10:35.180838+00:00",
+        "value": "3725.16"
+       },
+       {
+        "time": "2026-11-21T15:15:35.221569+00:00",
+        "value": "3727.05"
+       },
+       {
+        "time": "2026-11-21T15:20:35.141779+00:00",
+        "value": "3725.20"
+       },
+       {
+        "time": "2026-11-21T15:25:31.839852+00:00",
+        "value": "3721.31"
+       },
+       {
+        "time": "2026-11-21T15:30:35.854435+00:00",
+        "value": "3720.27"
+       },
+       {
+        "time": "2026-11-21T15:33:13.062181+00:00",
+        "value": "3720.09"
+       },
+       {
+        "time": "2026-11-21T15:35:35.454064+00:00",
+        "value": "3720.58"
+       },
+       {
+        "time": "2026-11-21T15:40:35.311836+00:00",
+        "value": "3721.61"
+       },
+       {
+        "time": "2026-11-21T15:45:35.726150+00:00",
+        "value": "3723.20"
+       },
+       {
+        "time": "2026-11-21T15:50:35.589967+00:00",
+        "value": "3725.09"
+       },
+       {
+        "time": "2026-11-21T15:55:35.240253+00:00",
+        "value": "3727.41"
+       },
+       {
+        "time": "2026-11-21T16:00:35.831384+00:00",
+        "value": "3729.94"
+       },
+       {
+        "time": "2026-11-21T16:05:37.146877+00:00",
+        "value": "3732.81"
+       }
+      ],
+      "lower_2sd": [
+       {
+        "time": "2026-11-21T13:40:35.349794+00:00",
+        "value": "3705.01"
+       },
+       {
+        "time": "2026-11-21T13:45:35.300152+00:00",
+        "value": "3704.04"
+       },
+       {
+        "time": "2026-11-21T13:50:35.230432+00:00",
+        "value": "3703.47"
+       },
+       {
+        "time": "2026-11-21T13:55:35.475418+00:00",
+        "value": "3703.37"
+       },
+       {
+        "time": "2026-11-21T14:00:35.385881+00:00",
+        "value": "3703.44"
+       },
+       {
+        "time": "2026-11-21T14:05:35.142328+00:00",
+        "value": "3703.67"
+       },
+       {
+        "time": "2026-11-21T14:10:35.389669+00:00",
+        "value": "3704.40"
+       },
+       {
+        "time": "2026-11-21T14:15:35.488058+00:00",
+        "value": "3704.69"
+       },
+       {
+        "time": "2026-11-21T14:20:35.153199+00:00",
+        "value": "3705.40"
+       },
+       {
+        "time": "2026-11-21T14:25:35.142477+00:00",
+        "value": "3706.14"
+       },
+       {
+        "time": "2026-11-21T14:30:35.153204+00:00",
+        "value": "3707.28"
+       },
+       {
+        "time": "2026-11-21T14:35:35.264052+00:00",
+        "value": "3708.57"
+       },
+       {
+        "time": "2026-11-21T14:40:35.434327+00:00",
+        "value": "3710.16"
+       },
+       {
+        "time": "2026-11-21T14:45:35.102589+00:00",
+        "value": "3711.69"
+       },
+       {
+        "time": "2026-11-21T14:50:35.308685+00:00",
+        "value": "3713.19"
+       },
+       {
+        "time": "2026-11-21T14:55:35.203472+00:00",
+        "value": "3714.89"
+       },
+       {
+        "time": "2026-11-21T15:00:35.477358+00:00",
+        "value": "3716.93"
+       },
+       {
+        "time": "2026-11-21T15:05:35.417053+00:00",
+        "value": "3719.04"
+       },
+       {
+        "time": "2026-11-21T15:10:35.180838+00:00",
+        "value": "3721.70"
+       },
+       {
+        "time": "2026-11-21T15:15:35.221569+00:00",
+        "value": "3724.65"
+       },
+       {
+        "time": "2026-11-21T15:20:35.141779+00:00",
+        "value": "3719.75"
+       },
+       {
+        "time": "2026-11-21T15:25:31.839852+00:00",
+        "value": "3709.38"
+       },
+       {
+        "time": "2026-11-21T15:30:35.854435+00:00",
+        "value": "3704.83"
+       },
+       {
+        "time": "2026-11-21T15:33:13.062181+00:00",
+        "value": "3701.72"
+       },
+       {
+        "time": "2026-11-21T15:35:35.454064+00:00",
+        "value": "3699.99"
+       },
+       {
+        "time": "2026-11-21T15:40:35.311836+00:00",
+        "value": "3699.34"
+       },
+       {
+        "time": "2026-11-21T15:45:35.726150+00:00",
+        "value": "3699.61"
+       },
+       {
+        "time": "2026-11-21T15:50:35.589967+00:00",
+        "value": "3700.55"
+       },
+       {
+        "time": "2026-11-21T15:55:35.240253+00:00",
+        "value": "3702.35"
+       },
+       {
+        "time": "2026-11-21T16:00:35.831384+00:00",
+        "value": "3704.62"
+       },
+       {
+        "time": "2026-11-21T16:05:37.146877+00:00",
+        "value": "3707.61"
+       }
+      ],
+      "start_time": "2026-11-21T13:40:35.349794+00:00",
+      "upper_1sd": [
+       {
+        "time": "2026-11-21T13:40:35.349794+00:00",
+        "value": "3717.20"
+       },
+       {
+        "time": "2026-11-21T13:45:35.300152+00:00",
+        "value": "3719.11"
+       },
+       {
+        "time": "2026-11-21T13:50:35.230432+00:00",
+        "value": "3720.96"
+       },
+       {
+        "time": "2026-11-21T13:55:35.475418+00:00",
+        "value": "3722.34"
+       },
+       {
+        "time": "2026-11-21T14:00:35.385881+00:00",
+        "value": "3723.67"
+       },
+       {
+        "time": "2026-11-21T14:05:35.142328+00:00",
+        "value": "3724.87"
+       },
+       {
+        "time": "2026-11-21T14:10:35.389669+00:00",
+        "value": "3725.72"
+       },
+       {
+        "time": "2026-11-21T14:15:35.488058+00:00",
+        "value": "3726.60"
+       },
+       {
+        "time": "2026-11-21T14:20:35.153199+00:00",
+        "value": "3727.35"
+       },
+       {
+        "time": "2026-11-21T14:25:35.142477+00:00",
+        "value": "3728.14"
+       },
+       {
+        "time": "2026-11-21T14:30:35.153204+00:00",
+        "value": "3728.81"
+       },
+       {
+        "time": "2026-11-21T14:35:35.264052+00:00",
+        "value": "3729.41"
+       },
+       {
+        "time": "2026-11-21T14:40:35.434327+00:00",
+        "value": "3729.75"
+       },
+       {
+        "time": "2026-11-21T14:45:35.102589+00:00",
+        "value": "3730.32"
+       },
+       {
+        "time": "2026-11-21T14:50:35.308685+00:00",
+        "value": "3730.79"
+       },
+       {
+        "time": "2026-11-21T14:55:35.203472+00:00",
+        "value": "3731.14"
+       },
+       {
+        "time": "2026-11-21T15:00:35.477358+00:00",
+        "value": "3731.57"
+       },
+       {
+        "time": "2026-11-21T15:05:35.417053+00:00",
+        "value": "3732.05"
+       },
+       {
+        "time": "2026-11-21T15:10:35.180838+00:00",
+        "value": "3732.08"
+       },
+       {
+        "time": "2026-11-21T15:15:35.221569+00:00",
+        "value": "3731.87"
+       },
+       {
+        "time": "2026-11-21T15:20:35.141779+00:00",
+        "value": "3736.11"
+       },
+       {
+        "time": "2026-11-21T15:25:31.839852+00:00",
+        "value": "3745.18"
+       },
+       {
+        "time": "2026-11-21T15:30:35.854435+00:00",
+        "value": "3751.16"
+       },
+       {
+        "time": "2026-11-21T15:33:13.062181+00:00",
+        "value": "3756.82"
+       },
+       {
+        "time": "2026-11-21T15:35:35.454064+00:00",
+        "value": "3761.76"
+       },
+       {
+        "time": "2026-11-21T15:40:35.311836+00:00",
+        "value": "3766.15"
+       },
+       {
+        "time": "2026-11-21T15:45:35.726150+00:00",
+        "value": "3770.38"
+       },
+       {
+        "time": "2026-11-21T15:50:35.589967+00:00",
+        "value": "3774.17"
+       },
+       {
+        "time": "2026-11-21T15:55:35.240253+00:00",
+        "value": "3777.54"
+       },
+       {
+        "time": "2026-11-21T16:00:35.831384+00:00",
+        "value": "3780.57"
+       },
+       {
+        "time": "2026-11-21T16:05:37.146877+00:00",
+        "value": "3783.20"
+       }
+      ],
+      "upper_2sd": [
+       {
+        "time": "2026-11-21T13:40:35.349794+00:00",
+        "value": "3721.26"
+       },
+       {
+        "time": "2026-11-21T13:45:35.300152+00:00",
+        "value": "3724.14"
+       },
+       {
+        "time": "2026-11-21T13:50:35.230432+00:00",
+        "value": "3726.79"
+       },
+       {
+        "time": "2026-11-21T13:55:35.475418+00:00",
+        "value": "3728.67"
+       },
+       {
+        "time": "2026-11-21T14:00:35.385881+00:00",
+        "value": "3730.41"
+       },
+       {
+        "time": "2026-11-21T14:05:35.142328+00:00",
+        "value": "3731.94"
+       },
+       {
+        "time": "2026-11-21T14:10:35.389669+00:00",
+        "value": "3732.83"
+       },
+       {
+        "time": "2026-11-21T14:15:35.488058+00:00",
+        "value": "3733.90"
+       },
+       {
+        "time": "2026-11-21T14:20:35.153199+00:00",
+        "value": "3734.66"
+       },
+       {
+        "time": "2026-11-21T14:25:35.142477+00:00",
+        "value": "3735.48"
+       },
+       {
+        "time": "2026-11-21T14:30:35.153204+00:00",
+        "value": "3735.98"
+       },
+       {
+        "time": "2026-11-21T14:35:35.264052+00:00",
+        "value": "3736.36"
+       },
+       {
+        "time": "2026-11-21T14:40:35.434327+00:00",
+        "value": "3736.28"
+       },
+       {
+        "time": "2026-11-21T14:45:35.102589+00:00",
+        "value": "3736.54"
+       },
+       {
+        "time": "2026-11-21T14:50:35.308685+00:00",
+        "value": "3736.65"
+       },
+       {
+        "time": "2026-11-21T14:55:35.203472+00:00",
+        "value": "3736.56"
+       },
+       {
+        "time": "2026-11-21T15:00:35.477358+00:00",
+        "value": "3736.46"
+       },
+       {
+        "time": "2026-11-21T15:05:35.417053+00:00",
+        "value": "3736.38"
+       },
+       {
+        "time": "2026-11-21T15:10:35.180838+00:00",
+        "value": "3735.54"
+       },
+       {
+        "time": "2026-11-21T15:15:35.221569+00:00",
+        "value": "3734.28"
+       },
+       {
+        "time": "2026-11-21T15:20:35.141779+00:00",
+        "value": "3741.56"
+       },
+       {
+        "time": "2026-11-21T15:25:31.839852+00:00",
+        "value": "3757.12"
+       },
+       {
+        "time": "2026-11-21T15:30:35.854435+00:00",
+        "value": "3766.61"
+       },
+       {
+        "time": "2026-11-21T15:33:13.062181+00:00",
+        "value": "3775.18"
+       },
+       {
+        "time": "2026-11-21T15:35:35.454064+00:00",
+        "value": "3782.35"
+       },
+       {
+        "time": "2026-11-21T15:40:35.311836+00:00",
+        "value": "3788.42"
+       },
+       {
+        "time": "2026-11-21T15:45:35.726150+00:00",
+        "value": "3793.97"
+       },
+       {
+        "time": "2026-11-21T15:50:35.589967+00:00",
+        "value": "3798.71"
+       },
+       {
+        "time": "2026-11-21T15:55:35.240253+00:00",
+        "value": "3802.61"
+       },
+       {
+        "time": "2026-11-21T16:00:35.831384+00:00",
+        "value": "3805.89"
+       },
+       {
+        "time": "2026-11-21T16:05:37.146877+00:00",
+        "value": "3808.40"
+       }
+      ]
+     }
+    ]
+   },
+   "tick_bracket_hypervisor": {
+    "brackets": [
+     {
+      "distance_bps": -5942,
+      "full_range": false,
+      "in_range": true,
+      "liquidity_usd": "260.40",
+      "lower_price": "0.00550148",
+      "position_id": "uniswap-v4:base:3163450",
+      "upper_price": "0.04106"
+     },
+     {
+      "distance_bps": null,
+      "full_range": true,
+      "in_range": true,
+      "liquidity_usd": "225.36",
+      "lower_price": "0",
+      "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+      "upper_price": "0"
+     },
+     {
+      "distance_bps": null,
+      "full_range": false,
+      "in_range": true,
+      "liquidity_usd": "243.92",
+      "lower_price": "0.000338833",
+      "position_id": "uniswap-v3:base:6607225",
+      "upper_price": "0.000675513"
+     },
+     {
+      "distance_bps": null,
+      "full_range": false,
+      "in_range": true,
+      "liquidity_usd": "248.56",
+      "lower_price": "0.000343266",
+      "position_id": "aerodrome-cl:base:3449558",
+      "upper_price": "0.000677543"
+     },
+     {
+      "distance_bps": -20,
+      "full_range": false,
+      "in_range": false,
+      "liquidity_usd": "27.63",
+      "lower_price": "0.01313",
+      "position_id": "uniswap-v4:base:3244699",
+      "upper_price": "0.01353"
+     },
+     {
+      "distance_bps": -315,
+      "full_range": false,
+      "in_range": false,
+      "liquidity_usd": "111.09",
+      "lower_price": "0.01097",
+      "position_id": "uniswap-v4:base:3244700",
+      "upper_price": "0.01313"
+     },
+     {
+      "distance_bps": -1910,
+      "full_range": false,
+      "in_range": false,
+      "liquidity_usd": "629.52",
+      "lower_price": "0.01002",
+      "position_id": "uniswap-v4:base:3244701",
+      "upper_price": "0.01097"
+     }
+    ],
+    "current_price": "0.01356"
+   },
+   "total_value_vs_baseline": {
+    "high_water_mark_series": [
+     "3784.83"
+    ],
+    "portfolio_value_series": [
+     "3783.05"
+    ],
+    "time_points": [
+     "2026-11-21T16:10:35.793937656+00:00"
+    ],
+    "token_price_series": [
+     "0.01356"
+    ]
+   },
+   "velocity_gas_sandbox": {
+    "contracts": [
+     {
+      "claimable_usd": "1.99",
+      "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+      "contract_name": "Uniswap V4 (USDC/NOCK 3.00%, #3163450)",
+      "efficiency_ratio": 566.8,
+      "gas_break_even_usd": "0.0035",
+      "recommended_action": "claim_now"
+     },
+     {
+      "claimable_usd": "0.00",
+      "contract_address": "0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+      "contract_name": "Aero USDC/NOCK 0.30% (full range)",
+      "earnings_kind": "gauge_reward",
+      "efficiency_ratio": 0.0,
+      "gas_break_even_usd": "0.0035",
+      "lp_fees_note": "not LP-claimable (claimFees() reverts)",
+      "note": "not LP-claimable (claimFees() reverts); unclaimed AERO 1.590710 ($0.63)",
+      "recommended_action": "not_claimable",
+      "reward": {
+       "amount": "1.590710",
+       "collect_url": "https://app.aero.xyz",
+       "collected_in": "the Aero app",
+       "gauge": "0xc82782ee66d82c4d19db0429652091a085083526",
+       "note": null,
+       "status": "read",
+       "token_address": "0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee",
+       "token_symbol": "AERO",
+       "usd": "0.63"
+      }
+     },
+     {
+      "claimable_usd": "1.00",
+      "contract_address": "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1",
+      "contract_name": "Uniswap V3 (WETH/USDC 0.05%, #6607225)",
+      "efficiency_ratio": 284.6,
+      "gas_break_even_usd": "0.0035",
+      "recommended_action": "claim_now"
+     },
+     {
+      "claimable_usd": "0.00",
+      "contract_address": "0x46a9dca72d78366571be583aa69c1dc16e6889fb",
+      "contract_name": "Aero CL WETH/USDC 0.04% #3449558",
+      "earnings_kind": "gauge_reward",
+      "efficiency_ratio": 0.0,
+      "gas_break_even_usd": "0.0035",
+      "lp_fees_note": "not LP-claimable (staked: swap fees on staked liquidity go to the gauge)",
+      "note": "not LP-claimable (staked: swap fees on staked liquidity go to the gauge); unclaimed AERO 2.744889 ($1.09)",
+      "recommended_action": "not_claimable",
+      "reward": {
+       "amount": "2.744889",
+       "collect_url": "https://app.aero.xyz",
+       "collected_in": "the Aero app",
+       "gauge": "0x46a9dca72d78366571be583aa69c1dc16e6889fb",
+       "note": null,
+       "status": "read",
+       "token_address": "0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee",
+       "token_symbol": "AERO",
+       "usd": "1.09"
+      }
+     },
+     {
+      "claimable_usd": "0.04",
+      "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+      "contract_name": "Uniswap V4 (USDC/NOCK 3.00%, #3244699)",
+      "efficiency_ratio": 10.34,
+      "gas_break_even_usd": "0.0035",
+      "recommended_action": "claim_now"
+     },
+     {
+      "claimable_usd": "0.00",
+      "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+      "contract_name": "Uniswap V4 (USDC/NOCK 3.00%, #3244700)",
+      "efficiency_ratio": 0.0,
+      "gas_break_even_usd": "0.0035",
+      "recommended_action": "accumulate"
+     },
+     {
+      "claimable_usd": "0.00",
+      "contract_address": "0x7c5f5a4bbd8fd63184577525326123b519429bdc",
+      "contract_name": "Uniswap V4 (USDC/NOCK 3.00%, #3244701)",
+      "efficiency_ratio": 0.0,
+      "gas_break_even_usd": "0.0035",
+      "recommended_action": "accumulate"
+     }
+    ]
+   }
+  },
+  "ladders": [
+   {
+    "config_id": "tracked-v4-3244699",
+    "fees_usd": "0.04",
+    "high_pct_of_spot": "-0.20",
+    "high_price_usd": "0.01353085",
+    "label": "v4 USDC/NOCK 3.00% #3244699",
+    "low_pct_of_spot": "-3.15",
+    "low_price_usd": "0.01313098",
+    "nock_now": "0.0000",
+    "open_end": null,
+    "pool_price_usd": "0.01355744",
+    "position_id": "uniswap-v4:base:3244699",
+    "rung": "cap",
+    "rung_note": null,
+    "since_deposit": {
+     "avg_buy_price_usd": null,
+     "current_liquidity": "1595712642669859",
+     "deposit_block": 60422895,
+     "deposit_liquidity": "1595712642669859",
+     "deposit_tx": "0xd959cc8388c2ff395215683ced32dccb67f79e857490bd63316901999d1a48c9",
+     "deposited_at": "2026-11-21T15:29:14+00:00",
+     "deposited_nock": "86.7731",
+     "deposited_usdc": "26.46",
+     "net_nock_bought": "-86.7731",
+     "net_usdc_spent": "-1.17",
+     "reason": null,
+     "status": "verified"
+    },
+    "source": "tracked",
+    "spot_price_usd": "0.01355744",
+    "state": "holds_only_usdc",
+    "state_text": "holds only USDC: the price is above the range, so it converts nothing until NOCK falls into it at $0.01353085",
+    "usdc_now": "27.63",
+    "value_usd": "27.63",
+    "vs_top": {
+     "converted_pct": "0.00",
+     "curve_avg_price_usd": null,
+     "nock_at_bottom": "2073.1118",
+     "nock_held_vs_top": "0.0000",
+     "usdc_at_top": "27.63",
+     "usdc_converted_vs_top": "0.00"
+    }
+   },
+   {
+    "config_id": "tracked-v4-3244700",
+    "fees_usd": "0.00",
+    "high_pct_of_spot": "-3.15",
+    "high_price_usd": "0.01313098",
+    "label": "v4 USDC/NOCK 3.00% #3244700",
+    "low_pct_of_spot": "-19.10",
+    "low_price_usd": "0.01096801",
+    "nock_now": "0.0000",
+    "open_end": null,
+    "pool_price_usd": "0.01355744",
+    "position_id": "uniswap-v4:base:3244700",
+    "rung": "near",
+    "rung_note": null,
+    "since_deposit": {
+     "avg_buy_price_usd": null,
+     "current_liquidity": "1126422639810375",
+     "deposit_block": 60423156,
+     "deposit_liquidity": "1126422639810375",
+     "deposit_tx": "0x16d46ed19bc0e47a375b88793264f1fbbb6e6e36356a88cbc10d5687a52478c4",
+     "deposited_at": "2026-11-21T15:30:06+00:00",
+     "deposited_nock": "0.0000",
+     "deposited_usdc": "111.09",
+     "net_nock_bought": "0.0000",
+     "net_usdc_spent": "0.00",
+     "reason": null,
+     "status": "verified"
+    },
+    "source": "tracked",
+    "spot_price_usd": "0.01355744",
+    "state": "holds_only_usdc",
+    "state_text": "holds only USDC: the price is above the range, so it converts nothing until NOCK falls into it at $0.01313098",
+    "usdc_now": "111.09",
+    "value_usd": "111.09",
+    "vs_top": {
+     "converted_pct": "0.00",
+     "curve_avg_price_usd": null,
+     "nock_at_bottom": "9256.8338",
+     "nock_held_vs_top": "0.0000",
+     "usdc_at_top": "111.09",
+     "usdc_converted_vs_top": "0.00"
+    }
+   },
+   {
+    "config_id": "tracked-v4-3244701",
+    "fees_usd": "0.00",
+    "high_pct_of_spot": "-19.10",
+    "high_price_usd": "0.01096801",
+    "label": "v4 USDC/NOCK 3.00% #3244701",
+    "low_pct_of_spot": "-26.06",
+    "low_price_usd": "0.01002405",
+    "nock_now": "0.0000",
+    "open_end": null,
+    "pool_price_usd": "0.01355744",
+    "position_id": "uniswap-v4:base:3244701",
+    "rung": "deep",
+    "rung_note": null,
+    "since_deposit": {
+     "avg_buy_price_usd": null,
+     "current_liquidity": "13661212735329633",
+     "deposit_block": 60423311,
+     "deposit_liquidity": "13661212735329633",
+     "deposit_tx": "0xa9eb576c81bc362071f78ee2e8dbe4d62dd6fbdaf3f52a7c220e5c5cb73a1b96",
+     "deposited_at": "2026-11-21T15:30:37+00:00",
+     "deposited_nock": "0.0000",
+     "deposited_usdc": "629.52",
+     "net_nock_bought": "0.0000",
+     "net_usdc_spent": "0.00",
+     "reason": null,
+     "status": "verified"
+    },
+    "source": "tracked",
+    "spot_price_usd": "0.01355744",
+    "state": "holds_only_usdc",
+    "state_text": "holds only USDC: the price is above the range, so it converts nothing until NOCK falls into it at $0.01096801",
+    "usdc_now": "629.52",
+    "value_usd": "629.52",
+    "vs_top": {
+     "converted_pct": "0.00",
+     "curve_avg_price_usd": null,
+     "nock_at_bottom": "60037.6735",
+     "nock_held_vs_top": "0.0000",
+     "usdc_at_top": "629.52",
+     "usdc_converted_vs_top": "0.00"
+    }
+   }
+  ],
+  "pool_mechanics": [
+   {
+    "active_liquidity_raw": "196388803703122223",
+    "fee_accrued_usd": "1.989355",
+    "fee_tier_bps": 300,
+    "liquidity_usd": "260.40",
+    "platform": "UniswapV4",
+    "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+    "pool_type": "concentrated",
+    "sqrt_price_x96": "00000000000000000000000000000000000d1ad5e208442ffd8c02b83e8b1710",
+    "tick_current": 273280,
+    "volatile_assets": [
+     {
+      "reserve_amount": "119.898904",
+      "reserve_usd": "119.90",
+      "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_symbol": "USDC"
+     },
+     {
+      "reserve_amount": "10363.249195",
+      "reserve_usd": "140.50",
+      "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+      "token_symbol": "NOCK"
+     }
+    ]
+   },
+   {
+    "active_liquidity_raw": "844057252174229",
+    "fee_accrued_usd": "0.000000",
+    "fee_tier_bps": 30,
+    "liquidity_usd": "225.36",
+    "platform": "Aerodrome",
+    "pool_id": "0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+    "pool_type": "concentrated",
+    "sqrt_price_x96": "00000000000000000000000000000000000cf4b7a83a8f098000000000000000",
+    "tick_current": 273051,
+    "volatile_assets": [
+     {
+      "reserve_amount": "113.966815",
+      "reserve_usd": "113.97",
+      "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_symbol": "USDC"
+     },
+     {
+      "reserve_amount": "8216.280964",
+      "reserve_usd": "111.39",
+      "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+      "token_symbol": "NOCK"
+     }
+    ]
+   },
+   {
+    "active_liquidity_raw": "879376711239842056",
+    "fee_accrued_usd": "0.998884",
+    "fee_tier_bps": 5,
+    "liquidity_usd": "243.92",
+    "platform": "UniswapV3",
+    "pool_id": "0xd0b53d9277642d899df5c87a3966a349a798f224",
+    "pool_type": "concentrated",
+    "sqrt_price_x96": "00000000000000000000000000000000000000000002af288751d21386894f18",
+    "tick_current": -202070,
+    "volatile_assets": [
+     {
+      "reserve_amount": "0.116668",
+      "reserve_usd": "195.72",
+      "token_address": "0x4200000000000000000000000000000000000006",
+      "token_symbol": "WETH"
+     },
+     {
+      "reserve_amount": "48.206523",
+      "reserve_usd": "48.21",
+      "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_symbol": "USDC"
+     }
+    ]
+   },
+   {
+    "active_liquidity_raw": "3221763322611602025",
+    "fee_accrued_usd": "0.000000",
+    "fee_tier_bps": 4,
+    "liquidity_usd": "248.56",
+    "platform": "Aerodrome",
+    "pool_id": "0x4a7af46bc8abc00048c6c7920a1488daf568366c",
+    "pool_type": "concentrated",
+    "sqrt_price_x96": "00000000000000000000000000000000000000000002af3000ff509a38ade1fa",
+    "tick_current": -202069,
+    "volatile_assets": [
+     {
+      "reserve_amount": "0.117839",
+      "reserve_usd": "197.68",
+      "token_address": "0x4200000000000000000000000000000000000006",
+      "token_symbol": "WETH"
+     },
+     {
+      "reserve_amount": "50.880870",
+      "reserve_usd": "50.88",
+      "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_symbol": "USDC"
+     }
+    ]
+   },
+   {
+    "active_liquidity_raw": "196388803703122223",
+    "fee_accrued_usd": "0.036289",
+    "fee_tier_bps": 300,
+    "liquidity_usd": "27.63",
+    "platform": "UniswapV4",
+    "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+    "pool_type": "concentrated",
+    "sqrt_price_x96": "00000000000000000000000000000000000d1ad5e208442ffd8c02b83e8b1710",
+    "tick_current": 273280,
+    "volatile_assets": [
+     {
+      "reserve_amount": "27.633371",
+      "reserve_usd": "27.63",
+      "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_symbol": "USDC"
+     },
+     {
+      "reserve_amount": "0.000000",
+      "reserve_usd": "0.00",
+      "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+      "token_symbol": "NOCK"
+     }
+    ]
+   },
+   {
+    "active_liquidity_raw": "196388803703122223",
+    "fee_accrued_usd": "0.000000",
+    "fee_tier_bps": 300,
+    "liquidity_usd": "111.09",
+    "platform": "UniswapV4",
+    "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+    "pool_type": "concentrated",
+    "sqrt_price_x96": "00000000000000000000000000000000000d1ad5e208442ffd8c02b83e8b1710",
+    "tick_current": 273280,
+    "volatile_assets": [
+     {
+      "reserve_amount": "111.090000",
+      "reserve_usd": "111.09",
+      "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_symbol": "USDC"
+     },
+     {
+      "reserve_amount": "0.000000",
+      "reserve_usd": "0.00",
+      "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+      "token_symbol": "NOCK"
+     }
+    ]
+   },
+   {
+    "active_liquidity_raw": "196388803703122223",
+    "fee_accrued_usd": "0.000000",
+    "fee_tier_bps": 300,
+    "liquidity_usd": "629.52",
+    "platform": "UniswapV4",
+    "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+    "pool_type": "concentrated",
+    "sqrt_price_x96": "00000000000000000000000000000000000d1ad5e208442ffd8c02b83e8b1710",
+    "tick_current": 273280,
+    "volatile_assets": [
+     {
+      "reserve_amount": "629.520000",
+      "reserve_usd": "629.52",
+      "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "token_symbol": "USDC"
+     },
+     {
+      "reserve_amount": "0.000000",
+      "reserve_usd": "0.00",
+      "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+      "token_symbol": "NOCK"
+     }
+    ]
+   }
+  ],
+  "positions": [
+   {
+    "amount0": "119.898904",
+    "amount1": "10363.249195",
+    "amount_usd": "260.40",
+    "fee_raw": 30000,
+    "fee_tier_bps": 300,
+    "fees_usd": "1.989355",
+    "full_range": false,
+    "hooks": "0x0000000000000000000000000000000000000000",
+    "in_range": true,
+    "is_price_source": true,
+    "liquidity_amount": "283687495614364",
+    "lower_price": "0.00550148",
+    "lower_tick": 262200,
+    "network": "base",
+    "nft_id": 3163450,
+    "pool_active": true,
+    "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+    "position_id": "uniswap-v4:base:3163450",
+    "protocol": "uniswap-v4",
+    "tick_spacing": 300,
+    "token0": {
+     "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+     "decimals": 6,
+     "symbol": "USDC"
+    },
+    "token1": {
+     "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+     "decimals": 16,
+     "symbol": "NOCK"
+    },
+    "tokens_owed_0": "0.446924",
+    "tokens_owed_1": "113.770072",
+    "upper_price": "0.04106",
+    "upper_tick": 282300,
+    "wallet": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+   },
+   {
+    "amount0": "113.966815",
+    "amount1": "8216.280964",
+    "amount_usd": "225.36",
+    "collectible_reward": {
+     "amount": "1.590710",
+     "collect_url": "https://app.aero.xyz",
+     "collected_in": "the Aero app",
+     "gauge": "0xc82782ee66d82c4d19db0429652091a085083526",
+     "note": null,
+     "status": "read",
+     "token_address": "0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee",
+     "token_symbol": "AERO",
+     "usd": "0.63"
+    },
+    "fee_tier_bps": 30,
+    "fees_usd": "0.000000",
+    "full_range": true,
+    "in_range": true,
+    "is_price_source": false,
+    "liquidity_amount": "96764372596543",
+    "lower_price": "0",
+    "lower_tick": -887272,
+    "network": "base",
+    "nft_id": 0,
+    "pool_active": true,
+    "pool_id": "0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+    "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+    "protocol": "aerodrome",
+    "token0": {
+     "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+     "decimals": 6,
+     "symbol": "USDC"
+    },
+    "token1": {
+     "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+     "decimals": 16,
+     "symbol": "NOCK"
+    },
+    "tokens_owed_0": "0.000000",
+    "tokens_owed_1": "0.000000",
+    "unclaimed_aero": "1.590710",
+    "unclaimed_aero_usd": "0.63",
+    "upper_price": "0",
+    "upper_tick": 887272,
+    "wallet": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+   },
+   {
+    "amount0": "0.116668",
+    "amount1": "48.206523",
+    "amount_usd": "243.92",
+    "fee_tier_bps": 5,
+    "fees_usd": "0.998884",
+    "full_range": false,
+    "in_range": true,
+    "is_price_source": false,
+    "liquidity_amount": "19419032081137",
+    "lower_price": "0.000338833",
+    "lower_tick": -203320,
+    "network": "base",
+    "nft_id": 6607225,
+    "npm_address": "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1",
+    "pool_active": true,
+    "pool_id": "0xd0b53d9277642d899df5c87a3966a349a798f224",
+    "position_id": "uniswap-v3:base:6607225",
+    "protocol": "uniswap-v3",
+    "token0": {
+     "address": "0x4200000000000000000000000000000000000006",
+     "decimals": 18,
+     "symbol": "WETH"
+    },
+    "token1": {
+     "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+     "decimals": 6,
+     "symbol": "USDC"
+    },
+    "tokens_owed_0": "0.000302",
+    "tokens_owed_1": "0.492043",
+    "upper_price": "0.000675513",
+    "upper_tick": -196420,
+    "wallet": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+   },
+   {
+    "amount0": "0.117839",
+    "amount1": "50.880870",
+    "amount_usd": "248.56",
+    "collectible_reward": {
+     "amount": "2.744889",
+     "collect_url": "https://app.aero.xyz",
+     "collected_in": "the Aero app",
+     "gauge": "0x46a9dca72d78366571be583aa69c1dc16e6889fb",
+     "note": null,
+     "status": "read",
+     "token_address": "0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee",
+     "token_symbol": "AERO",
+     "usd": "1.09"
+    },
+    "fee_tier_bps": 4,
+    "fees_note": "not LP-claimable (staked: swap fees on staked liquidity go to the gauge)",
+    "fees_usd": "0.000000",
+    "full_range": false,
+    "in_range": true,
+    "is_price_source": false,
+    "liquidity_amount": "20017303259586",
+    "lower_price": "0.000343266",
+    "lower_tick": -203350,
+    "network": "base",
+    "nft_id": 3449558,
+    "npm_address": "0x4857db576ee0e45f10525ec59527bfd10beec60b",
+    "pool_active": true,
+    "pool_id": "0x4a7af46bc8abc00048c6c7920a1488daf568366c",
+    "position_id": "aerodrome-cl:base:3449558",
+    "protocol": "aerodrome-cl",
+    "staked_in_gauge": "0x46a9dca72d78366571be583aa69c1dc16e6889fb",
+    "tick_spacing": 50,
+    "token0": {
+     "address": "0x4200000000000000000000000000000000000006",
+     "decimals": 18,
+     "symbol": "WETH"
+    },
+    "token1": {
+     "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+     "decimals": 6,
+     "symbol": "USDC"
+    },
+    "tokens_owed_0": "0.000000",
+    "tokens_owed_1": "0.000000",
+    "unclaimed_aero": "2.744889",
+    "unclaimed_aero_usd": "1.09",
+    "upper_price": "0.000677543",
+    "upper_tick": -196550,
+    "wallet": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+   },
+   {
+    "amount0": "27.633371",
+    "amount1": "0.000000",
+    "amount_usd": "27.63",
+    "fee_raw": 30000,
+    "fee_tier_bps": 300,
+    "fees_usd": "0.036289",
+    "full_range": false,
+    "hooks": "0x0000000000000000000000000000000000000000",
+    "in_range": false,
+    "is_price_source": false,
+    "liquidity_amount": "1595712642669859",
+    "lower_price": "0.01313",
+    "lower_tick": 273300,
+    "network": "base",
+    "nft_id": 3244699,
+    "pool_active": true,
+    "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+    "position_id": "uniswap-v4:base:3244699",
+    "protocol": "uniswap-v4",
+    "role": "ladder",
+    "rung": "cap",
+    "source": "tracked",
+    "tick_spacing": 300,
+    "token0": {
+     "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+     "decimals": 6,
+     "symbol": "USDC"
+    },
+    "token1": {
+     "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+     "decimals": 16,
+     "symbol": "NOCK"
+    },
+    "tokens_owed_0": "0.036289",
+    "tokens_owed_1": "0.000000",
+    "upper_price": "0.01353",
+    "upper_tick": 273600,
+    "wallet": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+   },
+   {
+    "amount0": "111.090000",
+    "amount1": "0.000000",
+    "amount_usd": "111.09",
+    "fee_raw": 30000,
+    "fee_tier_bps": 300,
+    "fees_usd": "0.000000",
+    "full_range": false,
+    "hooks": "0x0000000000000000000000000000000000000000",
+    "in_range": false,
+    "is_price_source": false,
+    "liquidity_amount": "1126422639810375",
+    "lower_price": "0.01097",
+    "lower_tick": 273600,
+    "network": "base",
+    "nft_id": 3244700,
+    "pool_active": true,
+    "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+    "position_id": "uniswap-v4:base:3244700",
+    "protocol": "uniswap-v4",
+    "role": "ladder",
+    "rung": "near",
+    "source": "tracked",
+    "tick_spacing": 300,
+    "token0": {
+     "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+     "decimals": 6,
+     "symbol": "USDC"
+    },
+    "token1": {
+     "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+     "decimals": 16,
+     "symbol": "NOCK"
+    },
+    "tokens_owed_0": "0.000000",
+    "tokens_owed_1": "0.000000",
+    "upper_price": "0.01313",
+    "upper_tick": 275400,
+    "wallet": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+   },
+   {
+    "amount0": "629.520000",
+    "amount1": "0.000000",
+    "amount_usd": "629.52",
+    "fee_raw": 30000,
+    "fee_tier_bps": 300,
+    "fees_usd": "0.000000",
+    "full_range": false,
+    "hooks": "0x0000000000000000000000000000000000000000",
+    "in_range": false,
+    "is_price_source": false,
+    "liquidity_amount": "13661212735329633",
+    "lower_price": "0.01002",
+    "lower_tick": 275400,
+    "network": "base",
+    "nft_id": 3244701,
+    "pool_active": true,
+    "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+    "position_id": "uniswap-v4:base:3244701",
+    "protocol": "uniswap-v4",
+    "role": "ladder",
+    "rung": "deep",
+    "source": "tracked",
+    "tick_spacing": 300,
+    "token0": {
+     "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+     "decimals": 6,
+     "symbol": "USDC"
+    },
+    "token1": {
+     "address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+     "decimals": 16,
+     "symbol": "NOCK"
+    },
+    "tokens_owed_0": "0.000000",
+    "tokens_owed_1": "0.000000",
+    "upper_price": "0.01097",
+    "upper_tick": 276300,
+    "wallet": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+   }
+  ],
+  "wallet_balances": [
+   {
+    "amount": "90000.0161",
+    "amount_usd": "1220.17",
+    "token_address": "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722",
+    "token_symbol": "NOCK",
+    "updated_at": "2026-11-21T16:10:34.824947482+00:00",
+    "wallet_address": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+   },
+   {
+    "amount": "778.7657",
+    "amount_usd": "778.77",
+    "token_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "token_symbol": "USDC",
+    "updated_at": "2026-11-21T16:10:34.824947482+00:00",
+    "wallet_address": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+   },
+   {
+    "amount": "0.016380",
+    "amount_usd": "27.48",
+    "token_address": "0x0000000000000000000000000000000000000000",
+    "token_symbol": "ETH",
+    "updated_at": "2026-11-21T16:10:34.824947482+00:00",
+    "wallet_address": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+   },
+   {
+    "amount": "0.001872",
+    "amount_usd": "3.14",
+    "token_address": "0x4200000000000000000000000000000000000006",
+    "token_symbol": "WETH",
+    "updated_at": "2026-11-21T16:10:34.824947482+00:00",
+    "wallet_address": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+   },
+   {
+    "amount": "17.654015",
+    "amount_usd": "7.01",
+    "token_address": "0x3f5bF3EdAc59d650D8fDf9657a71F2f904A3a4Ee",
+    "token_symbol": "AERO",
+    "updated_at": "2026-11-21T16:10:34.824947482+00:00",
+    "wallet_address": "0xeE114cC97eC5adeB34bA5645e315B497D8487a45"
+   }
+  ]
+ },
+ "data_provenance": {
+  "backfilled_points_count": 280,
+  "last_backfill_at": "2026-11-17T22:46:15.835768+00:00",
+  "sources": {
+   "geckoterminal": 280
+  }
+ },
+ "meta": {
+  "generated_at": "2026-11-21T16:10:35.795544312Z",
+  "snapshot_id": "315e0cee-b9be-487a-a554-d5717b90c3f1",
+  "state_hash": "e24a3971d2635fc1241867d0e2bfb51562ec31ed9e6d5e09936fb3259a8b4aeb",
+  "version": "2.10.0"
+ }
+}

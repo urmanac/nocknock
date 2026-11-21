@@ -546,6 +546,7 @@ fn test_profile() -> OperatorProfile {
         cash_reserve_usdc: None,
         ladder_bottom_usd: None,
         ladder_rungs: None,
+        ladder_maintenance: None,
     }
 }
 
@@ -1600,10 +1601,11 @@ fn test_closed_positions_need_no_new_config_key_and_are_in_the_spec() {
     // 2.8.0 brought closed positions; the v0.8.1 burn-down moved it to 2.8.1, and
     // TickBracket.position_id (#152) to 2.8.2, the standing reserve (#162) to 2.8.3 and
     // the floor-crossing price (#165) to 2.9.0, and the fee yield and the operator's
-    // ladder shape (#166 rungs) to 2.10.0.
-    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.10.0");
+    // ladder shape (#166 rungs) to 2.10.0, and the ladder maintenance and the events
+    // (#169) to 2.11.0.
+    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.11.0");
     let spec = include_str!("../../specs/core/snapshot.yaml");
-    assert!(spec.contains("  version: 2.10.0"));
+    assert!(spec.contains("  version: 2.11.0"));
     for field in [
         "closed_positions:", "ClosedPosition:", "ClosedEvidence:", "config_id:", "position_manager:", "first_seen_closed_at:",
         "supplies_spot_price:", "closed_positions_count:", "closed_positions_note:",

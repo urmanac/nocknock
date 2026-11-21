@@ -1772,7 +1772,7 @@ async fn test_the_scan_block_is_out_of_the_state_hash_and_the_block_is_absent_fr
     assert!(detect_at < read_at, "detection runs before the position reads, so a deposit is counted in the cycle that finds it");
     let (attach, suggest) = (ingest.find("derived_metrics.position_detection = Some(position_detection)").unwrap(), ingest.find("attach_ladder_suggestion(&mut snapshot_data").unwrap());
     assert!(attach < suggest);
-    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.10.0", "additive: detection's 2.9.0 additions ship in 2.10.0 with the ladder shape");
+    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.11.0", "additive: detection's 2.9.0 additions shipped in 2.10.0 with the ladder shape; #169 moved it to 2.11.0");
 }
 
 #[test]
@@ -1810,7 +1810,7 @@ fn test_the_specs_document_the_block_and_the_five_routes() {
 
     let snap_text = include_str!("../../specs/core/snapshot.yaml");
     let snap: serde_yaml::Value = serde_yaml::from_str(snap_text).expect("snapshot.yaml parses");
-    assert_eq!(snap["info"]["version"].as_str(), Some("2.10.0"), "additive: detection's 2.9.0 notes ship in 2.10.0");
+    assert_eq!(snap["info"]["version"].as_str(), Some("2.11.0"), "additive: detection's 2.9.0 notes shipped in 2.10.0; #169 moved it to 2.11.0");
     let prop = &snap["components"]["schemas"]["DerivedMetrics"]["properties"]["position_detection"];
     assert!(prop.is_mapping(), "DerivedMetrics.position_detection is in the schema");
     assert_eq!(prop["nullable"].as_bool(), Some(true));

@@ -193,6 +193,20 @@ pub(crate) fn deposit_url_for(p: &RawPosition, rule: &RebuildRule) -> String {
     }
 }
 
+/// The page of an existing position in its venue's app, where it is removed (#169's
+/// maintenance links). None for a protocol with no per-position page. Pure.
+pub(crate) fn position_page_url(p: &Position) -> Option<String> {
+    if p.network != "base" {
+        return None;
+    }
+    match Protocol::parse(&p.protocol) {
+        Some(Protocol::UniswapV3) => Some(format!("https://app.uniswap.org/positions/v3/base/{}", p.nft_id)),
+        Some(Protocol::UniswapV4) => Some(format!("https://app.uniswap.org/positions/v4/base/{}", p.nft_id)),
+        Some(Protocol::AeroCl) | Some(Protocol::AeroBasic) => Some(format!("https://app.aero.xyz/deposit/8453-{}", p.pool_id)),
+        None => None,
+    }
+}
+
 /// Where the operator would open a NEW position (a ladder, #168) in the pool of the
 /// tracked snapshot position `p`, with the range `tick_lower..tick_upper` in pool ticks.
 /// With `usdc_amount`, the USDC side is passed as the app's own `depositState`. The

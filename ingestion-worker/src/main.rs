@@ -104,6 +104,11 @@ use tracked::*;
 mod position_detect;
 use position_detect::*;
 mod position_detect_text;
+mod ladder_maintenance;
+use ladder_maintenance::*;
+mod events;
+use events::*;
+mod events_text;
 
 // ============================================================
 // Configuration
@@ -150,6 +155,45 @@ pub struct OperatorProfile {
     /// default. Unset = no shape.
     #[serde(default)]
     pub ladder_rungs: Option<Vec<LadderRungConfig>>,
+    /// The ladder's maintenance restraint (#169, operator 2026-11-21: "I know how to keep
+    /// it in my pants! But abstractly we need a 'keep it in your pants' model at some
+    /// level."). Every key has no default: a rule whose settings are not all set is off,
+    /// and the snapshot names the settings that turn it on. Unset = every rule off.
+    #[serde(default)]
+    pub ladder_maintenance: Option<LadderMaintenanceConfig>,
+}
+
+/// `operator_profile.ladder_maintenance` (#169): the restraint gates of the ladder's
+/// maintenance suggestions. Every value is the operator's own, never a default. Validated
+/// in ladder_maintenance.rs; an invalid value turns its rule off and is stated, never a
+/// cycle failure and never replaced by a number of NockNock's.
+#[derive(Deserialize, Serialize, Debug, Clone, Default, PartialEq)]
+pub struct LadderMaintenanceConfig {
+    /// near rung: hours it must sit out of range above (holding only USDC) before a move is
+    /// stated. 0 or more.
+    #[serde(default)]
+    pub min_hours_out_of_range: Option<f64>,
+    /// every rule: hours after the rung's deposit (the last action) and after the last
+    /// suggestion for it cleared, before another is stated. 0 or more.
+    #[serde(default)]
+    pub cooldown_hours: Option<f64>,
+    /// every rule, percent: a move is stated only when the pool price is at least this far
+    /// above the near rung's top, and stays until the price is back in its range; a pull
+    /// stays until the price falls this far below its recovery point. 0 or more.
+    #[serde(default)]
+    pub hysteresis_pct: Option<f64>,
+    /// near rung: the move's gas must be repaid by at most this many days of in-range fees
+    /// at the pool's measured rate. Above 0.
+    #[serde(default)]
+    pub max_gas_payback_days: Option<f64>,
+    /// deep rung: the share of its USDC converted to NOCK (the most seen) before a pull is
+    /// stated. Above 0 and at most 1.
+    #[serde(default)]
+    pub deep_pull_fill_fraction: Option<f64>,
+    /// deep rung, percent: how far the pool price must recover above the lowest price seen
+    /// while it held NOCK before a pull is stated. Above 0.
+    #[serde(default)]
+    pub deep_pull_recovery_pct: Option<f64>,
 }
 
 /// One rung of `operator_profile.ladder_rungs`.
@@ -208,6 +252,7 @@ impl Default for OperatorProfile {
             cash_reserve_usdc: None,
             ladder_bottom_usd: None,
             ladder_rungs: None,
+            ladder_maintenance: None,
         }
     }
 }
@@ -1091,6 +1136,21 @@ struct DerivedMetrics {
     /// stored before the field existed: not reported, never "nothing found".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     position_detection: Option<serde_json::Value>,
+    /// Ladder maintenance (snapshot 2.11.0, issue #169): per tracked ladder rung, what its
+    /// role's rule says this cycle against the operator's restraint settings
+    /// (`operator_profile.ladder_maintenance`, no defaults), with the clocks it carries
+    /// forward from the previous snapshot. Built by
+    /// `ladder_maintenance::ladder_maintenance_block`. Absent without a tracked ladder.
+    /// Left out of the state hash: it is worked out from the hashed state and the clocks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ladder_maintenance: Option<serde_json::Value>,
+    /// Calls to action as structured events (snapshot 2.11.0, issue #169): id, tier
+    /// (top | quiet), what changed, numbers, deep link and what the operator would sign,
+    /// so a later push channel can carry them. Built by `events::events_block`. Absent in
+    /// a snapshot stored before it: not reported, never "nothing needs you". Left out of
+    /// the state hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    events: Option<serde_json::Value>,
 }
 
 /// Fees per unit of liquidity measured on our own tracked ranges (2.10.0). One pool
@@ -1929,7 +1989,7 @@ struct LadderRungSetting {
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
-const SNAPSHOT_SPEC_VERSION: &str = "2.10.0";
+const SNAPSHOT_SPEC_VERSION: &str = "2.11.0";
 
 /// The gas (wallet ETH + WETH) and ETH pillar figures, each None when it cannot be
 /// measured: unread wallet balances or an unpriced ETH. Never a zero stand-in.
@@ -2526,3 +2586,5 @@ mod tests_ladder_liquidity;
 mod tests_tracked;
 #[cfg(test)]
 mod tests_position_detect;
+#[cfg(test)]
+mod tests_ladder_maintenance;

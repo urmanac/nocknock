@@ -167,6 +167,7 @@ fn example_profile() -> OperatorProfile {
         cash_reserve_usdc: None,
         ladder_bottom_usd: None,
         ladder_rungs: None,
+        ladder_maintenance: None,
     }
 }
 
