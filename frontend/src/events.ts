@@ -78,10 +78,28 @@ export function eventsOf(data: { derived_metrics?: { events?: SnapshotEvent[] | 
   return Array.isArray(e) ? e : null;
 }
 
+/** Whether the top-of-page strip renders this entry (and so holds its anchor). */
+export function stripRenders(e: Pick<SnapshotEvent, 'tier' | 'kind'>): boolean {
+  return e.tier === 'top' && !OWN_CARD_KINDS.includes(e.kind);
+}
+
 /** The entries for the top-of-page strip, in the worker's order. */
 export function topOfPage(events: SnapshotEvent[] | null): SnapshotEvent[] {
-  return (events ?? []).filter((e) => e.tier === 'top' && !OWN_CARD_KINDS.includes(e.kind));
+  return (events ?? []).filter(stripRenders);
 }
+
+/** Every `card` the worker names, and where the dashboard shows it (#169 review). */
+export const EVENT_CARDS = [
+  'directive',
+  'reserve',
+  'collectible',
+  'closed_positions',
+  'floor_health',
+  'ladders',
+  'ladder_suggestion',
+  'found_positions',
+  'accumulation_plan',
+] as const;
 
 /** The element id for an event's deep link ('#event-…' → 'event-…'). */
 export function anchorId(e: Pick<SnapshotEvent, 'deep_link'>): string {

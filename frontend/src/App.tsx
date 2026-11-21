@@ -52,6 +52,8 @@ import { isLadder, isNockLp, ladderCountClause, ladderReadingFor, laddersOf } fr
 import { FloorBreachNote } from './components/FloorBreachNote.tsx';
 import { LadderSuggestionCard } from './components/LadderSuggestionCard';
 import { TopOfPageEvents } from './components/TopOfPage';
+import { EventAnchors } from './components/EventAnchors';
+import { eventsOf } from './events';
 import { ladderSuggestionOf } from './ladderSuggestion';
 import { FoundPositionsCard } from './components/FoundPositions';
 import { positionDetectionOf } from './foundPositions';
@@ -126,6 +128,8 @@ function Dashboard() {
 
   const rawData = snapshot?.data as any;
   const metrics = rawData?.derived_metrics ?? rawData;
+  // The events (#169): every deep link lands on the place that shows it.
+  const pageEvents = eventsOf(rawData);
   const global = metrics?.global_status;
   // Market regime telemetry (v0.3.0): daily/micro RSI + third-party backfill provenance
   const provenance = snapshot?.data_provenance;
@@ -260,11 +264,13 @@ function Dashboard() {
 
         {/* The ladder suggestion (#168): the top-of-page ladder surface, under the title
             row and above the stat tiles. No input. */}
+        <EventAnchors events={pageEvents} card="ladder_suggestion" />
         <LadderSuggestionCard suggestion={ladderSuggestionOf(rawData)} syncStatus={freshness.syncStatus} />
 
         {/* Found on-chain (v0.9.0): the positions the worker found in the wallet, with
             one-tap buttons. Right under the ladder card: after a deposit in the Uniswap
             app this is where the new position appears. No input. */}
+        <EventAnchors events={pageEvents} card="found_positions" />
         <FoundPositionsCard detection={positionDetectionOf(rawData)} onChanged={refetch} />
 
         {/* Primary Dual-Goal Metrics Bar */}
@@ -283,6 +289,7 @@ function Dashboard() {
             suffix=" USDC"
             subtitle={[`${statValueText(global?.total_fees_accrued_usd, '$')} of LP fees uncollected`, reserveText(global)].filter(Boolean).join(' · ')}
             highlightColor="#00d2d3"
+            note={<EventAnchors events={pageEvents} card="reserve" />}
           />
           <StatCard
             label="Portfolio Value (USD)"
@@ -297,6 +304,7 @@ function Dashboard() {
             value={claimableYieldTile(global, positionsList).value}
             prefix="$"
             subtitle={claimableYieldTile(global, positionsList).subtitle}
+            note={<EventAnchors events={pageEvents} card="collectible" />}
             highlightColor="#f1c40f"
           />
           <StatCard
@@ -305,7 +313,7 @@ function Dashboard() {
             suffix="%"
             subtitle={floorNone ? 'No floor configured' : !nockFloorDeltaKnown ? 'floor status unknown' : floorDeltaText(nockFloorDeltaRaw, floorTarget)}
             highlightColor={floorHealthColor}
-            note={<FloorBreachNote floorBreach={metrics?.floor_breach} />}
+            note={<><EventAnchors events={pageEvents} card="floor_health" /><FloorBreachNote floorBreach={metrics?.floor_breach} /></>}
           />
           <StatCard
             label="High-Water Mark"
@@ -332,6 +340,7 @@ function Dashboard() {
 
       {/* Tactical Shot Advice Cockpit */}
       <section style={styles.shotAdviceBanner}>
+        <EventAnchors events={pageEvents} card="directive" />
         <div style={styles.adviceHeader}>
           <div style={styles.adviceActionRow}>
             <span style={styles.adviceBadge}>TACTICAL SHOT ADVICE</span>
@@ -480,8 +489,10 @@ function Dashboard() {
         </div>
         {/* Closed positions (#144): configured positions whose NFT no longer exists.
             Stated beside the live cards, never as one, and counted nowhere. */}
+        <EventAnchors events={pageEvents} card="closed_positions" />
         <ClosedPositionsCard data={rawData} />
         {/* Tracked ladders (#167): measured readings, no button. Absent without one. */}
+        <EventAnchors events={pageEvents} card="ladders" />
         <LaddersCard data={rawData} />
       </section>
 
@@ -750,6 +761,7 @@ function Dashboard() {
 
         {/* 5a. Accumulation Plan — DCA pacing + standing LP-rebuild bias (v0.5.0) */}
         <CanvasPanel title="Accumulation Plan (Dollar-Cost-Averaged NOCK Buys)">
+          <EventAnchors events={pageEvents} card="accumulation_plan" />
           <AccumulationPlanPanel
             plan={metrics?.accumulation_plan}
             lpRebuild={metrics?.lp_rebuild}

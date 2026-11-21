@@ -20,6 +20,8 @@ import { ladderSuggestionOf } from '../ladderSuggestion';
 import { FoundPositionsLiteCard } from './FoundPositions';
 import { positionDetectionOf } from '../foundPositions';
 import { TopOfPageLiteEvents } from './TopOfPage';
+import { EventAnchors } from './EventAnchors';
+import { eventsOf } from '../events';
 
 const card: React.CSSProperties = {
   background: '#161b22',
@@ -101,6 +103,8 @@ export function LiteStatusCard() {
         <TopOfPageLiteEvents data={snapshot.data} syncStatus={now?.syncStatus ?? freshness.syncStatus} cardStyle={card} labelStyle={label} />
       ) : null}
       <section style={{ ...card, borderLeft: `3px solid ${color}` }}>
+        {/* The anchors of every event the strip above does not render (#169). */}
+        {snapshot ? <EventAnchors events={eventsOf(snapshot.data)} /> : null}
         <div style={label}>DIRECTIVE</div>
         <div style={{ fontSize: 16, fontWeight: 700, color: '#f0f6fc', lineHeight: 1.4, marginBottom: 6 }}>{view.action}</div>
         {view.details ? <div style={{ ...sub, color: '#c9d1d9' }}>{view.details}</div> : null}

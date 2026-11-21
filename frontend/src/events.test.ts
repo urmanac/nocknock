@@ -29,10 +29,17 @@ describe('calls to action as events (#169)', () => {
     expect(EVENTS_PREDATES).toEqual(doc.predates.data);
   });
 
-  it('the live bottle with the settings unset puts nothing at the top', () => {
+  it('the live bottle with the settings unset puts only the reserve at the top', () => {
     const events = eventsOf(EVENTS_LIVE_UNSET);
     expect(events).not.toBeNull();
-    expect(topOfPage(events)).toEqual([]);
+    // The operator's rule (2026-11-21): top whenever wallet USDC alone is below the reserve.
+    const top = topOfPage(events);
+    expect(top.map((e) => e.id)).toEqual(['reserve_below']);
+    expect(top[0].text).toMatch(/^Wallet USDC \$778\.77 is \$171\.23 below your \$950\.00 reserve\./);
+    expect(top[0].text).toContain('wallet USDC $778.77 + NOCK LP USDC $233.86 + ladder USDC $768.24');
+    expect(top[0].numbers.eth_ranges_usdc).toBe('99.09');
+    expect(top[0].numbers.eth_ranges_weth_at_covering).toBe('0.1933');
+    expect(tierTone(top[0])).toBe('alarm');
     // The quiet ones are all there: the directive, the cap, the fees, the rewards, the floor price.
     const quiet = events!.filter((e) => e.tier === 'quiet').map((e) => e.kind);
     expect(quiet).toEqual(['directive', 'ladder_cap_sold', 'harvest', 'aero_rewards', 'floor_crossing']);
@@ -40,8 +47,8 @@ describe('calls to action as events (#169)', () => {
 
   it('a near-rung move is at the top, with what would be signed and its deep link', () => {
     const top = topOfPage(eventsOf(EVENTS_NEAR_MOVE));
-    expect(top.map((e) => e.id)).toEqual([`ladder_near_move:${NEAR}`]);
-    const e = top[0];
+    expect(top.map((e) => e.id)).toEqual(['reserve_below', `ladder_near_move:${NEAR}`, `ladder_rule_cannot_fire:${DEEP}`]);
+    const e = top[1];
     expect(e.title).toBe('LADDER: MOVE THE NEAR RUNG');
     expect(anchorId(e)).toBe('event-ladder-near-move-uniswap-v4-base-3244700');
     expect(e.numbers.width_ticks).toBe('1800');
@@ -51,7 +58,7 @@ describe('calls to action as events (#169)', () => {
   });
 
   it('the strip leaves cards that render themselves at the top', () => {
-    const own: SnapshotEvent = { ...topOfPage(eventsOf(EVENTS_NEAR_MOVE))[0], id: 'ladder_suggestion:NOCK', kind: 'ladder_suggestion', card: 'ladder_suggestion' };
+    const own: SnapshotEvent = { ...topOfPage(eventsOf(EVENTS_NEAR_MOVE))[1], id: 'ladder_suggestion:NOCK', kind: 'ladder_suggestion', card: 'ladder_suggestion' };
     const found: SnapshotEvent = { ...own, id: 'found_positions', kind: 'found_positions', card: 'found_positions' };
     expect(topOfPage([own, found])).toEqual([]);
   });
@@ -69,7 +76,7 @@ describe('calls to action as events (#169)', () => {
   });
 
   it('breaches are red, maintenance amber', () => {
-    const base = topOfPage(eventsOf(EVENTS_NEAR_MOVE))[0];
+    const base = topOfPage(eventsOf(EVENTS_NEAR_MOVE))[1];
     expect(tierTone({ ...base, kind: 'reserve_below' })).toBe('alarm');
     expect(tierTone({ ...base, kind: 'directive', title: 'DEFENSIVE LOCK (Floor Recovery)' })).toBe('alarm');
     expect(tierTone({ ...base, kind: 'directive', title: 'DCA TRANCHE DUE (2/5)' })).toBe('maintenance');

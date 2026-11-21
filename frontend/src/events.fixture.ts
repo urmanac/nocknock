@@ -11,10 +11,41 @@ export interface EventsFixture {
   derived_metrics: { events?: SnapshotEvent[]; ladder_maintenance?: LadderMaintenance };
 }
 
-/** live_unset: the live bottle with every restraint setting unset */
+/** live_unset: the live bottle with every restraint setting unset (the reserve is at the top: wallet USDC is below $950) */
 export const EVENTS_LIVE_UNSET: EventsFixture = {
   "derived_metrics": {
     "events": [
+      {
+        "card": "reserve",
+        "deep_link": "#event-reserve-below",
+        "id": "reserve_below",
+        "kind": "reserve_below",
+        "links": [],
+        "numbers": {
+          "eth_covering_pct_above_now": "9.1",
+          "eth_price_covering_shortfall_usd": "1830.74",
+          "eth_price_usd": "1677.54",
+          "eth_ranges_cover_shortfall": false,
+          "eth_ranges_usdc": "99.09",
+          "eth_ranges_weth": "0.2345",
+          "eth_ranges_weth_at_covering": "0.1933",
+          "ladder_usdc": "768.24",
+          "nock_lp_usdc": "233.86",
+          "reserve_usdc": "950.00",
+          "stable_headroom_usdc": "830.87",
+          "stable_usdc": "1780.87",
+          "wallet_shortfall_usdc": "171.23",
+          "wallet_usdc": "778.77",
+          "wallet_usdc_if_eth_ranges_withdrawn": "877.85"
+        },
+        "since": "2026-11-21T16:10:35.795544312+00:00",
+        "source": "derived_metrics.global_status",
+        "text": "Wallet USDC $778.77 is $171.23 below your $950.00 reserve. The stable balance the reserve gate counts is $1780.87 (wallet USDC $778.77 + NOCK LP USDC $233.86 + ladder USDC $768.24), $830.87 above it. The gas-side ETH/USDC ranges (outside the reserve gate) hold $99.09 USDC and 0.2345 WETH; withdrawn now, wallet USDC would be $877.85. Their USDC side alone would cover the $171.23 shortfall at ETH about $1830.74 (+9.1% from $1677.54), each range on its own pool's curve, with about 0.1933 WETH still in them there.",
+        "tier": "top",
+        "title": "WALLET USDC BELOW THE STANDING RESERVE",
+        "what_changed": "Wallet USDC alone is below your standing reserve.",
+        "would_sign": null
+      },
       {
         "card": "directive",
         "deep_link": "#event-directive",
@@ -256,10 +287,41 @@ export const EVENTS_LIVE_UNSET: EventsFixture = {
   }
 } as unknown as EventsFixture;
 
-/** near_move: the near rung 4% above its top after 25 h, every gate passed (example settings, not defaults) */
+/** near_move: the near rung 4% above its top after 25 h, every gate passed (the operator's chosen settings 24/24/2/30/0.5/10) */
 export const EVENTS_NEAR_MOVE: EventsFixture = {
   "derived_metrics": {
     "events": [
+      {
+        "card": "reserve",
+        "deep_link": "#event-reserve-below",
+        "id": "reserve_below",
+        "kind": "reserve_below",
+        "links": [],
+        "numbers": {
+          "eth_covering_pct_above_now": "9.1",
+          "eth_price_covering_shortfall_usd": "1830.74",
+          "eth_price_usd": "1677.54",
+          "eth_ranges_cover_shortfall": false,
+          "eth_ranges_usdc": "99.09",
+          "eth_ranges_weth": "0.2345",
+          "eth_ranges_weth_at_covering": "0.1933",
+          "ladder_usdc": "768.24",
+          "nock_lp_usdc": "233.86",
+          "reserve_usdc": "950.00",
+          "stable_headroom_usdc": "830.87",
+          "stable_usdc": "1780.87",
+          "wallet_shortfall_usdc": "171.23",
+          "wallet_usdc": "778.77",
+          "wallet_usdc_if_eth_ranges_withdrawn": "877.85"
+        },
+        "since": "2026-11-22T17:30:00+00:00",
+        "source": "derived_metrics.global_status",
+        "text": "Wallet USDC $778.77 is $171.23 below your $950.00 reserve. The stable balance the reserve gate counts is $1780.87 (wallet USDC $778.77 + NOCK LP USDC $233.86 + ladder USDC $768.24), $830.87 above it. The gas-side ETH/USDC ranges (outside the reserve gate) hold $99.09 USDC and 0.2345 WETH; withdrawn now, wallet USDC would be $877.85. Their USDC side alone would cover the $171.23 shortfall at ETH about $1830.74 (+9.1% from $1677.54), each range on its own pool's curve, with about 0.1933 WETH still in them there.",
+        "tier": "top",
+        "title": "WALLET USDC BELOW THE STANDING RESERVE",
+        "what_changed": "Wallet USDC alone is below your standing reserve.",
+        "would_sign": null
+      },
       {
         "card": "ladders",
         "deep_link": "#event-ladder-near-move-uniswap-v4-base-3244700",
@@ -293,11 +355,35 @@ export const EVENTS_NEAR_MOVE: EventsFixture = {
         },
         "since": "2026-11-22T17:30:00+00:00",
         "source": "derived_metrics.ladder_maintenance.rungs",
-        "text": "Near rung #3244700 has been out of range above since 2026-11-21 16:10 UTC (25.3 h): it holds $111.09 USDC and 0 NOCK and earns nothing until NOCK falls to its top $0.01313. The pool price $0.01366 is 4.00% above that top. A move to just below the price, keeping its width (1,800 ticks), would be ticks 273300..275100, $0.01130 to $0.01353, with the same $111.09 USDC and 0 NOCK; it would open 0.92% below the price, so it earns fees only once NOCK dips into it. It has earned $0.00 in fees so far. Out of range above: 25.3 h of your 24 h; hysteresis: 4.00% above its top, your 2%; cooldown: 26.0 h since its deposit of your 24 h; gas against fees: \u2248$0.0070 of gas (two transactions, an estimate) against \u2248$6.4921 a day of fees while in range at the pool's measured rate, repaid in 0.0011 days in range, your 30. Whether and when is your decision.",
+        "text": "Near rung #3244700 has been out of range above since 2026-11-21 16:10 UTC (25.3 h): it holds $111.09 USDC and 0 NOCK and earns nothing until NOCK falls to its top $0.01313. The pool price $0.01366 is 4.00% above that top. A move to just below the price, keeping its width (1,800 ticks), would be ticks 273300..275100, $0.01130 to $0.01353, with the same $111.09 USDC and 0 NOCK; it would open 0.92% below the price, so it earns fees only once NOCK dips into it. $0.01097 to $0.01130 is then covered by no rung (between the deep rung's top and the moved range's bottom). It has earned $0.00 in fees so far. Out of range above: 25.3 h of your 24 h; hysteresis: 4.00% above its top, your 2%; cooldown: 26.0 h since its deposit of your 24 h; gas against fees: ≈$0.0070 of gas (two transactions, an estimate) against ≈$6.4921 a day of fees while in range at the pool's measured rate, repaid in 0.0011 days in range, your 30. Whether and when is your decision.",
         "tier": "top",
         "title": "LADDER: MOVE THE NEAR RUNG",
         "what_changed": "Near rung #3244700 has been out of range above past every gate you set.",
         "would_sign": "Two transactions in your wallet: remove all of Near rung #3244700's liquidity (its fees come with it), then mint ticks 273300..275100 in the same pool with $111.09 USDC and 0 NOCK. NockNock builds neither and signs nothing; the new position is found on-chain after it lands."
+      },
+      {
+        "card": "ladders",
+        "deep_link": "#event-ladder-rule-cannot-fire-uniswap-v4-base-3244701",
+        "id": "ladder_rule_cannot_fire:uniswap-v4:base:3244701",
+        "kind": "ladder_rule_cannot_fire",
+        "links": [],
+        "numbers": {
+          "bottom_usd": "0.01002405",
+          "deep_pull_recovery_pct": "10",
+          "low_usd": "0.01002405",
+          "recovery_point_usd": "0.01102646",
+          "rung_width_pct": "9.42",
+          "top_usd": "0.01096801"
+        },
+        "position_id": "uniswap-v4:base:3244701",
+        "setting": "operator_profile.ladder_maintenance.deep_pull_recovery_pct",
+        "since": "2026-11-22T17:30:00+00:00",
+        "source": "derived_metrics.ladder_maintenance.rungs",
+        "text": "Deep rung #3244701: the deep-rung pull cannot fire for this rung with your operator_profile.ladder_maintenance.deep_pull_recovery_pct of 10%. The rung is 9.42% wide (its top $0.01097 is 9.42% above its bottom $0.01002), so a 10% recovery from its bottom, $0.01002 lands at $0.01103, at or above its top, and by then the rung has sold all the NOCK it bought back for USDC. A recovery below 9.42% would let the pull be stated before that.",
+        "tier": "top",
+        "title": "LADDER: DEEP PULL CANNOT FIRE",
+        "what_changed": "Your deep_pull_recovery_pct is at or above Deep rung #3244701's width.",
+        "would_sign": null
       },
       {
         "card": "directive",
@@ -495,7 +581,7 @@ export const EVENTS_NEAR_MOVE: EventsFixture = {
               "width_ticks": "1800"
             },
             "since": "2026-11-22T17:30:00+00:00",
-            "text": "Near rung #3244700 has been out of range above since 2026-11-21 16:10 UTC (25.3 h): it holds $111.09 USDC and 0 NOCK and earns nothing until NOCK falls to its top $0.01313. The pool price $0.01366 is 4.00% above that top. A move to just below the price, keeping its width (1,800 ticks), would be ticks 273300..275100, $0.01130 to $0.01353, with the same $111.09 USDC and 0 NOCK; it would open 0.92% below the price, so it earns fees only once NOCK dips into it. It has earned $0.00 in fees so far. Out of range above: 25.3 h of your 24 h; hysteresis: 4.00% above its top, your 2%; cooldown: 26.0 h since its deposit of your 24 h; gas against fees: \u2248$0.0070 of gas (two transactions, an estimate) against \u2248$6.4921 a day of fees while in range at the pool's measured rate, repaid in 0.0011 days in range, your 30. Whether and when is your decision.",
+            "text": "Near rung #3244700 has been out of range above since 2026-11-21 16:10 UTC (25.3 h): it holds $111.09 USDC and 0 NOCK and earns nothing until NOCK falls to its top $0.01313. The pool price $0.01366 is 4.00% above that top. A move to just below the price, keeping its width (1,800 ticks), would be ticks 273300..275100, $0.01130 to $0.01353, with the same $111.09 USDC and 0 NOCK; it would open 0.92% below the price, so it earns fees only once NOCK dips into it. $0.01097 to $0.01130 is then covered by no rung (between the deep rung's top and the moved range's bottom). It has earned $0.00 in fees so far. Out of range above: 25.3 h of your 24 h; hysteresis: 4.00% above its top, your 2%; cooldown: 26.0 h since its deposit of your 24 h; gas against fees: ≈$0.0070 of gas (two transactions, an estimate) against ≈$6.4921 a day of fees while in range at the pool's measured rate, repaid in 0.0011 days in range, your 30. Whether and when is your decision.",
             "tier": "top",
             "title": "LADDER: MOVE THE NEAR RUNG",
             "what_changed": "Near rung #3244700 has been out of range above past every gate you set.",
@@ -529,11 +615,12 @@ export const EVENTS_NEAR_MOVE: EventsFixture = {
               "measured": "0.0011",
               "passes": true,
               "setting": "30",
-              "text": "gas against fees: \u2248$0.0070 of gas (two transactions, an estimate) against \u2248$6.4921 a day of fees while in range at the pool's measured rate, repaid in 0.0011 days in range, your 30"
+              "text": "gas against fees: ≈$0.0070 of gas (two transactions, an estimate) against ≈$6.4921 a day of fees while in range at the pool's measured rate, repaid in 0.0011 days in range, your 30"
             }
           ],
           "label": "v4 USDC/NOCK 3.00% #3244700",
           "move": {
+            "deep_top_usd": "0.01096801",
             "fee_rate_from": "v4 USDC/NOCK 3.00% #3163450",
             "fee_rate_reason": null,
             "fees_earned_usd": "0.00",
@@ -550,6 +637,8 @@ export const EVENTS_NEAR_MOVE: EventsFixture = {
             "opens_pct_of_price": "-0.92",
             "payback_days_in_range": "0.0011",
             "remove_url": "https://app.uniswap.org/positions/v4/base/3244700",
+            "uncovered_from_usd": "0.01096801",
+            "uncovered_to_usd": "0.01130202",
             "usdc": "111.09",
             "width_ticks": 1800
           },
@@ -562,7 +651,7 @@ export const EVENTS_NEAR_MOVE: EventsFixture = {
           "short_label": "Near rung #3244700",
           "state": "holds_only_usdc",
           "status": "suggested",
-          "text": "Near rung #3244700 has been out of range above since 2026-11-21 16:10 UTC (25.3 h): it holds $111.09 USDC and 0 NOCK and earns nothing until NOCK falls to its top $0.01313. The pool price $0.01366 is 4.00% above that top. A move to just below the price, keeping its width (1,800 ticks), would be ticks 273300..275100, $0.01130 to $0.01353, with the same $111.09 USDC and 0 NOCK; it would open 0.92% below the price, so it earns fees only once NOCK dips into it. It has earned $0.00 in fees so far. Out of range above: 25.3 h of your 24 h; hysteresis: 4.00% above its top, your 2%; cooldown: 26.0 h since its deposit of your 24 h; gas against fees: \u2248$0.0070 of gas (two transactions, an estimate) against \u2248$6.4921 a day of fees while in range at the pool's measured rate, repaid in 0.0011 days in range, your 30. Whether and when is your decision.",
+          "text": "Near rung #3244700 has been out of range above since 2026-11-21 16:10 UTC (25.3 h): it holds $111.09 USDC and 0 NOCK and earns nothing until NOCK falls to its top $0.01313. The pool price $0.01366 is 4.00% above that top. A move to just below the price, keeping its width (1,800 ticks), would be ticks 273300..275100, $0.01130 to $0.01353, with the same $111.09 USDC and 0 NOCK; it would open 0.92% below the price, so it earns fees only once NOCK dips into it. $0.01097 to $0.01130 is then covered by no rung (between the deep rung's top and the moved range's bottom). It has earned $0.00 in fees so far. Out of range above: 25.3 h of your 24 h; hysteresis: 4.00% above its top, your 2%; cooldown: 26.0 h since its deposit of your 24 h; gas against fees: ≈$0.0070 of gas (two transactions, an estimate) against ≈$6.4921 a day of fees while in range at the pool's measured rate, repaid in 0.0011 days in range, your 30. Whether and when is your decision.",
           "tick_lower": 273600,
           "tick_upper": 275400,
           "top_usd": "0.01313098",
@@ -587,10 +676,29 @@ export const EVENTS_NEAR_MOVE: EventsFixture = {
           "pull": null,
           "rule": "deep_pull",
           "rung": "deep",
+          "setting_event": {
+            "kind": "ladder_rule_cannot_fire",
+            "links": [],
+            "numbers": {
+              "bottom_usd": "0.01002405",
+              "deep_pull_recovery_pct": "10",
+              "low_usd": "0.01002405",
+              "recovery_point_usd": "0.01102646",
+              "rung_width_pct": "9.42",
+              "top_usd": "0.01096801"
+            },
+            "position_id": "uniswap-v4:base:3244701",
+            "setting": "operator_profile.ladder_maintenance.deep_pull_recovery_pct",
+            "text": "Deep rung #3244701: the deep-rung pull cannot fire for this rung with your operator_profile.ladder_maintenance.deep_pull_recovery_pct of 10%. The rung is 9.42% wide (its top $0.01097 is 9.42% above its bottom $0.01002), so a 10% recovery from its bottom, $0.01002 lands at $0.01103, at or above its top, and by then the rung has sold all the NOCK it bought back for USDC. A recovery below 9.42% would let the pull be stated before that.",
+            "tier": "top",
+            "title": "LADDER: DEEP PULL CANNOT FIRE",
+            "what_changed": "Your deep_pull_recovery_pct is at or above Deep rung #3244701's width.",
+            "would_sign": null
+          },
           "short_label": "Deep rung #3244701",
           "state": "holds_only_usdc",
-          "status": "waiting_for_dip",
-          "text": "Deep rung #3244701 holds only USDC ($629.52): the price is above it, so it waits for NOCK to fall to its top $0.01097. It is never moved up or chased; nothing to do.",
+          "status": "rule_cannot_fire",
+          "text": "Deep rung #3244701: the deep-rung pull cannot fire for this rung with your operator_profile.ladder_maintenance.deep_pull_recovery_pct of 10%. The rung is 9.42% wide (its top $0.01097 is 9.42% above its bottom $0.01002), so a 10% recovery from its bottom, $0.01002 lands at $0.01103, at or above its top, and by then the rung has sold all the NOCK it bought back for USDC. A recovery below 9.42% would let the pull be stated before that. This cycle: Deep rung #3244701 holds only USDC ($629.52): the price is above it, so it waits for NOCK to fall to its top $0.01097. It is never moved up or chased; nothing to do.",
           "tick_lower": 275400,
           "tick_upper": 276300,
           "top_usd": "0.01096801",
@@ -616,6 +724,37 @@ export const EVENTS_NEAR_MOVE: EventsFixture = {
 export const EVENTS_DEEP_CONVERTED: EventsFixture = {
   "derived_metrics": {
     "events": [
+      {
+        "card": "reserve",
+        "deep_link": "#event-reserve-below",
+        "id": "reserve_below",
+        "kind": "reserve_below",
+        "links": [],
+        "numbers": {
+          "eth_covering_pct_above_now": "9.1",
+          "eth_price_covering_shortfall_usd": "1830.74",
+          "eth_price_usd": "1677.54",
+          "eth_ranges_cover_shortfall": false,
+          "eth_ranges_usdc": "99.09",
+          "eth_ranges_weth": "0.2345",
+          "eth_ranges_weth_at_covering": "0.1933",
+          "ladder_usdc": "768.24",
+          "nock_lp_usdc": "233.86",
+          "reserve_usdc": "950.00",
+          "stable_headroom_usdc": "830.87",
+          "stable_usdc": "1780.87",
+          "wallet_shortfall_usdc": "171.23",
+          "wallet_usdc": "778.77",
+          "wallet_usdc_if_eth_ranges_withdrawn": "877.85"
+        },
+        "since": "2026-11-21T16:10:35.795544312+00:00",
+        "source": "derived_metrics.global_status",
+        "text": "Wallet USDC $778.77 is $171.23 below your $950.00 reserve. The stable balance the reserve gate counts is $1780.87 (wallet USDC $778.77 + NOCK LP USDC $233.86 + ladder USDC $768.24), $830.87 above it. The gas-side ETH/USDC ranges (outside the reserve gate) hold $99.09 USDC and 0.2345 WETH; withdrawn now, wallet USDC would be $877.85. Their USDC side alone would cover the $171.23 shortfall at ETH about $1830.74 (+9.1% from $1677.54), each range on its own pool's curve, with about 0.1933 WETH still in them there.",
+        "tier": "top",
+        "title": "WALLET USDC BELOW THE STANDING RESERVE",
+        "what_changed": "Wallet USDC alone is below your standing reserve.",
+        "would_sign": null
+      },
       {
         "card": "ladders",
         "deep_link": "#event-ladder-deep-converted-uniswap-v4-base-3244701",
@@ -798,6 +937,7 @@ export const EVENTS_DEEP_CONVERTED: EventsFixture = {
               "low_at": "2026-11-21T16:10:35.795544312+00:00",
               "low_price_usd": "0.00990000",
               "peak_converted_pct": "100.00",
+              "peak_nock": "60037.6735",
               "started_at": "2026-11-21T16:10:35.795544312+00:00"
             },
             "last_cleared_at": null,
@@ -864,7 +1004,9 @@ export const EVENTS_DEEP_CONVERTED: EventsFixture = {
             "low_at": "2026-11-21T16:10:35.795544312+00:00",
             "low_price_usd": "0.00990000",
             "nock_now": "60037.6735",
+            "nock_sold_back_since_low": "0.0000",
             "peak_converted_pct": "100.00",
+            "peak_nock": "60037.6735",
             "recovery_pct_now": "0.00",
             "recovery_point_usd": "0.01089000",
             "remove_url": "https://app.uniswap.org/positions/v4/base/3244701",
