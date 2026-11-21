@@ -218,7 +218,7 @@ fn test_a_mint_found_on_chain_and_not_yet_tracked_is_not_offered_again() {
     assert_eq!(st(near, "/status"), "found");
     assert_eq!(
         st(near, "/text"),
-        "Deposit 2 of 3 (near rung): found on-chain, being tracked. Uniswap-v4:base:9000003 is in this pool on exactly this rung's ticks; it is counted once it is tracked, so it is not offered again."
+        "Deposit 2 of 3 (near rung): found on-chain, being tracked. The position uniswap-v4:base:9000003 is in this pool on exactly this rung's ticks; it is counted once it is tracked, so it is not offered again."
     );
     // Its USDC left the wallet: it counts for its rung, so the deep rung is not re-sized.
     assert_eq!(st(deposit(&l, "deep"), "/usdc/to_enter"), "650.89");

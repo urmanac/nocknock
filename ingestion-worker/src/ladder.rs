@@ -3131,7 +3131,7 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
         (p.status, p.reason) = if held && -rem_v >= minimum.max(tol) {
             ("over", Some(format!("the tracked rung holds ${} of USDC at its top, ${} more than its target", fx(v_tracked, 2), fx(-rem_v, 2))))
         } else if found_only {
-            ("found", Some(format!("{} is in this pool on exactly this rung's ticks; it is counted once it is tracked, so it is not offered again", p.found.join(", "))))
+            ("found", Some(format!("the position {} is in this pool on exactly this rung's ticks; it is counted once it is tracked, so it is not offered again", p.found.join(", "))))
         } else if held && rem_v <= tol {
             ("deployed", None)
         } else if held && rem_v < minimum {
@@ -3229,7 +3229,7 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
         let found_only = p.counterparts.is_empty() && !p.found.is_empty();
         (p.status, p.reason) = if held {
             if found_only {
-                ("found", Some(format!("{} is in this pool on exactly this rung's ticks; it is counted once it is tracked, so it is not offered again", p.found.join(", "))))
+                ("found", Some(format!("the position {} is in this pool on exactly this rung's ticks; it is counted once it is tracked, so it is not offered again", p.found.join(", "))))
             } else {
                 ("deployed", None)
             }

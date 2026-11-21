@@ -4617,7 +4617,7 @@ export const LADDER_BOTTLE_FOUND: LadderSuggestion = {
         "note": null,
         "of": 3,
         "over_by_usdc": null,
-        "reason": "uniswap-v4:base:9000003 is in this pool on exactly this rung's ticks; it is counted once it is tracked, so it is not offered again",
+        "reason": "the position uniswap-v4:base:9000003 is in this pool on exactly this rung's ticks; it is counted once it is tracked, so it is not offered again",
         "remaining_nock": "0.0000",
         "remaining_usdc": "0.00",
         "rung": "near",
@@ -4625,7 +4625,7 @@ export const LADDER_BOTTLE_FOUND: LadderSuggestion = {
         "target_liquidity": "1408301615002237",
         "target_nock": null,
         "target_usdc": "114.86",
-        "text": "Deposit 2 of 3 (near rung): found on-chain, being tracked. Uniswap-v4:base:9000003 is in this pool on exactly this rung's ticks; it is counted once it is tracked, so it is not offered again.",
+        "text": "Deposit 2 of 3 (near rung): found on-chain, being tracked. The position uniswap-v4:base:9000003 is in this pool on exactly this rung's ticks; it is counted once it is tracked, so it is not offered again.",
         "tick_lower": 273900,
         "tick_upper": 275400,
         "tracked_liquidity": "1408301615002237"
