@@ -768,7 +768,13 @@ async fn serve(state: Arc<AppState>) -> String {
 
 #[tokio::test]
 async fn test_ladder_endpoint_is_a_read_and_refuses_writes() {
-    let base = serve(offline_state(Some(fixture()))).await;
+    // Two days old, so the worker's health verdict is deterministically "degraded"
+    // (past the sync window) and the age is 2,880 minutes.
+    let mut env = fixture();
+    let generated = Utc::now() - chrono::Duration::days(2);
+    let generated = DateTime::parse_from_rfc3339(&generated.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)).unwrap().with_timezone(&Utc);
+    env.meta.generated_at = generated;
+    let base = serve(offline_state(Some(env))).await;
     let client = Client::new();
     let url = format!("{base}/v1/simulate/ladder?usdc=741&low=0.01&high=spot");
     // A cross-site GET is a read: it answers.
@@ -804,7 +810,15 @@ async fn test_ladder_endpoint_is_a_read_and_refuses_writes() {
     assert_eq!(r["result"]["isError"], json!(false));
     let text = r["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("average $0.01137717"), "{text}");
-    assert!(text.ends_with("· worker health: degraded") || text.contains("· worker health: "), "{text}");
+    // The source line comes from the body's own snapshot block: its time, its age and
+    // the worker's health, in the words of the other tools' footer.
+    let gen = generated.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let last = text.lines().last().unwrap();
+    assert!(
+        last == format!("Snapshot generated {gen} (2880 min ago) · worker health: degraded")
+            || last == format!("Snapshot generated {gen} (2881 min ago) · worker health: degraded"),
+        "{last}"
+    );
     let r: Value = client.post(format!("{base}/v1/mcp")).json(&call(json!({"usdc": 741, "low": 0.01}))).send().await.unwrap().json().await.unwrap();
     assert_eq!(r["result"]["isError"], json!(true));
     // tools/list carries the shared definition.
@@ -974,4 +988,72 @@ fn test_ladder_specs_document_the_endpoint_and_the_new_fields() {
         assert!(gs[f].is_mapping(), "GlobalStatus.{f}");
     }
     assert!(snap["components"]["schemas"]["Position"]["properties"]["tick_spacing"]["description"].as_str().unwrap().contains("uniswap-v4"));
+}
+
+
+/// The fixture with the price-source pool at another sqrtPriceX96 (#166 review).
+fn fixture_at_sqrt(sqrt: U256) -> SnapshotEnvelope {
+    let mut v = v4();
+    v.sqrt_price_x96 = sqrt;
+    v.tick = (sqrt_price_x96_to_raw(sqrt).ln() / 1.0001f64.ln()).floor() as i32;
+    let v = with_amounts(RawPosition { fee0: 0.213182, fee1: 113.759403, ..v });
+    let mut gas2 = gas_range_v3();
+    gas2.position_id = "uniswap-v3:base:6607226".to_string();
+    envelope_of(raw_book(vec![v, aero(111.367340, 8408.058135), gas_range_v3(), gas2]), &profile(Some(950.0)))
+}
+
+#[test]
+fn test_ladder_unsnapped_spot_top_holds_no_dust_nock() {
+    // At this sqrtPriceX96 (spot $0.00945387) sqrt(usd_to_raw(spot)) lands one ulp below
+    // the pool's own sqrt; before the fix n0 came out ~5e-11 NOCK, avg_sell_price_usd
+    // printed 0.01465134 and the floor-crossing effect was not "none".
+    let env = fixture_at_sqrt(U256::from_hex_be(&format!("{:x}", 81484448971563975728368401080474936u128)).unwrap());
+    for pairs in [
+        vec![("usdc", "741"), ("low_pct", "-30"), ("high", "spot")],
+        vec![("usdc", "741"), ("low_pct", "-30"), ("high_pct", "0")],
+    ] {
+        let b = sim_on(&env, &pairs).unwrap();
+        assert_eq!(st(&b, "/snapshot/spot_usd"), "0.00945387");
+        assert_eq!(st(&b, "/sizing/nock_needed_at_spot"), "0.0000", "{pairs:?}");
+        assert_eq!(b["top"]["avg_sell_price_usd"], Value::Null, "{pairs:?}");
+        assert_eq!(b["top"]["out_of_range_above_now"], json!(true));
+        assert_eq!(st(&b, "/floor_check/floor_breach_effect/status"), "none", "{pairs:?}");
+    }
+    assert!(LADDER_NOCK_DUST <= 1e-9);
+}
+
+#[test]
+fn test_ladder_floor_effect_conserves_nock_at_spot() {
+    // Adding the ladder moves NOCK from the wallet into the range: tracked NOCK at spot
+    // (m = 1) is the same before and after, for unsnapped (rounded-tick) and snapped
+    // ranges. Before the fix the unrounded n0 left the wallet while the rounded range
+    // held more (+8 NOCK for the Chat case, +10 for a spot top).
+    for pairs in [
+        CHAT.to_vec(),
+        SPOT_741.to_vec(),
+        vec![("usdc", "50"), ("low", "0.012"), ("high", "0.0135")],
+        vec![("usdc", "900"), ("low_pct", "-30"), ("high_pct", "2"), ("position_id", V4_ID)],
+    ] {
+        let b = sim(&pairs);
+        let e = &b["floor_check"]["floor_breach_effect"];
+        assert_eq!(st(e, "/before/nock_now"), "109543", "{pairs:?}");
+        assert_eq!(e["before"]["nock_now"], e["after"]["nock_now"], "{pairs:?}");
+    }
+    // A spot top rounds toward the side that holds no NOCK: "none", the same crossing.
+    let b = sim(&SPOT_741);
+    let e = &b["floor_check"]["floor_breach_effect"];
+    assert_eq!(e["status"], "none");
+    assert_eq!(e["before"]["crossing"], e["after"]["crossing"]);
+}
+
+#[test]
+fn test_ladder_rejects_bounds_outside_the_tick_range() {
+    // A bottom below the lowest price any tick can hold (1e10 * 1.0001^-887272 ≈ 3e-29).
+    let e = err(&[("usdc", "741"), ("low", "1e-30"), ("high", "spot")]);
+    assert_eq!((e.status, e.code), (422, Some("RANGE_OUTSIDE_TICKS")), "{}", e.detail);
+    assert!(e.detail.contains("outside the pool's tick range [-887272, 887272]"), "{}", e.detail);
+    // A range inside it is simulated.
+    assert!(sim_on(&fixture(), &[("usdc", "741"), ("low", "1e-20"), ("high", "spot")]).is_ok());
+    let api = include_str!("../../specs/core/api.yaml");
+    assert!(api.contains("RANGE_OUTSIDE_TICKS"));
 }

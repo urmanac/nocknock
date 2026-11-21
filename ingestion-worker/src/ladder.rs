@@ -23,6 +23,9 @@ pub(crate) const LADDER_NOCK_MATCH_TOLERANCE_BPS: f64 = 10.0;
 pub(crate) const LADDER_GRID_DEFAULT_TO_PCT: f64 = -40.0;
 pub(crate) const LADDER_GRID_DEFAULT_STEP_PCT: f64 = 5.0;
 pub(crate) const LADDER_GRID_MAX_ROWS: usize = 60;
+/// NOCK below this at spot is float noise from a sqrt round trip, not a holding: it is
+/// treated as exactly 0 wherever the NOCK a ladder needs decides an outcome (#166 review).
+pub(crate) const LADDER_NOCK_DUST: f64 = 1e-9;
 /// The id the hypothetical range carries inside the floor-crossing figure.
 pub(crate) const LADDER_POSITION_ID: &str = "hypothetical:ladder";
 /// What the result is, stated in every body.
@@ -649,7 +652,30 @@ pub(crate) fn simulate_ladder(env: &SnapshotEnvelope, req: &LadderRequest, now: 
             }
             (pool.range_from_ticks(t_low, t_high), rule)
         }
-        None => (pool.range_unsnapped(low, high), "unsnapped"),
+        None => {
+            // A bound past the protocol's tick range is a range that cannot exist.
+            for (what, p) in [("bottom", low), ("top", high)] {
+                let t = pool.tick_f(p);
+                if !t.is_finite() || t < MIN_TICK as f64 || t > MAX_TICK as f64 {
+                    return Err(LadderError::not_simulated(
+                        "RANGE_OUTSIDE_TICKS",
+                        format!(
+                            "the {what} ${} is at tick {}, outside the pool's tick range [{MIN_TICK}, {MAX_TICK}]: no such range can exist",
+                            fx(p, 8),
+                            fx(t, 2)
+                        ),
+                    ));
+                }
+            }
+            let mut r = pool.range_unsnapped(low, high);
+            if req.high == Bound::Spot {
+                // The top is the pool's own price: its own sqrt, not a USD round trip
+                // that can land one ulp off and leave dust NOCK in the range.
+                r.s_top = pool.s_now;
+                if pool.nock_is_token1 { r.sa = pool.s_now } else { r.sb = pool.s_now }
+            }
+            (r, "unsnapped")
+        }
     };
     if range.low_usd >= price {
         return Err(above_spot(range.low_usd));
@@ -677,6 +703,7 @@ pub(crate) fn simulate_ladder(env: &SnapshotEnvelope, req: &LadderRequest, now: 
     let Some((l, n0)) = pool.size(&range, req.usdc) else {
         return Err(above_spot(range.low_usd));
     };
+    let n0 = if n0 < LADDER_NOCK_DUST { 0.0 } else { n0 };
     let nock_check = match req.nock {
         None => "not_given",
         Some(n) => {
@@ -880,17 +907,39 @@ pub(crate) fn simulate_ladder(env: &SnapshotEnvelope, req: &LadderRequest, now: 
     };
 
     // The hypothetical range as one more read, for the floor-crossing price.
+    // Unsnapped bounds are rounded to whole ticks; a top at spot is rounded toward the
+    // side that holds no NOCK, so the rounded range holds none at spot either.
     let (tl, tu) = range.ticks.unwrap_or_else(|| {
-        let a = (range.sa * range.sa).ln() / 1.0001f64.ln();
-        let b = (range.sb * range.sb).ln() / 1.0001f64.ln();
-        (a.round() as i32, b.round() as i32)
+        let tick_of = |s: f64| (s * s).ln() / 1.0001f64.ln();
+        let t_top = tick_of(range.s_top);
+        let t_top = if req.high == Bound::Spot {
+            usable_tick_toward(t_top, 1, pool.nock_is_token1)
+        } else {
+            t_top.round() as i32
+        };
+        let t_bottom = tick_of(range.s_bottom).round() as i32;
+        (t_top.min(t_bottom), t_top.max(t_bottom))
     });
+    // On rounded ticks the same liquidity would hold slightly different NOCK at spot; it
+    // is rescaled so the hypothetical range holds exactly the NOCK the ladder needs (and
+    // floor_breach_effect takes exactly that out of the wallet).
+    let nock_of = |liq: u128| {
+        let (a0, a1) = concentrated_amounts_raw(liq, pool.template.sqrt_price_x96, tl, tu);
+        if pool.nock_is_token1 { a1 / 10f64.powi(pool.nock_dec) } else { a0 / 10f64.powi(pool.nock_dec) }
+    };
     let l_u128 = l.round().max(0.0) as u128;
-    let (ra0, ra1) = concentrated_amounts_raw(l_u128, pool.template.sqrt_price_x96, tl, tu);
+    let mut l_hyp = l_u128;
+    if range.ticks.is_none() && n0 > 0.0 {
+        let held = nock_of(l_hyp);
+        if held > 0.0 {
+            l_hyp = (l_hyp as f64 * n0 / held).round() as u128;
+        }
+    }
+    let (ra0, ra1) = concentrated_amounts_raw(l_hyp, pool.template.sqrt_price_x96, tl, tu);
     let ladder_raw = RawPosition {
         position_id: LADDER_POSITION_ID.to_string(),
         nft_id: 0,
-        liquidity: l_u128,
+        liquidity: l_hyp,
         tick_lower: tl,
         tick_upper: tu,
         amount0: ra0 / 10f64.powi(pool.template.token0.decimals),
@@ -1072,8 +1121,12 @@ fn floor_breach_effect(data: &SnapshotData, book: &StoredBook, ladder: &RawPosit
         ..Default::default()
     };
     let before = floor_breach_with(&rebuild(0.0, 0.0), &profile, &[]);
-    let after = floor_breach_with(&rebuild(n0, usdc), &profile, std::slice::from_ref(ladder));
-    let view = |f: &FloorBreach| json!({ "status": f.status, "crossing": f.crossing, "tolerated": f.tolerated, "reason": f.reason });
+    // NOCK is conserved at spot: what leaves the wallet is the hypothetical range's own
+    // NOCK on its (possibly rounded) ticks, not the unrounded figure.
+    let ladder_nock = if is_nock_token(&ladder.token1) { ladder.amount1 } else { ladder.amount0 };
+    let ladder_nock = if ladder_nock < LADDER_NOCK_DUST { 0.0 } else { ladder_nock };
+    let after = floor_breach_with(&rebuild(ladder_nock, usdc), &profile, std::slice::from_ref(ladder));
+    let view = |f: &FloorBreach| json!({ "status": f.status, "crossing": f.crossing, "tolerated": f.tolerated, "reason": f.reason, "nock_now": f.nock_now });
     let multiple = |f: &FloorBreach| f.crossing.as_ref().and_then(|c| c.multiple.as_deref()).and_then(|m| m.parse::<f64>().ok());
     let (status, reason): (&str, String) = if before.status == "no_floor" {
         ("no_floor", "no treasury_floor_nock is set".to_string())

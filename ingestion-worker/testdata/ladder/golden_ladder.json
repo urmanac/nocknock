@@ -36,6 +36,7 @@
               "price_usd": "0.019842",
               "status": "crosses"
             },
+            "nock_now": "109543",
             "reason": null,
             "status": "crosses",
             "tolerated": {
@@ -55,6 +56,7 @@
               "price_usd": "0.025404",
               "status": "crosses"
             },
+            "nock_now": "109543",
             "reason": null,
             "status": "crosses",
             "tolerated": {
@@ -384,6 +386,7 @@
               "price_usd": "0.018363",
               "status": "crosses"
             },
+            "nock_now": "109543",
             "reason": null,
             "status": "crosses",
             "tolerated": {
@@ -403,6 +406,7 @@
               "price_usd": "0.025404",
               "status": "crosses"
             },
+            "nock_now": "109543",
             "reason": null,
             "status": "crosses",
             "tolerated": {
@@ -752,6 +756,7 @@
               "price_usd": "0.025404",
               "status": "crosses"
             },
+            "nock_now": "109543",
             "reason": null,
             "status": "crosses",
             "tolerated": {
@@ -771,6 +776,7 @@
               "price_usd": "0.025404",
               "status": "crosses"
             },
+            "nock_now": "109543",
             "reason": null,
             "status": "crosses",
             "tolerated": {
@@ -1100,6 +1106,7 @@
               "price_usd": "0.025404",
               "status": "crosses"
             },
+            "nock_now": "109543",
             "reason": null,
             "status": "crosses",
             "tolerated": {
@@ -1119,6 +1126,7 @@
               "price_usd": "0.025404",
               "status": "crosses"
             },
+            "nock_now": "109543",
             "reason": null,
             "status": "crosses",
             "tolerated": {

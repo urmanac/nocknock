@@ -632,7 +632,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/LadderError' }
         '422':
-          description: LADDER_NOT_SIMULATED; `code` is NOCK_TOO_LITTLE, NOCK_TOO_MUCH, USDC_EXCEEDS_WALLET, RANGE_ABOVE_SPOT, RANGE_TOO_NARROW, POOL_NOT_SNAPPABLE or SPOT_UNAVAILABLE. A NOCK mismatch carries nock_needed (a measured figure) and the bounds.
+          description: LADDER_NOT_SIMULATED; `code` is NOCK_TOO_LITTLE, NOCK_TOO_MUCH, USDC_EXCEEDS_WALLET, RANGE_ABOVE_SPOT, RANGE_TOO_NARROW, RANGE_OUTSIDE_TICKS (an unsnapped bound past MIN_TICK or MAX_TICK, a range that cannot exist), POOL_NOT_SNAPPABLE or SPOT_UNAVAILABLE. A NOCK mismatch carries nock_needed (a measured figure) and the bounds.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LadderError' }
@@ -1044,7 +1044,7 @@ components:
         error: { type: string, enum: [INVALID_PARAMETER, LADDER_NOT_SIMULATED] }
         code:
           type: string
-          enum: [NOCK_TOO_LITTLE, NOCK_TOO_MUCH, USDC_EXCEEDS_WALLET, RANGE_ABOVE_SPOT, RANGE_TOO_NARROW, POOL_NOT_SNAPPABLE, SPOT_UNAVAILABLE]
+          enum: [NOCK_TOO_LITTLE, NOCK_TOO_MUCH, USDC_EXCEEDS_WALLET, RANGE_ABOVE_SPOT, RANGE_TOO_NARROW, RANGE_OUTSIDE_TICKS, POOL_NOT_SNAPPABLE, SPOT_UNAVAILABLE]
         detail: { type: string }
         nock_needed: { type: string, description: NOCK the range needs at the pool price for this USDC, 4 dp }
         bounds: { $ref: '#/components/schemas/LadderBounds' }
@@ -1179,7 +1179,7 @@ components:
               type: object
               properties:
                 status: { type: string, enum: [none, lowers, raises, unchanged, changes, no_floor, unknown] }
-                before: { type: object, nullable: true }
+                before: { type: object, nullable: true, description: "floor_breach status, crossing, tolerated, reason and nock_now (tracked NOCK at spot; equal before and after: the ladder's NOCK moves from the wallet into the range)" }
                 after: { type: object, nullable: true }
                 reason: { type: string }
                 assumption: { type: string, nullable: true }
