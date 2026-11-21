@@ -23,6 +23,8 @@ export interface ClosedPositionLike {
   position_manager?: string;
   first_seen_closed_at?: string | null;
   supplies_spot_price?: boolean;
+  /** `tracked` when it was a database row found on-chain, not a config.yaml entry. */
+  source?: string | null;
 }
 
 /** The snapshot's closed positions; empty when the snapshot lists none. */
@@ -52,6 +54,10 @@ export const CLOSED_NOT_COUNTED = 'not counted in any total';
  * leave the worker without a price.
  */
 export function closedPositionConfigHint(c: ClosedPositionLike): string {
+  // A position found on-chain and tracked from the database has no config.yaml entry.
+  if (c.source) {
+    return 'it was tracked from the chain, not from config.yaml: UNTRACK (under Found on-chain) removes it from this list';
+  }
   if (c.supplies_spot_price === true) {
     return 'its pool still supplies the NOCK/USD spot: flag another position as is_price_source before removing its entry from config.yaml';
   }

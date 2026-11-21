@@ -177,6 +177,10 @@ function Body({
       {s.after_deposit && (
         <div data-testid="ladder-after-deposit" style={{ ...muted, marginTop: 4 }}>
           {s.after_deposit.text}
+          {/* When this cycle's check for new positions did not run, it says so here. */}
+          {s.after_deposit.detection_note && (
+            <span data-testid="ladder-after-deposit-note" style={{ color: '#f59e0b' }}> {s.after_deposit.detection_note}</span>
+          )}
         </div>
       )}
       {!compact && (s.assumptions?.length ?? 0) > 0 && (

@@ -17,6 +17,8 @@ import { AccumulationPlanPanel } from './AccumulationPlanPanel';
 import { NotificationTestPanel } from './NotificationTestPanel';
 import { LadderSuggestionLiteCard } from './LadderSuggestionCard';
 import { ladderSuggestionOf } from '../ladderSuggestion';
+import { FoundPositionsLiteCard } from './FoundPositions';
+import { positionDetectionOf } from '../foundPositions';
 
 const card: React.CSSProperties = {
   background: '#161b22',
@@ -109,6 +111,11 @@ export function LiteStatusCard() {
           cardStyle={card}
           labelStyle={label}
         />
+      ) : null}
+      {/* Found on-chain (v0.9.0): the same block as the dashboard's, with the same
+          one-tap buttons, right under the ladder card. */}
+      {snapshot ? (
+        <FoundPositionsLiteCard detection={positionDetectionOf(snapshot.data)} onChanged={refetch} cardStyle={card} labelStyle={label} />
       ) : null}
       {snapshot && metrics?.accumulation_plan ? (
         <section style={card}>

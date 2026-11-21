@@ -61,8 +61,8 @@ describe('LadderSuggestionCard (#168)', () => {
     expect(html).toContain('Tax reserve: $8.70 (stated, not a gate).');
     expect(html).toMatch(/Cash target: \$[\d.]+ \(5% of the portfolio; stated, not a gate\)\./);
     expect(html).toContain('Assumptions: The amount is the most');
-    // The after-deposit fallback is one short sentence.
-    expect(html).toContain('Automatic tracking of a new ladder position is not built yet');
+    // After a deposit nothing is typed: the worker finds the position (v0.9.0).
+    expect(html).toContain('After you deposit there is nothing to copy or configure.');
     expect(html).not.toContain('deploy.sh');
     expect(html).not.toMatch(NO_INPUT);
     expect(html).not.toMatch(IMPERATIVE);

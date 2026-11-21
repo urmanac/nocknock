@@ -1745,3 +1745,65 @@ async fn test_the_scan_block_is_out_of_the_state_hash_and_the_block_is_absent_fr
     assert!(attach < suggest);
     assert_eq!(SNAPSHOT_SPEC_VERSION, "2.9.0", "additive under 2.9.0; the next minor is another branch's");
 }
+
+#[test]
+fn test_the_specs_document_the_block_and_the_five_routes() {
+    let api: serde_yaml::Value = serde_yaml::from_str(include_str!("../../specs/core/api.yaml")).expect("api.yaml parses");
+    for (path, method) in [
+        ("/positions/found", "get"),
+        ("/positions/track", "post"),
+        ("/positions/untrack", "post"),
+        ("/positions/dismiss", "post"),
+        ("/positions/restore", "post"),
+    ] {
+        assert!(api["paths"][path][method].is_mapping(), "specs/core/api.yaml has {method} {path}");
+        // The worker routes it under /v1, inside the cross-site guard.
+        assert!(include_str!("api.rs").contains(&format!("\"/v1{path}\"")), "{path} is routed");
+    }
+    // Every write takes a JSON body with exactly the fields the handler reads.
+    let required = |path: &str| -> Vec<String> {
+        api["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"]["required"]
+            .as_sequence()
+            .unwrap_or_else(|| panic!("{path} declares its required body fields"))
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(required("/positions/track"), vec!["nft_id", "as"]);
+    assert_eq!(required("/positions/untrack"), vec!["position_id"]);
+    assert_eq!(required("/positions/dismiss"), vec!["nft_id"]);
+    assert_eq!(required("/positions/restore"), vec!["nft_id"]);
+    let api_text = include_str!("../../specs/core/api.yaml");
+    for code in ["UNKNOWN_CHOICE", "CONFIG_POSITION", "NOT_ELIGIBLE", "CHOICE_NOT_OFFERED", "NOT_OWNED", "EMPTY", "CHAIN_UNAVAILABLE", "NOT_TRACKED", "NOT_AN_OFFER", "TRACKED_POSITIONS_UNAVAILABLE"] {
+        assert!(api_text.contains(code), "specs/core/api.yaml names {code}");
+        assert!(include_str!("position_detect.rs").contains(code) || include_str!("claims.rs").contains(code), "{code} is an error the worker returns");
+    }
+
+    let snap_text = include_str!("../../specs/core/snapshot.yaml");
+    let snap: serde_yaml::Value = serde_yaml::from_str(snap_text).expect("snapshot.yaml parses");
+    assert_eq!(snap["info"]["version"].as_str(), Some("2.9.0"), "additive under 2.9.0");
+    let prop = &snap["components"]["schemas"]["DerivedMetrics"]["properties"]["position_detection"];
+    assert!(prop.is_mapping(), "DerivedMetrics.position_detection is in the schema");
+    assert_eq!(prop["nullable"].as_bool(), Some(true));
+    // Every key the worker's block carries is named in the spec, and so is every status,
+    // tracked state and choice.
+    let golden: Value = serde_json::from_str(include_str!("../testdata/position_detect/golden_position_detect.json")).unwrap();
+    let block = &golden["found_not_counted"]["position_detection"];
+    for key in block.as_object().unwrap().keys() {
+        assert!(prop["properties"].get(key.as_str()).is_some(), "the schema lists position_detection.{key}");
+    }
+    for key in block["found_not_counted"]["positions"][0].as_object().unwrap().keys().chain(golden["tracked_by_itself"]["position_detection"]["tracked"][0].as_object().unwrap().keys()) {
+        if !["protocol", "pool_id", "pool_label", "tick_lower", "tick_upper", "bounds_usd", "in_range", "holds", "mint_tx", "minted_by", "received_from", "config_id"].contains(&key.as_str()) {
+            assert!(snap_text.contains(key.as_str()), "specs/core/snapshot.yaml names {key}");
+        }
+    }
+    for word in [
+        "ok | partial |", "unavailable | not_run", "counted | empty | closed | not_owned | shadowed_by_config | quarantined |",
+        "ladder:<rung> | lp | dismiss", "detected | confirmed", "found_untracked", "tracked_automatically",
+        "Position.source, LadderReading.source and", "ClosedPosition.source", "never a partial sum", "left out of the state hash",
+    ] {
+        assert!(snap_text.contains(word), "specs/core/snapshot.yaml says: {word}");
+    }
+    // The fallback of the past is named only as what an older snapshot carried.
+    assert!(snap_text.contains("manual_config in a snapshot stored before"));
+}

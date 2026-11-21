@@ -6,7 +6,8 @@
  * The card needs no input: it states whether a NOCK ladder fits the operator's own
  * rules, what it would do in plain words, and the numbered deposits with their links.
  * It shows only while the snapshot is fresh. NockNock signs and sends nothing, and the
- * links prefill no amount.
+ * links prefill no amount. After a deposit nothing is typed either: the worker finds the
+ * new position on-chain (foundPositions.ts).
  */
 import type { SyncStatus } from './hooks/useFreshness';
 
@@ -79,7 +80,10 @@ export interface LadderSuggestion {
   outcomes: LadderOutcome[];
   picture: LadderPictureData | null;
   candidates: { rows: LadderCandidateRow[]; to_pct?: string; step_pct?: string; reason?: string | null } | null;
-  after_deposit: { kind: string; is?: string; text: string; config_snippets?: string[] } | null;
+  /** How a deposited rung becomes tracked: `tracked_automatically` since v0.9.0 (the
+   *  worker finds the new position NFT on-chain); `detection_note` says so when this
+   *  cycle's check did not run. `manual_config` in a snapshot stored before that. */
+  after_deposit: { kind: string; is?: string; text: string; config_snippets?: string[]; detection_status?: string | null; detection_note?: string | null } | null;
   statement: string;
   excluded?: { position_id: string; reason: string }[];
   stated?: { lines?: string[]; note?: string } | null;

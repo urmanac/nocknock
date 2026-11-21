@@ -87,9 +87,11 @@ export function ladderRangeLine(r: LadderReading): string {
   return `${low} – ${high}${vs}${open}`;
 }
 
-/** "rung near" or "rung unset". */
+/** "rung near" or "rung unset", and "found on-chain" for a ladder that comes from a
+ *  database row (v0.9.0) rather than a config.yaml entry. */
 export function ladderRungText(r: LadderReading): string {
-  return r.rung ? `rung ${r.rung}` : 'rung unset';
+  const rung = r.rung ? `rung ${r.rung}` : 'rung unset';
+  return (r as { source?: string | null }).source ? `${rung} · found on-chain` : rung;
 }
 
 export function ladderHoldsLine(r: LadderReading): string {

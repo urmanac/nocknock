@@ -70,11 +70,46 @@ info:
       target (stated, not gates); deep_link prefills the pool and range, never the
       amount (the app was observed on 2026-11-21 to drop one), and states
       amount_to_enter beside it; picture is the data of the card's price-axis drawing;
-      after_deposit (kind manual_config today) is the one field that says how a minted
-      rung becomes tracked. It never changes shot_advice_action or shot_advice_details.
+      after_deposit is the one field that says how a deposited rung becomes tracked:
+      kind tracked_automatically (position detection, below; `text` says what the worker
+      does with no promised duration, and `detection_status` / `detection_note` state a
+      check that did not run this cycle); manual_config in a snapshot stored before
+      detection existed. It never changes shot_advice_action or shot_advice_details.
       Position.fee_raw and Position.hooks (uniswap-v4 only; absent when not read): the
       poolKeys fee in hundredths of a basis point (30000 = 3%) and the hooks address,
       for the new-position link.
+    - Positions found on-chain (v0.9.0; issue #145 for Uniswap v4), also additive. With
+      no database-tracked position and no detection block no byte of an earlier
+      snapshot changes. DerivedMetrics.position_detection (absent in a snapshot stored
+      before it: not reported, never "nothing found"): `status` ok | partial |
+      unavailable | not_run, with `reason` whenever it is not ok (what is missing, or
+      why the check could not run and when the transfers were last read); `scan`
+      (coverage complete | partial | none, sources.transfer_logs and
+      sources.transfer_index, logs_from_block, logs_behind_blocks and `text`: how far
+      back the wallet's position-NFT transfers were read); `onchain_count` (held: the
+      position manager's balanceOf for the wallet; known: the NFTs the scan knows as
+      the wallet's); `tracked[]` (each database row: position_id, nft_id, role, rung,
+      rung_note, source detected | confirmed, deposit_tx, mint_block, tracked_at,
+      state counted | empty | closed | not_owned | shadowed_by_config | quarantined |
+      not_read, note, choices); `found_not_counted` and `dismissed` (count, value_usd,
+      value_note, positions[]): every position the wallet holds in a whitelisted pool
+      that is NOT in positions[] and NOT in any total, with what it holds, its
+      value at this cycle's prices, why it was not tracked by itself
+      (why_not_automatic) and the one-tap choices (ladder:<rung> | lp | dismiss).
+      value_usd is null with value_note when it cannot be stated, and a list's total
+      is null when any member's is: never a partial sum. `ignored` counts the NFTs
+      never listed, by reason (not_whitelisted, empty, not_owned, hooks, unsupported,
+      gone, in_config). last_checked_at and checked_at_block change every cycle and
+      are left out of the state hash. Position.source, LadderReading.source and
+      ClosedPosition.source: "tracked" for a position that comes from a database row,
+      absent for a config.yaml entry (config_id then names no config entry, and the
+      closed and rung notes name UNTRACK instead of config.yaml).
+      ladder_suggestion gains status found_untracked (a position found on-chain that
+      could be a ladder rung waits for a tap: no new ladder is measured beside it,
+      `found_untracked` lists it); tracked[].source says a tracked ladder was found
+      on-chain; a tracked ladder whose reading is `empty` is listed and no longer
+      stops a new measurement (gates.ladder_tracked.reason says so). lp_rebuild
+      excludes a row tracked as LP with its own reason (never a rebuild target).
 
     2.8.3 (the standing protected cash reserve, issue #162), additive:
     - GlobalStatus.cash_reserve_usdc, reserve_stable_usdc, reserve_headroom_usdc
@@ -899,6 +934,30 @@ components:
             file; the worker's golden bodies are in
             ingestion-worker/testdata/ladder_suggest/golden_ladder_suggest.json. Absent
             in a snapshot stored before it: not reported, never "nothing fits".
+        position_detection:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: |
+            Positions found on-chain (2.9.0; issue #145 for Uniswap v4): whether the
+            wallet's new position NFTs were looked for and how far back, the positions
+            tracked from the database, and every position found and NOT counted, with
+            its value. Shape and statuses are in the 2.9.0 notes at the top of this
+            file; the worker's golden bodies, built from recorded chain answers, are in
+            ingestion-worker/testdata/position_detect/golden_position_detect.json.
+            Absent in a snapshot stored before it: not reported, never "nothing found".
+          properties:
+            status: { type: string, enum: [ok, partial, unavailable, not_run] }
+            reason: { type: string, nullable: true }
+            last_checked_at: { type: string, format: date-time, nullable: true, description: 'When the transfers were last read; not part of the state hash' }
+            checked_at_block: { type: integer, nullable: true, description: 'The block every read of this cycle named; not part of the state hash' }
+            scan: { type: object, additionalProperties: true }
+            onchain_count: { type: object, additionalProperties: true }
+            tracked: { type: array, items: { type: object, additionalProperties: true } }
+            found_not_counted: { type: object, additionalProperties: true }
+            dismissed: { type: object, additionalProperties: true }
+            ignored: { type: object, additionalProperties: { type: integer } }
+            statement: { type: string }
 
     FloorBreach:
       type: object
