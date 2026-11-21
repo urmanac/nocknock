@@ -37,6 +37,14 @@ pub fn ladder_suggestion_lines(data: &Value, health: Option<&str>) -> String {
     };
     let status = s(l, "/status").unwrap_or("unavailable");
     let reason = s(l, "/reason").unwrap_or("");
+    // A ready card that is not shown is the stored row read back after a restart (its
+    // links, amounts to enter and limits are left out of it): never printed as a live card.
+    if status == "ready" && l.get("shown").and_then(|v| v.as_bool()) == Some(false) {
+        return format!(
+            "• Ladder suggestion: not available until the first cycle after a restart. The stored row read \"{}\". {reason}\n",
+            s(l, "/headline").unwrap_or("")
+        );
+    }
     if status != "ready" {
         let mut out = format!("• Ladder suggestion: {} ({status}) {reason}\n", s(l, "/headline").unwrap_or("Ladder: not shown."));
         if status == "needs_setting" {

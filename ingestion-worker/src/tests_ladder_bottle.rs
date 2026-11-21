@@ -808,6 +808,15 @@ fn test_golden_ladder_bottle_text() {
     let env = fresh();
     let l = card(&env);
     doc.insert("bottle_stale".to_string(), json!({ "health": "degraded", "ladder_suggestion": l, "text": text(&env, &l, Some("degraded")) }));
+    // The stored row read back after a restart, with a healthy worker: both transports
+    // say the card is not available until the first cycle (second review of the bottle).
+    let mut stored_env = fresh();
+    stored_env.data.derived_metrics.ladder_suggestion = Some(card(&stored_env));
+    let mut stored = serde_json::to_value(&stored_env.data).unwrap();
+    slim_stored_data(&mut stored);
+    let sl = stored["derived_metrics"]["ladder_suggestion"].clone();
+    let st_text = crate::ladder_suggest_text::ladder_suggestion_lines(&json!({ "derived_metrics": { "ladder_suggestion": sl } }), Some("ok"));
+    doc.insert("bottle_stored_row".to_string(), json!({ "health": "ok", "ladder_suggestion": sl, "text": st_text }));
     let actual = format!("{}\n", serde_json::to_string_pretty(&Value::Object(doc)).unwrap());
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/ladder_suggest/golden_ladder_bottle.json");
     if std::env::var("NOCKNOCK_BLESS_GOLDEN").is_ok() {

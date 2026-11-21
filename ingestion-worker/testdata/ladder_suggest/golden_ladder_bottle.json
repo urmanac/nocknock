@@ -2108,6 +2108,223 @@
     },
     "text": "• Ladder suggestion: not shown: the snapshot is not fresh (worker health: degraded). It shows again on a fresh cycle.\n"
   },
+  "bottle_stored_row": {
+    "health": "ok",
+    "ladder_suggestion": {
+      "after_deposit": null,
+      "assumptions": null,
+      "candidates": null,
+      "detail_note": "the deposit links, texts, limits, picture, gates and outcomes are left out of the stored row: the latest snapshot in the worker's memory carries it, and the next cycle measures it again",
+      "excluded": [],
+      "fit": null,
+      "found_note": null,
+      "freshness_rule": "Shown only while the snapshot is fresh: the dashboard's sync status is not stale, or the worker's health is ok.",
+      "gates": null,
+      "headline": "Ladder: 3 of 3 deposits left, up to $766.97 USDC and about 87 NOCK.",
+      "id": "ladder_suggestion:NOCK",
+      "minimum_usdc": "1.00",
+      "mint_note": null,
+      "missing": [],
+      "numbers": {
+        "avg_buy_price_usd": "0.01066922",
+        "binding": "reserve",
+        "cash_reserve_usdc": "950.00",
+        "existing_ranges_usdc_at_gate": "171.15",
+        "existing_ranges_usdc_now": "223.71",
+        "gate_price_usd": "0.01000000",
+        "headroom_usdc": "766.99",
+        "lp_nock_budget": "86.7891",
+        "nock_at_bottom": "71974.8945",
+        "nock_bought_at_bottom": "71888.1054",
+        "nock_now": "86.7891",
+        "pool_price_usd": "0.01294400",
+        "shape_rest_usdc": "765.76",
+        "shape_total_usdc": "766.99",
+        "shape_tracked_usdc": "0.00",
+        "stable_at_gate_usdc": "950.02",
+        "usdc_max": "766.97",
+        "wallet_usdc": "1545.84",
+        "wallet_usdc_after": "778.87"
+      },
+      "outcomes": null,
+      "picture": null,
+      "reason": "This is the stored row of the ladder card: its links, amounts to enter, limits, picture and outcomes are left out of it. The next cycle shows the whole card again.",
+      "rungs": [
+        {
+          "fee_estimate": {
+            "reason": "the fee estimate is left out of the stored row: the latest snapshot in the worker's memory carries it, and the next cycle measures it again",
+            "status": "unavailable"
+          },
+          "index": 1,
+          "mint": {
+            "amount0_raw": "1225999",
+            "amount1_raw": "867890958577132038",
+            "liquidity_raw": "138192109253769"
+          },
+          "nock": {
+            "amount": "86.7890958577132038",
+            "raw": "867890958577132038",
+            "to_enter": "86.7890"
+          },
+          "of": 3,
+          "pool": {
+            "label": "the USDC/NOCK 3% v4 pool",
+            "network": "base",
+            "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+            "position_id": "uniswap-v4:base:3163450",
+            "protocol": "uniswap-v4"
+          },
+          "rung": "cap",
+          "status": "to_deposit",
+          "summary": "about 86.79 NOCK + $1.22 USDC, in range now",
+          "tick_lower": 273600,
+          "tick_upper": 273900,
+          "usdc": {
+            "amount": "1.225999",
+            "raw": "1225999",
+            "to_enter": "1.22"
+          }
+        },
+        {
+          "fee_estimate": {
+            "reason": "the fee estimate is left out of the stored row: the latest snapshot in the worker's memory carries it, and the next cycle measures it again",
+            "status": "unavailable"
+          },
+          "index": 2,
+          "mint": {
+            "amount0_raw": "114864600",
+            "amount1_raw": "0",
+            "liquidity_raw": "1408301615002237"
+          },
+          "nock": {
+            "amount": "0.0000000000000000",
+            "raw": "0",
+            "to_enter": "0.0000"
+          },
+          "of": 3,
+          "pool": {
+            "label": "the USDC/NOCK 3% v4 pool",
+            "network": "base",
+            "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+            "position_id": "uniswap-v4:base:3163450",
+            "protocol": "uniswap-v4"
+          },
+          "rung": "near",
+          "status": "to_deposit",
+          "summary": "$114.86 USDC, no NOCK, below the price now",
+          "tick_lower": 273900,
+          "tick_upper": 275400,
+          "usdc": {
+            "amount": "114.864600",
+            "raw": "114864600",
+            "to_enter": "114.86"
+          }
+        },
+        {
+          "fee_estimate": {
+            "reason": "the fee estimate is left out of the stored row: the latest snapshot in the worker's memory carries it, and the next cycle measures it again",
+            "status": "unavailable"
+          },
+          "index": 3,
+          "mint": {
+            "amount0_raw": "650899400",
+            "amount1_raw": "0",
+            "liquidity_raw": "14125167068081104"
+          },
+          "nock": {
+            "amount": "0.0000000000000000",
+            "raw": "0",
+            "to_enter": "0.0000"
+          },
+          "of": 3,
+          "pool": {
+            "label": "the USDC/NOCK 3% v4 pool",
+            "network": "base",
+            "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
+            "position_id": "uniswap-v4:base:3163450",
+            "protocol": "uniswap-v4"
+          },
+          "rung": "deep",
+          "status": "to_deposit",
+          "summary": "$650.89 USDC, no NOCK, below the price now",
+          "tick_lower": 275400,
+          "tick_upper": 276300,
+          "usdc": {
+            "amount": "650.899400",
+            "raw": "650899400",
+            "to_enter": "650.89"
+          }
+        }
+      ],
+      "sentence": "Your ladder shape in the USDC/NOCK 3% v4 pool: 3 of 3 deposits are left, holding up to $766.97 USDC and 86.79 NOCK now: sized to leave the stable balance at or above your $950 reserve at $0.01. Fully converted at $0.01002 they would hold about 71,975 NOCK, about 71,888 of it bought, at an average of $0.01067.",
+      "shape": {
+        "below_minimum": 0,
+        "deployed": 0,
+        "found": 0,
+        "held": 0,
+        "left": 3,
+        "none": 0,
+        "of": 3,
+        "over": 0,
+        "passed": 0,
+        "rest_rule": "what the reserve gate allows now, less the cap's USDC: no near or deep rung is deposited yet, so this follows the gate until one is",
+        "rest_usdc": "765.76",
+        "rungs": [
+          {
+            "counterparts": [],
+            "found": [],
+            "index": 1,
+            "of": 3,
+            "remaining_usdc": "1.22",
+            "rung": "cap",
+            "status": "to_deposit",
+            "text": "Deposit 1 of 3 (cap): left to deposit, about 86.79 NOCK + $1.22 USDC.",
+            "tick_lower": 273600,
+            "tick_upper": 273900
+          },
+          {
+            "counterparts": [],
+            "found": [],
+            "index": 2,
+            "of": 3,
+            "remaining_usdc": "114.86",
+            "rung": "near",
+            "status": "to_deposit",
+            "text": "Deposit 2 of 3 (near rung): left to deposit, $114.86 USDC.",
+            "tick_lower": 273900,
+            "tick_upper": 275400
+          },
+          {
+            "counterparts": [],
+            "found": [],
+            "index": 3,
+            "of": 3,
+            "remaining_usdc": "650.89",
+            "rung": "deep",
+            "status": "to_deposit",
+            "text": "Deposit 3 of 3 (deep rung): left to deposit, $650.89 USDC.",
+            "tick_lower": 275400,
+            "tick_upper": 276300
+          }
+        ],
+        "source": "operator_profile.ladder_rungs",
+        "status": "computed",
+        "total_usdc": "766.99",
+        "tracked_usdc": "0.00",
+        "unmatched": []
+      },
+      "shown": false,
+      "stated": null,
+      "statement": "A measurement from this cycle's reads of what your ladder shape would do. NockNock does not choose the shape, the bottom or the amounts, builds no transaction, and signs and sends nothing.",
+      "status": "ready",
+      "tier": "top",
+      "token": "NOCK",
+      "tracked": [],
+      "wallet_after": null,
+      "what_changed": "Your ladder shape has 3 of 3 deposits left in the USDC/NOCK 3% v4 pool: up to $766.97 USDC and about 87 NOCK."
+    },
+    "text": "• Ladder suggestion: not available until the first cycle after a restart. The stored row read \"Ladder: 3 of 3 deposits left, up to $766.97 USDC and about 87 NOCK.\". This is the stored row of the ladder card: its links, amounts to enter, limits, picture and outcomes are left out of it. The next cycle shows the whole card again.\n"
+  },
   "cap_and_near_deployed": {
     "health": "ok",
     "ladder_suggestion": {

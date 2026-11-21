@@ -643,3 +643,22 @@ fn test_a_near_rung_minted_a_band_ago_is_matched_by_its_bottom_tick_and_tracked(
         assert!(matches!(crate::position_detect::decide(&far, OPERATOR, &suggested, &[]), Decision::Offer { .. }), "{ticks}");
     }
 }
+
+#[test]
+fn test_after_a_restart_both_transports_say_the_stored_card_is_not_available() {
+    let mut env = fresh();
+    env.data.derived_metrics.ladder_suggestion = Some(card(&env));
+    let mut stored = serde_json::to_value(&env.data).unwrap();
+    slim_stored_data(&mut stored);
+    // The worker's /v1/mcp builds get_shot_advice this way (mcp_http.rs); the stdio binary
+    // runs the same text module on the same row (mcp_bin_tests_ladder_suggest.rs).
+    let advice = crate::mcp_text::format_shot_advice_text(&stored);
+    let text = crate::ladder_suggest_text::with_ladder_suggestion(&advice, &stored, Some("ok"));
+    assert!(text.contains("• Ladder suggestion: not available until the first cycle after a restart. The stored row read \"Ladder: 3 of 3 deposits left, up to $766.97 USDC and about 87 NOCK.\". This is the stored row of the ladder card"), "{text}");
+    for banned in ["$?", "Deposit link: none (not built)", "Deposit 1 of 3", "Amount to enter", "NOCK budget: unknown"] {
+        assert!(!text.contains(banned), "{banned} in {text}");
+    }
+    // The live card in memory still prints in full.
+    let live = crate::ladder_suggest_text::with_ladder_suggestion(&advice, &serde_json::to_value(&env.data).unwrap(), Some("ok"));
+    assert!(live.contains("Deposit 1 of 3 (cap)") && live.contains("Amount to enter in the app"));
+}

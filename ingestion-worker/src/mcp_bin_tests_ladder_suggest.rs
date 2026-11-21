@@ -56,6 +56,12 @@ fn test_stdio_prints_the_bottle_the_worker_prints() {
     }
     assert_eq!(bottle.matches("Fees while in range (an estimate): $").count(), 3);
     assert!(g["bottle_stale"]["text"].as_str().unwrap().contains("not fresh"));
+    // The stored row after a restart, with a healthy worker: not printed as a live card.
+    let stored = g["bottle_stored_row"]["text"].as_str().unwrap();
+    assert!(stored.starts_with("• Ladder suggestion: not available until the first cycle after a restart."), "{stored}");
+    for banned in ["$?", "Deposit link: none (not built)", "Deposit 1 of 3", "Amount to enter"] {
+        assert!(!stored.contains(banned), "{banned} in {stored}");
+    }
     assert!(g["deep_deployed"]["text"].as_str().unwrap().contains("Deposit 3 of 3 (deep rung): done."));
     assert!(g["all_deployed"]["text"].as_str().unwrap().contains("Ladder deployed: all 3 deposits are done."));
     assert!(g["near_passed"]["text"].as_str().unwrap().contains("Deposit 2 of 3 (near rung): passed."));
