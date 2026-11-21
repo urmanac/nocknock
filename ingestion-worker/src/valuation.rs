@@ -96,6 +96,8 @@ pub(crate) fn build_position_snapshots(raw_positions: &[RawPosition], nock_usd: 
                 full_range: is_full_range(p.tick_lower, p.tick_upper),
                 // Filled by apply_position_facts for the protocols that have them.
                 tick_spacing: None,
+                fee_raw: None,
+                hooks: None,
                 staked_in_gauge: None,
                 fees_note: None,
                 // Filled by apply_aero_rewards for Aero positions whose gauge was read.
@@ -129,6 +131,8 @@ pub(crate) fn apply_position_facts(positions: &mut [Position], facts: &HashMap<S
     for p in positions.iter_mut() {
         if let Some(f) = facts.get(&p.position_id) {
             p.tick_spacing = f.tick_spacing;
+            p.fee_raw = f.fee_raw;
+            p.hooks = f.hooks.clone();
             p.staked_in_gauge = f.staked_in_gauge.clone();
             p.fees_note = f.fees_note.clone();
         }

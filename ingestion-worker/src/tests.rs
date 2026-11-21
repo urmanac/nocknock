@@ -55,6 +55,7 @@
             tax_reserve_ratio: 0.40,
             target_weights_bps: TargetWeightsBps { treasury: 8000, uniswap_lp: 1500, cash: 500 },
             cash_reserve_usdc: None,
+            ladder_bottom_usd: None,
         }
     }
 
@@ -1812,6 +1813,7 @@ database_url: "postgresql://localhost/test"
                 lp_rebuild: LpRebuild::default(),
                 cost_basis: None,
                 floor_breach: None,
+                ladder_suggestion: None,
                 asset_aggregation_series: AssetAggregationSeries {
                     time_points: vec!["2026-10-11T00:00:00Z".to_string()],
                     safe_haven_series: vec!["48.00".to_string()],
@@ -3651,7 +3653,7 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
         let derived_metrics = compute_derived_metrics_with_plan(
             &raw, prev_hwm, profile, compute_structural_channels_sync(history), counterfactual, ledger, regime, plan,
         );
-        SnapshotData {
+        let mut data = SnapshotData {
             ladders: Vec::new(),
             closed_positions: vec![],
             wallet_balances: raw.wallet_balances,
@@ -3660,7 +3662,10 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
             concentrated_liquidity: raw.concentrated_liquidity,
             contract_fees: raw.contract_fees,
             derived_metrics,
-        }
+        };
+        // As run_ingestion_cycle does after assembling the snapshot (#168).
+        attach_ladder_suggestion(&mut data, profile, t("2026-11-15T12:00:00Z"));
+        data
     }
 
     fn golden_case(data: &SnapshotData) -> serde_json::Value {

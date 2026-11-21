@@ -544,6 +544,7 @@ fn test_profile() -> OperatorProfile {
         tax_reserve_ratio: 0.40,
         target_weights_bps: TargetWeightsBps { treasury: 6500, uniswap_lp: 3000, cash: 500 },
         cash_reserve_usdc: None,
+        ladder_bottom_usd: None,
     }
 }
 

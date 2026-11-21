@@ -29,6 +29,9 @@ mod ladder_text;
 // Tracked ladders (issue #167): the same lines as the worker's mcp_text.
 #[path = "../ladder_track_text.rs"]
 mod ladder_track_text;
+// The ladder suggestion (issue #168): the same section as the worker's /v1/mcp.
+#[path = "../ladder_suggest_text.rs"]
+mod ladder_suggest_text;
 
 /// Worker base URL when NOCKNOCK_API_URL is unset. Point the variable at a remote
 /// deployment (e.g. `http://chudmax:8081`) to read it instead of a local worker.
@@ -118,7 +121,7 @@ async fn main() -> Result<()> {
                             },
                             {
                                 "name": "get_shot_advice",
-                                "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics, with uncollected LP fees, collectible AERO rewards and their total as separate labelled lines. The harvest rule counts LP fees only.",
+                                "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics, with uncollected LP fees, collectible AERO rewards and their total as separate labelled lines. The harvest rule counts LP fees only. Also states the ladder suggestion (#168): whether a NOCK ladder fits your bottom setting and standing reserve, its range, the most USDC the reserve allows and the deposit link (no amount prefilled), as a measurement shown only on a fresh snapshot.",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {},
@@ -274,14 +277,17 @@ async fn handle_tool_call(client: &Client, tool_name: &str, args: Option<&Value>
         if let Ok(snap) = resp.json::<Value>().await {
             if status.is_success() {
                 if let Some(data) = snap.get("data") {
+                    let health = worker_health(client).await;
                     let body = match tool_name {
                         "get_portfolio_state" => format_portfolio_state(data),
-                        "get_shot_advice" => format_shot_advice(data),
+                        // The ladder suggestion (#168), shown only on a fresh snapshot.
+                        "get_shot_advice" => {
+                            ladder_suggest_text::with_ladder_suggestion(&format_shot_advice(data), data, health.as_deref())
+                        }
                         "simulate_claim_fees" => format_claim_simulation(data),
                         "get_accumulation_plan" => format_accumulation_plan(data),
                         _ => return (format!("Unknown tool: {tool_name}"), false),
                     };
-                    let health = worker_health(client).await;
                     return (format!("{body}\n{}", snapshot_source_line(&snap, health.as_deref())), false);
                 }
             } else if let Some(text) = no_snapshot_text(&snap) {
@@ -792,3 +798,8 @@ mod tests_floor_breach;
 #[cfg(test)]
 #[path = "../mcp_bin_tests_ladder_track.rs"]
 mod tests_ladder_track;
+
+// The ladder suggestion (issue #168): stdio parity with the worker's text.
+#[cfg(test)]
+#[path = "../mcp_bin_tests_ladder_suggest.rs"]
+mod tests_ladder_suggest;

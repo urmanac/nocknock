@@ -103,7 +103,7 @@ pub(crate) async fn mcp_http_handler(
                     },
                     {
                         "name": "get_shot_advice",
-                        "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics, with uncollected LP fees, collectible AERO rewards and their total as separate labelled lines. The harvest rule counts LP fees only.",
+                        "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics, with uncollected LP fees, collectible AERO rewards and their total as separate labelled lines. The harvest rule counts LP fees only. Also states the ladder suggestion (#168): whether a NOCK ladder fits your bottom setting and standing reserve, its range, the most USDC the reserve allows and the deposit link (no amount prefilled), as a measurement shown only on a fresh snapshot.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {},
@@ -170,9 +170,17 @@ pub(crate) async fn mcp_http_handler(
             }
             let result_text = if let Some(ref env) = latest {
                 let data_val = serde_json::to_value(&env.data).unwrap_or_default();
+                let now = Utc::now();
+                let lag = now.signed_duration_since(env.meta.generated_at).num_seconds().max(0);
+                let health = health_status(true, lag, state.config.sync_window_seconds as i64, last_error.is_some());
                 let body = match tool_name {
                     "get_portfolio_state" => format_portfolio_state_text(&data_val),
-                    "get_shot_advice" => format_shot_advice_text(&data_val),
+                    // The ladder suggestion (#168) shows only while the snapshot is fresh.
+                    "get_shot_advice" => crate::ladder_suggest_text::with_ladder_suggestion(
+                        &format_shot_advice_text(&data_val),
+                        &data_val,
+                        Some(health),
+                    ),
                     // Gauge rewards (#142): the gas of collecting one is estimated now,
                     // read-only, and only for a claim call proven for that gauge.
                     "simulate_claim_fees" => {
@@ -182,9 +190,6 @@ pub(crate) async fn mcp_http_handler(
                     "get_accumulation_plan" => format_accumulation_plan_text(&data_val),
                     _ => format!("Unknown tool: {tool_name}"),
                 };
-                let now = Utc::now();
-                let lag = now.signed_duration_since(env.meta.generated_at).num_seconds().max(0);
-                let health = health_status(true, lag, state.config.sync_window_seconds as i64, last_error.is_some());
                 format!("{body}\n{}", snapshot_source_line(env.meta.generated_at, now, health))
             } else {
                 no_snapshot_mcp_text(last_error.as_deref())

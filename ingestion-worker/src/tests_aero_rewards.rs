@@ -373,6 +373,7 @@ pub(super) fn example_profile() -> OperatorProfile {
         tax_reserve_ratio: 0.40,
         target_weights_bps: TargetWeightsBps { treasury: 8000, uniswap_lp: 1500, cash: 500 },
         cash_reserve_usdc: None,
+        ladder_bottom_usd: None,
     }
 }
 
@@ -490,7 +491,7 @@ fn test_each_protocol_reads_unclaimed_aero_from_the_right_place() {
     let (_, staked) = real_cl_position();
     assert_eq!(gauge_of(&cl_config(), Some(&staked)), format!("{CL_GAUGE} 0xd942be03"));
     // An unstaked CL NFT earns swap fees, not AERO; a Uniswap position earns none.
-    let unstaked = PositionFacts { tick_spacing: Some(200), staked_in_gauge: None, fees_note: None };
+    let unstaked = PositionFacts { tick_spacing: Some(200), staked_in_gauge: None, fees_note: None, ..Default::default() };
     assert_eq!(gauge_of(&cl_config(), Some(&unstaked)), "not earning");
     assert_eq!(gauge_of(&cl_config(), None), "not earning");
     for protocol in ["uniswap-v3", "uniswap-v4"] {

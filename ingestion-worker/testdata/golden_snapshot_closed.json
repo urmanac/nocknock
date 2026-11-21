@@ -460,9 +460,11 @@
           "amount0": "120.022849",
           "amount1": "8114.362638",
           "amount_usd": "241.21",
+          "fee_raw": 30000,
           "fee_tier_bps": 300,
           "fees_usd": "0.000000",
           "full_range": false,
+          "hooks": "0x0000000000000000000000000000000000000000",
           "in_range": true,
           "is_price_source": true,
           "liquidity_amount": "249864729574523",
@@ -612,7 +614,7 @@
         }
       ]
     },
-    "state_hash": "19849d82507f89c583702282fe2c812ce1bbfdb25cd2a9d12ea9c1016493b90d"
+    "state_hash": "ab984ebff942fb9d2066763bdab5b0d04db1a4dad9638e7e4243ab3cdbc151ed"
   },
   "v4_price_source_closed_block_58646285": {
     "mcp_text": {

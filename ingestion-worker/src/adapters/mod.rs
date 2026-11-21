@@ -193,6 +193,54 @@ pub(crate) fn deposit_url_for(p: &RawPosition, rule: &RebuildRule) -> String {
     }
 }
 
+/// Where the operator would open a NEW position (a ladder, #168) in the pool of the
+/// tracked snapshot position `p`, with the range `tick_lower..tick_upper` in pool ticks.
+/// Never an amount (OPERATOR_GUIDANCE §7.6). Returns the URL and what it prefills.
+///
+/// - Uniswap v4 on Base: the web app's new-position page,
+///   `https://app.uniswap.org/positions/add/new`, with the pair, the pool key's fee and
+///   tick spacing, the hooks address when it is not zero, and `priceRangeState`
+///   {priceInverted: false, fullRange: false, minTick, maxTick} in pool ticks. The format
+///   is read from the app's own source, not documented: the card prints the ticks and
+///   prices as text as well. It needs the pool key's unrounded fee and hooks (`fee_raw`,
+///   `hooks`), never a fee rebuilt from `fee_tier_bps`.
+/// - Aero CL on Base: the pool's deposit page, nothing prefilled (no format is known).
+/// - Anything else: no link, with the reason.
+pub(crate) fn new_position_url(p: &Position, tick_lower: i32, tick_upper: i32) -> std::result::Result<(String, Vec<&'static str>), String> {
+    if p.network != "base" {
+        return Err(format!("no new-position link is known for network {}", p.network));
+    }
+    match Protocol::parse(&p.protocol) {
+        Some(Protocol::UniswapV4) => {
+            let fee = p.fee_raw.ok_or("the pool's fee was not read this cycle")?;
+            let spacing = p.tick_spacing.ok_or("the pool's tick spacing was not read this cycle")?;
+            let hooks = p.hooks.as_deref().ok_or("the pool's hooks address was not read this cycle")?;
+            let mut params: Vec<(&str, String)> = vec![
+                ("chain", "base".to_string()),
+                ("protocolVersion", "v4".to_string()),
+                ("currencyA", p.token0.address.clone()),
+                ("currencyB", p.token1.address.clone()),
+                ("fee", json!({ "feeAmount": fee, "tickSpacing": spacing, "isDynamic": false }).to_string()),
+            ];
+            if hooks.trim_start_matches("0x").chars().any(|c| c != '0') {
+                params.push(("hook", hooks.to_string()));
+            }
+            params.push((
+                "priceRangeState",
+                json!({ "priceInverted": false, "fullRange": false, "minTick": tick_lower, "maxTick": tick_upper }).to_string(),
+            ));
+            params.push(("step", "1".to_string()));
+            let url = reqwest::Url::parse_with_params("https://app.uniswap.org/positions/add/new", &params)
+                .map_err(|e| format!("the link could not be built: {e}"))?;
+            Ok((url.to_string(), vec!["pair", "fee and tick spacing", "range ticks"]))
+        }
+        Some(Protocol::AeroCl) => Ok((format!("https://app.aero.xyz/deposit/8453-{}", p.pool_id), vec![])),
+        Some(Protocol::AeroBasic) => Err("a basic Aero pool is full range; it cannot hold a ladder".to_string()),
+        Some(Protocol::UniswapV3) => Err("no new-position link is built for a Uniswap v3 pool".to_string()),
+        None => Err(format!("unknown protocol {}", p.protocol)),
+    }
+}
+
 pub(crate) fn position_label(p: &RawPosition) -> String {
     let fee_pct = p.fee_tier_bps as f64 / 100.0;
     match Protocol::parse(&p.protocol) {

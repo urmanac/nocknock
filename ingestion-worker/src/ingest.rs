@@ -320,10 +320,13 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
 
     // Build snapshot data (cycle_snapshot_data). What the previous snapshot held
     // decides a closed position's first-seen time and whether its closing is pushed.
-    let (snapshot_data, closed_notes) = {
+    let (mut snapshot_data, closed_notes) = {
         let prev = state.latest_snapshot.lock().await;
         cycle_snapshot_data(raw_data, derived_metrics, prev.as_ref().map(|s| &s.data), &Utc::now().to_rfc3339())
     };
+    // The ladder suggestion (#168), measured on the assembled snapshot after the
+    // directive strings were captured: it never changes the directive or a push.
+    attach_ladder_suggestion(&mut snapshot_data, &profile, Utc::now());
 
     // Compute deterministic state hash
     let state_hash = compute_state_hash(&snapshot_data);

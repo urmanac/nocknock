@@ -200,6 +200,7 @@ pub(crate) fn with_gas_ranges() -> RawOnChainData {
             tick_spacing: Some(100),
             staked_in_gauge: Some(GAUGE.to_string()),
             fees_note: Some(AERO_CL_STAKED_FEES_NOTE.to_string()),
+            ..Default::default()
         },
     );
     raw.aero = AeroReads {
@@ -225,6 +226,7 @@ pub(crate) fn profile() -> OperatorProfile {
         tax_reserve_ratio: 0.0,
         target_weights_bps: TargetWeightsBps { treasury: 8000, uniswap_lp: 1500, cash: 500 },
         cash_reserve_usdc: None,
+        ladder_bottom_usd: None,
     }
 }
 
