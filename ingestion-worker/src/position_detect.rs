@@ -55,8 +55,29 @@ pub(crate) const POSITION_CLASSIFY_MAX_PER_CYCLE: usize = 200;
 pub(crate) const POSITION_RECEIPTS_MAX_PER_CYCLE: usize = 25;
 /// Owners re-read per cycle when the wallet holds fewer NFTs than are known as owned.
 pub(crate) const POSITION_OWNER_RESYNC_MAX_PER_CYCLE: usize = 60;
+/// Untracked NFTs the wallet holds re-read per cycle (their liquidity, and their owner
+/// when funded). Dust in a whitelisted pool is cheap to send, so the re-reads are capped
+/// and rotate: the rest are read in later cycles, and the status says so.
+pub(crate) const POSITION_REFRESH_MAX_PER_CYCLE: usize = 40;
+/// The check stops starting new reads after this long, well inside the hard timeout: what
+/// it read is kept and the rest is read next cycle, so the check never fails the cycle and
+/// never runs into the hard timeout because of dust.
+pub(crate) const POSITION_SCAN_SOFT_SECONDS: u64 = 40;
 /// The whole check is abandoned after this long; what was stored before the cut stays.
 pub(crate) const POSITION_SCAN_TIMEOUT_SECONDS: u64 = 60;
+/// Where the next cycle's re-reads start, so every untracked NFT is re-read in turn.
+static REFRESH_CURSOR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// This cycle's share of the re-reads: at most `max`, starting at `cursor` and wrapping,
+/// and how many wait for a later cycle. Pure.
+pub(crate) fn refresh_batch(ids: &[u64], cursor: usize, max: usize) -> (Vec<u64>, usize) {
+    if ids.len() <= max {
+        return (ids.to_vec(), 0);
+    }
+    let start = cursor % ids.len();
+    let batch: Vec<u64> = ids.iter().cycle().skip(start).take(max).copied().collect();
+    (batch, ids.len() - max)
+}
 pub(crate) const POSITION_SCAN_REQUEST_TIMEOUT_SECONDS: u64 = 10;
 pub(crate) const POSITION_SCAN_REQUEST_ATTEMPTS: u32 = 2;
 /// How long a refusal learned from an RPC (a range limit, an archive limit) is trusted
@@ -793,6 +814,10 @@ pub(crate) struct ScanRun {
     /// NFTs whose reads failed this cycle, and NFTs left for a later cycle by a limit.
     pub(crate) unread: usize,
     pub(crate) deferred: usize,
+    /// Untracked NFTs whose re-read waits for a later cycle (the per-cycle cap).
+    pub(crate) refresh_deferred: usize,
+    /// The check stopped starting reads at its time budget.
+    pub(crate) time_cut: bool,
     /// `balanceOf(wallet)` at the block. None when it could not be read.
     pub(crate) held: Option<u64>,
     /// NFTs known as owned by the wallet after this cycle's reads.
@@ -1174,6 +1199,8 @@ async fn scan(inp: &DetectionInputs<'_>, wallet: &str, url: &str) -> ScanRun {
     };
     let head = (latest - POSITION_HEAD_LAG_BLOCKS).max(0);
     let mut run = ScanRun { block: Some(head), previously_checked_at: state.last_checked_at, ..Default::default() };
+    let soft_deadline = std::time::Instant::now() + std::time::Duration::from_secs(POSITION_SCAN_SOFT_SECONDS);
+    let out_of_time = || std::time::Instant::now() >= soft_deadline;
     let mut seen: HashMap<u64, TransferSeen> = HashMap::new();
 
     // 1. Transfers: the logs, then the index while the logs do not cover the history.
@@ -1216,6 +1243,11 @@ async fn scan(inp: &DetectionInputs<'_>, wallet: &str, url: &str) -> ScanRun {
             run.deferred += 1;
             continue;
         }
+        if out_of_time() {
+            run.time_cut = true;
+            run.deferred += 1;
+            continue;
+        }
         let prior = rows.get(nft_id).cloned();
         match reader.classify(*nft_id, seen.get(nft_id), prior.as_ref()).await {
             Classified::Row(row) => store_row(inp.store, &mut rows, &mut fresh, &mut run, row).await,
@@ -1235,7 +1267,17 @@ async fn scan(inp: &DetectionInputs<'_>, wallet: &str, url: &str) -> ScanRun {
         .filter(|id| !todo.contains(id))
         .collect();
     refresh.sort_unstable();
+    let max = POSITION_REFRESH_MAX_PER_CYCLE;
+    // The cursor moves only when there are more than the cap, so every one is read in turn.
+    let cursor = if refresh.len() > max { REFRESH_CURSOR.fetch_add(max, std::sync::atomic::Ordering::Relaxed) } else { 0 };
+    let (refresh, waiting) = refresh_batch(&refresh, cursor, max);
+    run.refresh_deferred = waiting;
     for nft_id in refresh {
+        if out_of_time() {
+            run.time_cut = true;
+            run.refresh_deferred += 1;
+            continue;
+        }
         let prior = rows[&nft_id].clone();
         let Some(liquidity) = reader.liquidity(nft_id).await else {
             run.unread += 1;
@@ -1288,6 +1330,10 @@ async fn scan(inp: &DetectionInputs<'_>, wallet: &str, url: &str) -> ScanRun {
     if run.held.is_some_and(|h| h < owned_count(&rows)) {
         let stale: Vec<u64> = rows.values().filter(|r| r.owned && !fresh.contains(&r.nft_id)).map(|r| r.nft_id).take(POSITION_OWNER_RESYNC_MAX_PER_CYCLE).collect();
         for nft_id in stale {
+            if out_of_time() {
+                run.time_cut = true;
+                break;
+            }
             if let Some(owner) = reader.owner(nft_id).await {
                 let mut row = rows[&nft_id].clone();
                 let owned = owner.as_deref() == Some(reader.wallet.as_str());
@@ -1306,6 +1352,10 @@ async fn scan(inp: &DetectionInputs<'_>, wallet: &str, url: &str) -> ScanRun {
     // 4. What each found position holds now: its liquidity and its pool's price.
     let mut prices: HashMap<String, Option<(U256, i32)>> = HashMap::new();
     for r in rows.values().filter(|r| is_found(r, &in_config, &tracked_ids) && fresh.contains(&r.nft_id)) {
+        if out_of_time() {
+            run.time_cut = true;
+            break;
+        }
         let Some(liquidity) = reader.liquidity(r.nft_id).await else { continue };
         let slot0 = match r.pool_id.as_deref() {
             Some(pool) => match prices.get(pool) {
@@ -1415,6 +1465,15 @@ pub(crate) fn detection_status(run: &ScanRun) -> (&'static str, Option<String>, 
     }
     if run.deferred > 0 {
         gaps.push(format!("{} more position NFT(s) are still to be read (a per-cycle limit)", run.deferred));
+    }
+    if run.refresh_deferred > 0 {
+        gaps.push(format!(
+            "{} untracked position NFT(s) the wallet holds are read again in later cycles (at most {POSITION_REFRESH_MAX_PER_CYCLE} a cycle, in turn); what they hold is not stated this cycle",
+            run.refresh_deferred
+        ));
+    }
+    if run.time_cut {
+        gaps.push(format!("the check stopped starting reads at its {POSITION_SCAN_SOFT_SECONDS}-second budget; the rest is read next cycle"));
     }
     match run.held {
         Some(h) if h > run.known_owned => gaps.push(format!(

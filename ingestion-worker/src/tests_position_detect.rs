@@ -1831,3 +1831,58 @@ fn test_the_specs_document_the_block_and_the_five_routes() {
     // The fallback of the past is named only as what an older snapshot carried.
     assert!(snap_text.contains("manual_config in a snapshot stored before"));
 }
+
+// ------------------------------------------------------------------
+// Second review of the bottle: dust cannot time the check out
+// ------------------------------------------------------------------
+
+#[test]
+fn test_the_rereads_rotate_within_their_cap() {
+    let ids: Vec<u64> = (1..=10).collect();
+    assert_eq!(refresh_batch(&ids, 0, 20), (ids.clone(), 0), "under the cap: all, nothing deferred");
+    assert_eq!(refresh_batch(&ids, 0, 4), (vec![1, 2, 3, 4], 6));
+    assert_eq!(refresh_batch(&ids, 8, 4), (vec![9, 10, 1, 2], 6), "it wraps");
+    // Cycle after cycle, every one is read in turn.
+    let mut seen: HashSet<u64> = HashSet::new();
+    for cycle in 0..3 {
+        seen.extend(refresh_batch(&ids, cycle * 4, 4).0);
+    }
+    assert_eq!(seen.len(), 10);
+}
+
+#[tokio::test]
+async fn test_dust_in_a_whitelisted_pool_is_reread_at_most_the_cap_per_cycle_and_stated() {
+    // The operator's wallet, then 300 dust NFTs in a whitelisted pool sent to it (cheap on
+    // Base). Before the cap every one was re-read every cycle, sequentially, past the 60 s
+    // timeout: the whole check failed and no rung mint was tracked again.
+    let dust: Vec<u64> = (900_000_000..900_000_300).collect();
+    // The chain answers for them: each empty, and the wallet holds 43 + 300 NFTs.
+    let mut swaps = vec![wide_logs_swap("operator")];
+    let empty = format!("0x{}", "0".repeat(64));
+    swaps.extend(dust.iter().map(|id| (key_liquidity(*id), Swap::Json(json!({ "result": empty })))));
+    let balance_key = call_key(UNISWAP_V4_POSM_BASE, &format!("{ERC721_BALANCE_OF}{:0>64}", OPERATOR.trim_start_matches("0x")));
+    swaps.push((balance_key, Swap::Json(json!({ "result": format!("0x{:064x}", 43 + dust.len()) }))));
+    let n = node("operator", swaps).await;
+    let store = store_at(clock("operator"));
+    // The first cycle reads the history (the dust reached the wallet after it, here).
+    detect(&store, &n, &book(), None, clock("operator")).await;
+    for id in &dust {
+        let mut row = candidate(*id);
+        row.has_liquidity = Some(false);
+        store.upsert_candidate(&row).await.unwrap();
+    }
+    let mut asked: HashSet<u64> = HashSet::new();
+    for _ in 0..8 {
+        n.forget();
+        let out = detect(&store, &n, &book(), None, clock("operator")).await;
+        // The rest waits, and the status says so: never "nothing found", never a failure.
+        assert_eq!(out.status, "partial", "{:?}", out.reason);
+        let reason = out.reason.clone().unwrap();
+        assert!(reason.contains(&format!("untracked position NFT(s) the wallet holds are read again in later cycles (at most {POSITION_REFRESH_MAX_PER_CYCLE} a cycle, in turn)")), "{reason}");
+        // The header, the NFT count and at most the cap of re-reads.
+        assert!(n.count("eth_call") <= POSITION_REFRESH_MAX_PER_CYCLE + 1, "{}", n.count("eth_call"));
+        let keys = n.keys();
+        asked.extend(dust.iter().filter(|id| keys.iter().any(|k| k.contains(&format!("{:064x}", id)))));
+    }
+    assert_eq!(asked.len(), dust.len(), "every dust NFT is read in turn");
+}
