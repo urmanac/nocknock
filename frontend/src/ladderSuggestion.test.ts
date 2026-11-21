@@ -86,18 +86,20 @@ describe('ladder suggestion (#168)', () => {
   it('the link label says what the link prefills; only the two app hosts over https', () => {
     const r = LADDER_READY_LIVE.rungs[0];
     expect(ladderDepositUrl(r.deep_link.url)).toBe(r.deep_link.url);
-    expect(ladderLinkLabel(r)).toBe('OPEN IN UNISWAP ↗ (pool, range and amount prefilled)');
-    expect(ladderLinkLabel({ ...r, deep_link: { ...r.deep_link, prefilled: ['pair', 'fee and tick spacing', 'range ticks'] } })).toBe(
-      'OPEN IN UNISWAP ↗ (pool and range prefilled)',
-    );
-    expect(r.deep_link.url).toContain('depositState=%7B%22exactAmounts%22%3A%7B%22TOKEN0%22%3A%22765.86%22%7D');
+    expect(ladderLinkLabel(r)).toBe('OPEN IN UNISWAP ↗ (pool and range prefilled)');
+    expect(r.deep_link.prefilled).toEqual(['pair', 'fee and tick spacing', 'range ticks']);
+    expect(r.deep_link.not_prefilled).toEqual(['amount']);
+    // The app drops an amount passed in the link (observed 2026-11-21): none is passed,
+    // and the amount is stated beside it.
+    expect(r.deep_link.url).not.toContain('depositState');
+    expect(r.deep_link.amount_to_enter).toBe('Amount to enter in the app: $765.86 USDC');
     for (const bad of ['http://app.uniswap.org/x', 'https://aerodrome.finance/deposit', 'https://evil.example/app.uniswap.org', 'javascript:alert(1)', '', null]) {
       expect(ladderDepositUrl(bad as any)).toBeNull();
     }
     expect(ladderLinkLabel({ ...r, deep_link: { ...r.deep_link, url: 'https://app.aero.xyz/deposit/8453-0xabc', prefilled: [] } })).toBe(
       'OPEN POOL DEPOSIT ON AERO.XYZ ↗ (nothing prefilled)',
     );
-    expect(linkFormatNote(LADDER_READY_LIVE)).toContain('check the pool, range and amount in the app');
+    expect(linkFormatNote(LADDER_READY_LIVE)).toContain('check the pool and range in the app');
   });
 
   it('states the lines that are not gates, and each excluded pool', () => {

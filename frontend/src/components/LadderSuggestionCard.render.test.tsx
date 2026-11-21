@@ -49,10 +49,12 @@ describe('LadderSuggestionCard (#168)', () => {
     expect(html).toContain('ticks 273900 to 276300, a new position in the USDC/NOCK 3% v4 pool');
     expect(html).not.toContain('#3163450');
     expect(html).toContain('href="https://app.uniswap.org/positions/add/new?chain=base&amp;protocolVersion=v4');
-    expect(html).toContain('depositState=');
-    expect(html).toContain('OPEN IN UNISWAP ↗ (pool, range and amount prefilled)');
+    expect(html).not.toContain('depositState');
+    expect(html).toContain('data-testid="ladder-amount-to-enter"');
+    expect(html).toContain('Amount to enter in the app: $765.86 USDC');
+    expect(html).toContain('OPEN IN UNISWAP ↗ (pool and range prefilled)');
     expect(html.match(/data-testid="ladder-link-note"/g)).toHaveLength(1);
-    expect(html).toContain('check the pool, range and amount in the app');
+    expect(html).toContain('check the pool and range in the app');
     expect(html).toContain('data-testid="ladder-rung-action"');
     // The stated lines and the assumptions, muted.
     expect(html).toContain('Plan budget not yet spent: $0.00 (stated, not a gate).');
@@ -159,7 +161,7 @@ describe('LadderSuggestionCard (#168)', () => {
     expect(html).toContain('A rise sells nothing: the ladder holds 0 NOCK, so its USDC stays USDC.');
     expect(html).toContain('Deposit 1 of 2 (near rung)');
     expect(html).toContain('Deposit 2 of 2 (deep rung)');
-    expect(html).toContain('OPEN IN UNISWAP ↗ (pool, range and amount prefilled)');
+    expect(html).toContain('OPEN IN UNISWAP ↗ (pool and range prefilled)');
     expect(html).not.toMatch(NO_INPUT);
     const stale = renderToStaticMarkup(<LadderSuggestionLiteCard suggestion={LADDER_READY} syncStatus="stale" />);
     expect(stale).toContain('Ladder: not shown while the snapshot is stale.');

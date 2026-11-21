@@ -38,7 +38,7 @@ export interface LadderRung {
   bounds_nock_per_usdc: { low: string | null; high: string | null };
   usdc: { amount: string; raw: string; decimals: number };
   nock: { amount: string; raw: string; decimals: number };
-  deep_link: { url: string | null; prefilled: string[]; not_prefilled: string[]; reason: string | null; format_note?: string | null };
+  deep_link: { url: string | null; prefilled: string[]; not_prefilled: string[]; reason: string | null; format_note?: string | null; amount_to_enter?: string | null };
   would_sign: string;
 }
 

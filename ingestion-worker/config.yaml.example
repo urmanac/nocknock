@@ -217,7 +217,7 @@ operator_profile:
   # cycle does not fail). With it and cash_reserve_usdc set, the dashboard's ladder card
   # states the range from the usable tick at or below spot down to this bottom, holding
   # the most USDC that leaves the stable balance at cash_reserve_usdc at this price,
-  # and a Uniswap link that prefills the pool, the range and the USDC amount.
+  # and a Uniswap link that prefills the pool and the range, with the amount printed.
   # NockNock signs and sends nothing.
   # ladder_bottom_usd: 0.01
 

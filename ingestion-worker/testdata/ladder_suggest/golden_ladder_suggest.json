@@ -409,17 +409,19 @@
             "low": "0.01002405"
           },
           "deep_link": {
-            "format_note": "The link format is the app's own and undocumented: check the pool, range and amount in the app against the figures here.",
+            "amount_to_enter": "Amount to enter in the app: $766.99 USDC",
+            "format_note": "The link format is the app's own and undocumented: check the pool and range in the app against the figures here.",
             "host": "app.uniswap.org",
-            "not_prefilled": [],
+            "not_prefilled": [
+              "amount"
+            ],
             "prefilled": [
               "pair",
               "fee and tick spacing",
-              "range ticks",
-              "amount"
+              "range ticks"
             ],
             "reason": null,
-            "url": "https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&depositState=%7B%22exactAmounts%22%3A%7B%22TOKEN0%22%3A%22766.99%22%7D%2C%22exactField%22%3A%22TOKEN0%22%7D&step=1"
+            "url": "https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&step=1"
           },
           "index": 1,
           "nock": {
@@ -522,7 +524,7 @@
       "tracked": [],
       "what_changed": "No ladder is tracked, and the standing reserve allows $766.99 in the USDC/NOCK 3% v4 pool down to your $0.01 bottom."
     },
-    "text": "• Ladder suggestion (a measurement, not advice): Ladder ready: up to $766.99 USDC in 1 deposit, 0 NOCK. No ladder is tracked. A new USDC-only position in the USDC/NOCK 3% v4 pool from $0.01274 (-1.6%) down to $0.01002 (-23%) would hold up to $766.99 USDC and 0 NOCK now: the most that leaves the stable balance at your $950.00 reserve at your $0.01 bottom. Fully converted it would hold about 67,863 NOCK, an average of $0.01130.\n  - A fall to $0.01100 (-15%) would buy about 40,558 NOCK for $480.24 of the USDC, an average of $0.01184.\n  - A fall to the ladder bottom $0.01002 (-23%) would buy about 67,863 NOCK with all $766.99, an average of $0.01130.\n  - A rise sells nothing: the ladder holds 0 NOCK, so its USDC stays USDC.\n  Reserve $950.00 holds at $0.01000000 (the reserve binds); NOCK budget: fits.\n  Stated, not gates: No accumulation plan is configured. Tax reserve: $0.00 (stated, not a gate). No cash target is set. Below the bottom the other NOCK ranges keep converting: at $0.007766 the stable balance would be $904.70 (a measurement, not the gate).\n  Assumptions: The amount is the most the standing reserve allows at the ladder's bottom; fees and gas are not counted. The top is the usable tick at or below spot: the range holds only USDC now and earns no fees until NOCK falls to its top. Below the bottom the other NOCK ranges keep converting; that reading is stated, not the gate. The ladder's USDC is outside the NOCK LP target and the rebuild: the two are separate figures. No fee estimate is stated yet; it joins this card with the rung settings.\n  Deposit 1 of 1: 766.99 USDC + 0.0000 NOCK as a new position in the USDC/NOCK 3% v4 pool, ticks 273900 to 276300 ($0.01002405 to $0.01274292; 78.4750 to 99.7600 NOCK per USDC).\n    Deposit link (pool, range and amount prefilled): https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&depositState=%7B%22exactAmounts%22%3A%7B%22TOKEN0%22%3A%22766.99%22%7D%2C%22exactField%22%3A%22TOKEN0%22%7D&step=1\n  The link format is the app's own and undocumented: check the pool, range and amount in the app against the figures here.\n  After you deposit (current fallback): Automatic tracking of a new ladder position is not built yet; until it is, a minted rung is tracked only from a config.yaml entry (role: ladder).\n  A measurement from this cycle's reads of what the range would do. NockNock does not choose the bottom or the amount, builds no transaction, and signs and sends nothing.\n"
+    "text": "• Ladder suggestion (a measurement, not advice): Ladder ready: up to $766.99 USDC in 1 deposit, 0 NOCK. No ladder is tracked. A new USDC-only position in the USDC/NOCK 3% v4 pool from $0.01274 (-1.6%) down to $0.01002 (-23%) would hold up to $766.99 USDC and 0 NOCK now: the most that leaves the stable balance at your $950.00 reserve at your $0.01 bottom. Fully converted it would hold about 67,863 NOCK, an average of $0.01130.\n  - A fall to $0.01100 (-15%) would buy about 40,558 NOCK for $480.24 of the USDC, an average of $0.01184.\n  - A fall to the ladder bottom $0.01002 (-23%) would buy about 67,863 NOCK with all $766.99, an average of $0.01130.\n  - A rise sells nothing: the ladder holds 0 NOCK, so its USDC stays USDC.\n  Reserve $950.00 holds at $0.01000000 (the reserve binds); NOCK budget: fits.\n  Stated, not gates: No accumulation plan is configured. Tax reserve: $0.00 (stated, not a gate). No cash target is set. Below the bottom the other NOCK ranges keep converting: at $0.007766 the stable balance would be $904.70 (a measurement, not the gate).\n  Assumptions: The amount is the most the standing reserve allows at the ladder's bottom; fees and gas are not counted. The top is the usable tick at or below spot: the range holds only USDC now and earns no fees until NOCK falls to its top. Below the bottom the other NOCK ranges keep converting; that reading is stated, not the gate. The ladder's USDC is outside the NOCK LP target and the rebuild: the two are separate figures. No fee estimate is stated yet; it joins this card with the rung settings.\n  Deposit 1 of 1: 766.99 USDC + 0.0000 NOCK as a new position in the USDC/NOCK 3% v4 pool, ticks 273900 to 276300 ($0.01002405 to $0.01274292; 78.4750 to 99.7600 NOCK per USDC).\n    Deposit link (pool and range prefilled): https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&step=1\n    Amount to enter in the app: $766.99 USDC\n  The link format is the app's own and undocumented: check the pool and range in the app against the figures here.\n  After you deposit (current fallback): Automatic tracking of a new ladder position is not built yet; until it is, a minted rung is tracked only from a config.yaml entry (role: ladder).\n  A measurement from this cycle's reads of what the range would do. NockNock does not choose the bottom or the amount, builds no transaction, and signs and sends nothing.\n"
   },
   "ready_live": {
     "health": "ok",
@@ -667,17 +669,19 @@
             "low": "0.01002405"
           },
           "deep_link": {
-            "format_note": "The link format is the app's own and undocumented: check the pool, range and amount in the app against the figures here.",
+            "amount_to_enter": "Amount to enter in the app: $765.86 USDC",
+            "format_note": "The link format is the app's own and undocumented: check the pool and range in the app against the figures here.",
             "host": "app.uniswap.org",
-            "not_prefilled": [],
+            "not_prefilled": [
+              "amount"
+            ],
             "prefilled": [
               "pair",
               "fee and tick spacing",
-              "range ticks",
-              "amount"
+              "range ticks"
             ],
             "reason": null,
-            "url": "https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&depositState=%7B%22exactAmounts%22%3A%7B%22TOKEN0%22%3A%22765.86%22%7D%2C%22exactField%22%3A%22TOKEN0%22%7D&step=1"
+            "url": "https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&step=1"
           },
           "index": 1,
           "nock": {
@@ -784,7 +788,7 @@
       "tracked": [],
       "what_changed": "No ladder is tracked, and the standing reserve allows $765.86 in the USDC/NOCK 3% v4 pool down to your $0.01 bottom."
     },
-    "text": "• Ladder suggestion (a measurement, not advice): Ladder ready: up to $765.86 USDC in 1 deposit, 0 NOCK. No ladder is tracked. A new USDC-only position in the USDC/NOCK 3% v4 pool from $0.01274 (-1.6%) down to $0.01002 (-23%) would hold up to $765.86 USDC and 0 NOCK now: the most that leaves the stable balance at your $950.00 reserve at your $0.01 bottom. Fully converted it would hold about 67,763 NOCK, an average of $0.01130.\n  - A fall to $0.01100 (-15%) would buy about 40,488 NOCK for $479.41 of the USDC, an average of $0.01184.\n  - A fall to the ladder bottom $0.01002 (-23%) would buy about 67,763 NOCK with all $765.86, an average of $0.01130.\n  - A rise sells nothing: the ladder holds 0 NOCK, so its USDC stays USDC.\n  Reserve $950.00 holds at $0.01000000 (the reserve binds); NOCK budget: fits.\n  Stated, not gates: Plan budget not yet spent: $0.00 (stated, not a gate). Tax reserve: $8.70 (stated, not a gate). Cash target: $184.18 (5% of the portfolio; stated, not a gate). Below the bottom the other NOCK ranges keep converting: at $0.007767 the stable balance would be $904.85 (a measurement, not the gate).\n  Assumptions: The amount is the most the standing reserve allows at the ladder's bottom; fees and gas are not counted. The top is the usable tick at or below spot: the range holds only USDC now and earns no fees until NOCK falls to its top. Below the bottom the other NOCK ranges keep converting; that reading is stated, not the gate. The ladder's USDC is outside the NOCK LP target and the rebuild: the two are separate figures. No fee estimate is stated yet; it joins this card with the rung settings.\n  Deposit 1 of 1: 765.86 USDC + 0.0000 NOCK as a new position in the USDC/NOCK 3% v4 pool, ticks 273900 to 276300 ($0.01002405 to $0.01274292; 78.4750 to 99.7600 NOCK per USDC).\n    Deposit link (pool, range and amount prefilled): https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&depositState=%7B%22exactAmounts%22%3A%7B%22TOKEN0%22%3A%22765.86%22%7D%2C%22exactField%22%3A%22TOKEN0%22%7D&step=1\n  The link format is the app's own and undocumented: check the pool, range and amount in the app against the figures here.\n  After you deposit (current fallback): Automatic tracking of a new ladder position is not built yet; until it is, a minted rung is tracked only from a config.yaml entry (role: ladder).\n  A measurement from this cycle's reads of what the range would do. NockNock does not choose the bottom or the amount, builds no transaction, and signs and sends nothing.\n"
+    "text": "• Ladder suggestion (a measurement, not advice): Ladder ready: up to $765.86 USDC in 1 deposit, 0 NOCK. No ladder is tracked. A new USDC-only position in the USDC/NOCK 3% v4 pool from $0.01274 (-1.6%) down to $0.01002 (-23%) would hold up to $765.86 USDC and 0 NOCK now: the most that leaves the stable balance at your $950.00 reserve at your $0.01 bottom. Fully converted it would hold about 67,763 NOCK, an average of $0.01130.\n  - A fall to $0.01100 (-15%) would buy about 40,488 NOCK for $479.41 of the USDC, an average of $0.01184.\n  - A fall to the ladder bottom $0.01002 (-23%) would buy about 67,763 NOCK with all $765.86, an average of $0.01130.\n  - A rise sells nothing: the ladder holds 0 NOCK, so its USDC stays USDC.\n  Reserve $950.00 holds at $0.01000000 (the reserve binds); NOCK budget: fits.\n  Stated, not gates: Plan budget not yet spent: $0.00 (stated, not a gate). Tax reserve: $8.70 (stated, not a gate). Cash target: $184.18 (5% of the portfolio; stated, not a gate). Below the bottom the other NOCK ranges keep converting: at $0.007767 the stable balance would be $904.85 (a measurement, not the gate).\n  Assumptions: The amount is the most the standing reserve allows at the ladder's bottom; fees and gas are not counted. The top is the usable tick at or below spot: the range holds only USDC now and earns no fees until NOCK falls to its top. Below the bottom the other NOCK ranges keep converting; that reading is stated, not the gate. The ladder's USDC is outside the NOCK LP target and the rebuild: the two are separate figures. No fee estimate is stated yet; it joins this card with the rung settings.\n  Deposit 1 of 1: 765.86 USDC + 0.0000 NOCK as a new position in the USDC/NOCK 3% v4 pool, ticks 273900 to 276300 ($0.01002405 to $0.01274292; 78.4750 to 99.7600 NOCK per USDC).\n    Deposit link (pool and range prefilled): https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&step=1\n    Amount to enter in the app: $765.86 USDC\n  The link format is the app's own and undocumented: check the pool and range in the app against the figures here.\n  After you deposit (current fallback): Automatic tracking of a new ladder position is not built yet; until it is, a minted rung is tracked only from a config.yaml entry (role: ladder).\n  A measurement from this cycle's reads of what the range would do. NockNock does not choose the bottom or the amount, builds no transaction, and signs and sends nothing.\n"
   },
   "ready_stale": {
     "health": "degraded",
@@ -929,17 +933,19 @@
             "low": "0.01002405"
           },
           "deep_link": {
-            "format_note": "The link format is the app's own and undocumented: check the pool, range and amount in the app against the figures here.",
+            "amount_to_enter": "Amount to enter in the app: $766.99 USDC",
+            "format_note": "The link format is the app's own and undocumented: check the pool and range in the app against the figures here.",
             "host": "app.uniswap.org",
-            "not_prefilled": [],
+            "not_prefilled": [
+              "amount"
+            ],
             "prefilled": [
               "pair",
               "fee and tick spacing",
-              "range ticks",
-              "amount"
+              "range ticks"
             ],
             "reason": null,
-            "url": "https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&depositState=%7B%22exactAmounts%22%3A%7B%22TOKEN0%22%3A%22766.99%22%7D%2C%22exactField%22%3A%22TOKEN0%22%7D&step=1"
+            "url": "https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&step=1"
           },
           "index": 1,
           "nock": {

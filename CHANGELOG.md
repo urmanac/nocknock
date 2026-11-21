@@ -94,9 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reserve's zone), the outcomes in plain words (a fall inside the range, a fall to the
   bottom, a rise selling nothing; exact, from the ticks), and numbered deposits with
   their range in USD per NOCK and NOCK per USDC and a link to the Uniswap web app's
-  new-position page that prefills the pool, the range and the USDC amount (operator
-  decision 2026-11-21: no typing into forms; the format is the app's own and
-  undocumented, so the card says so once and prints the figures beside it). Each
+  new-position page that prefills the pool and the range (the format is the app's own
+  and undocumented, so the card says so once and prints the figures beside it). The
+  amount is printed beside the link ("Amount to enter in the app: $… USDC") because
+  the app was observed, on 2026-11-21, to drop an amount passed in the link. Each
   deposit carries the pool, ticks and the amounts in raw units for the transaction
   builder that follows. How a minted rung becomes tracked is one isolated field, today
   a one-sentence fallback. Every other status is one line saying which condition

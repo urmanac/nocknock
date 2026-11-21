@@ -100,6 +100,10 @@ function RungBlock({ r, action, compact }: { r: LadderRung; action?: ReactNode; 
         {/* The per-deposit action slot (sign in the paired wallet, a follow-up). */}
         <span data-testid="ladder-rung-action">{action}</span>
       </div>
+      {/* The app drops an amount passed in the link (observed 2026-11-21): it is stated here. */}
+      {url && r.deep_link?.amount_to_enter && (
+        <div data-testid="ladder-amount-to-enter" style={{ fontWeight: 600, color: '#e6edf3' }}>{r.deep_link.amount_to_enter}</div>
+      )}
       {!compact && <div style={{ color: MUTED, fontSize: '0.7rem' }}>{r.would_sign}</div>}
     </li>
   );

@@ -124,7 +124,12 @@ pub fn rung_lines(l: &Value) -> String {
             s(r, "/bounds_nock_per_usdc/high").unwrap_or("?"),
         ));
         match s(r, "/deep_link/url") {
-            Some(url) => out.push_str(&format!("    Deposit link ({}): {url}\n", prefilled_words(r))),
+            Some(url) => {
+                out.push_str(&format!("    Deposit link ({}): {url}\n", prefilled_words(r)));
+                if let Some(a) = s(r, "/deep_link/amount_to_enter") {
+                    out.push_str(&format!("    {a}\n"));
+                }
+            }
             None => out.push_str(&format!("    Deposit link: none ({})\n", s(r, "/deep_link/reason").unwrap_or("not built"))),
         }
     }

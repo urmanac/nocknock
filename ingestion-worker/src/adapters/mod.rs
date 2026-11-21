@@ -195,10 +195,10 @@ pub(crate) fn deposit_url_for(p: &RawPosition, rule: &RebuildRule) -> String {
 
 /// Where the operator would open a NEW position (a ladder, #168) in the pool of the
 /// tracked snapshot position `p`, with the range `tick_lower..tick_upper` in pool ticks.
-/// With `usdc_amount`, the USDC side of the deposit is prefilled as `depositState`
-/// (operator decision 2026-11-21, reversing v0.7.0's "nothing prefilled": the operator
-/// does not type into forms); any other side is left to the app. Returns the URL and
-/// what it prefills.
+/// With `usdc_amount`, the USDC side is passed as the app's own `depositState`. The
+/// ladder card passes None: on 2026-11-21 the Uniswap app was observed to drop that
+/// amount (it rewrote `exactAmounts` to empty and showed 0 USDC), so the card prints the
+/// amount beside the link instead. Returns the URL and what it prefills.
 ///
 /// - Uniswap v4 on Base: the web app's new-position page,
 ///   `https://app.uniswap.org/positions/add/new`, with the pair, the pool key's fee and

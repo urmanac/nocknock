@@ -150,17 +150,19 @@ export const LADDER_READY: LadderSuggestion = {
         "low": "0.01002405"
       },
       "deep_link": {
-        "format_note": "The link format is the app's own and undocumented: check the pool, range and amount in the app against the figures here.",
+        "amount_to_enter": "Amount to enter in the app: $766.99 USDC",
+        "format_note": "The link format is the app's own and undocumented: check the pool and range in the app against the figures here.",
         "host": "app.uniswap.org",
-        "not_prefilled": [],
+        "not_prefilled": [
+          "amount"
+        ],
         "prefilled": [
           "pair",
           "fee and tick spacing",
-          "range ticks",
-          "amount"
+          "range ticks"
         ],
         "reason": null,
-        "url": "https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&depositState=%7B%22exactAmounts%22%3A%7B%22TOKEN0%22%3A%22766.99%22%7D%2C%22exactField%22%3A%22TOKEN0%22%7D&step=1"
+        "url": "https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&step=1"
       },
       "index": 1,
       "nock": {
@@ -406,17 +408,19 @@ export const LADDER_READY_LIVE: LadderSuggestion = {
         "low": "0.01002405"
       },
       "deep_link": {
-        "format_note": "The link format is the app's own and undocumented: check the pool, range and amount in the app against the figures here.",
+        "amount_to_enter": "Amount to enter in the app: $765.86 USDC",
+        "format_note": "The link format is the app's own and undocumented: check the pool and range in the app against the figures here.",
         "host": "app.uniswap.org",
-        "not_prefilled": [],
+        "not_prefilled": [
+          "amount"
+        ],
         "prefilled": [
           "pair",
           "fee and tick spacing",
-          "range ticks",
-          "amount"
+          "range ticks"
         ],
         "reason": null,
-        "url": "https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&depositState=%7B%22exactAmounts%22%3A%7B%22TOKEN0%22%3A%22765.86%22%7D%2C%22exactField%22%3A%22TOKEN0%22%7D&step=1"
+        "url": "https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&step=1"
       },
       "index": 1,
       "nock": {

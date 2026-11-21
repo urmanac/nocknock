@@ -285,22 +285,23 @@ fn test_ladder_suggest_deep_link_format() {
     let url = s(&l, "/rungs/0/deep_link/url");
     assert_eq!(
         url,
-        "https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&depositState=%7B%22exactAmounts%22%3A%7B%22TOKEN0%22%3A%22765.86%22%7D%2C%22exactField%22%3A%22TOKEN0%22%7D&step=1"
+        "https://app.uniswap.org/positions/add/new?chain=base&protocolVersion=v4&currencyA=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&currencyB=0x9B5E262cF9bb04869ab40b19AF91D2dc85761722&fee=%7B%22feeAmount%22%3A30000%2C%22isDynamic%22%3Afalse%2C%22tickSpacing%22%3A300%7D&priceRangeState=%7B%22fullRange%22%3Afalse%2C%22maxTick%22%3A276300%2C%22minTick%22%3A273900%2C%22priceInverted%22%3Afalse%7D&step=1"
     );
-    // Decoded, the fields round-trip; the USDC side (TOKEN0 = currencyA) is the amount.
+    // Decoded, the fields round-trip. No amount: the app was observed on 2026-11-21 to
+    // drop a depositState amount, so the amount is printed beside the link instead.
     let u = reqwest::Url::parse(url).unwrap();
     let q: HashMap<String, String> = u.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect();
     let fee: Value = serde_json::from_str(&q["fee"]).unwrap();
     assert_eq!(fee, json!({ "feeAmount": 30000, "tickSpacing": 300, "isDynamic": false }));
     let pr: Value = serde_json::from_str(&q["priceRangeState"]).unwrap();
     assert_eq!(pr, json!({ "priceInverted": false, "fullRange": false, "minTick": 273900, "maxTick": 276300 }));
-    let ds: Value = serde_json::from_str(&q["depositState"]).unwrap();
-    assert_eq!(ds, json!({ "exactField": "TOKEN0", "exactAmounts": { "TOKEN0": "765.86" } }));
+    assert!(!q.contains_key("depositState") && !url.contains("765.86"), "{q:?}");
     assert!(!q.contains_key("hook"), "{q:?}");
     assert_eq!(u.host_str(), Some("app.uniswap.org"));
     assert!(!url.contains("aerodrome.finance"));
-    assert_eq!(l["rungs"][0]["deep_link"]["prefilled"], json!(["pair", "fee and tick spacing", "range ticks", "amount"]));
-    assert_eq!(l["rungs"][0]["deep_link"]["not_prefilled"], json!([]));
+    assert_eq!(l["rungs"][0]["deep_link"]["prefilled"], json!(["pair", "fee and tick spacing", "range ticks"]));
+    assert_eq!(l["rungs"][0]["deep_link"]["not_prefilled"], json!(["amount"]));
+    assert_eq!(s(&l, "/rungs/0/deep_link/amount_to_enter"), "Amount to enter in the app: $765.86 USDC");
     assert_eq!(s(&l, "/rungs/0/deep_link/format_note"), LADDER_LINK_FORMAT_NOTE);
     // A hooked pool's address would be passed; with USDC as token1 the amount is TOKEN1.
     let mut p = sim_fixture().data.positions.into_iter().find(|p| p.position_id == V4_ID).unwrap();
@@ -444,7 +445,8 @@ fn test_ladder_suggest_stale_snapshot_is_not_shown() {
     }
     let fresh = text(&env, &l, Some("ok"));
     assert!(fresh.contains("Deposit 1 of 1: 766.99 USDC + 0.0000 NOCK as a new position in the USDC/NOCK 3% v4 pool"), "{fresh}");
-    assert!(fresh.contains("Deposit link (pool, range and amount prefilled): https://app.uniswap.org/positions/add/new?"), "{fresh}");
+    assert!(fresh.contains("Deposit link (pool and range prefilled): https://app.uniswap.org/positions/add/new?"), "{fresh}");
+    assert!(fresh.contains("prefilled): https://app.uniswap.org/positions/add/new?") && fresh.contains("&step=1\n    Amount to enter in the app: $766.99 USDC\n"), "{fresh}");
     assert!(fresh.contains(LADDER_LINK_FORMAT_NOTE), "{fresh}");
     assert!(fresh.contains("After you deposit (current fallback): Automatic tracking of a new ladder position is not built yet"), "{fresh}");
     assert!(!fresh.contains("#3163450"), "the pool is named by itself, not by an NFT: {fresh}");
@@ -473,7 +475,7 @@ fn test_ladder_suggest_two_rungs_render_as_a_numbered_list() {
     let b = t.find("Deposit 2 of 2 (deep rung): 651.94 USDC").expect(&t);
     assert!(a < b);
     assert!(t.contains("($0.01002405 to $0.01100000;"), "{t}");
-    assert_eq!(t.matches("Deposit link (pool, range and amount prefilled)").count(), 2);
+    assert_eq!(t.matches("Deposit link (pool and range prefilled)").count(), 2);
     assert_eq!(t.matches(LADDER_LINK_FORMAT_NOTE).count(), 1, "the format note once");
 }
 

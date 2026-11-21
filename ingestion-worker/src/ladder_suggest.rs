@@ -193,14 +193,16 @@ fn sim_with(env: &SnapshotEnvelope, position_id: &str, low: (&str, f64), usdc: f
     simulate_ladder(env, &req, env.meta.generated_at, "ok")
 }
 
-pub(crate) const LADDER_LINK_FORMAT_NOTE: &str = "The link format is the app's own and undocumented: check the pool, range and amount in the app against the figures here.";
+pub(crate) const LADDER_LINK_FORMAT_NOTE: &str = "The link format is the app's own and undocumented: check the pool and range in the app against the figures here.";
 
-/// The Uniswap web app's new-position page for this pool, range and USDC amount, or the
-/// Aero pool's deposit page (nothing prefilled). The amount is prefilled on the USDC side
-/// only (operator decision 2026-11-21: no typing into forms); the app derives any other
-/// side. Pure.
+/// The Uniswap web app's new-position page for this pool and range, or the Aero pool's
+/// deposit page (nothing prefilled). No amount is passed in the link: on 2026-11-21 the
+/// Uniswap app was observed to drop a `depositState` amount (it rewrote it to empty
+/// `exactAmounts` and showed 0 USDC), so the amount is printed beside the link as
+/// `amount_to_enter` instead. Pure.
 fn deep_link(p: &Position, tick_lower: i32, tick_upper: i32, usdc_amount: &str) -> Value {
-    match new_position_url(p, tick_lower, tick_upper, Some(usdc_amount)) {
+    let amount_to_enter = format!("Amount to enter in the app: ${usdc_amount} USDC");
+    match new_position_url(p, tick_lower, tick_upper, None) {
         Ok((url, prefilled)) => {
             let all = ["pair", "fee and tick spacing", "range ticks", "amount"];
             let not: Vec<&str> = all.iter().copied().filter(|k| !prefilled.contains(k)).collect();
@@ -210,10 +212,11 @@ fn deep_link(p: &Position, tick_lower: i32, tick_upper: i32, usdc_amount: &str) 
                 "prefilled": prefilled,
                 "not_prefilled": not,
                 "format_note": LADDER_LINK_FORMAT_NOTE,
+                "amount_to_enter": amount_to_enter,
                 "reason": Value::Null,
             })
         }
-        Err(reason) => json!({ "url": Value::Null, "host": Value::Null, "prefilled": [], "not_prefilled": [], "format_note": Value::Null, "reason": reason }),
+        Err(reason) => json!({ "url": Value::Null, "host": Value::Null, "prefilled": [], "not_prefilled": ["amount"], "format_note": Value::Null, "amount_to_enter": amount_to_enter, "reason": reason }),
     }
 }
 

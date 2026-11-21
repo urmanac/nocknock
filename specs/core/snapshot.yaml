@@ -67,8 +67,9 @@ info:
       USDC and NOCK as decimal and raw units, and the bounds in USD per NOCK and NOCK per
       USDC. outcomes[] are plain-language measurements (a fall inside the range, a fall
       to the bottom, a rise); stated.lines are the plan budget, tax reserve and cash
-      target (stated, not gates); deep_link prefills the pool, range and USDC amount
-      (depositState); picture is the data of the card's price-axis drawing;
+      target (stated, not gates); deep_link prefills the pool and range, never the
+      amount (the app was observed on 2026-11-21 to drop one), and states
+      amount_to_enter beside it; picture is the data of the card's price-axis drawing;
       after_deposit (kind manual_config today) is the one field that says how a minted
       rung becomes tracked. It never changes shot_advice_action or shot_advice_details.
       Position.fee_raw and Position.hooks (uniswap-v4 only; absent when not read): the
