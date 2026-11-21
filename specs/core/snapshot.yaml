@@ -36,14 +36,21 @@ info:
       signed up for and floor and reserve breaches (a DEFENSIVE LOCK, DCA TRANCHE DUE or
       DCA PLAN INVALID directive, a detected plan buy to confirm, a position found
       on-chain waiting for a tap, the shown ladder suggestion, a ladder near move, deep
-      pull or deep bottom report, and a reserve dip the ranges' buying does not explain);
+      pull, deep bottom report or a deep pull that cannot fire with the operator's
+      recovery setting, and wallet USDC below the reserve);
       `quiet` = everything else (every other directive, collectable LP fees, AERO
-      rewards, a closed position, the floor-crossing price, a cap that sold its NOCK, a
-      reserve dip explained by the NOCK ranges' buying, an invalid reserve setting).
-      A reserve dip is quiet when wallet USDC plus the USDC the NOCK ranges hold at their
-      tops (a full-range pool: its USDC now) still covers the reserve, top otherwise; it
-      states the wallet / NOCK LP / ladder split. The pushes are unchanged (notify.rs
-      does not read events). Left out of the state hash.
+      rewards, a closed position, the floor-crossing price, a cap that sold its NOCK, an
+      invalid reserve setting). The reserve event (reserve_below) is top whenever wallet
+      USDC alone is below cash_reserve_usdc, with no exceptions (operator's choice,
+      2026-11-21); its text and numbers give the wallet / NOCK LP / ladder split of the
+      stable balance the gate counts, and one measured line on the gas-side ETH/USDC
+      ranges (outside the gate): their USDC and WETH now, wallet USDC if they were
+      withdrawn now, and the ETH price at which their USDC side alone covers the wallet's
+      shortfall (each range's liquidity on its own pool's curve, scaled from the
+      snapshot's eth_price_usd), with the WETH still in them there, or that they cover it
+      already. Every event's deep_link is an element id on the dashboard and in the Lite
+      cockpit: the strip for top entries, else the place its `card` names. The pushes
+      are unchanged (notify.rs does not read events). Left out of the state hash.
 
     2.10.0 (the fee yield and the operator's ladder shape, extending #166), additive:
     - DerivedMetrics.fee_yield (absent before 2.10.0): swap fees per unit of liquidity

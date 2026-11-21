@@ -136,8 +136,10 @@ fn live_bottle_with_settings_unset_states_every_rule_off_and_suggests_nothing() 
     let cap_ev = event(&evs, &format!("ladder_cap_sold:{CAP}")).unwrap();
     assert_eq!(cap_ev["tier"], "quiet");
     assert!(cap_ev["would_sign"].is_null());
-    // Nothing at the top of the page: HOLD is quiet, the suggestion card is not shown.
-    assert!(top_ids(&c).is_empty(), "{:?}", top_ids(&c));
+    // At the top of the page only the reserve: wallet USDC $778.77 is below the $950 reserve
+    // (the operator's rule, 2026-11-21). HOLD is quiet, the suggestion card is not shown, and
+    // no ladder rule is on.
+    assert_eq!(top_ids(&c), vec!["reserve_below".to_string()]);
     assert_eq!(event(&evs, "directive").unwrap()["tier"], "quiet");
     assert_measured_words(&c);
 }
@@ -331,13 +333,29 @@ fn all_below(env: &mut SnapshotEnvelope, price: f64) {
     }
 }
 
-fn deep_converting(env: &mut SnapshotEnvelope, price: f64, converted_pct: f64, nock: f64, usdc: f64) {
+/// The deep rung as the chain would show it at `price`: on its own curve between its bottom
+/// and top (from its reading's amounts at the edges), never a state the chain cannot give.
+fn deep_at(env: &mut SnapshotEnvelope, price: f64) -> (f64, f64) {
     at_price(env, price);
     let r = reading(env, DEEP);
-    r.state = "in_range".to_string();
-    r.vs_top.converted_pct = Some(format!("{converted_pct:.2}"));
-    r.nock_now = format!("{nock:.4}");
+    let a: f64 = r.low_price_usd.as_ref().unwrap().parse().unwrap();
+    let b: f64 = r.high_price_usd.as_ref().unwrap().parse().unwrap();
+    let u_top: f64 = r.vs_top.usdc_at_top.as_ref().unwrap().parse().unwrap();
+    let n_bottom: f64 = r.vs_top.nock_at_bottom.as_ref().unwrap().parse().unwrap();
+    let (state, usdc, nock) = if price >= b {
+        ("holds_only_usdc", u_top, 0.0)
+    } else if price <= a {
+        ("holds_only_nock", 0.0, n_bottom)
+    } else {
+        let usdc = u_top * (price.sqrt() - a.sqrt()) / (b.sqrt() - a.sqrt());
+        let nock = n_bottom * (1.0 / price.sqrt() - 1.0 / b.sqrt()) / (1.0 / a.sqrt() - 1.0 / b.sqrt());
+        ("in_range", usdc, nock)
+    };
+    r.state = state.to_string();
     r.usdc_now = format!("{usdc:.2}");
+    r.nock_now = format!("{nock:.4}");
+    r.vs_top.converted_pct = Some(format!("{:.2}", (1.0 - usdc / u_top) * 100.0));
+    (usdc, nock)
 }
 
 #[test]
@@ -368,48 +386,100 @@ fn deep_rung_fully_converted_is_reported_and_no_lower_ladder_is_suggested() {
     }
 }
 
+/// The review's walk on the live rung (about 9.4% wide) with the operator's 10% recovery:
+/// a dump to $0.0101, then a rise through the rung. The pull can never be stated, because the
+/// recovery point is above the rung's top; the rule says so at the top of the page.
 #[test]
-fn deep_rung_pull_after_it_bought_low_and_the_price_recovered() {
+fn a_recovery_at_or_above_the_rungs_width_is_reported_as_unable_to_fire() {
     let cfg = example_cfg();
     let mut env = live_bottle();
-    // The dump: 92% converted at a low of $0.0101.
-    deep_converting(&mut env, 0.0101, 92.0, 55000.0, 50.0);
+    // Before any dip, measured from its bottom: 0.01002405 * 1.10 is above its top 0.01096801.
+    let live = cycle(&env, Some(cfg.clone()), None, env.meta.generated_at);
+    let deep = rung(&live, DEEP);
+    assert_eq!(deep["status"], "rule_cannot_fire", "{}", deep["text"]);
+    let ev = event(&events(&live), &format!("ladder_rule_cannot_fire:{DEEP}")).unwrap().clone();
+    assert_eq!(ev["tier"], "top");
+    assert_eq!(ev["numbers"]["rung_width_pct"], "9.42");
+    let text = ev["text"].as_str().unwrap();
+    assert!(text.contains("operator_profile.ladder_maintenance.deep_pull_recovery_pct of 10%"), "{text}");
+    assert!(text.contains("The rung is 9.42% wide"), "{text}");
+    assert!(text.contains("A recovery below 9.42% would let the pull be stated before that."), "{text}");
+    // The walk: never stated, the rule keeps saying why, and at the top the NOCK is sold back.
     let t0 = t("2026-11-25T10:00:00Z");
-    let low = cycle(&env, Some(cfg.clone()), None, t0);
+    let mut prev: Option<SnapshotEnvelope> = None;
+    for (i, price) in [0.0101, 0.0103, 0.0105, 0.0107, 0.0109, 0.01099, 0.0112].iter().enumerate() {
+        deep_at(&mut env, *price);
+        let c = cycle(&env, Some(cfg.clone()), prev.as_ref(), t0 + chrono::Duration::minutes(5 * i as i64));
+        let d = rung(&c, DEEP);
+        assert_ne!(d["status"], "suggested", "at {price}");
+        assert_eq!(d["status"], "rule_cannot_fire", "at {price}: {}", d["text"]);
+        assert!(event(&events(&c), &format!("ladder_rule_cannot_fire:{DEEP}")).is_some());
+        prev = Some(c);
+    }
+    assert_eq!(rung(prev.as_ref().unwrap(), DEEP)["state"], "holds_only_usdc");
+}
+
+/// With a recovery under the rung's width the pull is stated on the way back up, and it
+/// says how much of the NOCK bought has been sold back since the low.
+#[test]
+fn deep_rung_pull_after_it_bought_low_and_the_price_recovered() {
+    let cfg = LadderMaintenanceConfig { deep_pull_recovery_pct: Some(5.0), ..example_cfg() };
+    let mut env = live_bottle();
+    let t0 = t("2026-11-25T10:00:00Z");
+    let at = |i: i64| t0 + chrono::Duration::minutes(5 * i);
+    // The dump to $0.0101: in range, most of its USDC converted.
+    let (_, nock_low) = deep_at(&mut env, 0.0101);
+    let low = cycle(&env, Some(cfg.clone()), None, at(0));
     let deep = rung(&low, DEEP);
     assert_eq!(deep["status"], "holding", "{}", deep["text"]);
     assert_eq!(deep["clock"]["episode"]["low_price_usd"], "0.01010000");
-    assert_eq!(deep["clock"]["episode"]["peak_converted_pct"], "92.00");
-    // A rebound to $0.0112 (+10.9%): the rung starts selling back; the pull is stated.
-    deep_converting(&mut env, 0.0112, 60.0, 36000.0, 240.0);
-    let up = cycle(&env, Some(cfg.clone()), Some(&low), t0 + chrono::Duration::minutes(5));
+    assert!(deep["setting_event"].is_null(), "a 5% recovery fits inside the 9.42% rung");
+    // +1.98% and +3.96%: still holding.
+    deep_at(&mut env, 0.0103);
+    let a = cycle(&env, Some(cfg.clone()), Some(&low), at(1));
+    assert_eq!(rung(&a, DEEP)["status"], "holding");
+    deep_at(&mut env, 0.0105);
+    let b = cycle(&env, Some(cfg.clone()), Some(&a), at(2));
+    assert_eq!(rung(&b, DEEP)["status"], "holding");
+    // +5.94%: past the recovery point $0.010605, still inside the rung (top $0.01097).
+    let (_, nock_up) = deep_at(&mut env, 0.0107);
+    let up = cycle(&env, Some(cfg.clone()), Some(&b), at(3));
     let deep = rung(&up, DEEP);
+    assert_eq!(deep["state"], "in_range");
     assert_eq!(deep["status"], "suggested", "{}", deep["text"]);
-    assert_eq!(deep["pull"]["peak_converted_pct"], "92.00");
+    let sold: f64 = deep["pull"]["nock_sold_back_since_low"].as_str().unwrap().parse().unwrap();
+    assert!((sold - (nock_low - nock_up)).abs() < 0.01, "{sold} vs {}", nock_low - nock_up);
     let ev = event(&events(&up), &format!("ladder_deep_pull:{DEEP}")).unwrap().clone();
     assert_eq!(ev["tier"], "top");
     assert_eq!(ev["title"], "LADDER: PULL THE DEEP RUNG");
+    let text = ev["text"].as_str().unwrap();
+    assert!(text.contains("Since then it has sold back"), "{text}");
+    assert!(text.contains("removing it now keeps the"), "{text}");
+    assert!(!text.contains("keeps the NOCK it bought"), "{text}");
     assert!(ev["would_sign"].as_str().unwrap().starts_with("One transaction in your wallet: remove all of Deep rung #3244701's liquidity"));
-    // A dip inside the hysteresis band keeps it (no churn): 2% under the recovery point.
-    deep_converting(&mut env, 0.0101 * 1.10 * 0.985, 65.0, 39000.0, 200.0);
-    let dip = cycle(&env, Some(cfg.clone()), Some(&up), t0 + chrono::Duration::minutes(10));
+    // A dip inside the 2% hysteresis band keeps it (no churn).
+    deep_at(&mut env, 0.0104);
+    let dip = cycle(&env, Some(cfg.clone()), Some(&up), at(4));
     assert_eq!(rung(&dip, DEEP)["status"], "suggested");
-    // A new low clears it and moves the recovery point down.
-    deep_converting(&mut env, 0.0100, 99.0, 59000.0, 5.0);
-    let new_low = cycle(&env, Some(cfg.clone()), Some(&dip), t0 + chrono::Duration::minutes(15));
+    // A new low below the bottom clears it: fully converted, reported.
+    deep_at(&mut env, 0.0100);
+    let new_low = cycle(&env, Some(cfg.clone()), Some(&dip), at(5));
     let deep = rung(&new_low, DEEP);
-    assert_eq!(deep["status"], "holding", "{}", deep["text"]);
+    assert_eq!(deep["status"], "fully_converted", "{}", deep["text"]);
     assert_eq!(deep["clock"]["episode"]["low_price_usd"], "0.01000000");
     assert!(deep["clock"]["last_cleared_at"].is_string());
     // Below the fill setting the pull is never stated, whatever the recovery.
+    // (A 2% recovery, so the rule can fire inside the rung: about 38% converted at $0.0106.)
+    let cfg2 = LadderMaintenanceConfig { deep_pull_recovery_pct: Some(2.0), ..cfg.clone() };
     let mut env2 = live_bottle();
-    deep_converting(&mut env2, 0.0105, 30.0, 18000.0, 440.0);
-    let a = cycle(&env2, Some(cfg.clone()), None, t0);
-    deep_converting(&mut env2, 0.0120, 30.0, 18000.0, 440.0);
-    let b = cycle(&env2, Some(cfg.clone()), Some(&a), t0 + chrono::Duration::minutes(5));
-    assert_eq!(rung(&b, DEEP)["status"], "holding");
+    deep_at(&mut env2, 0.0106);
+    let a = cycle(&env2, Some(cfg2.clone()), None, at(0));
+    deep_at(&mut env2, 0.0109);
+    let b = cycle(&env2, Some(cfg2), Some(&a), at(1));
+    assert_eq!(rung(&b, DEEP)["status"], "holding", "{}", rung(&b, DEEP)["text"]);
     // With its settings unset the pull is off and says which settings turn it on.
-    let off = cycle(&env, None, Some(&dip), t0 + chrono::Duration::minutes(15));
+    deep_at(&mut env, 0.0107);
+    let off = cycle(&env, None, Some(&dip), at(5));
     assert_eq!(rung(&off, DEEP)["status"], "off");
     assert!(rung(&off, DEEP)["text"].as_str().unwrap().contains("operator_profile.ladder_maintenance.deep_pull_fill_fraction"));
 }
@@ -492,37 +562,44 @@ fn every_audited_call_to_action_has_its_tier() {
     }
 }
 
+/// The operator's rule (2026-11-21, "Top when wallet < $950"): top whenever wallet USDC alone
+/// is below the reserve, with the split and the ETH/USDC ranges' line. Numbers recomputed
+/// independently from the live fixture (each range's liquidity on its own pool's curve).
 #[test]
-fn a_reserve_dip_from_the_ranges_buying_is_quiet_and_a_wallet_shortfall_is_top() {
-    // Stable $1,780.87 against a $1,800 reserve: wallet $778.77 plus the ranges' USDC at
-    // their tops covers it, so the dip is their buying: quiet, with the split.
-    let mut env = live_bottle();
-    {
-        let g = &mut env.data.derived_metrics.global_status;
-        g.cash_reserve_usdc = Some("1800.00".to_string());
-        g.reserve_headroom_usdc = Some("-19.13".to_string());
-    }
-    let c = cycle(&env, None, None, env.meta.generated_at);
-    let evs = events(&c);
-    let r = event(&evs, "reserve_below").unwrap();
-    assert_eq!(r["tier"], "quiet", "{r}");
-    let text = r["text"].as_str().unwrap();
-    assert!(text.starts_with("Stable $1780.87 (wallet USDC $778.77 + NOCK LP USDC $233.86 + ladder USDC $768.24) is $19.13 below your $1800.00 reserve."), "{text}");
-    assert!(text.contains("the dip is their buying"), "{text}");
-    // A reserve the ranges' USDC at their tops cannot cover: top of the page.
-    {
-        let g = &mut env.data.derived_metrics.global_status;
-        g.cash_reserve_usdc = Some("2400.00".to_string());
-        g.reserve_headroom_usdc = Some("-619.13".to_string());
-    }
-    let c = cycle(&env, None, None, env.meta.generated_at);
+fn wallet_usdc_below_the_reserve_is_top_with_the_split_and_the_eth_ranges_line() {
+    let live = live_bottle();
+    let c = cycle(&live, None, None, live.meta.generated_at);
     let evs = events(&c);
     let r = event(&evs, "reserve_below").unwrap();
     assert_eq!(r["tier"], "top", "{r}");
-    assert!(r["text"].as_str().unwrap().contains("More than the ranges' buying"));
-    // Above the reserve (live: $830.87 of headroom): no entry.
-    let live = cycle(&live_bottle(), None, None, live_bottle().meta.generated_at);
-    assert!(event(&events(&live), "reserve_below").is_none());
+    let text = r["text"].as_str().unwrap();
+    assert!(text.starts_with("Wallet USDC $778.77 is $171.23 below your $950.00 reserve."), "{text}");
+    assert!(text.contains("(wallet USDC $778.77 + NOCK LP USDC $233.86 + ladder USDC $768.24), $830.87 above it."), "{text}");
+    let n = &r["numbers"];
+    assert_eq!(n["wallet_shortfall_usdc"], "171.23");
+    assert_eq!(n["eth_ranges_usdc"], "99.09");
+    assert_eq!(n["eth_ranges_weth"], "0.2345");
+    assert_eq!(n["wallet_usdc_if_eth_ranges_withdrawn"], "877.85");
+    assert_eq!(n["eth_price_usd"], "1677.54");
+    let covering: f64 = n["eth_price_covering_shortfall_usd"].as_str().unwrap().parse().unwrap();
+    assert!((covering - 1830.74).abs() < 0.02, "{covering}");
+    assert_eq!(n["eth_covering_pct_above_now"], "9.1");
+    assert_eq!(n["eth_ranges_weth_at_covering"], "0.1933");
+    assert!(text.contains("withdrawn now, wallet USDC would be $877.85"), "{text}");
+    assert!(text.contains("would cover the $171.23 shortfall at ETH about $1830.7"), "{text}");
+    assert!(!text.to_lowercase().contains("pull now") && !text.to_lowercase().contains("should"), "{text}");
+    // When their USDC already covers the shortfall, the line says so.
+    let mut env = live_bottle();
+    env.data.derived_metrics.global_status.cash_reserve_usdc = Some("850.00".to_string());
+    let c = cycle(&env, None, None, env.meta.generated_at);
+    let evs = events(&c);
+    let r = event(&evs, "reserve_below").unwrap();
+    assert_eq!(r["tier"], "top");
+    assert!(r["text"].as_str().unwrap().contains("Their USDC already covers the $71.23 shortfall."), "{}", r["text"]);
+    // Wallet USDC at or above the reserve: no entry.
+    env.data.derived_metrics.global_status.cash_reserve_usdc = Some("700.00".to_string());
+    let c = cycle(&env, None, None, env.meta.generated_at);
+    assert!(event(&events(&c), "reserve_below").is_none());
 }
 
 #[test]
@@ -564,6 +641,126 @@ fn the_cycle_attaches_maintenance_after_the_suggestion_and_before_the_hash() {
     assert!(!include_str!("notify.rs").contains("events"));
 }
 
+// ---------------- Review fixes (#169) ----------------
+
+/// On a spacing multiple the pool tick is inside [lower, upper): the moved range's top goes
+/// one spacing further, so it opens holding only USDC.
+#[test]
+fn a_move_from_a_pool_tick_on_a_spacing_multiple_opens_out_of_range() {
+    let env = live_bottle();
+    let mut p = env.data.positions.iter().find(|p| p.position_id == NEAR).unwrap().clone();
+    p.lower_tick = 273900;
+    p.upper_tick = 275700;
+    // The pool tick exactly on 273300: before the fix the range was 273300..275100, in range.
+    let (lo, hi) = moved_ticks(&p, 273300, 300).unwrap();
+    assert_eq!((lo, hi), (273600, 275400));
+    assert!(lo > 273300, "NOCK token1: in range when lower <= tick < upper");
+    // Off the multiple: the next multiple up, as before.
+    assert_eq!(moved_ticks(&p, 273280, 300), Some((273300, 275100)));
+}
+
+/// A standing move survives a pool_stale cycle, unknown reads and a dip to within one
+/// spacing above the top; only a real return into the range clears it.
+#[test]
+fn a_standing_move_is_withdrawn_only_by_a_real_return_into_the_range() {
+    let cfg = example_cfg();
+    let standing = near_after_25h(4.0, true, cfg.clone());
+    assert_eq!(rung(&standing, NEAR)["status"], "suggested");
+    let above_since = rung(&standing, NEAR)["clock"]["above_since"].clone();
+    let mut env = live_bottle();
+    let top = near_top(&env);
+    at_price(&mut env, top * 1.04);
+    let next = |e: &SnapshotEnvelope, prev: &SnapshotEnvelope| cycle(e, Some(cfg.clone()), Some(prev), prev.meta.generated_at + chrono::Duration::minutes(5));
+    // One pool_stale cycle.
+    let mut stale = env.clone();
+    reading(&mut stale, NEAR).state = "pool_stale".to_string();
+    let a = next(&stale, &standing);
+    assert_eq!(rung(&a, NEAR)["status"], "suggested", "{}", rung(&a, NEAR)["text"]);
+    assert_eq!(rung(&a, NEAR)["clock"]["above_since"], above_since);
+    assert!(event(&events(&a), &format!("ladder_near_move:{NEAR}")).is_some());
+    // The pool tick not read: unknown, still standing.
+    let mut unread = env.clone();
+    for m in unread.data.pool_mechanics.iter_mut() {
+        m.tick_current = None;
+    }
+    let b = next(&unread, &a);
+    assert_eq!(rung(&b, NEAR)["status"], "suggested");
+    // Back at 4% above: still the same move, no clock restarted, no cooldown started.
+    let c = next(&env, &b);
+    assert_eq!(rung(&c, NEAR)["status"], "suggested");
+    assert_eq!(rung(&c, NEAR)["clock"]["suggested_since"], "2026-11-22T17:00:00+00:00");
+    assert!(rung(&c, NEAR)["clock"]["last_cleared_at"].is_null());
+    // A dip to within one spacing above the top: still above, still standing.
+    let mut near_edge = live_bottle();
+    at_price(&mut near_edge, top * 1.005);
+    let d = next(&near_edge, &c);
+    assert_eq!(rung(&d, NEAR)["status"], "suggested", "{}", rung(&d, NEAR)["text"]);
+    // A real return into the range clears it and starts the cooldown.
+    let mut back = live_bottle();
+    at_price(&mut back, top * 0.99);
+    reading(&mut back, NEAR).state = "in_range".to_string();
+    let e = next(&back, &d);
+    assert_eq!(rung(&e, NEAR)["status"], "trading");
+    assert!(rung(&e, NEAR)["clock"]["suggested_since"].is_null());
+    assert_eq!(rung(&e, NEAR)["clock"]["last_cleared_at"], e.meta.generated_at.to_rfc3339());
+}
+
+/// The move states the stretch between the deep rung's top and the moved range's bottom
+/// that no rung covers; once minted with USDC only, the moved range is tracked as the near
+/// rung by itself.
+#[test]
+fn a_completed_near_move_is_tracked_and_its_gap_to_the_deep_rung_is_stated() {
+    let c = near_after_25h(4.0, false, example_cfg());
+    let near = rung(&c, NEAR);
+    assert_eq!(near["status"], "suggested");
+    assert_eq!(near["move"]["uncovered_from_usd"], "0.01096801");
+    assert_eq!(near["move"]["uncovered_to_usd"], "0.01130202");
+    assert!(near["text"].as_str().unwrap().contains("$0.01097 to $0.01130 is then covered by no rung"), "{}", near["text"]);
+    // Detection reads the standing move from the previous snapshot.
+    let data = serde_json::to_value(&c.data).unwrap();
+    let rungs = crate::position_detect::suggested_rungs(&data);
+    let moved = rungs.iter().find(|r| r.from_move).expect("the moved range is a suggested rung");
+    assert_eq!((moved.tick_lower, moved.tick_upper, moved.rung.as_deref()), (273300, 275100, Some("near")));
+    let wallet = c.data.positions[0].wallet.clone();
+    let pos = c.data.positions.iter().find(|p| p.position_id == NEAR).unwrap();
+    let cand = CandidateRow {
+        wallet: wallet.clone(),
+        protocol: pos.protocol.clone(),
+        network: "base".to_string(),
+        nft_id: 3300000,
+        verdict: "eligible".to_string(),
+        owned: true,
+        has_liquidity: Some(true),
+        pool_id: Some(POOL.to_string()),
+        currency0: Some(pos.token0.address.clone()),
+        currency1: Some(pos.token1.address.clone()),
+        fee_raw: Some(30000),
+        tick_spacing: Some(300),
+        hooks: Some("0x0000000000000000000000000000000000000000".to_string()),
+        tick_lower: Some(273300),
+        tick_upper: Some(275100),
+        received_from: Some("0x0000000000000000000000000000000000000000".to_string()),
+        mint_tx: Some("0xabc".to_string()),
+        mint_block: Some(60500000),
+        minted_by: Some(wallet.clone()),
+        deposit_check: Some("ok".to_string()),
+        ..Default::default()
+    };
+    let tracked = crate::position_detect::tracked_ranges_in_snapshot(&data);
+    assert_eq!(
+        crate::position_detect::decide(&cand, &wallet, &rungs, &tracked),
+        crate::position_detect::Decision::Track { rung: Some("near".to_string()) }
+    );
+    // A mint that put NOCK in is not the moved (USDC-only) near rung: offered, with why.
+    let with_nock = CandidateRow { deposit_check: Some(crate::position_detect::DEPOSIT_OK_HOLDS_NOCK.to_string()), ..cand };
+    match crate::position_detect::decide(&with_nock, &wallet, &rungs, &tracked) {
+        crate::position_detect::Decision::Offer { why_not_automatic, .. } => {
+            assert!(why_not_automatic.iter().any(|w| w.contains("the moved near rung is a USDC-only range")), "{why_not_automatic:?}")
+        }
+        other => panic!("expected an offer, got {other:?}"),
+    }
+}
+
 // ---------------- MCP text, both transports ----------------
 
 fn text_case(env: &SnapshotEnvelope, health: Option<&str>) -> Value {
@@ -596,11 +793,13 @@ fn mcp_text_golden_for_both_transports() {
     assert!(actual == expected, "events text changed; bless with NOCKNOCK_BLESS_GOLDEN=1 and review the diff");
     // What the lines say.
     let t = doc["live_unset"]["text"].as_str().unwrap();
-    assert!(t.starts_with("• Top of page: nothing needs you.\n"), "{t}");
+    assert!(t.starts_with("• Top of page (1):\n  – WALLET USDC BELOW THE STANDING RESERVE: "), "{t}");
     assert!(t.contains("• Quiet ("), "{t}");
     assert!(t.contains("  – Near rung #3244700 (off): "), "{t}");
     let t = doc["near_move"]["text"].as_str().unwrap();
-    assert!(t.starts_with("• Top of page (1):\n  – LADDER: MOVE THE NEAR RUNG: "), "{t}");
+    assert!(t.starts_with("• Top of page (3):\n  – WALLET USDC BELOW THE STANDING RESERVE: "), "{t}");
+    assert!(t.contains("\n  – LADDER: MOVE THE NEAR RUNG: "), "{t}");
+    assert!(t.contains("\n  – LADDER: DEEP PULL CANNOT FIRE: "), "{t}");
     assert!(t.contains("    Would sign: Two transactions in your wallet"), "{t}");
     let t = doc["deep_converted_stale"]["text"].as_str().unwrap();
     assert!(t.contains("the worker's health is degraded"), "{t}");

@@ -153,6 +153,10 @@ pub(crate) struct Episode {
     pub(crate) low_at: String,
     /// The most of its USDC converted to NOCK, percent, `{:.2}`.
     pub(crate) peak_converted_pct: String,
+    /// The most NOCK it was seen holding this episode, `{:.4}`: what it sold back since is
+    /// that less what it holds now.
+    #[serde(default)]
+    pub(crate) peak_nock: String,
     /// Set when the price was not watched for a while during the episode.
     pub(crate) gap_note: Option<String>,
 }
@@ -263,7 +267,9 @@ pub(crate) fn moved_ticks(p: &Position, pool_tick: i32, spacing: i32) -> Option<
     let width = p.upper_tick - p.lower_tick;
     let (lo, hi) = if nock_is_token1(p) {
         // Higher tick = lower USD: the top is the lower tick, at or above the pool tick.
-        let top = pool_tick.div_euclid(spacing) * spacing + if pool_tick.rem_euclid(spacing) == 0 { 0 } else { spacing };
+        // On a spacing multiple the tick itself is in range ([lower, upper)): one spacing
+        // further, so the moved range opens holding only USDC.
+        let top = pool_tick.div_euclid(spacing) * spacing + spacing;
         (top, top + width)
     } else {
         let top = pool_tick.div_euclid(spacing) * spacing;
@@ -382,11 +388,15 @@ fn rung_entry(
         last_cleared_at: prev.last_cleared_at.clone(),
         episode: prev.episode.clone(),
     };
+    // The out-of-range clock ends only on a real return into or below the range (or an
+    // emptied rung): a pool_stale cycle, or one whose reads are unknown, keeps it (#169
+    // review).
+    let returned = matches!(state, "in_range" | "holds_only_nock" | "empty");
     if state == "holds_only_usdc" {
         if clock.above_since.is_none() {
             clock.above_since = Some(now_s.clone());
         }
-    } else {
+    } else if returned {
         clock.above_since = None;
     }
     let pool_price = fo(r.pool_price_usd.as_ref());
@@ -421,6 +431,9 @@ fn rung_entry(
                     if converted > peak {
                         e.peak_converted_pct = format!("{:.2}", converted);
                     }
+                    if nock_now > f(&e.peak_nock).unwrap_or(0.0) {
+                        e.peak_nock = format!("{:.4}", nock_now);
+                    }
                     if gap_note.is_some() {
                         e.gap_note = gap_note;
                     }
@@ -431,6 +444,7 @@ fn rung_entry(
                     low_price_usd: if px.is_finite() { p8(px) } else { String::new() },
                     low_at: now_s.clone(),
                     peak_converted_pct: format!("{:.2}", converted),
+                    peak_nock: format!("{:.4}", nock_now),
                     gap_note: None,
                 },
             });
@@ -507,6 +521,13 @@ fn rung_entry(
             out["pull"] = pull;
             out["event"] = event;
             suggested = is_suggested;
+            if let Some((text, ev)) = deep_cannot_fire(r, cfg, deep_rule, &clock, top, bottom, &label) {
+                out["setting_event"] = ev;
+                if !matches!(status, "fully_converted" | "suggested") {
+                    out["status"] = json!("rule_cannot_fire");
+                    out["text"] = json!(format!("{text} This cycle: {}", out["text"].as_str().unwrap_or("")));
+                }
+            }
         }
         Some("cap") => {
             out["rule"] = json!("cap_statement");
@@ -549,6 +570,29 @@ fn rung_entry(
                 r.label
             ));
         }
+    }
+    // A standing near move is withdrawn only by a real return of the price into (or below)
+    // its range, or by the rule being turned off: a pool_stale cycle, unknown reads, or a
+    // dip to within one tick spacing above the top keep it (#169 review).
+    if rung == Some("near") && !suggested && clock.suggested_since.is_some() && !returned && near_rule["status"].as_str() == Some("on") {
+        suggested = true;
+        let this_cycle = out["text"].as_str().unwrap_or("").to_string();
+        let remove = pos.and_then(position_page_url);
+        let text = format!(
+            "{label}'s move stands until the price is back inside its range; it is not withdrawn while the price is above its top. This cycle: {this_cycle} Whether and when is your decision."
+        );
+        out["status"] = json!("suggested");
+        out["text"] = json!(text.clone());
+        out["event"] = json!({
+            "kind": "ladder_near_move",
+            "tier": "top",
+            "title": "LADDER: MOVE THE NEAR RUNG",
+            "what_changed": format!("{label}'s move stands: the price has not come back into its range."),
+            "text": text,
+            "numbers": { "pool_price_usd": r.pool_price_usd, "top_usd": r.high_price_usd, "usdc": m2(usdc_now), "fees_earned_usd": m2(fees) },
+            "links": links(&[("This rung in the Uniswap app (remove)", remove)]),
+            "would_sign": Value::Null,
+        });
     }
     // The standing suggestion's clock: stamped on entry, cleared (and the cooldown started)
     // when it ends.
@@ -708,6 +752,19 @@ fn near_move(
     let tx_link = position_page_url(p);
     let new_link = new_position_url(p, lo, hi, None).ok().map(|(u, _)| u);
     let opens_below = (new_top / px - 1.0) * 100.0;
+    // What the moved range leaves between itself and the deep rung's top (same pool).
+    let deep_top = data
+        .ladders
+        .iter()
+        .filter(|l| l.rung.as_deref() == Some("deep"))
+        .filter(|l| data.positions.iter().any(|q| q.position_id == l.position_id && q.pool_id.eq_ignore_ascii_case(&p.pool_id)))
+        .filter_map(|l| fo(l.high_price_usd.as_ref()))
+        .fold(None, |acc: Option<f64>, v| Some(acc.map_or(v, |a| a.max(v))));
+    let coverage = match deep_top {
+        Some(d) if new_low > d * (1.0 + 1e-9) => format!(" ${} to ${} is then covered by no rung (between the deep rung's top and the moved range's bottom).", price4(d), price4(new_low)),
+        Some(d) if new_low < d * (1.0 - 1e-9) => format!(" It would overlap the deep rung from ${} to ${}.", price4(new_low), price4(d)),
+        _ => String::new(),
+    };
     let mv = json!({
         "new_tick_lower": lo,
         "new_tick_upper": hi,
@@ -725,11 +782,14 @@ fn near_move(
         "fee_rate_reason": rate.as_ref().err().cloned(),
         "payback_days_in_range": payback.map(|v| format!("{:.4}", v)),
         "fees_earned_usd": m2(fees),
+        "deep_top_usd": deep_top.map(p8),
+        "uncovered_from_usd": deep_top.filter(|d| new_low > *d * (1.0 + 1e-9)).map(p8),
+        "uncovered_to_usd": deep_top.filter(|d| new_low > *d * (1.0 + 1e-9)).map(|_| p8(new_low)),
         "remove_url": tx_link,
         "new_position_url": new_link,
     });
     let what = format!(
-        "A move to just below the price, keeping its width ({} ticks), would be ticks {lo}..{hi}, ${} to ${}, with the same ${} USDC and 0 NOCK; it would open {:.2}% below the price, so it earns fees only once NOCK dips into it. It has earned ${} in fees so far.",
+        "A move to just below the price, keeping its width ({} ticks), would be ticks {lo}..{hi}, ${} to ${}, with the same ${} USDC and 0 NOCK; it would open {:.2}% below the price, so it earns fees only once NOCK dips into it.{coverage} It has earned ${} in fees so far.",
         int_grouped(width as i64),
         price4(new_low),
         price4(new_top),
@@ -917,7 +977,11 @@ fn deep_rung(
     let all_pass = gates.iter().all(|g| g["passes"].as_bool() == Some(true));
     let gas = gas_per_tx_usd(data);
     let remove = pos.and_then(position_page_url);
+    let peak_nock = f(&ep.peak_nock).unwrap_or(nock_now).max(nock_now);
+    let sold_back = (peak_nock - nock_now).max(0.0);
     let pull = json!({
+        "peak_nock": m4(peak_nock),
+        "nock_sold_back_since_low": m4(sold_back),
         "low_price_usd": low.map(p8),
         "low_at": low_at.map(|t| t.to_rfc3339()),
         "peak_converted_pct": format!("{:.2}", peak),
@@ -933,10 +997,14 @@ fn deep_rung(
     });
     if all_pass {
         let text = format!(
-            "{held}{gap} The price ${} is {:.2}% above that low (your {}%). A further rise into the rung sells its NOCK back for USDC; removing it now keeps the NOCK it bought. Gas ≈ ${} (one transaction, an estimate). {}. Whether and when is your decision.",
+            "{held}{gap} The price ${} is {:.2}% above that low (your {}%). Since then it has sold back {} of the {} NOCK it held at most ({:.1}%); a further rise sells more of it for USDC, and removing it now keeps the {} NOCK it still holds. Gas ≈ ${} (one transaction, an estimate). {}. Whether and when is your decision.",
             price_words(pool_price),
             recovery_now.unwrap_or(0.0),
             num_plain(rec),
+            nock_words(sold_back),
+            nock_words(peak_nock),
+            if peak_nock > 0.0 { sold_back / peak_nock * 100.0 } else { 0.0 },
+            nock_words(nock_now),
             gas.map(m4).unwrap_or_else(|| "unknown".to_string()),
             capitalize(&gates.iter().filter_map(|g| g["text"].as_str()).collect::<Vec<_>>().join("; "))
         );
@@ -954,6 +1022,8 @@ fn deep_rung(
                 "nock_now": m4(nock_now),
                 "usdc_now": m2(usdc_now),
                 "avg_buy_price_usd": avg.map(p8),
+                "peak_nock": m4(peak_nock),
+                "nock_sold_back_since_low": m4(sold_back),
                 "gas_usd": gas.map(m4),
                 "fees_earned_usd": m2(fees),
             },
@@ -973,6 +1043,65 @@ fn deep_rung(
     let failing: Vec<String> = gates.iter().filter(|g| g["passes"].as_bool() != Some(true)).filter_map(|g| g["text"].as_str().map(str::to_string)).collect();
     let text = format!("{held}{gap} It is in range, buying as the price falls. No pull is stated: {}.", failing.join("; "));
     ("holding", text, gates, pull, Value::Null, false)
+}
+
+/// The deep pull cannot fire for this rung when the recovery point, measured from the
+/// lowest price seen (or from its bottom, before it held NOCK), is at or above its top: the
+/// rung has sold all the NOCK it bought back before the pull would be stated. NockNock picks
+/// no other number; the text says what width a recovery would need to stay under. Pure.
+pub(crate) fn deep_cannot_fire(
+    r: &LadderReading,
+    cfg: Option<&LadderMaintenanceConfig>,
+    rule: &Value,
+    clock: &RungClock,
+    top: Option<f64>,
+    bottom: Option<f64>,
+    label: &str,
+) -> Option<(String, Value)> {
+    if rule["status"].as_str() != Some("on") {
+        return None;
+    }
+    let (top, bottom) = (top?, bottom?);
+    let rec = val(cfg, "deep_pull_recovery_pct");
+    let ep_low = clock.episode.as_ref().and_then(|e| f(&e.low_price_usd));
+    let low = ep_low.unwrap_or(bottom);
+    let trigger = low * (1.0 + rec / 100.0);
+    if trigger < top {
+        return None;
+    }
+    let width = (top / bottom - 1.0) * 100.0;
+    let from = if ep_low.is_some() { format!("the lowest price seen, ${}", price4(low)) } else { format!("its bottom, ${}", price4(low)) };
+    let text = format!(
+        "{label}: the deep-rung pull cannot fire for this rung with your {LM_KEY}.deep_pull_recovery_pct of {}%. The rung is {:.2}% wide (its top ${} is {:.2}% above its bottom ${}), so a {}% recovery from {from} lands at ${}, at or above its top, and by then the rung has sold all the NOCK it bought back for USDC. A recovery below {:.2}% would let the pull be stated before that.",
+        num_plain(rec),
+        width,
+        price4(top),
+        width,
+        price4(bottom),
+        num_plain(rec),
+        price4(trigger),
+        width
+    );
+    let event = json!({
+        "kind": "ladder_rule_cannot_fire",
+        "tier": "top",
+        "title": "LADDER: DEEP PULL CANNOT FIRE",
+        "what_changed": format!("Your deep_pull_recovery_pct is at or above {label}'s width."),
+        "text": text,
+        "numbers": {
+            "deep_pull_recovery_pct": num_plain(rec),
+            "rung_width_pct": format!("{:.2}", width),
+            "low_usd": p8(low),
+            "recovery_point_usd": p8(trigger),
+            "top_usd": p8(top),
+            "bottom_usd": p8(bottom),
+        },
+        "links": [],
+        "would_sign": Value::Null,
+        "setting": format!("{LM_KEY}.deep_pull_recovery_pct"),
+        "position_id": r.position_id,
+    });
+    Some((text, event))
 }
 
 fn capitalize(s: &str) -> String {

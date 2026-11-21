@@ -53,32 +53,147 @@ fn is_usdc_sym(t: &PositionTokenInfo) -> bool {
     t.symbol == "USDC"
 }
 
-/// USDC a NOCK/USDC range holds at or above its top, from its liquidity; a full-range
-/// position's USDC now (it has no top). None for a pair without USDC and NOCK. Pure.
-pub(crate) fn usdc_at_top_of(p: &Position) -> Option<f64> {
-    let (nock1, usdc0) = (is_nock_token(&p.token1), is_usdc_sym(&p.token0));
-    let (nock0, usdc1) = (is_nock_token(&p.token0), is_usdc_sym(&p.token1));
-    if !((nock1 && usdc0) || (nock0 && usdc1)) {
+/// A square-root price from a pool's `sqrt_price_x96` hex word, as a plain number. Pure.
+fn sqrt_from_x96_hex(h: &str) -> Option<f64> {
+    let h = h.trim().trim_start_matches("0x");
+    if h.is_empty() {
         return None;
     }
-    if p.full_range {
-        return f(if usdc0 { &p.amount0 } else { &p.amount1 });
+    let mut v = 0f64;
+    for c in h.chars() {
+        v = v * 16.0 + c.to_digit(16)? as f64;
     }
-    let l = f(&p.liquidity_amount)?;
-    let (sa, sb) = (tick_sqrt_price(p.lower_tick), tick_sqrt_price(p.upper_tick));
-    if usdc0 {
-        let (a0, _) = concentrated_amounts_at(l, sa, sa, sb);
-        Some(a0 / 10f64.powi(p.token0.decimals))
-    } else {
-        let (_, a1) = concentrated_amounts_at(l, sb, sa, sb);
-        Some(a1 / 10f64.powi(p.token1.decimals))
+    let s = v / 2f64.powi(96);
+    (s.is_finite() && s > 0.0).then_some(s)
+}
+
+/// One gas-side ETH/USDC range on its own pool's curve (#151): it holds USDC and WETH, and
+/// is never in the reserve gate.
+pub(crate) struct EthRange {
+    pub(crate) l: f64,
+    pub(crate) sa: f64,
+    pub(crate) sb: f64,
+    /// The pool's square-root price now (raw token1 per raw token0).
+    pub(crate) s_now: f64,
+    /// token0 is WETH (raw price = USDC per WETH): a higher ETH price is a higher raw price.
+    pub(crate) weth0: bool,
+    pub(crate) usdc_dec: i32,
+    pub(crate) weth_dec: i32,
+}
+
+impl EthRange {
+    /// (USDC, WETH) it holds when ETH is `m` times its pool's price now. Pure.
+    pub(crate) fn at_multiple(&self, m: f64) -> (f64, f64) {
+        let s = if self.weth0 { self.s_now * m.sqrt() } else { self.s_now / m.sqrt() };
+        let (a0, a1) = concentrated_amounts_at(self.l, s, self.sa, self.sb);
+        let (weth_raw, usdc_raw) = if self.weth0 { (a0, a1) } else { (a1, a0) };
+        (usdc_raw / 10f64.powi(self.usdc_dec), weth_raw / 10f64.powi(self.weth_dec))
     }
 }
 
-/// The reserve dip (#162 reserve, operator 2026-11-20): an entry only while the stable
-/// balance is below the standing reserve. Quiet when the NOCK ranges' own buying explains
-/// it, that is when wallet USDC plus the USDC those ranges hold back at their tops (the
-/// USDC a rise back above them returns) still covers the reserve; top otherwise. Pure.
+/// The gas-side ETH/USDC ranges of a snapshot, each on its own pool's curve. A range whose
+/// pool price or liquidity is not in the snapshot is left out (and named by the caller's
+/// count). Pure.
+pub(crate) fn eth_ranges(data: &SnapshotData) -> (Vec<EthRange>, usize) {
+    let mut out = Vec::new();
+    let mut unread = 0;
+    for p in &data.positions {
+        let is_weth = |t: &PositionTokenInfo| t.symbol == "WETH" || t.symbol == "ETH";
+        let weth0 = is_weth(&p.token0) && is_usdc_sym(&p.token1);
+        let weth1 = is_usdc_sym(&p.token0) && is_weth(&p.token1);
+        if !(weth0 || weth1) {
+            continue;
+        }
+        let s_now = data
+            .pool_mechanics
+            .iter()
+            .find(|m| m.pool_id.eq_ignore_ascii_case(&p.pool_id))
+            .and_then(|m| m.sqrt_price_x96.as_deref())
+            .and_then(sqrt_from_x96_hex);
+        let (Some(s_now), Some(l)) = (s_now, f(&p.liquidity_amount)) else {
+            unread += 1;
+            continue;
+        };
+        let (sa, sb) = if p.full_range { (tick_sqrt_price(-887220), tick_sqrt_price(887220)) } else { (tick_sqrt_price(p.lower_tick), tick_sqrt_price(p.upper_tick)) };
+        let (usdc_dec, weth_dec) = if weth0 { (p.token1.decimals, p.token0.decimals) } else { (p.token0.decimals, p.token1.decimals) };
+        out.push(EthRange { l, sa, sb, s_now, weth0, usdc_dec, weth_dec });
+    }
+    (out, unread)
+}
+
+/// The ETH/USDC ranges against the wallet's shortfall (operator, 2026-11-21: "we can plan to
+/// pull the ETH LPs some time after it would cover the $950 usdc reserve"): what they hold,
+/// what wallet USDC would be if they were withdrawn now, and the ETH price at which their
+/// USDC side alone covers the shortfall, with the WETH they would still hold there. A
+/// measurement; they stay outside the reserve gate (#151, #162). Pure.
+pub(crate) fn eth_ranges_line(data: &SnapshotData, wallet: f64, reserve: f64) -> Option<(String, serde_json::Map<String, Value>)> {
+    let (ranges, unread) = eth_ranges(data);
+    if ranges.is_empty() {
+        return None;
+    }
+    let eth = data.derived_metrics.global_status.eth_price_usd.as_deref().and_then(f)?;
+    let total = |m: f64| ranges.iter().map(|r| r.at_multiple(m)).fold((0.0, 0.0), |(u, w), (a, b)| (u + a, w + b));
+    let (usdc_now, weth_now) = total(1.0);
+    let shortfall = (reserve - wallet).max(0.0);
+    let withdrawn = wallet + usdc_now;
+    let mut n = serde_json::Map::new();
+    n.insert("eth_ranges_usdc".into(), json!(m2(usdc_now)));
+    n.insert("eth_ranges_weth".into(), json!(format!("{:.4}", weth_now)));
+    n.insert("wallet_usdc_if_eth_ranges_withdrawn".into(), json!(m2(withdrawn)));
+    n.insert("eth_price_usd".into(), json!(m2(eth)));
+    let head = format!(
+        "The gas-side ETH/USDC ranges (outside the reserve gate) hold ${} USDC and {:.4} WETH; withdrawn now, wallet USDC would be ${}.",
+        m2(usdc_now),
+        weth_now,
+        m2(withdrawn)
+    );
+    let unread_note = if unread > 0 { format!(" {unread} more range(s) could not be valued from this snapshot.") } else { String::new() };
+    if usdc_now >= shortfall {
+        n.insert("eth_ranges_cover_shortfall".into(), json!(true));
+        return Some((format!("{head} Their USDC already covers the ${} shortfall.{unread_note}", m2(shortfall)), n));
+    }
+    // Their USDC grows as ETH rises (they sell WETH for USDC): the least multiple at which
+    // it covers the shortfall, by bisection up to every range's top.
+    let hi_m = 1e6;
+    if total(hi_m).0 < shortfall {
+        n.insert("eth_ranges_cover_shortfall".into(), json!(false));
+        return Some((
+            format!("{head} Even above every range's top their USDC side (${}) would not cover the ${} shortfall.{unread_note}", m2(total(hi_m).0), m2(shortfall)),
+            n,
+        ));
+    }
+    let (mut lo, mut hi) = (1.0f64, hi_m);
+    for _ in 0..200 {
+        let mid = (lo * hi).sqrt();
+        if total(mid).0 >= shortfall {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    let (_, weth_left) = total(hi);
+    let price = eth * hi;
+    n.insert("eth_ranges_cover_shortfall".into(), json!(false));
+    n.insert("eth_price_covering_shortfall_usd".into(), json!(m2(price)));
+    n.insert("eth_covering_pct_above_now".into(), json!(format!("{:.1}", (hi - 1.0) * 100.0)));
+    n.insert("eth_ranges_weth_at_covering".into(), json!(format!("{:.4}", weth_left)));
+    Some((
+        format!(
+            "{head} Their USDC side alone would cover the ${} shortfall at ETH about ${} ({:+.1}% from ${}), each range on its own pool's curve, with about {:.4} WETH still in them there.{unread_note}",
+            m2(shortfall),
+            m2(price),
+            (hi - 1.0) * 100.0,
+            m2(eth),
+            weth_left
+        ),
+        n,
+    ))
+}
+
+/// The reserve event (#162 reserve; operator's choice, 2026-11-21: "Top when wallet <
+/// $950"): top tier whenever wallet USDC alone is below `cash_reserve_usdc`, with no
+/// exceptions. Its text gives the wallet / NOCK LP / ladder split of the stable balance the
+/// reserve is measured on, and one measured line on the gas-side ETH/USDC ranges. Pure.
 pub(crate) fn reserve_event(data: &SnapshotData) -> Option<Value> {
     let g = &data.derived_metrics.global_status;
     if let Some(note) = g.reserve_note.as_ref() {
@@ -92,72 +207,55 @@ pub(crate) fn reserve_event(data: &SnapshotData) -> Option<Value> {
             "numbers": {},
             "links": [],
             "would_sign": Value::Null,
-            "card": Value::Null,
+            "card": "reserve",
             "source": "derived_metrics.global_status.reserve_note",
         }));
     }
     let reserve = g.cash_reserve_usdc.as_deref().and_then(f)?;
-    let headroom = g.reserve_headroom_usdc.as_deref().and_then(f)?;
-    if headroom >= 0.0 {
+    let wallet: f64 = data.wallet_balances.iter().filter(|b| b.token_symbol == "USDC").filter_map(|b| f(&b.amount)).sum();
+    if wallet >= reserve {
         return None;
     }
-    let stable = g.reserve_stable_usdc.as_deref().and_then(f).unwrap_or(reserve + headroom);
-    let wallet: f64 = data
-        .wallet_balances
-        .iter()
-        .filter(|b| b.token_symbol == "USDC")
-        .filter_map(|b| f(&b.amount))
-        .sum();
+    let stable = g.reserve_stable_usdc.as_deref().and_then(f);
+    let headroom = g.reserve_headroom_usdc.as_deref().and_then(f);
     let ladder = g.reserve_ladder_usdc.as_deref().and_then(f).unwrap_or(0.0);
-    let lp = (stable - wallet - ladder).max(0.0);
-    let at_tops: f64 = data.positions.iter().filter_map(usdc_at_top_of).sum();
-    let recoverable = wallet + at_tops;
-    let explained = recoverable >= reserve;
-    let split = format!(
-        "Stable ${} (wallet USDC ${} + NOCK LP USDC ${}{}) is ${} below your ${} reserve.",
-        m2(stable),
-        m2(wallet),
-        m2(lp),
-        if ladder > 0.0 { format!(" + ladder USDC ${}", m2(ladder)) } else { String::new() },
-        m2(-headroom),
-        m2(reserve)
-    );
-    let (tier, text) = if explained {
-        (
-            "quiet",
-            format!(
-                "{split} The NOCK ranges bought NOCK with it on the way down: wallet USDC plus the USDC those ranges hold back at their tops is ${}, at or above the reserve, so the dip is their buying, which is what the reserve is for."
-                , m2(recoverable)
-            ),
-        )
-    } else {
-        (
-            "top",
-            format!(
-                "{split} More than the ranges' buying: wallet USDC plus the USDC the NOCK ranges hold back at their tops is ${}, ${} below the reserve."
-                , m2(recoverable), m2(reserve - recoverable)
-            ),
-        )
-    };
+    let lp = stable.map(|s| (s - wallet - ladder).max(0.0));
+    let mut text = format!("Wallet USDC ${} is ${} below your ${} reserve.", m2(wallet), m2(reserve - wallet), m2(reserve));
+    if let (Some(st), Some(lp), Some(h)) = (stable, lp, headroom) {
+        text.push_str(&format!(
+            " The stable balance the reserve gate counts is ${} (wallet USDC ${} + NOCK LP USDC ${}{}), ${} {} it.",
+            m2(st),
+            m2(wallet),
+            m2(lp),
+            if ladder > 0.0 { format!(" + ladder USDC ${}", m2(ladder)) } else { String::new() },
+            m2(h.abs()),
+            if h >= 0.0 { "above" } else { "below" }
+        ));
+    }
+    let mut numbers = serde_json::Map::new();
+    numbers.insert("reserve_usdc".into(), json!(m2(reserve)));
+    numbers.insert("wallet_usdc".into(), json!(m2(wallet)));
+    numbers.insert("wallet_shortfall_usdc".into(), json!(m2(reserve - wallet)));
+    numbers.insert("stable_usdc".into(), json!(stable.map(m2)));
+    numbers.insert("nock_lp_usdc".into(), json!(lp.map(m2)));
+    numbers.insert("ladder_usdc".into(), json!(m2(ladder)));
+    numbers.insert("stable_headroom_usdc".into(), json!(headroom.map(m2)));
+    if let Some((line, n)) = eth_ranges_line(data, wallet, reserve) {
+        text.push(' ');
+        text.push_str(&line);
+        numbers.extend(n);
+    }
     Some(json!({
         "id": "reserve_below",
         "kind": "reserve_below",
-        "tier": tier,
-        "title": "BELOW THE STANDING RESERVE",
-        "what_changed": "The stable balance is below your standing reserve.",
+        "tier": "top",
+        "title": "WALLET USDC BELOW THE STANDING RESERVE",
+        "what_changed": "Wallet USDC alone is below your standing reserve.",
         "text": text,
-        "numbers": {
-            "reserve_usdc": m2(reserve),
-            "stable_usdc": m2(stable),
-            "shortfall_usdc": m2(-headroom),
-            "wallet_usdc": m2(wallet),
-            "nock_lp_usdc": m2(lp),
-            "ladder_usdc": m2(ladder),
-            "wallet_plus_ranges_at_tops_usdc": m2(recoverable),
-        },
+        "numbers": Value::Object(numbers),
         "links": [],
         "would_sign": Value::Null,
-        "card": Value::Null,
+        "card": "reserve",
         "source": "derived_metrics.global_status",
     }))
 }
@@ -366,14 +464,17 @@ pub(crate) fn events_block(data: &SnapshotData, prev_events: Option<&Value>, con
     }
     if let Some(rungs) = data.derived_metrics.ladder_maintenance.as_ref().and_then(|m| m.get("rungs")).and_then(|r| r.as_array()) {
         for r in rungs {
-            let Some(ev) = r.get("event").filter(|e| e.is_object()) else { continue };
-            let mut e = ev.clone();
-            let pid = r.get("position_id").and_then(|v| v.as_str()).unwrap_or("");
-            let kind = e.get("kind").and_then(|v| v.as_str()).unwrap_or("ladder").to_string();
-            e["id"] = json!(format!("{kind}:{pid}"));
-            e["card"] = json!("ladders");
-            e["source"] = json!("derived_metrics.ladder_maintenance.rungs");
-            all.push(e);
+            // A rung's own event, and the event of a setting that cannot work for it.
+            for key in ["event", "setting_event"] {
+                let Some(ev) = r.get(key).filter(|e| e.is_object()) else { continue };
+                let mut e = ev.clone();
+                let pid = r.get("position_id").and_then(|v| v.as_str()).unwrap_or("");
+                let kind = e.get("kind").and_then(|v| v.as_str()).unwrap_or("ladder").to_string();
+                e["id"] = json!(format!("{kind}:{pid}"));
+                e["card"] = json!("ladders");
+                e["source"] = json!("derived_metrics.ladder_maintenance.rungs");
+                all.push(e);
+            }
         }
     }
     all.extend(quiet_events(data));
