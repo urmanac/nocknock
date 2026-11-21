@@ -1952,3 +1952,30 @@ async fn test_a_scan_cut_short_by_its_budget_resumes_where_it_stopped() {
     // The stored cursor moved by what was read, not by the cap.
     assert!(cursors.windows(2).all(|w| w[0] != w[1]), "{cursors:?}");
 }
+
+#[test]
+fn test_two_mints_of_one_rung_in_one_cycle_track_one_and_offer_the_other() {
+    // Third review of the bottle: the bottom-tick guard ran on the drift path only, so a
+    // drifted near (lower id) and an exact near were both tracked in one cycle.
+    let near = [rung(273900, 275400, Some("near")), rung(275400, 276300, Some("deep"))];
+    let exact = CandidateRow { nft_id: 9000004, tick_lower: Some(273900), tick_upper: Some(275400), ..candidate(9000004) };
+    let drifted = CandidateRow { nft_id: 9000003, tick_lower: Some(273600), tick_upper: Some(275400), ..candidate(9000003) };
+    let as_range = |c: &CandidateRow| TrackedRange { position_id: v4_position_key("base", c.nft_id), pool_id: POOL_3PCT.to_string(), tick_lower: c.tick_lower.unwrap(), tick_upper: c.tick_upper.unwrap() };
+    // The loop decides the exact match first, whatever the ids.
+    let mut order = vec![&drifted, &exact];
+    order.sort_by_key(|c| (!is_exact_match(c, &near), c.nft_id));
+    assert_eq!(order[0].nft_id, 9000004);
+    assert_eq!(decide(&exact, OPERATOR, &near, &[]), Decision::Track { rung: Some("near".into()) });
+    match decide(&drifted, OPERATOR, &near, &[as_range(&exact)]) {
+        Decision::Offer { why_not_automatic, .. } => assert_eq!(why_not_automatic, vec!["its ticks 273600..275400 are not a suggested rung's (273900..275400, 275400..276300)".to_string()]),
+        other => panic!("{other:?}"),
+    }
+    // And when a drifted one is already tracked (an earlier cycle), the exact one is
+    // offered, with the reason.
+    match decide(&exact, OPERATOR, &near, &[as_range(&drifted)]) {
+        Decision::Offer { why_not_automatic, .. } => {
+            assert_eq!(why_not_automatic, vec!["a ladder in this pool already holds this rung's bottom tick (uniswap-v4:base:9000003): this would be a second one".to_string()])
+        }
+        other => panic!("{other:?}"),
+    }
+}

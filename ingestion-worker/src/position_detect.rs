@@ -738,6 +738,14 @@ pub(crate) fn decide(c: &CandidateRow, wallet: &str, suggested: &[SuggestedRung]
     }
     if let Some(dup) = tracked.iter().find(|t| t.pool_id == pool_id && t.tick_lower == lo && t.tick_upper == hi) {
         why.push(format!("that range is already tracked as {}", dup.position_id));
+    } else if matched.is_some() {
+        // The exact path too: a live ladder, or one tracked earlier this cycle, already
+        // holds this rung's bottom tick in this pool, so this is a second mint of the rung.
+        let nock1 = c.currency1.as_deref().and_then(|a| token_info(a).ok()).is_some_and(|t| is_nock_token(&t));
+        let bottom_of = |l: i32, h: i32| if nock1 { h } else { l };
+        if let Some(holder) = tracked.iter().find(|t| t.pool_id == pool_id && bottom_of(t.tick_lower, t.tick_upper) == bottom_of(lo, hi)) {
+            why.push(format!("a ladder in this pool already holds this rung's bottom tick ({}): this would be a second one", holder.position_id));
+        }
     }
     if !can_be_ladder(c) && matched.is_some() {
         why.push("it is not a USDC/NOCK concentrated range".to_string());
@@ -746,6 +754,12 @@ pub(crate) fn decide(c: &CandidateRow, wallet: &str, suggested: &[SuggestedRung]
         (true, Some(m)) => Decision::Track { rung: m.rung.clone() },
         _ => Decision::Offer { why_not_automatic: why, choices },
     }
+}
+
+/// Its pool and ticks are exactly a suggested rung's. Pure.
+pub(crate) fn is_exact_match(c: &CandidateRow, suggested: &[SuggestedRung]) -> bool {
+    let Some(pool_id) = c.pool_id.as_deref().map(lc) else { return false };
+    suggested.iter().any(|s| s.protocol == c.protocol && s.pool_id == pool_id && Some(s.tick_lower) == c.tick_lower && Some(s.tick_upper) == c.tick_upper)
 }
 
 /// The `tracked_positions` row for a candidate. Its deposit_tx is the mint only when the
@@ -1604,7 +1618,10 @@ pub(crate) async fn detect_positions(inp: &DetectionInputs<'_>) -> DetectionOutc
             *out.ignored.entry(b.to_string()).or_insert(0) += 1;
         }
     }
-    let found: Vec<&CandidateRow> = candidates.iter().filter(|c| is_found(c, &in_config, &tracked_ids)).collect();
+    let mut found: Vec<&CandidateRow> = candidates.iter().filter(|c| is_found(c, &in_config, &tracked_ids)).collect();
+    // A rung's exact match is decided before a drifted one, so two mints of one rung in a
+    // cycle track the exact one (the one the card counts) and offer the other.
+    found.sort_by_key(|c| (!is_exact_match(c, &suggested), c.nft_id));
     for c in found {
         let dismissed = c.choice.as_deref() == Some(CHOICE_DISMISSED);
         let read = run.reads.get(&c.nft_id).cloned();
