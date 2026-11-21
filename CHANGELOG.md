@@ -82,26 +82,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the new setting `operator_profile.ladder_bottom_usd` is set (no default; positive and
   finite, otherwise reported as invalid) and the standing reserve allows at least
   $1.00. The range runs from the usable tick at or below spot (so it holds 0 NOCK) down
-  to your bottom, snapped, in the one tracked USDC/NOCK concentrated pool that can hold
-  it (frozen, hooked, dynamic-fee or unread pools are excluded with the reason;
-  NockNock does not choose between several). The USDC is the most the $950 reserve
-  allows when the range is fully converted at its bottom (the simulator's
-  `max_usdc_for_this_range`); the plan budget and the tax reserve are stated, not
-  gates. The card shows a plain headline, a picture on a price axis (spot, each
-  deposit's bar and amount, the bottom line and the reserve's zone), the outcomes in
-  plain words (a fall inside the range, a fall to the bottom, a rise selling nothing),
-  and numbered deposits with their range in USD per NOCK and NOCK per USDC and a link
-  to the Uniswap web app's new-position page that prefills the pair, fee and range,
-  never an amount (the link format is the app's own and undocumented, so the ticks and
-  prices are printed too). Each deposit carries the pool, ticks and the amounts in raw
-  units for the transaction builder that follows. How a minted rung becomes tracked is
-  one isolated field, today the config fallback. Every other status is one line saying
-  which condition fails; with no bottom set it lists candidate bottoms as a measurement,
-  none picked. It shows only on a fresh snapshot, never changes the directive and never
-  pushes. Both MCP transports print it in `get_shot_advice`. The v4 adapter now stamps
-  `positions[].fee_raw` and `hooks` from the poolKeys answer it already reads. On the
-  live book of 2026-11-21: up to $766.32 USDC and 0 NOCK in v4 USDC/NOCK 3% #3163450,
-  ticks 273900 to 276300 ($0.01274292 down to $0.01002405), about 67,800 NOCK if fully
+  to your bottom, snapped, as a new position in the one tracked USDC/NOCK concentrated
+  pool that can hold it (frozen, hooked, dynamic-fee or unread pools are listed with
+  the reason; NockNock does not choose between several). The USDC is the most that
+  leaves the stable balance at the $950 reserve at the lower of the snapped bottom and
+  your setting, capped by wallet USDC, and the card names which limit binds; the plan
+  budget, the tax reserve and the cash target are stated lines, not gates. A price at
+  or below your bottom is its own status (`price_at_or_below_bottom`). The card sits
+  at the top of the dashboard, above the stat tiles, and shows a plain headline, a
+  picture on a price axis (spot, each deposit's bar and amount, the bottom line and the
+  reserve's zone), the outcomes in plain words (a fall inside the range, a fall to the
+  bottom, a rise selling nothing; exact, from the ticks), and numbered deposits with
+  their range in USD per NOCK and NOCK per USDC and a link to the Uniswap web app's
+  new-position page that prefills the pool, the range and the USDC amount (operator
+  decision 2026-11-21: no typing into forms; the format is the app's own and
+  undocumented, so the card says so once and prints the figures beside it). Each
+  deposit carries the pool, ticks and the amounts in raw units for the transaction
+  builder that follows. How a minted rung becomes tracked is one isolated field, today
+  a one-sentence fallback. Every other status is one line saying which condition
+  fails; with no bottom set it lists candidate bottoms as a measurement, none picked.
+  It shows only on a fresh snapshot, never changes the directive and never pushes.
+  Both MCP transports print it, with the stated lines, in `get_shot_advice`. The v4
+  adapter now stamps `positions[].fee_raw` and `hooks` from the poolKeys answer it
+  already reads. A non-numeric `ladder_bottom_usd` stops the worker at startup like
+  every numeric key. On the live book of 2026-11-21: up to $765.86 USDC and 0 NOCK in
+  the USDC/NOCK 3% v4 pool, ticks 273900 to 276300 ($0.01274 down to $0.01002; 78.4750
+  to 99.7600 NOCK per USDC), about 67,763 NOCK at an average of $0.01130 if fully
   converted. The Ladder Simulator panel is no longer rendered on the dashboard
   (operator: no forms); the what-if stays in `GET /v1/simulate/ladder` and the
   `simulate_ladder` tool.

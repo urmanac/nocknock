@@ -53,17 +53,22 @@ info:
       top-of-page event (id, tier "top", status, shown, headline, what_changed, the
       numbers, rungs[] with each rung's deep_link and would_sign). status ready |
       needs_setting | invalid | ladder_tracked | no_target_pool | several_pools |
-      no_headroom | bottom_at_or_above_top | nock_exceeds | unavailable; every status but
-      ready carries `reason` and no rungs; needs_setting names `missing` settings and
-      shows `candidates` (the simulator's grid depths as bottoms, none picked). Ready
+      no_headroom | price_at_or_below_bottom | bottom_at_or_above_top | nock_exceeds |
+      unavailable; every status but ready carries `reason` and no rungs; needs_setting
+      names `missing` settings and, only when the bottom is missing, shows `candidates`
+      (the simulator's grid depths as bottoms, none picked); no_target_pool lists
+      `excluded` with each pool's reason. Ready
       means no ladder is tracked, operator_profile.ladder_bottom_usd is set (no default)
-      and the standing reserve allows at least `minimum_usdc` at the ladder's bottom;
+      and the standing reserve allows at least `minimum_usdc`, read at the lower of the
+      snapped bottom and the setting (gates.reserve.read_at_usd, binding reserve | wallet);
       the reader applies `freshness_rule` (shown only on a fresh snapshot). Each rung
       carries the pool (position_id, pool_id, protocol, tokens with addresses and
       decimals, fee_tier_bps, fee_raw, tick_spacing, hooks), tick_lower/tick_upper, the
       USDC and NOCK as decimal and raw units, and the bounds in USD per NOCK and NOCK per
       USDC. outcomes[] are plain-language measurements (a fall inside the range, a fall
-      to the bottom, a rise); picture is the data of the card's price-axis drawing;
+      to the bottom, a rise); stated.lines are the plan budget, tax reserve and cash
+      target (stated, not gates); deep_link prefills the pool, range and USDC amount
+      (depositState); picture is the data of the card's price-axis drawing;
       after_deposit (kind manual_config today) is the one field that says how a minted
       rung becomes tracked. It never changes shot_advice_action or shot_advice_details.
       Position.fee_raw and Position.hooks (uniswap-v4 only; absent when not read): the
