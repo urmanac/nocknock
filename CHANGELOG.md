@@ -29,6 +29,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The clocks are carried from the previous snapshot (no table, no migration); a gap past
   the /health window restarts them. Each suggestion states what the operator would sign;
   NockNock builds and signs nothing.
+- **The ladder shape (#169; operator, 2026-11-21: "so that we can approximate the bottle
+  shape and judge whether it looks bottle-y").** `derived_metrics.ladder_profile` (snapshot
+  2.11.0, additive) and a chart in the dashboard's ladder section and on the phone: every
+  deployed USDC/NOCK range as a bar on a logarithmic price axis, its height
+  capital / ln(high/low) so its area is its capital (a rung's capital is its value as all
+  USDC at its top; any other range's is its value now), overlapping ranges stacked into the
+  depth profile, the price as a vertical line, the ladder bottom dashed with the reserve
+  kept below it noted. Wider ranges are clipped to the ladder zone with where they
+  continue; full-range pools are stated, not drawn; a rung of unknown capital is an
+  outline. Both MCP transports print it as a short table.
+- **Only real calls to action at the top of the page (#169; operator, 2026-11-21: "it is
+  swamped by the 'call to action' that is no longer a call to action").** A ladder with
+  nothing left to deposit is one quiet line ("Ladder: all 3 rungs deployed") in the ladder
+  section, its card behind a collapsed details; positions found on-chain with nothing to
+  decide are one quiet line ("3 positions tracked from the chain · checked at block N"),
+  the rows and buttons behind a collapsed details. An offer or an incomplete check stays at
+  the top. Same on the phone.
+- **Compact ladder rows.** Each rung is one summary line (label, rung, a short badge, what
+  it holds in plain numbers, its range at 4 significant figures); the rest is behind a
+  per-row details. Rows wrap and long text breaks, so nothing leaks out of the card.
 - **Calls to action as events, in two tiers (#169).** `derived_metrics.events[]`
   (snapshot 2.11.0, additive) lists every call to action with an id, a tier (top |
   quiet), what changed, its numbers, since, a deep link and what the operator would sign,
