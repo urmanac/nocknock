@@ -35,6 +35,8 @@ import {
   shapeRowLines,
   statedLines,
   walletAfterLine,
+  fitLine,
+  foundNote,
 } from '../ladderSuggestion';
 
 const MUTED = '#8b949e';
@@ -162,6 +164,7 @@ function Body({
     const candidates = view.mode === 'line' ? candidateLines(s) : [];
     const excluded = view.mode === 'line' && s.status === 'no_target_pool' ? excludedLines(s) : [];
     const rows = view.mode === 'line' ? shapeRowLines(s) : [];
+    const found = view.mode === 'line' ? foundNote(s) : null;
     return (
       <>
         <div data-testid="ladder-headline" style={{ fontSize: compact ? 14 : '0.95rem', fontWeight: 700, color: '#e6edf3' }}>{view.headline}</div>
@@ -180,6 +183,9 @@ function Body({
             ))}
           </ol>
         )}
+        {found && (
+          <div data-testid="ladder-found-note" style={{ color: '#f59e0b', marginTop: 4 }}>{found}</div>
+        )}
         {candidates.length > 0 && (
           <>
             <div style={{ color: MUTED, marginTop: 6 }}>Candidate bottoms (a measurement; none is picked):</div>
@@ -196,6 +202,8 @@ function Body({
   const note = linkFormatNote(s);
   const stated = statedLines(s);
   const wallet = walletAfterLine(s);
+  const fit = fitLine(s);
+  const found = foundNote(s);
   return (
     <>
       <div data-testid="ladder-headline" style={{ fontSize: compact ? 15 : '1rem', fontWeight: 700, color: '#e6edf3' }}>{view.headline}</div>
@@ -205,6 +213,13 @@ function Body({
           <li key={o.kind}>{o.text}</li>
         ))}
       </ul>
+      {/* The reserve gate cut what is left: by how much, never a hidden list. */}
+      {fit && (
+        <div data-testid="ladder-fit" style={{ color: '#f59e0b', margin: '0 0 8px' }}>{fit}</div>
+      )}
+      {found && (
+        <div data-testid="ladder-found-note" style={{ color: '#f59e0b', margin: '0 0 8px' }}>{found}</div>
+      )}
       {wallet && (
         <div data-testid="ladder-wallet-after" style={{ color: TEXT, margin: '0 0 8px' }}>{wallet}</div>
       )}

@@ -90,7 +90,7 @@ export interface LadderShapeRow {
   index: number;
   of: number;
   rung: 'cap' | 'near' | 'deep';
-  status: 'to_deposit' | 'deployed' | 'over' | 'passed' | 'none';
+  status: 'to_deposit' | 'deployed' | 'over' | 'passed' | 'none' | 'found' | 'below_minimum' | 'held';
   reason: string | null;
   target_usdc: string;
   deployed_usdc: string;
@@ -138,6 +138,12 @@ export interface LadderSuggestion {
   /** What the deposits leave in the wallet, and how the reserve counts the rest. */
   wallet_after?: { text: string; wallet_usdc_after: string; stable_at_gate_usdc: string; wallet_alone_below_reserve: boolean } | null;
   mint_note?: string | null;
+  /** How what is left fits the reserve gate; `text` when it was cut (never all or nothing). */
+  fit?: { status: string; allowed_usdc?: string | null; needed_usdc?: string | null; shortfall_usdc?: string | null; rule?: string; text?: string | null } | null;
+  /** A position found on-chain in the ladder's pool that matches no rung exactly. */
+  found_note?: string | null;
+  /** In a stored row: what was left out of it. */
+  detail_note?: string | null;
 }
 
 export const LADDER_TITLE = 'Ladder suggestion (a measurement, not advice)';
@@ -254,6 +260,16 @@ export function ladderList(s: LadderSuggestion): LadderListItem[] {
 /** Every rung's stated line, for a card that lists no deposit (all deployed, all passed). */
 export function shapeRowLines(s: LadderSuggestion): string[] {
   return (s.shape?.rungs ?? []).map((r) => r.text).filter((t) => typeof t === 'string' && t.length > 0);
+}
+
+/** The reserve gate's cut of what is left, in the worker's words, or null when it fits. */
+export function fitLine(s: LadderSuggestion): string | null {
+  return s.fit?.text ?? null;
+}
+
+/** A position found on-chain in the ladder's pool, not counted until one tap, or null. */
+export function foundNote(s: LadderSuggestion): string | null {
+  return s.found_note ?? null;
 }
 
 /** "After these deposits your wallet holds about $779 USDC; …", or null. */

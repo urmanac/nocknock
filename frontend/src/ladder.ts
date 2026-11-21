@@ -138,10 +138,13 @@ export interface LadderRung {
     pool_tick: number;
     band_rule: string;
     lp_nock_budget: string | null;
-    budget_counting_the_tracked_cap: string | null;
     nock: string;
     usdc: string;
+    /** lp_nock_budget | near_usdc | reserve | total_usdc */
     bound_by: string;
+    /** The USDC limit and what it is: near_share | near_usdc | reserve | total_usdc. */
+    usdc_limit?: string;
+    usdc_limit_is?: string;
     limit_rule: string;
     note: string;
   } | null;

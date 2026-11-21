@@ -14,6 +14,8 @@ import {
   rungTitle,
   shapeRowLines,
   walletAfterLine,
+  fitLine,
+  foundNote,
 } from './ladderSuggestion';
 import { feeEstimateLine } from './feeYield';
 import { LADDER_READY_LIVE } from './ladderSuggestion.fixture';
@@ -24,6 +26,11 @@ import {
   LADDER_BOTTLE_DEEP_DEPLOYED,
   LADDER_BOTTLE_NEAR_PASSED,
   LADDER_BOTTLE_OVER,
+  LADDER_BOTTLE_DEEP_UP_8,
+  LADDER_BOTTLE_CAP_ABOVE,
+  LADDER_BOTTLE_FOUND,
+  LADDER_BOTTLE_REDUCED,
+  LADDER_BOTTLE_HELD,
   LADDER_BOTTLE_TEXT,
 } from './ladderBottle.fixture';
 
@@ -37,20 +44,25 @@ describe('the ladder suggestion for a configured shape (the bottle)', () => {
     expect(LADDER_BOTTLE_CAP_NEAR_DEPLOYED).toEqual(doc.cap_and_near_deployed.ladder_suggestion);
     expect(LADDER_BOTTLE_ALL_DEPLOYED).toEqual(doc.all_deployed.ladder_suggestion);
     expect(LADDER_BOTTLE_NEAR_PASSED).toEqual(doc.near_passed.ladder_suggestion);
-    expect(LADDER_BOTTLE_OVER).toEqual(doc.deep_over.ladder_suggestion);
+    expect(LADDER_BOTTLE_OVER).toEqual(doc.near_over.ladder_suggestion);
+    expect(LADDER_BOTTLE_DEEP_UP_8).toEqual(doc.deep_deployed_up_8_ticks.ladder_suggestion);
+    expect(LADDER_BOTTLE_CAP_ABOVE).toEqual(doc.cap_deployed_above_its_band.ladder_suggestion);
+    expect(LADDER_BOTTLE_FOUND).toEqual(doc.near_found_untracked.ladder_suggestion);
+    expect(LADDER_BOTTLE_REDUCED).toEqual(doc.near_cut_by_the_reserve.ladder_suggestion);
+    expect(LADDER_BOTTLE_HELD).toEqual(doc.deep_held_for_nock.ladder_suggestion);
     expect(LADDER_BOTTLE_TEXT).toBe(doc.bottle.text);
   });
 
   it('three numbered deposits, the cap first, each with its amounts in plain words', () => {
     expect(ladderCardView(LADDER_BOTTLE, 'fresh')).toEqual({
       mode: 'ready',
-      headline: 'Ladder: 3 of 3 deposits left, up to $766.99 USDC and about 87 NOCK.',
+      headline: 'Ladder: 3 of 3 deposits left, up to $766.97 USDC and about 87 NOCK.',
       line: null,
     });
     const list = ladderList(LADDER_BOTTLE);
     expect(list.map((i) => i.kind)).toEqual(['deposit', 'deposit', 'deposit']);
     const [cap, near, deep] = LADDER_BOTTLE.rungs;
-    expect(rungTitle(cap)).toBe('Deposit 1 of 3 (cap): about 86.79 NOCK + $1.23 USDC, in range now');
+    expect(rungTitle(cap)).toBe('Deposit 1 of 3 (cap): about 86.79 NOCK + $1.22 USDC, in range now');
     expect(rungTitle(near)).toBe('Deposit 2 of 3 (near rung): $114.86 USDC, no NOCK, below the price now');
     expect(rungTitle(deep)).toBe('Deposit 3 of 3 (deep rung): $650.89 USDC, no NOCK, below the price now');
     expect(rungRangeLines(cap)).toEqual([
@@ -79,7 +91,7 @@ describe('the ladder suggestion for a configured shape (the bottle)', () => {
       [275400, 276300],
     ]);
     expect(LADDER_BOTTLE.rungs.map((r) => r.deep_link.amount_to_enter)).toEqual([
-      'Amount to enter in the app: 86.7890 NOCK, in the NOCK field; the app then works out the USDC side, about $1.23 at this reading.',
+      'Amount to enter in the app: 86.7890 NOCK, in the NOCK field; the app then works out the USDC side, about $1.22 at this reading.',
       'Amount to enter in the app: $114.86 USDC',
       'Amount to enter in the app: $650.89 USDC',
     ]);
@@ -89,7 +101,7 @@ describe('the ladder suggestion for a configured shape (the bottle)', () => {
   it('the cap states the NOCK limit and the field that keeps it; the other rungs have none', () => {
     const [cap, near, deep] = LADDER_BOTTLE.rungs;
     expect(rungNockLimit(cap)).toBe(
-      'The NOCK side must not exceed 86.7891 NOCK, your LP NOCK budget. The limit holds when the NOCK field is the one typed, at 86.7890 NOCK or less. When the USDC field is typed instead, the app works out the NOCK side from the price at that moment, and it can come out above the limit; neither the link nor the app applies a NOCK limit of its own.',
+      "The NOCK side must not exceed 86.7891 NOCK, your LP NOCK budget, which binds now; the USDC side must not exceed $100.04, the most that keeps it at or below the near rung's USDC. The limits hold when the NOCK field is the one typed, at 86.7890 NOCK or less, and the app shows at most $100.04 of USDC: about $1.22 at this reading, more if the price rises inside the band before you deposit. When the USDC field is typed instead, the app works out the NOCK side from the price at that moment, and it can come out above the limit; neither the link nor the app applies a NOCK limit of its own.",
     );
     expect(cap.nock_limit?.field_to_type).toBe('NOCK');
     expect(Number(cap.nock_limit!.nock_to_enter)).toBeLessThanOrEqual(Number(cap.nock.amount));
@@ -100,7 +112,7 @@ describe('the ladder suggestion for a configured shape (the bottle)', () => {
 
   it('states what the deposits leave in the wallet', () => {
     expect(walletAfterLine(LADDER_BOTTLE)).toBe(
-      "After these deposits your wallet holds about $779 USDC; the $950 reserve counts the $224 of USDC inside your existing NOCK ranges. At $0.01 with every rung converted, the stable balance reads $950.00: the wallet's $778.85 plus $171.15 still inside those ranges.",
+      "After these deposits your wallet holds about $779 USDC; the $950 reserve counts the $224 of USDC inside your existing NOCK ranges. At $0.01 with every rung converted, the stable balance reads $950.02: the wallet's $778.87 plus $171.15 still inside those ranges.",
     );
     expect(walletAfterLine(LADDER_READY_LIVE)).toBeNull();
     expect(walletAfterLine(LADDER_BOTTLE_ALL_DEPLOYED)).toBeNull();
@@ -109,9 +121,9 @@ describe('the ladder suggestion for a configured shape (the bottle)', () => {
   it('one fee line per rung, never without its sample size, in-range share and replay bound, in the worker\'s own words', () => {
     const lines = LADDER_BOTTLE.rungs.map((r) => rungFeeLine(r)!);
     expect(lines).toEqual([
-      'Fees while in range (an estimate): $0.84/day, measured over 6.33 days (1,836 intervals) on v4 USDC/NOCK 3.00% #3163450. In range 1.95% of the measured time. Replayed over it: at most $0.02 inside and $0.15 more at its edges (no lower bound).',
-      'Fees while in range (an estimate): $8.56/day, measured over 6.33 days (1,836 intervals) on v4 USDC/NOCK 3.00% #3163450. In range 28.63% of the measured time. Replayed over it: at most $6.39 inside and $5.16 more at its edges (no lower bound).',
-      'Fees while in range (an estimate): $85.90/day, measured over 6.33 days (1,836 intervals) on v4 USDC/NOCK 3.00% #3163450. In range 5.82% of the measured time. Replayed over it: at most $32.55 inside and $50.00 more at its edges (no lower bound).',
+      'Fees while in range (an estimate): $0.84/day undiluted, $0.84/day diluted (it would be 0.17% of the pool\'s active liquidity), measured over 6.33 days (1,836 intervals) on v4 USDC/NOCK 3.00% #3163450. In range 1.95% of the measured time. Replayed over it: at most $0.02 inside and $0.15 more at its edges (no lower bound).',
+      'Fees while in range (an estimate): $8.56/day undiluted, $8.42/day diluted (it would be 1.73% of the pool\'s active liquidity), measured over 6.33 days (1,836 intervals) on v4 USDC/NOCK 3.00% #3163450. In range 28.63% of the measured time. Replayed over it: at most $6.39 inside and $5.16 more at its edges (no lower bound).',
+      'Fees while in range (an estimate): $85.90/day undiluted, $73.03/day diluted (it would be 14.98% of the pool\'s active liquidity), measured over 6.33 days (1,836 intervals) on v4 USDC/NOCK 3.00% #3163450. In range 5.82% of the measured time. Replayed over it: at most $32.55 inside and $50.00 more at its edges (no lower bound).',
     ]);
     // The same bytes both MCP transports print.
     for (const line of lines) expect(LADDER_BOTTLE_TEXT).toContain(`    ${line}\n`);
@@ -120,7 +132,7 @@ describe('the ladder suggestion for a configured shape (the bottle)', () => {
       'Fees while in range: not estimated: no tracked range in this pool measures fees.',
     );
     expect(feeEstimateLine({ status: 'measured', per_day_in_range_usd: '1.00', in_range_share_reason: 'no stored history', replay_reason: 'no stored history' })).toBe(
-      'Fees while in range (an estimate): $1.00/day, measured sample size not stated. In range over stored history: not stated (no stored history). Replay: not stated (no stored history).',
+      'Fees while in range (an estimate): $1.00/day undiluted; diluted not stated (no reason given), measured sample size not stated. In range over stored history: not stated (no stored history). Replay: not stated (no stored history).',
     );
     expect(feeEstimateLine(null)).toBe('Fees while in range: not stated in this body.');
     // The single rung of #168 states no estimate.
@@ -128,7 +140,7 @@ describe('the ladder suggestion for a configured shape (the bottle)', () => {
   });
 
   it('a deployed rung is one stated line and is not offered again', () => {
-    expect(ladderCardView(LADDER_BOTTLE_DEEP_DEPLOYED, 'fresh').headline).toBe('Ladder: 2 of 3 deposits left, up to $116.09 USDC and about 87 NOCK.');
+    expect(ladderCardView(LADDER_BOTTLE_DEEP_DEPLOYED, 'fresh').headline).toBe('Ladder: 2 of 3 deposits left, up to $116.08 USDC and about 87 NOCK.');
     const list = ladderList(LADDER_BOTTLE_DEEP_DEPLOYED);
     expect(list.map((i) => i.kind)).toEqual(['deposit', 'deposit', 'row']);
     const last = list[2];
@@ -140,7 +152,7 @@ describe('the ladder suggestion for a configured shape (the bottle)', () => {
       expect(LADDER_BOTTLE_DEEP_DEPLOYED.rungs[i].index).toBe(i + 1);
       expect(LADDER_BOTTLE_DEEP_DEPLOYED.rungs[i].mint).toEqual(LADDER_BOTTLE.rungs[i].mint);
     }
-    expect(ladderCardView(LADDER_BOTTLE_CAP_NEAR_DEPLOYED, 'fresh').headline).toBe('Ladder: 1 of 3 deposits left, up to $650.90 USDC.');
+    expect(ladderCardView(LADDER_BOTTLE_CAP_NEAR_DEPLOYED, 'fresh').headline).toBe('Ladder: 1 of 3 deposits left, up to $650.89 USDC.');
     expect(ladderList(LADDER_BOTTLE_CAP_NEAR_DEPLOYED).map((i) => i.kind)).toEqual(['row', 'row', 'deposit']);
     expect(rungTitle(LADDER_BOTTLE_CAP_NEAR_DEPLOYED.rungs[0])).toBe('Deposit 3 of 3 (deep rung): $650.89 USDC, no NOCK, below the price now');
   });
@@ -157,10 +169,13 @@ describe('the ladder suggestion for a configured shape (the bottle)', () => {
     const passed = ladderList(LADDER_BOTTLE_NEAR_PASSED);
     expect(passed.map((i) => i.kind)).toEqual(['deposit', 'row', 'deposit']);
     expect(passed[1].kind === 'row' && passed[1].row.text).toBe(
-      "Deposit 2 of 3 (near rung): passed. The price is below this rung's range; a USDC-only deposit there is not possible.",
+      "Deposit 2 of 3 (near rung): passed. The price $0.01130146 is less than one tick spacing above this rung's bottom $0.01096801: the cap's band, the one containing the price, covers all that is left of it, so it has no range of its own.",
     );
-    expect(ladderCardView(LADDER_BOTTLE_OVER, 'fresh').mode).toBe('line');
-    expect(shapeRowLines(LADDER_BOTTLE_OVER)[2]).toMatch(/^Deposit 3 of 3 \(deep rung\): over its target, so nothing more is listed for it\. The tracked rung holds \$[\d.]+ USDC more than its target\.$/);
+    // An over rung is stated and changes nothing else: the cap is still listed.
+    expect(ladderCardView(LADDER_BOTTLE_OVER, 'fresh').mode).toBe('ready');
+    const over = ladderList(LADDER_BOTTLE_OVER);
+    expect(over.map((i) => i.kind)).toEqual(['deposit', 'row', 'row']);
+    expect(over[1].kind === 'row' && over[1].row.text).toMatch(/^Deposit 2 of 3 \(near rung\): over its target; it is stated and changes nothing else\. The tracked rung holds \$[\d.]+ of USDC at its top, \$[\d.]+ more than its target\.$/);
     expect(shapeRowLines(LADDER_READY_LIVE)).toEqual([]);
   });
 
@@ -175,7 +190,7 @@ describe('the ladder suggestion for a configured shape (the bottle)', () => {
       expect(near.x + near.w).toBeLessThanOrEqual(cap.x + 0.001);
       expect(deep.x + deep.w).toBeLessThanOrEqual(near.x + 0.001);
       expect(g.bottomX).toBeLessThanOrEqual(deep.x + 0.001);
-      expect(g.bars.map((b) => b.label)).toEqual(['$1.23 + 87 NOCK', '$114.86', '$650.89']);
+      expect(g.bars.map((b) => b.label)).toEqual(['$1.22 + 87 NOCK', '$114.86', '$650.89']);
       // The cap's bar is too narrow for its label, which sits beside it, clear of the
       // spot line and of the bottom line; the wide bars carry theirs inside.
       expect(cap.labelInside).toBe(false);
@@ -202,5 +217,15 @@ describe('the ladder suggestion for a configured shape (the bottle)', () => {
     expect(done.bars[2].label).toBe('$650.90');
     expect(done.rows.deployedLegend).toBeGreaterThan(done.rows.legend);
     expect(done.height).toBeGreaterThan(pictureGeometry(LADDER_BOTTLE.picture!, 340)!.height);
+  });
+
+  it('the fit line and the found note are the worker\'s words, or null', () => {
+    expect(fitLine(LADDER_BOTTLE)).toBeNull();
+    expect(fitLine(LADDER_BOTTLE_REDUCED)).toBe(
+      'Your $950 reserve, kept for below $0.01, allows $114.36 for what is left of your shape, $0.50 short of the $114.86 it would take: each deposit is cut by the same fraction, so the shape keeps its proportions.',
+    );
+    expect(foundNote(LADDER_BOTTLE_FOUND)).toBeNull();
+    expect(foundNote({ ...LADDER_BOTTLE, found_note: 'Found on-chain in this pool and not counted yet.' })).toBe('Found on-chain in this pool and not counted yet.');
+    expect(ladderList(LADDER_BOTTLE_FOUND).map((i) => i.kind)).toEqual(['deposit', 'row', 'deposit']);
   });
 });

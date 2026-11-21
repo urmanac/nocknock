@@ -243,6 +243,10 @@ export interface FeeEstimateForLines {
   status: string;
   reason?: string | null;
   per_day_in_range_usd?: string | null;
+  /** The figure diluted by the rung's own share of the pool's active liquidity. */
+  per_day_in_range_diluted_usd?: string | null;
+  dilution?: { share_of_active_pct?: string | null } | null;
+  dilution_reason?: string | null;
   measured_days?: string | null;
   intervals?: number | null;
   measured_label?: string | null;
@@ -269,7 +273,14 @@ export function feeEstimateLines(fe: FeeEstimateForLines | null | undefined): st
     fe.measured_days != null && fe.intervals != null
       ? `over ${fe.measured_days} days (${fe.intervals.toLocaleString('en-US')} intervals) on ${fe.measured_label ?? 'the measuring range'}`
       : 'sample size not stated';
-  const lines = [`Fees while in range (an estimate): $${fe.per_day_in_range_usd}/day, measured ${sample}`];
+  // Undiluted and diluted: a large rung would be a share of the pool's active liquidity
+  // and take that share of the fees, so both figures are stated (the worker's words).
+  const share = fe.dilution?.share_of_active_pct;
+  const diluted =
+    fe.per_day_in_range_diluted_usd != null && share != null
+      ? ` undiluted, $${fe.per_day_in_range_diluted_usd}/day diluted (it would be ${share}% of the pool's active liquidity)`
+      : ` undiluted; diluted not stated (${fe.dilution_reason ?? 'no reason given'})`;
+  const lines = [`Fees while in range (an estimate): $${fe.per_day_in_range_usd}/day${diluted}, measured ${sample}`];
   const sh = fe.in_range_share_stored_history;
   const rp = fe.stored_history_replay;
   lines.push(

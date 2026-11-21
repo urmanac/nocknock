@@ -23,7 +23,7 @@ describe('the honesty rules the helpers keep (2.10.0 review)', () => {
     }
     expect(printed).toBeGreaterThanOrEqual(5);
     expect(feeEstimateLines(TWO_RUNGS_MEASURED.rungs![0].fee_estimate)).toEqual([
-      'Fees while in range (an estimate): $18.23/day, measured over 6.33 days (1,836 intervals) on v4 USDC/NOCK 3.00% #3163450',
+      "Fees while in range (an estimate): $18.23/day undiluted, $17.57/day diluted (it would be 3.60% of the pool's active liquidity), measured over 6.33 days (1,836 intervals) on v4 USDC/NOCK 3.00% #3163450",
       'In range 0.11% of the measured time',
       'Replayed over it: at most $1.31 inside and $4.70 more at its edges (no lower bound)',
     ]);
