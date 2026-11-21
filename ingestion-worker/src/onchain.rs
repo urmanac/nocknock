@@ -240,6 +240,11 @@ pub(crate) async fn fetch_raw_data_from(
     if raw_positions.is_empty() {
         return Err(all_positions_closed_error(&closed_positions));
     }
+    // 2b. Ladders (#167): live entries only (a closed ladder is in no total and has no
+    //     reading). Each must be a USDC/NOCK concentrated range, checked on what was read.
+    let ladders: HashMap<String, LadderTag> =
+        live_configs.iter().filter(|c| is_ladder_config(c)).map(|c| (position_key(c), ladder_tag(c))).collect();
+    check_ladder_pairs(&raw_positions, &ladders, &position_facts)?;
 
     // 3. NOCK/USD spot from the designated price-source position pool (zero-mock:
     //    fail the cycle when missing or unparseable).
@@ -363,6 +368,15 @@ pub(crate) async fn fetch_raw_data_from(
         &position_facts,
     )
     .await?;
+    // 5b''. Each ladder's baseline (#167): its deposit_tx receipt, checked against the
+    //       position. Never fails the cycle: a failed read is `unverified` and retried.
+    let mut ladder_baselines: HashMap<String, LadderBaselineRead> = HashMap::new();
+    for p in raw_positions.iter() {
+        if let Some(tag) = ladders.get(&p.position_id) {
+            let read = read_ladder_baseline(http_client, alchemy_url, wallet_addr, p, tag).await;
+            ladder_baselines.insert(p.position_id.clone(), read);
+        }
+    }
     // 5c. Per-position rebuild rules from config, keyed like RawPosition.position_id.
     //     Live entries only: a closed position takes no share of the LP target.
     let rebuild_rules: HashMap<String, RebuildRule> = live_configs
@@ -445,6 +459,8 @@ pub(crate) async fn fetch_raw_data_from(
         position_facts,
         aero,
         closed_positions,
+        ladders,
+        ladder_baselines,
     })
 }
 

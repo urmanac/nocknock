@@ -74,6 +74,8 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
     let reserve = crate::reserve_text::reserve_line(global);
     // The floor-crossing price (issue #165), the same line in both transports.
     let floor_breach = crate::floor_breach_text::floor_breach_line(data.pointer("/derived_metrics/floor_breach"));
+    // Tracked ladders (issue #167), the same lines in both transports. Empty without one.
+    let ladders = crate::ladder_track_text::ladders_lines(data);
 
     format!(
         "📈 NockNock Sovereign Portfolio State\n\
@@ -88,6 +90,7 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
          {aero}\n\
          {collectible}\
          {closed}\
+         {ladders}\
          • High-Water Mark: {hwm}\n\
          {cost_basis}\n\
          • Tactical Directive: {advice}"
@@ -182,6 +185,8 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
         let g = |k: &str| ex.get(k).and_then(|x| x.as_str()).unwrap_or("n/a");
         lp_line.push_str(&format!("\n   ✗ {}: {}", g("label"), g("reason")));
     }
+    // Tracked ladders (issue #167) are not in the rebuild: said after its lines.
+    lp_line.push_str(&crate::ladder_track_text::ladder_rebuild_note(data));
     // Closed positions (issue #144): after the rebuild lines, which list every tracked
     // position and no closed one. Empty when there are none.
     let closed = closed_positions_trailer(data);

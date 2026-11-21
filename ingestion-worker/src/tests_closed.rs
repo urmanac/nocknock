@@ -1663,3 +1663,60 @@ async fn test_golden_snapshot_closed_is_byte_identical() {
         "snapshot bytes changed; compare {path} with a fresh NOCKNOCK_BLESS_GOLDEN=1 run and `git diff` it"
     );
 }
+
+// ------------------------------------------------------------------
+// Ladders (#167) through the whole recorded cycle
+// ------------------------------------------------------------------
+
+/// The wallet's own emptied v4 NFT #3163431 (USDC/NOCK, ticks 267825..271050) configured
+/// as a ladder, with a deposit_tx the replay node holds no receipt for.
+fn entry_v4_empty_as_ladder() -> String {
+    format!(
+        "{ENTRY_V4_EMPTY}\n    role: ladder\n    rung: deep\n    deposit_tx: \"0x{}\"",
+        "ab".repeat(32)
+    )
+}
+
+#[tokio::test]
+async fn test_a_ladder_is_read_measured_and_its_unread_receipt_is_unverified_not_zero() {
+    let node = replay_node(vec![]).await;
+    let raw = read_cycle(&node, &config(&[ENTRY_V4, ENTRY_V3, ENTRY_BASIC, &entry_v4_empty_as_ladder()])).await.expect("a ladder does not fail the cycle");
+    let id = format!("uniswap-v4:base:{V4_EMPTY_NFT}");
+    assert_eq!(raw.ladders.get(&id), Some(&LadderTag { config_id: "uniswap-v4-nock-usdc-retired".to_string(), rung: Some("deep".to_string()), deposit_tx: Some(format!("0x{}", "ab".repeat(32))) }));
+    // The receipt read failed (the node holds no answer for it): unverified, not cached.
+    assert_eq!(node.count("eth_getTransactionReceipt"), 3, "one read, retried twice: {:?}", node.seen.lock().unwrap());
+    assert!(matches!(raw.ladder_baselines.get(&id), Some(LadderBaselineRead::Unverified { .. })), "{:?}", raw.ladder_baselines);
+    let (snap, _) = finish_cycle(raw, None);
+    let p = snap.positions.iter().find(|p| p.position_id == id).unwrap();
+    assert_eq!((p.role.as_deref(), p.rung.as_deref()), (Some("ladder"), Some("deep")));
+    assert_eq!(snap.ladders.len(), 1);
+    let l = &snap.ladders[0];
+    assert_eq!((l.state.as_str(), l.since_deposit.status.as_str()), ("empty", "unverified"));
+    assert!(l.since_deposit.reason.as_deref().unwrap().starts_with("the receipt could not be read this cycle (the RPC did not answer)"), "{:?}", l.since_deposit.reason);
+    assert_eq!(l.since_deposit.net_nock_bought, None);
+    // Not NOCK LP: no rebuild share, no exclusion.
+    assert!(snap.derived_metrics.lp_rebuild.suggestions.iter().all(|s| s.position_id != id));
+    assert!(snap.derived_metrics.lp_rebuild.excluded.iter().all(|e| e.position_id != id));
+    // The other three positions are exactly what they are without the role.
+    let plain = read_cycle(&replay_node(vec![]).await, &config(&[ENTRY_V4, ENTRY_V3, ENTRY_BASIC])).await.unwrap();
+    let (plain_snap, _) = finish_cycle(plain, None);
+    assert_eq!(serde_json::to_value(&snap.positions[..3]).unwrap(), serde_json::to_value(&plain_snap.positions[..]).unwrap());
+}
+
+#[tokio::test]
+async fn test_a_ladder_on_a_weth_nock_pair_fails_the_cycle_after_the_read() {
+    let node = replay_node(vec![]).await;
+    let ladder_v3 = format!("{ENTRY_V3}\n    role: ladder");
+    let e = read_cycle(&node, &config(&[ENTRY_V4, &ladder_v3, ENTRY_BASIC])).await.unwrap_err().to_string();
+    assert_eq!(e, "Configuration error: position 'uniswap-v3-weth-nock' is role: ladder but is a WETH/NOCK pair. A ladder is a USDC/NOCK range; AERO and ETH ladders are not supported yet (#170). Correct `positions:` in config.yaml");
+    assert_no_url(&e, &node.url);
+}
+
+#[tokio::test]
+async fn test_an_unknown_role_fails_the_cycle_before_any_read() {
+    let node = replay_node(vec![]).await;
+    let bad = format!("{ENTRY_V3}\n    role: Ladder");
+    let e = read_cycle(&node, &config(&[ENTRY_V4, &bad])).await.unwrap_err().to_string();
+    assert!(e.contains("position 'uniswap-v3-weth-nock' has unknown role 'Ladder'"), "{e}");
+    assert!(node.seen.lock().unwrap().is_empty(), "nothing is read");
+}

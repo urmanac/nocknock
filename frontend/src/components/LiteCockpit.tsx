@@ -18,6 +18,7 @@ import { api, describeApiError, ClaimFeeAction, ClaimFeesPayload, LedgerSummary 
 import { ledgerLiteText } from '../ledger';
 import { AeroLiteCard } from './AeroPillar';
 import { ClosedPositionsLiteCard } from './ClosedPositions';
+import { LadderLiteCard } from './Ladders';
 import { LiteCollectibleLines } from './CollectibleEarnings';
 import { lpFeeReasonOfDetail } from '../rewards';
 import {
@@ -323,6 +324,8 @@ export function LiteCockpit({ top, bottom }: { top?: React.ReactNode; bottom?: R
 
       {/* 2c. Closed positions (issue #144): the fact, no figure and no action */}
       <ClosedPositionsLiteCard data={snapshotData} cardStyle={lite.card} labelStyle={lite.label} subStyle={lite.sub} />
+      {/* Tracked ladders (#167): one muted line each, facts only. */}
+      <LadderLiteCard data={snapshotData} cardStyle={lite.card} labelStyle={lite.label} subStyle={lite.sub} />
 
       {/* 3. EXECUTE BATCH HARVEST */}
       <section style={lite.card}>

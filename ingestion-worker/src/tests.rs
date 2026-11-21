@@ -509,7 +509,7 @@ database_url: "postgresql://localhost/test"
     }
 
     fn roomy_guards() -> PlanGuards {
-        PlanGuards { overextended: false, spot_price: 0.0123, wallet_usdc: 1053.0, lp_usdc: 0.0, tax_reserve_usd: 0.0, cash_target_usd: 124.0, standing_reserve_usdc: None }
+        PlanGuards { overextended: false, spot_price: 0.0123, wallet_usdc: 1053.0, lp_usdc: 0.0, ladder_usdc: 0.0, tax_reserve_usd: 0.0, cash_target_usd: 124.0, standing_reserve_usdc: None }
     }
 
     fn t(s: &str) -> DateTime<Utc> {
@@ -1772,6 +1772,7 @@ database_url: "postgresql://localhost/test"
 
     fn sample_snapshot_data() -> SnapshotData {
         SnapshotData {
+            ladders: Vec::new(),
             closed_positions: vec![],
             wallet_balances: vec![WalletBalance {
                 wallet_address: "0x123".to_string(),
@@ -3651,6 +3652,7 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
             &raw, prev_hwm, profile, compute_structural_channels_sync(history), counterfactual, ledger, regime, plan,
         );
         SnapshotData {
+            ladders: Vec::new(),
             closed_positions: vec![],
             wallet_balances: raw.wallet_balances,
             positions,

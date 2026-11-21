@@ -27,6 +27,27 @@ info:
       floor_breach is measured on total tracked NOCK. GlobalStatus.lp_nock_budget_note:
       why it is not a plain budget (no floor set, or negative). GlobalStatus.
       lp_floor_tolerance_bps: the parameter of lp_nock_budget and floor_breach.tolerated.
+    - A deployed ladder tracked as `role: ladder` (issue #167), also additive. With no
+      position configured `role: ladder` no byte of the snapshot changes.
+      Position.role ("ladder", absent otherwise) and Position.rung (near | deep, absent
+      when unset). SnapshotData.ladders (absent when empty): one LadderReading per
+      ladder, in positions order, named by what the range holds (holds_only_usdc |
+      in_range | holds_only_nock | empty | pool_stale, never by a direction), its bounds
+      against spot, what it holds against its own all-USDC top (vs_top, holdings, not
+      trades) and what it bought since its deposit only from the receipt of the
+      operator's deposit_tx (since_deposit: verified | no_baseline | refused |
+      unverified | liquidity_changed; every non-verified status has null figures and a
+      reason). A ladder counts in every total, in floor_breach and in the standing
+      reserve: GlobalStatus.reserve_stable_usdc now includes the USDC inside tracked
+      ladders, and GlobalStatus.reserve_ladder_usdc (absent with no reserve or no
+      ladder) states that part. It is not NOCK LP: lp_rebuild (target, suggestions,
+      exclusions) and the "NOCK LP (NOCK-pair positions)" deviation row leave it out,
+      and a no_target "NOCK ladders (measured)" row is appended last when a ladder
+      holds value. WholeStackBasis.ladder_buys_since (absent with no ladder): the
+      verified net buys of ladders deposited after the opening basis, added to
+      basis_nock and basis_cost_usd. positions_nock and the tick brackets keep the
+      ladder (it holds NOCK). The simulator's stored book (#166) counts a tracked
+      ladder as an existing range.
 
     2.8.3 (the standing protected cash reserve, issue #162), additive:
     - GlobalStatus.cash_reserve_usdc, reserve_stable_usdc, reserve_headroom_usdc
@@ -189,6 +210,15 @@ components:
             `contract_fees` and the tick brackets stay index-aligned. Absent when no
             configured position is closed, and on every snapshot from before 2.8.0;
             clients treat absent as empty and render such a snapshot as before. (#144)
+        ladders:
+          type: array
+          items:
+            $ref: '#/components/schemas/LadderReading'
+          description: |
+            One measured reading per position configured `role: ladder`, in positions
+            order (2.9.0, #167). Absent when there is none; clients treat absent as
+            empty. A ladder is measured, never steered: nothing here says to re-centre,
+            withdraw or add to it.
         derived_metrics:
           $ref: '#/components/schemas/DerivedMetrics'
 
@@ -485,6 +515,19 @@ components:
             answers earned() in the older token 0x940181a9…8631; its figure is not
             published as AERO). The read is optional: it does not fail the cycle,
             and the value is never published as 0. (v0.6.0, #93)
+        role:
+          type: string
+          enum: [ladder]
+          description: >
+            "ladder" for a position configured `role: ladder` (2.9.0, #167): measured
+            and counted in every total, but not NOCK LP. Absent for every other
+            position, which is classified by its pair as before (#151).
+        rung:
+          type: string
+          enum: [near, deep]
+          description: >
+            A ladder's rung from config (2.9.0, #167). Absent when unset (stated as
+            unset in ladders[].rung_note, never assumed) and on every other position.
         collectible_reward:
           allOf:
             - $ref: '#/components/schemas/CollectibleReward'
@@ -928,9 +971,72 @@ components:
           nullable: true
           description: (multiple − 1) × 100, 1 decimal.
 
+    LadderReading:
+      type: object
+      description: |
+        One tracked ladder, measured (2.9.0, issue #167). A USDC/NOCK concentrated range
+        the operator deployed; NockNock never steers it.
+      required: [position_id, config_id, label, state, state_text, usdc_now, nock_now, fees_usd, vs_top, since_deposit]
+      properties:
+        position_id: { type: string }
+        config_id: { type: string, description: The entry's id in config.yaml }
+        label: { type: string }
+        rung: { type: string, nullable: true, enum: [near, deep], description: Null when unset (rung_note says so) }
+        rung_note: { type: string, nullable: true }
+        state:
+          type: string
+          enum: [holds_only_usdc, in_range, holds_only_nock, empty, pool_stale]
+          description: What the range holds now, by its own pool's tick. Never "out of range" for a ladder above it.
+        state_text: { type: string }
+        low_price_usd: { type: string, nullable: true, description: "The range's bottom, USD per NOCK, 8 dp. Null when the bottom reaches the pool's usable extremes (open_end)" }
+        high_price_usd: { type: string, nullable: true, description: "The range's top, USD per NOCK, 8 dp. Null when the top reaches the pool's usable extremes (open_end)" }
+        open_end: { type: string, nullable: true, description: "Which bound reaches the pool's usable extremes (within one tick spacing of the lowest or highest usable tick), in words; its price and the amount held there are not stated. Null otherwise" }
+        low_pct_of_spot: { type: string, nullable: true, description: Signed percent from spot, null without a spot }
+        high_pct_of_spot: { type: string, nullable: true }
+        spot_price_usd: { type: string, nullable: true }
+        pool_price_usd: { type: string, nullable: true, description: USD per NOCK in the ladder's own pool }
+        usdc_now: { type: string }
+        nock_now: { type: string }
+        value_usd: { type: string, nullable: true }
+        fees_usd: { type: string, description: Uncollected fees, apart from every bought figure }
+        vs_top:
+          type: object
+          description: |
+            Holdings against the range's own fixed curve (no baseline needed while its
+            liquidity is unchanged). Holdings, not trades: a range in range converts
+            both ways.
+          properties:
+            usdc_at_top: { type: string, nullable: true, description: USDC held at or above the top; null when the top is open-ended }
+            nock_at_bottom: { type: string, nullable: true, description: NOCK held at or below the bottom; null when the bottom is open-ended }
+            nock_held_vs_top: { type: string, description: NOCK held now (0 at the top) }
+            usdc_converted_vs_top: { type: string, nullable: true, description: usdc_at_top less USDC held now; null with usdc_at_top }
+            curve_avg_price_usd: { type: string, nullable: true, description: usdc_converted_vs_top / nock_held_vs_top; null when it holds no NOCK }
+            converted_pct: { type: string, nullable: true }
+        since_deposit:
+          type: object
+          description: |
+            What it bought since its deposit, from the receipt of the operator's
+            deposit_tx only, checked against the position (sent by the tracked wallet,
+            one deposit into this NFT, no swap, amounts that fit the range). Verified and
+            refused receipts are read once; an unverified read is retried every cycle.
+          required: [status, current_liquidity]
+          properties:
+            status: { type: string, enum: [verified, no_baseline, refused, unverified, liquidity_changed] }
+            deposit_tx: { type: string, nullable: true }
+            deposit_block: { type: integer, nullable: true }
+            deposited_at: { type: string, nullable: true, description: The deposit block's time; null when the header was not read }
+            deposited_usdc: { type: string, nullable: true }
+            deposited_nock: { type: string, nullable: true }
+            deposit_liquidity: { type: string, nullable: true }
+            current_liquidity: { type: string }
+            net_nock_bought: { type: string, nullable: true, description: 'NOCK now less NOCK deposited, signed; verified only' }
+            net_usdc_spent: { type: string, nullable: true, description: 'USDC deposited less USDC now, signed; verified only' }
+            avg_buy_price_usd: { type: string, nullable: true, description: Only when both net figures are above zero }
+            reason: { type: string, nullable: true, description: Why the figures are null }
+
     FloorBreachPosition:
       type: object
-      description: One NOCK-pair position in the floor-crossing figure (2.9.0, issue #165).
+      description: One NOCK-pair position in the floor-crossing figure (2.9.0, issue #165). A tracked ladder (#167) is one of them.
       required: [position_id, label, full_range, nock_now]
       properties:
         position_id:
@@ -1153,6 +1259,22 @@ components:
             is `global_status.total_nock_amount`), for comparison with basis_nock. The
             two differ by everything the basis does not track.
           example: "118714"
+        ladder_buys_since:
+          type: object
+          description: |
+            The verified net buys of tracked ladders added to the basis (2.9.0, #167):
+            for each ladder whose since_deposit is verified, deposited strictly after
+            as_of, with a net NOCK bought and a net USDC spent both above zero. Included
+            in basis_nock and basis_cost_usd. Absent when no ladder is tracked.
+          required: [ladders_counted, nock, usdc]
+          properties:
+            ladders_counted: { type: integer }
+            nock: { type: string, description: Net NOCK bought, summed, 4 dp }
+            usdc: { type: string, description: Net USDC spent, summed, 2 dp }
+            not_counted:
+              type: array
+              items: { type: string }
+              description: "Each tracked ladder left out, as position_id: reason"
         includes:
           type: array
           items: { type: string }
@@ -1827,9 +1949,11 @@ components:
           type: string
           description: >
             The stable balance the reserve is measured on: wallet USDC plus USDC inside
-            NOCK-pair LP. Moving USDC into a NOCK range does not consume the reserve;
-            buying NOCK does. USDC in a gas-side ETH/USDC range is left out (#151).
-            Absent with no reserve. (2.8.3, #162)
+            NOCK LP and, since 2.9.0, inside tracked ladders (#167; reserve_ladder_usdc).
+            Moving USDC into a NOCK range does not consume the reserve; buying NOCK does,
+            and so does a range converting it to NOCK on the way down. USDC in a
+            gas-side ETH/USDC range is left out (#151). Absent with no reserve. (2.8.3,
+            #162)
           example: "1768.18"
         reserve_headroom_usdc:
           type: string
@@ -1837,6 +1961,13 @@ components:
             reserve_stable_usdc less cash_reserve_usdc. Signed: negative when the stable
             balance is below the reserve. Absent with no reserve. (2.8.3, #162)
           example: "818.18"
+        reserve_ladder_usdc:
+          type: string
+          description: >
+            The USDC inside tracked ladders that reserve_stable_usdc includes (2.9.0,
+            #167). Absent with no reserve or no tracked ladder; "0.00" for ladders that
+            hold no USDC now.
+          example: "1303.10"
         dry_powder_usdc:
           type: string
           description: >
@@ -2023,7 +2154,9 @@ components:
             positions)" before). Ranges with no NOCK leg are an appended row with no
             target, present only when they hold value: "ETH/USDC LP (measured)" when
             every such range is an ETH-or-WETH / USDC pair, otherwise "Non-NOCK LP
-            (measured)".
+            (measured)". Tracked ladders (2.9.0, #167) are a further no_target row,
+            "NOCK ladders (measured)", appended last and only when a ladder holds value;
+            the NOCK LP row leaves them out.
         actual_weight_bps:
           type: integer
           description: Actual allocation in basis points of total_portfolio_usd (gas and wallet AERO included); 0 when the total is 0

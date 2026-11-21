@@ -706,6 +706,7 @@ async fn test_refresh_quotes_the_snapshots_tranche_and_attaches_the_answer() {
             snapshot_id: Uuid::new_v4(),
         },
         data: SnapshotData {
+            ladders: Vec::new(),
             closed_positions: vec![],
             wallet_balances: vec![],
             positions: vec![],
@@ -1366,6 +1367,7 @@ fn envelope_with(plan: Option<AccumulationPlanStatus>, displayed_price: &str) ->
             snapshot_id: Uuid::new_v4(),
         },
         data: SnapshotData {
+            ladders: Vec::new(),
             closed_positions: vec![],
             wallet_balances: vec![],
             positions: vec![],

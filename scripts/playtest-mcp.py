@@ -17,6 +17,26 @@ import os
 API_BASE = os.environ.get("NOCKNOCK_API_URL", "http://127.0.0.1:8080").rstrip("/")
 API_URL = f"{API_BASE}/v1/mcp"
 
+def ladder_lines(text):
+    """The tracked-ladder block of get_portfolio_state (#167), or None without one."""
+    if "• Ladders (" not in text:
+        return None
+    block = text.split("• Ladders (", 1)[1].split("• High-Water Mark", 1)[0]
+    return "• Ladders (" + block
+
+
+def check_ladder_lines(text, transport):
+    block = ladder_lines(text)
+    if block is None:
+        print(f"  ✓ {transport}: no tracked ladder (role: ladder) configured, no ladder lines")
+        return None
+    rungs = [l for l in block.splitlines() if l.startswith("   – ")]
+    assert rungs, f"{transport}: a ladder block with no ladder"
+    assert block.count("since deposit") == len(rungs), f"{transport}: every ladder states its since-deposit baseline or why there is none"
+    print(f"  ✓ {transport}: {len(rungs)} tracked ladder(s) stated, each with its since-deposit line")
+    return block
+
+
 def test_stdio_mcp():
     print("==================================================")
     print("1. Playtesting STDIO MCP Server (`nocknock-mcp`)")
@@ -73,6 +93,8 @@ def test_stdio_mcp():
     state_text = responses[2]["result"]["content"][0]["text"]
     assert "NockNock Sovereign Portfolio State" in state_text or "NockNock Sovereign State" in state_text
     print("  ✓ STDIO get_portfolio_state call passed")
+    global STDIO_LADDERS
+    STDIO_LADDERS = check_ladder_lines(state_text, "STDIO")
 
     advice_text = responses[3]["result"]["content"][0]["text"]
     assert "Tactical Shot Advice Engine" in advice_text
@@ -119,6 +141,11 @@ def test_http_mcp():
     state_res = post_mcp("tools/call", {"name": "get_portfolio_state"})
     assert "NockNock Sovereign" in state_res["result"]["content"][0]["text"]
     print("  ✓ HTTP /v1/mcp get_portfolio_state passed")
+    http_ladders = check_ladder_lines(state_res["result"]["content"][0]["text"], "HTTP")
+    if STDIO_LADDERS is not None or http_ladders is not None:
+        # Both transports print the same ladder lines (ladder_track_text.rs).
+        assert STDIO_LADDERS == http_ladders, "the two transports state the ladders differently"
+        print("  ✓ STDIO and HTTP state the same ladder lines")
 
     advice_res = post_mcp("tools/call", {"name": "get_shot_advice"})
     assert "Tactical Shot Advice" in advice_res["result"]["content"][0]["text"]
@@ -130,6 +157,9 @@ def test_http_mcp():
     print("  ✓ HTTP /v1/mcp simulate_claim_fees passed")
 
     return True
+
+STDIO_LADDERS = None
+
 
 def main():
     stdio_ok = test_stdio_mcp()

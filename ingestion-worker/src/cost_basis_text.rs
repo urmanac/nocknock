@@ -70,8 +70,10 @@ fn whole_stack_line(cb: &Value, spot: Option<&str>) -> String {
                 Some(h) => format!(" NockNock reads {h} NOCK held now (wallet plus tracked LP)."),
                 None => " The NOCK held now is not reported by this snapshot.".to_string(),
             };
+            // Verified ladder buys (#167), named only when the block has a ladder part.
+            let ladders = crate::ladder_track_text::ladder_basis_clause(layer);
             format!(
-                "{label}: ${} per NOCK on {} NOCK (${}). Operator-entered opening basis: {} NOCK for ${} as of {}, source: {}; plus {since} verified buy(s) since. {}{held} Not tracked after the as-of: sells, LP rebalancing, fees earned, unrecorded buys.",
+                "{label}: ${} per NOCK on {} NOCK (${}). Operator-entered opening basis: {} NOCK for ${} as of {}, source: {}; plus {since} verified buy(s) since.{ladders} {}{held} Not tracked after the as-of: sells, LP rebalancing, fees earned, unrecorded buys.",
                 get("avg_cost_usd"),
                 get("basis_nock"),
                 get("basis_cost_usd"),

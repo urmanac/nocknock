@@ -698,6 +698,7 @@ fn test_historical_rows_keep_the_cost_basis_figures_and_drop_the_repeated_prose(
     let cb = compute_cost_basis(Ok(&real_fills()), &test_opening(), Some(0.01153), Some(12000.0));
     assert!(!cb.plan_buys.includes.is_empty() && !cb.whole_stack.excludes.is_empty());
     let mut data = SnapshotData {
+        ladders: Vec::new(),
         closed_positions: vec![],
         wallet_balances: vec![],
         positions: vec![],
@@ -715,6 +716,7 @@ fn test_historical_rows_keep_the_cost_basis_figures_and_drop_the_repeated_prose(
     assert_eq!(slim.whole_stack.source, cb.whole_stack.source);
     // A row from before the field has nothing to slim.
     let mut old = SnapshotData {
+        ladders: Vec::new(),
         closed_positions: vec![],
         wallet_balances: vec![],
         positions: vec![],
@@ -766,6 +768,7 @@ fn test_historical_rows_keep_the_cost_basis_figures_and_drop_the_repeated_prose(
         dismissed: vec![offer; 2],
     });
     let mut due = SnapshotData {
+        ladders: Vec::new(),
         closed_positions: vec![],
         wallet_balances: vec![],
         positions: vec![],

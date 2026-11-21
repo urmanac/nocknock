@@ -78,9 +78,10 @@ pub(crate) fn lp_rebuild_suggestions(
     let mut excluded = Vec::new();
     let mut eligible: Vec<(&RawPosition, Option<u32>)> = Vec::new();
     for p in &raw.positions {
-        // A range with no NOCK leg (a gas-side ETH/USDC range, #151) is not NOCK LP:
-        // measured, never steered. It is neither a template nor an exclusion.
-        if !is_nock_pair(p) {
+        // A range with no NOCK leg (a gas-side ETH/USDC range, #151) is not NOCK LP, and
+        // neither is a tracked ladder (#167): measured, never steered. Neither is a
+        // template nor an exclusion.
+        if !is_nock_lp(raw, p) {
             continue;
         }
         let rule = raw.rebuild_rules.get(&p.position_id).cloned().unwrap_or_default();
@@ -176,11 +177,12 @@ pub(crate) fn lp_rebuild_suggestions(
     // are left alone (no unwinding), so the others' shares can add up to more than
     // what LP as a whole is short by; scale them down together so a completed rebuild
     // lands on the LP target instead of overshooting it.
-    // NOCK LP only (#151), the same sum the rebuild status was judged on.
+    // NOCK LP only (#151, #167: no gas range, no ladder), the same sum the rebuild status
+    // was judged on.
     let lp_now: f64 = raw
         .positions
         .iter()
-        .filter(|p| is_nock_pair(p))
+        .filter(|p| is_nock_lp(raw, p))
         .map(|p| {
             p.amount0 * leg_usd_price(&p.token0, nock_usd, eth_usd)
                 + p.amount1 * leg_usd_price(&p.token1, nock_usd, eth_usd)
@@ -367,8 +369,35 @@ pub(crate) fn lp_positions_summary(raw: &RawOnChainData) -> (String, bool) {
             .and_then(|v| v.parse::<u128>().ok())
             .map(|l| l > 0)
     };
-    let nock: Vec<&RawPosition> = raw.positions.iter().filter(|p| is_nock_pair(p)).collect();
+    let nock: Vec<&RawPosition> = raw.positions.iter().filter(|p| is_nock_lp(raw, p)).collect();
     let other: Vec<&RawPosition> = raw.positions.iter().filter(|p| !is_nock_pair(p)).collect();
+    // Tracked ladders (#167): named in their own closing clause, measured only, by what
+    // each holds. A ladder above its range is never counted "out of range".
+    let ladders: Vec<&RawPosition> = raw.positions.iter().filter(|p| is_ladder(raw, p)).collect();
+    let ladder_clause = if ladders.is_empty() {
+        String::new()
+    } else {
+        let count = |state: &str| ladders.iter().filter(|p| ladder_state(raw, p) == state).count();
+        let mut detail: Vec<String> = Vec::new();
+        for (state, words) in [
+            ("holds_only_usdc", "holding only USDC"),
+            ("in_range", "in range"),
+            ("holds_only_nock", "holding only NOCK"),
+            ("empty", "empty"),
+            ("pool_stale", "on a stale pool"),
+        ] {
+            let k = count(state);
+            if k > 0 {
+                detail.push(format!("{k} {words}"));
+            }
+        }
+        format!(
+            " +{} ladder{}, measured only ({}).",
+            ladders.len(),
+            if ladders.len() == 1 { "" } else { "s" },
+            detail.join(", ")
+        )
+    };
     let other_clause = if other.is_empty() {
         String::new()
     } else {
@@ -387,10 +416,10 @@ pub(crate) fn lp_positions_summary(raw: &RawOnChainData) -> (String, bool) {
     };
     let n = nock.len();
     if n == 0 {
-        if other.is_empty() {
+        if other.is_empty() && ladders.is_empty() {
             return ("No LP positions tracked.".to_string(), false);
         }
-        return (format!("No NOCK LP positions tracked.{}", other_clause), false);
+        return (format!("No NOCK LP positions tracked.{}{}", other_clause, ladder_clause), false);
     }
     let full = nock.iter().filter(|p| is_full_range(p.tick_lower, p.tick_upper)).count();
     let ranged: Vec<&RawPosition> = nock.iter().copied().filter(|p| !is_full_range(p.tick_lower, p.tick_upper)).collect();
@@ -424,12 +453,13 @@ pub(crate) fn lp_positions_summary(raw: &RawOnChainData) -> (String, bool) {
     }
     (
         format!(
-            "{} {}LP position{} tracked: {}.{}",
+            "{} {}LP position{} tracked: {}.{}{}",
             n,
-            if other.is_empty() { "" } else { "NOCK " },
+            if other.is_empty() && ladders.is_empty() { "" } else { "NOCK " },
             if n == 1 { "" } else { "s" },
             parts.join(", "),
-            other_clause
+            other_clause,
+            ladder_clause
         ),
         engine_active,
     )

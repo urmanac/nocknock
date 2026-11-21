@@ -248,8 +248,16 @@ pub fn ladder_text(b: &Value) -> String {
                 Some(abs) => format!("breached: below it by ${abs}"),
                 None => format!("holds by ${margin}"),
             };
+            // Tracked ladders (#167) are existing ranges too; named only when there are any.
+            let ladders = b
+                .pointer("/reserve_check/existing_ladders")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .filter(|n| *n > 0)
+                .map(|n| format!(", {n} tracked ladder{} among them", if n == 1 { "" } else { "s" }))
+                .unwrap_or_default();
             format!(
-                "• Reserve: stable ${} at the bottom against the ${} reserve: {verdict} (this range takes at most ${}; the existing NOCK ranges hold ${} USDC there). {}\n",
+                "• Reserve: stable ${} at the bottom against the ${} reserve: {verdict} (this range takes at most ${}; the existing NOCK ranges hold ${} USDC there{ladders}). {}\n",
                 rc("stable_at_bottom_usdc").unwrap_or_default(),
                 rc("cash_reserve_usdc").unwrap_or_default(),
                 rc("max_usdc_for_this_range").unwrap_or_else(|| "unknown".to_string()),

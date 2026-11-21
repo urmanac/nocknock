@@ -26,6 +26,9 @@ mod floor_breach_text;
 // one file for both transports.
 #[path = "../ladder_text.rs"]
 mod ladder_text;
+// Tracked ladders (issue #167): the same lines as the worker's mcp_text.
+#[path = "../ladder_track_text.rs"]
+mod ladder_track_text;
 
 /// Worker base URL when NOCKNOCK_API_URL is unset. Point the variable at a remote
 /// deployment (e.g. `http://chudmax:8081`) to read it instead of a local worker.
@@ -349,6 +352,8 @@ fn format_accumulation_plan(data: &Value) -> String {
     } else {
         format!("• NOCK LP rebuild bias: {lp_status} (within tolerance of target)")
     };
+    // Tracked ladders (issue #167) are not in the rebuild: said after its lines.
+    let lp_line = format!("{lp_line}{}", ladder_track_text::ladder_rebuild_note(data));
     // Closed positions (issue #144): the worker's own lines, from the same source file.
     let closed = closed_positions_trailer(data);
     match data.pointer("/derived_metrics/accumulation_plan").filter(|p| !p.is_null()) {
@@ -445,6 +450,8 @@ fn format_portfolio_state(data: &Value) -> String {
     let reserve = reserve_text::reserve_line(global);
     // The floor-crossing price (issue #165), the same line in both transports.
     let floor_breach = floor_breach_text::floor_breach_line(data.pointer("/derived_metrics/floor_breach"));
+    // Tracked ladders (issue #167), the same lines as the worker's mcp_text.
+    let ladders = ladder_track_text::ladders_lines(data);
 
     format!(
         "📈 NockNock Sovereign Portfolio State\n\
@@ -459,6 +466,7 @@ fn format_portfolio_state(data: &Value) -> String {
          {aero}\n\
          {collectible}\
          {closed}\
+         {ladders}\
          • High-Water Mark: {hwm}\n\
          {cost_basis}\n\
          • Tactical Directive: {advice}"
@@ -779,3 +787,8 @@ mod tests_ladder;
 #[cfg(test)]
 #[path = "../mcp_bin_tests_floor_breach.rs"]
 mod tests_floor_breach;
+
+// Tracked ladders (issue #167): stdio parity with the worker golden text.
+#[cfg(test)]
+#[path = "../mcp_bin_tests_ladder_track.rs"]
+mod tests_ladder_track;

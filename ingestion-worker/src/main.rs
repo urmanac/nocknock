@@ -87,6 +87,9 @@ mod floor_breach_text;
 mod ladder;
 use ladder::*;
 mod ladder_text;
+mod ladder_track;
+use ladder_track::*;
+mod ladder_track_text;
 
 // ============================================================
 // Configuration
@@ -222,6 +225,25 @@ pub struct PositionConfig {
     /// are out of range". Set true to make an exception for this position.
     #[serde(default)]
     pub rebuild_when_out_of_range: bool,
+    /// What the position is for (#167). Unset: classified by its pair, exactly as before
+    /// (#151: a NOCK leg makes it NOCK LP, no NOCK leg a measured gas range). `ladder`: a
+    /// deployed USDC/NOCK ladder rung, measured on its own and never steered: counted in
+    /// every total, the floor-crossing price and the standing reserve, but not NOCK LP
+    /// (no LP target, no rebuild, no engine label). Any other value is a configuration
+    /// error (adapters::validate_positions_config). No default.
+    #[serde(default)]
+    pub role: Option<String>,
+    /// Ladder only (#167): which kind of rung this NFT is, `near` (trades both ways near
+    /// spot for fees) or `deep` (waits near the bottom to accumulate). Optional with no
+    /// default: unset is reported as unset. Read by later maintenance (#169).
+    #[serde(default)]
+    pub rung: Option<String>,
+    /// Ladder only (#167): the transaction that minted this position. Its receipt is the
+    /// baseline for what the ladder has bought since; without it there is no baseline and
+    /// none is inferred. One per ladder: a ladder added to or partly withdrawn later reads
+    /// `liquidity_changed`.
+    #[serde(default)]
+    pub deposit_tx: Option<String>,
 }
 
 fn default_network() -> String {
@@ -533,6 +555,10 @@ struct SnapshotData {
     /// a snapshot without a closed position keeps the bytes it had.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     closed_positions: Vec<ClosedPosition>,
+    /// One measured reading per tracked ladder (2.9.0, #167), in positions order. Absent
+    /// when no position is configured `role: ladder`, so such a snapshot keeps its bytes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    ladders: Vec<LadderReading>,
     derived_metrics: DerivedMetrics,
 }
 
@@ -635,6 +661,13 @@ struct RawOnChainData {
     /// Configured positions proven closed this cycle (#144). They are NOT in `positions`
     /// and no other field of this struct knows them.
     closed_positions: Vec<ClosedPosition>,
+    /// Live positions configured `role: ladder` (#167), keyed by position_id. Empty when
+    /// none is: every reading then stays exactly what it was before #167.
+    ladders: HashMap<String, LadderTag>,
+    /// The baseline read of each ladder's `deposit_tx`, keyed by position_id (#167). A
+    /// ladder with no entry was not read (fixtures): it reads `no_baseline` only when its
+    /// tag says no deposit_tx is set, otherwise `unverified`.
+    ladder_baselines: HashMap<String, LadderBaselineRead>,
 }
 
 /// One cycle's AERO reads (v0.6.0, #93). Built by fetch_aero_reads and test fixtures.
@@ -776,6 +809,14 @@ struct Position {
     /// advice, and not counted in amount_usd, fees_usd or the portfolio total.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     collectible_reward: Option<CollectibleReward>,
+    /// "ladder" for a position configured `role: ladder` (2.9.0, #167); absent for every
+    /// other position, which is classified by its pair as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    role: Option<String>,
+    /// A ladder's `rung` from config, `near` or `deep` (2.9.0, #167). Absent when unset
+    /// (`ladders[].rung` is then null and says so) and on every other position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rung: Option<String>,
 }
 
 /// A gauge reward stated as collectible earnings (#142). It says what is there and where
@@ -1026,10 +1067,29 @@ struct WholeStackBasis {
     /// NOCK NockNock reads now (wallet plus tracked LP), to the nearest whole NOCK, for
     /// comparison with `basis_nock`: the two differ by everything the basis does not track.
     held_nock: Option<String>,
+    /// Receipt-verified ladder buys added to the basis (2.9.0, #167): the net NOCK each
+    /// tracked ladder bought since its `deposit_tx`, at the net USDC it spent, for ladders
+    /// deposited after `as_of`. Included in `basis_nock` and `basis_cost_usd`. Absent when
+    /// no ladder is tracked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ladder_buys_since: Option<LadderBuysSince>,
     #[serde(default)]
     includes: Vec<String>,
     #[serde(default)]
     excludes: Vec<String>,
+}
+
+/// The ladder part of the whole-stack basis (#167).
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
+struct LadderBuysSince {
+    /// Ladders whose verified net buys are in the basis.
+    ladders_counted: i64,
+    /// Their net NOCK bought and net USDC spent since their deposits, summed.
+    nock: String,
+    usdc: String,
+    /// Each tracked ladder left out, with the reason ("position_id: reason").
+    #[serde(default)]
+    not_counted: Vec<String>,
 }
 
 /// Plan progress as emitted in snapshots. Everything here derives from the plan
@@ -1396,8 +1456,12 @@ struct PlanGuards {
     wallet_usdc: f64,
     /// USDC held inside NOCK-pair LP positions. Counts toward the protected cash reserve
     /// (operator decision, 2026-11-14: rebuilding LP is cash-neutral). USDC inside a
-    /// range with no NOCK leg (a gas-side ETH/USDC range) is left out (#151).
+    /// range with no NOCK leg (a gas-side ETH/USDC range) is left out (#151). Ladders
+    /// (#167) are not in it: their USDC is `ladder_usdc`.
     lp_usdc: f64,
+    /// USDC held inside tracked ladders (#167). Counted toward the reserve like `lp_usdc`
+    /// and named apart, so the text can say where it is. 0 with no ladder.
+    ladder_usdc: f64,
     tax_reserve_usd: f64,
     cash_target_usd: f64,
     /// The standing reserve, `operator_profile.cash_reserve_usdc` (#162). A plan never
@@ -1556,13 +1620,18 @@ struct GlobalStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     cash_reserve_usdc: Option<String>,
     /// The stable balance the reserve is measured on (2.8.3, #162): wallet USDC plus USDC
-    /// inside NOCK-pair LP; gas-side ETH/USDC ranges are left out. Absent with no reserve.
+    /// inside NOCK-pair LP and, since 2.9.0, inside tracked ladders (#167); gas-side
+    /// ETH/USDC ranges are left out. Absent with no reserve.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reserve_stable_usdc: Option<String>,
     /// `reserve_stable_usdc` less the reserve (2.8.3, #162), signed: negative when the
     /// stable balance is below it. Absent with no reserve or an invalid one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reserve_headroom_usdc: Option<String>,
+    /// The ladder USDC included in `reserve_stable_usdc` (2.9.0, #167). Absent with no
+    /// reserve or no tracked ladder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reserve_ladder_usdc: Option<String>,
     /// Liquid dry powder in USDC (2.8.3, #162): wallet USDC less the larger of the cash
     /// target and the virtual tax reserve, and never more than `reserve_headroom_usdc`.
     /// The same figure the advice names. "0.00" when there is none; absent when the
@@ -2168,3 +2237,5 @@ mod tests_reserve;
 mod tests_floor_breach;
 #[cfg(test)]
 mod tests_ladder;
+#[cfg(test)]
+mod tests_ladder_track;

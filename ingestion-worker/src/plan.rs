@@ -121,12 +121,14 @@ pub(crate) fn plan_directive(
         // inside NOCK LP. Moving USDC into a range therefore does not consume headroom;
         // buying NOCK with it does. USDC in a gas-side ETH/USDC range is not counted
         // (#151): it turns into WETH as ETH falls, so it is no NOCK reserve.
-        let stable = guards.wallet_usdc + guards.lp_usdc;
+        // A tracked ladder's USDC (#167) counts like NOCK LP's and is named apart.
+        let stable = guards.wallet_usdc + guards.lp_usdc + guards.ladder_usdc;
+        let ladders = if guards.ladder_usdc >= 0.005 { format!(" + ladders ${:.2}", guards.ladder_usdc) } else { String::new() };
         cap(
             stable - reserve,
             format!(
-                "stable balance ${:.2} (wallet ${:.2} + NOCK LP ${:.2}) less {} ${:.2} protected cash reserve",
-                stable, guards.wallet_usdc, guards.lp_usdc, whose, reserve
+                "stable balance ${:.2} (wallet ${:.2} + NOCK LP ${:.2}{}) less {} ${:.2} protected cash reserve",
+                stable, guards.wallet_usdc, guards.lp_usdc, ladders, whose, reserve
             ),
         );
     }
@@ -219,7 +221,15 @@ pub(crate) fn plan_progress_unknown(ps: Option<&AccumulationPlanStatus>) -> bool
 }
 
 /// Advice text for an active (not complete) plan.
+/// Ladder-less entry point (unit tests).
+#[allow(dead_code)]
 pub(crate) fn plan_advice(ps: &AccumulationPlanStatus, spot_price: f64) -> (String, String) {
+    plan_advice_with(ps, spot_price, false)
+}
+
+/// As `plan_advice`; `ladder_usdc_counted` names tracked ladders (#167) in the stable
+/// balance the reserve is measured on, when they hold USDC.
+pub(crate) fn plan_advice_with(ps: &AccumulationPlanStatus, spot_price: f64, ladder_usdc_counted: bool) -> (String, String) {
     // No ledger read: no progress sentence and no "(n of N)", which would be the zero of
     // an empty read presented as the plan's (issue #130).
     if ps.progress_unknown {
@@ -242,7 +252,12 @@ pub(crate) fn plan_advice(ps: &AccumulationPlanStatus, spot_price: f64) -> (Stri
             .unwrap_or_default()
     );
     let progress = match &ps.cash_reserve_usdc {
-        Some(r) => format!("{} The plan never spends the stable balance (wallet + NOCK LP USDC) below ${}.", progress, r),
+        Some(r) => format!(
+            "{} The plan never spends the stable balance ({}) below ${}.",
+            progress,
+            if ladder_usdc_counted { "wallet + NOCK LP and ladder USDC" } else { "wallet + NOCK LP USDC" },
+            r
+        ),
         None => progress,
     };
     let n = format!("{} of {}", ps.tranche_index, ps.tranches_total);

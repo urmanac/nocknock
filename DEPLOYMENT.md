@@ -155,6 +155,11 @@ at boot and survive logout.
    host, stores `config.yaml` and a generated database password as Podman secrets,
    installs the quadlets into `~/.config/containers/systemd/` and restarts the stack.
    Re-run it to upgrade; the database volume and password are kept. Upgrades are forward-only: a build older than the newest migration already applied will not start (see AGENTS.md section 13).
+   Any change to `config.yaml` reaches the host only through this step, because the
+   worker reads the stored secret. That includes a new ladder entry (`role: ladder`,
+   #167) and its `deposit_tx`: after deploying a ladder rung, add its entry and mint
+   transaction to `config.yaml`, then re-run `deploy.sh <host>`. The receipt is checked
+   on the next cycle; the ladder's reading says `verified`, or why not.
 
 3. **Endpoints**: dashboard on `http://<host>:3000`, API and HTTP MCP on
    `http://<host>:8081` (host port 8080 is left free). PostgreSQL is reachable only

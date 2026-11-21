@@ -123,6 +123,46 @@ positions:
   #   pool_address: "0x957256c98d61A714081DE2EE70ae3A96c9b40874"
   #   is_price_source: false
 
+  # A deployed ladder rung (v0.9.0, issue #167). EXAMPLE, commented out: use your own NFT,
+  # ticks and transaction. A ladder is a USDC/NOCK concentrated range (uniswap-v4,
+  # uniswap-v3 or aerodrome-cl) that you deployed to buy NOCK on the way down or to trade
+  # near spot; each rung is its own NFT and its own entry. NockNock measures it and never
+  # steers it: it counts in every total, in the floor-crossing price and in the
+  # protected cash reserve (its USDC is part of the stable balance), but it is not NOCK LP:
+  # no LP target, no rebuild suggestion, no "Dual Growth Engine Active" label.
+  #   role        unset (the default meaning since #151: classified by its pair) or
+  #               "ladder". Nothing else is accepted: any other value fails every cycle
+  #               with a configuration error, exactly like an unknown protocol.
+  #   rung        optional, ladder only: "near" (trades both ways near spot, for fees) or
+  #               "deep" (waits near the bottom to accumulate). No default: unset is
+  #               reported as unset. Later maintenance (#169) treats the two differently.
+  #   deposit_tx  optional, ladder only: the transaction that minted this NFT (0x + 64 hex).
+  #               Its receipt is the baseline for "net NOCK bought since deposit". It is
+  #               checked against this position (sent by the tracked wallet, one deposit into
+  #               this NFT, no swap in the same transaction, amounts that fit the range).
+  #               Without it there is no baseline and none is invented. One per ladder: a
+  #               rung you add to or partly withdraw reads "liquidity_changed" (no bought
+  #               figure) until it is re-deployed as a new NFT with its own deposit_tx.
+  #               Verified buys made after cost_basis.opening.as_of enter the whole-stack
+  #               average cost.
+  # A ladder may not be the price source, may not set rebuild_weight_bps,
+  # rebuild_when_out_of_range: true or deposit_url, and may not be an `aerodrome` (full
+  # range) entry: each is refused with a configuration error. AERO and ETH ladders are #170.
+  # Adding or changing deposit_tx changes config.yaml, which on chudmax means a redeploy
+  # (deploy.sh stores config.yaml as the nocknock-config secret).
+  # - id: "ladder-deep-1"
+  #   protocol: "uniswap-v4"
+  #   network: "base"
+  #   nft_id: <your NFT id>
+  #   pool_id: "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13"
+  #   currency0: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"   # USDC
+  #   currency1: "0x9B5E262cF9bb04869ab40b19AF91D2dc85761722"   # NOCK
+  #   tick_lower: <from the mint>
+  #   tick_upper: <from the mint>
+  #   role: "ladder"
+  #   rung: "deep"
+  #   deposit_tx: "0x<the mint transaction hash>"
+
 # Canonical Uniswap v3 WETH/USDC 0.05% pool (Base) for the live ETH/USD spot (slot0).
 # Resolved via the verified v3 factory getPool and price-checked at discovery.
 eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
