@@ -43,6 +43,8 @@ export interface DerivedMetrics {
   lp_rebuild?: LpRebuild;
   /** NOCK cost basis (v0.6.0, #98); null/absent from a worker that predates it */
   cost_basis?: import('../costBasis').CostBasis | null;
+  /** The floor-crossing price (2.9.0, #165); null/absent from a worker that predates it */
+  floor_breach?: import('../floor').FloorBreach | null;
 }
 
 /** Plan progress, derived from config + receipt-verified buys only (2.1.0) */

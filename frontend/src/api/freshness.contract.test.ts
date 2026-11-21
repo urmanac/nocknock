@@ -211,7 +211,26 @@ describe('Freshness Contract', () => {
     brackets.forEach((b: any, i: number) => expect(b.position_id).toBe(data.positions[i].position_id));
     expect(ag.tranche_1_nock).toBeUndefined();
     // Meta version: the current snapshot spec (specs/core/snapshot.yaml info.version).
-    expect(latestSnapshot!.meta.version).toBe('2.8.2');
+    expect(latestSnapshot!.meta.version).toBe('2.9.0');
+  });
+
+  it('2.9.0 floor_breach is stated, and at spot it is the Floor Health reading (#165)', () => {
+    if (!latestSnapshot) {
+      console.log('Skipping contract test: backend not reachable in isolated environment');
+      return;
+    }
+    const data = latestSnapshot.data as any;
+    const fb = data.derived_metrics?.floor_breach;
+    expect(fb).toBeTruthy();
+    expect(['crosses', 'already_below', 'never', 'no_floor', 'unavailable']).toContain(fb.status);
+    expect(typeof fb.assumption).toBe('string');
+    if (fb.status === 'unavailable') {
+      expect(typeof fb.reason).toBe('string');
+      expect(fb.crossing).toBeNull();
+    } else if (fb.status !== 'no_floor') {
+      expect(fb.nock_now).toBe(data.derived_metrics.global_status.total_nock_amount);
+      expect(fb.crossing.status).toBe(fb.status);
+    }
   });
 
   it('2.3.0 pillars partition the total and the wallet reports its gas', () => {
