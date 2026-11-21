@@ -265,10 +265,7 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     let gas_cost = raw.live_gas_cost_usd;
 
     // 3. Sovereign Treasury (wallet) and totals
-    let wallet_nock = raw.wallet_balances.iter()
-        .find(|w| w.token_symbol == "NOCK")
-        .and_then(|w| w.amount.parse().ok())
-        .unwrap_or(0.0);
+    let wallet_nock = wallet_nock(raw);
     let t3_nock = wallet_nock;
     let t3_usd = t3_nock * spot_price;
 
@@ -1023,4 +1020,13 @@ fn cap_parenthetical(base: &str, clause: &str) -> String {
         Some(head) => format!("{}, {}).", head, clause),
         None => format!("{} ({})", base, clause),
     }
+}
+
+/// Wallet NOCK as Floor Health reads it: the NOCK balance row, or 0.0 when there is none
+/// (a from-zero wallet). Shared with the floor-breach price (#165) so both read the same W.
+pub(crate) fn wallet_nock(raw: &RawOnChainData) -> f64 {
+    raw.wallet_balances.iter()
+        .find(|w| w.token_symbol == "NOCK")
+        .and_then(|w| w.amount.parse().ok())
+        .unwrap_or(0.0)
 }
