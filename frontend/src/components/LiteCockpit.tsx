@@ -15,6 +15,7 @@
 import React from 'react';
 import { floorDeltaText } from '../floor';
 import { api, describeApiError, ClaimFeeAction, ClaimFeesPayload, LedgerSummary } from '../api/client';
+import { claimActionKey } from '../claimActions';
 import { ledgerLiteText } from '../ledger';
 import { AeroLiteCard } from './AeroPillar';
 import { ClosedPositionsLiteCard } from './ClosedPositions';
@@ -180,33 +181,35 @@ export function LiteCockpit({ top, bottom }: { top?: React.ReactNode; bottom?: R
     return () => clearInterval(t);
   }, [loadPayload, loadLedger]);
 
-  const setState = (platform: string, s: ActionState) =>
-    setActionStates((prev) => ({ ...prev, [platform]: s }));
+  // State is kept per action (claimActionKey), not per platform: two Uniswap v4
+  // positions are two actions, each with its own row and its own state.
+  const setState = (key: string, s: ActionState) =>
+    setActionStates((prev) => ({ ...prev, [key]: s }));
 
-  const recordWithPendingHandling = async (platform: string, txHash: string) => {
+  const recordWithPendingHandling = async (key: string, platform: string, txHash: string) => {
     for (let attempt = 1; attempt <= AWAIT_MAX_ATTEMPTS; attempt++) {
       try {
         await api.recordHarvest(platform, txHash);
-        setState(platform, { kind: 'recorded', txHash });
+        setState(key, { kind: 'recorded', txHash });
         loadLedger();
         return;
       } catch (e) {
         const kind = classifyRecordError(e);
         if (kind === 'recorded') {
-          setState(platform, { kind: 'recorded', txHash });
+          setState(key, { kind: 'recorded', txHash });
           loadLedger();
           return;
         }
         if (kind === 'awaiting_broadcast') {
-          setState(platform, { kind: 'awaiting_broadcast', txHash, attempts: attempt });
+          setState(key, { kind: 'awaiting_broadcast', txHash, attempts: attempt });
           await new Promise((r) => setTimeout(r, AWAIT_POLL_MS));
           continue;
         }
-        setState(platform, { kind: 'failed', detail: e instanceof Error ? e.message : String(e) });
+        setState(key, { kind: 'failed', detail: e instanceof Error ? e.message : String(e) });
         return;
       }
     }
-    setState(platform, {
+    setState(key, {
       kind: 'failed',
       detail: 'Transaction stayed unbroadcast for ~10 minutes; open the Uniswap app to broadcast, then retry from the ledger panel.',
     });
@@ -214,15 +217,16 @@ export function LiteCockpit({ top, bottom }: { top?: React.ReactNode; bottom?: R
 
   const executeAction = async (action: ClaimFeeAction) => {
     if (!payload) return;
-    setState(action.platform, { kind: 'signing' });
+    const key = claimActionKey(action);
+    setState(key, { kind: 'signing' });
     try {
       const txHash = await sendClaimTransaction(
         { to: action.to, data: action.data, value: action.value },
         payload.from,
       );
-      await recordWithPendingHandling(action.platform, txHash);
+      await recordWithPendingHandling(key, action.platform, txHash);
     } catch (e) {
-      setState(action.platform, {
+      setState(key, {
         kind: 'failed',
         detail: e instanceof Error ? e.message : String(e),
       });
@@ -230,7 +234,7 @@ export function LiteCockpit({ top, bottom }: { top?: React.ReactNode; bottom?: R
   };
 
   const executable = (payload?.actions ?? []).filter((a) => a.simulation === 'success');
-  const stateOf = (a: ClaimFeeAction): ActionState => actionStates[a.platform] ?? { kind: 'idle' };
+  const stateOf = (a: ClaimFeeAction): ActionState => actionStates[claimActionKey(a)] ?? { kind: 'idle' };
 
   // floorTarget 0 is the operator's own "no floor": neutral, never a +N "above" reading.
   const noFloor = floorTarget === 0;
@@ -340,7 +344,7 @@ export function LiteCockpit({ top, bottom }: { top?: React.ReactNode; bottom?: R
         {walletConnectConfigured() && executable.map((a) => {
           const st = stateOf(a);
           return (
-            <div key={a.platform} style={lite.actionRow}>
+            <div key={claimActionKey(a)} style={lite.actionRow}>
               <div style={lite.actionLabel}>{a.label}</div>
               <div style={lite.sub}>
                 {a.expected_usd ? `$${a.expected_usd}` : '—'} · gas ${a.gas_usd ?? '—'} · sim:{' '}

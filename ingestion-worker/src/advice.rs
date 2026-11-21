@@ -975,6 +975,8 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         ladder_shape: None,
         // Filled from the assembled snapshot (#168): ladder_suggest::attach_ladder_suggestion.
         ladder_suggestion: None,
+        // Filled by the cycle from its detection run (position_detect::position_detection_block).
+        position_detection: None,
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: fee_entries
                 .iter()

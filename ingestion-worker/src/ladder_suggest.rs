@@ -11,8 +11,9 @@
 //!   reserve is the only gate on the USDC; the plan budget and the tax reserve are stated
 //!   lines, not gates (operator decision 2026-11-20). The NOCK must fit the floor +
 //!   tolerance budget, which a range holding no NOCK always does.
-//! - It shows only while no ladder is tracked (#167), the reserve allows at least
-//!   `LADDER_SUGGEST_MIN_USDC`, and the snapshot is fresh. Freshness is judged where the
+//! - It shows only while no tracked ladder holds anything (#167; an emptied one is not a
+//!   deployed rung), no position found on-chain is waiting for a tap, the reserve allows
+//!   at least `LADDER_SUGGEST_MIN_USDC`, and the snapshot is fresh. Freshness is judged where the
 //!   card is read (the dashboard's sync status, the MCP transports' worker health); the
 //!   stored object carries `freshness_rule` so every reader applies the same rule.
 //!
@@ -49,6 +50,7 @@ pub(crate) const LADDER_RESERVE_KEY: &str = "operator_profile.cash_reserve_usdc"
 pub(crate) const LADDER_SUGGEST_BOTTOM_INVALID_NOTE: &str =
     "operator_profile.ladder_bottom_usd must be a USD price per NOCK above 0 (a finite number); no ladder is sized";
 pub(crate) const LADDER_SUGGEST_STATEMENT: &str = "A measurement from this cycle's reads of what the range would do. NockNock does not choose the bottom or the amount, builds no transaction, and signs and sends nothing.";
+pub(crate) const LADDER_AFTER_DEPOSIT_TEXT: &str = "After you deposit there is nothing to copy or configure. NockNock looks for the wallet's new position NFT on-chain at the start of every cycle (CHECK NOW runs one at once), so a deposit is normally found in the first cycle after it lands. A position your wallet minted in this pool with exactly a rung's ticks is tracked as a ladder by itself, with its mint as the baseline. Any other range it finds is shown as found on-chain and is not counted until one tap says how to track it.";
 pub(crate) const LADDER_FRESHNESS_RULE: &str = "Shown only while the snapshot is fresh: the dashboard's sync status is not stale, or the worker's health is ok.";
 pub(crate) const LADDER_SUGGEST_ASSUMPTIONS: [&str; 5] = [
     "The amount is the most the standing reserve allows at the ladder's bottom; fees and gas are not counted.",
@@ -232,50 +234,30 @@ fn deep_link(p: &Position, tick_lower: i32, tick_upper: i32, usdc_amount: &str) 
     }
 }
 
-/// The config entry that tracks one minted rung today (#167). Pure.
-fn config_snippet(p: &Position, index: usize, tick_lower: i32, tick_upper: i32, rung: Option<&str>) -> String {
-    let mut lines = vec![
-        format!("- id: \"nock-ladder-{index}\""),
-        format!("  protocol: \"{}\"", p.protocol),
-        format!("  network: \"{}\"", p.network),
-        "  nft_id: <the new NFT's id>".to_string(),
-    ];
-    if p.protocol == "uniswap-v4" {
-        lines.push(format!("  pool_id: \"{}\"", p.pool_id));
-        lines.push(format!("  currency0: \"{}\"   # {}", p.token0.address, p.token0.symbol));
-        lines.push(format!("  currency1: \"{}\"   # {}", p.token1.address, p.token1.symbol));
-    } else {
-        lines.push(format!("  npm_address: \"{}\"", p.npm_address.clone().unwrap_or_default()));
-        lines.push(format!("  pool_address: \"{}\"", p.pool_id));
-    }
-    lines.push(format!("  tick_lower: {tick_lower}   # the minted ticks; the app may adjust them"));
-    lines.push(format!("  tick_upper: {tick_upper}"));
-    lines.push("  role: \"ladder\"".to_string());
-    match rung {
-        Some(r) => lines.push(format!("  rung: \"{r}\"")),
-        None => lines.push("  rung: \"<near or deep: your choice>\"".to_string()),
-    }
-    lines.push("  deposit_tx: \"0x<the mint transaction hash>\"".to_string());
-    lines.join("\n")
-}
-
-/// How a minted rung becomes tracked: ONE isolated field and function, so on-chain
-/// detection of the wallet's new position NFTs can replace it without touching the rest
-/// of the card. Today it is the `manual_config` fallback (#167's `role: ladder` entry),
-/// stated as the fallback, not the flow. Pure.
-pub(crate) fn after_deposit(rungs: &[(&Position, i32, i32)]) -> Value {
-    let named: Vec<(&Position, usize, i32, i32, Option<&str>)> = rungs.iter().enumerate().map(|(i, (p, tl, tu))| (*p, i + 1, *tl, *tu, None)).collect();
-    after_deposit_named(&named)
-}
-
-/// `after_deposit` with each rung's own index and, from a configured shape, its role.
-pub(crate) fn after_deposit_named(rungs: &[(&Position, usize, i32, i32, Option<&str>)]) -> Value {
-    let snippets: Vec<String> = rungs.iter().map(|(p, i, tl, tu, rung)| config_snippet(p, *i, *tl, *tu, *rung)).collect();
+/// How a deposited rung becomes tracked: ONE isolated field and function. Since v0.9.0 it
+/// is automatic (`tracked_automatically`): position_detect.rs finds the wallet's new
+/// position NFT on-chain and tracks it when its pool and ticks are exactly a rung's. The
+/// text states how long that may take as what the worker does, with no promised number,
+/// and says so when this cycle's check could not run. `detection` is the snapshot's
+/// `derived_metrics.position_detection`. Pure.
+pub(crate) fn after_deposit(detection: Option<&Value>) -> Value {
+    let status = detection.and_then(|d| d.get("status")).and_then(|v| v.as_str());
+    let note = match status {
+        Some("unavailable") | Some("not_run") => Some(format!(
+            "This cycle's check did not run: {} A deposit made now is found once the check runs again.",
+            detection.and_then(|d| d.get("reason")).and_then(|v| v.as_str()).unwrap_or("no reason was reported.")
+        )),
+        Some("partial") => Some(format!(
+            "This cycle's check ran with a gap: {}.",
+            detection.and_then(|d| d.get("reason")).and_then(|v| v.as_str()).unwrap_or("no reason was reported")
+        )),
+        _ => None,
+    };
     json!({
-        "kind": "manual_config",
-        "is": "the current fallback until NockNock detects the wallet's new position NFTs on-chain",
-        "text": "Automatic tracking of a new ladder position is not built yet; until it is, a minted rung is tracked only from a config.yaml entry (role: ladder).",
-        "config_snippets": snippets,
+        "kind": "tracked_automatically",
+        "text": LADDER_AFTER_DEPOSIT_TEXT,
+        "detection_status": status,
+        "detection_note": note,
     })
 }
 
@@ -284,6 +266,7 @@ pub(crate) fn headline_for(status: &str) -> &'static str {
     match status {
         "ladder_tracked" => "Ladder: tracked. No new one is suggested.",
         "ladder_deployed" => "Ladder deployed: nothing is left to deposit.",
+        "found_untracked" => "Ladder: a position found on-chain is waiting for one tap.",
         "needs_setting" => "Ladder: a setting is needed before one is measured.",
         "invalid" => "Ladder: a setting is invalid, so none is measured.",
         "no_target_pool" => "Ladder: no tracked USDC/NOCK pool can hold one this cycle.",
@@ -340,11 +323,60 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
     }
 
     // 1. A ladder is already tracked (#167): its maintenance is #169's, not a new one.
+    //    A ladder found on-chain and tracked from the database (v0.9.0) says so. One that
+    //    holds nothing (emptied, its NFT still in the wallet) is not a deployed rung: it
+    //    is listed and does not stop a new measurement.
     let tracked = tracked_ladders(data);
-    if !tracked.is_empty() {
-        let names: Vec<String> = tracked.iter().filter_map(|t| t["label"].as_str().map(|s| s.to_string())).collect();
+    let name_of = |t: &Value| -> Option<String> {
+        let label = t["label"].as_str()?;
+        Some(if t.get("source").is_some() { format!("{label}, found on-chain") } else { label.to_string() })
+    };
+    let live: Vec<&Value> = tracked.iter().filter(|t| t["state"] != json!("empty")).collect();
+    if !live.is_empty() {
+        let names: Vec<String> = live.iter().filter_map(|t| name_of(t)).collect();
         out["tracked"] = json!(tracked);
         set(&mut out, "ladder_tracked", format!("A ladder is tracked ({}): no new one is suggested. Its readings are in the Ladders card.", names.join(", ")));
+        return out;
+    }
+    // Every tracked ladder is empty: say so, and measure.
+    let none_tracked = if tracked.is_empty() {
+        "No ladder is tracked.".to_string()
+    } else {
+        let names: Vec<String> = tracked.iter().filter_map(name_of).collect();
+        out["tracked"] = json!(tracked);
+        format!("No tracked ladder holds anything ({} is empty: emptied, its NFT still in the wallet, so not a deployed rung).", names.join(", "))
+    };
+
+    // 1b. A position found on-chain that could be a ladder rung is waiting for a tap
+    //     (position_detect.rs). Its USDC already left the wallet and is in no total, so a
+    //     new ladder is not measured beside it.
+    let waiting: Vec<&Value> = data
+        .derived_metrics
+        .position_detection
+        .as_ref()
+        .and_then(|d| d.pointer("/found_not_counted/positions"))
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|p| p.get("choices").and_then(|c| c.as_array()).is_some_and(|c| c.iter().any(|x| x.as_str().is_some_and(|x| x.starts_with("ladder:")))))
+        .collect();
+    if !waiting.is_empty() {
+        let names: Vec<String> = waiting
+            .iter()
+            .map(|p| {
+                let worth = p.get("value_usd").and_then(|v| v.as_str()).map(|v| format!(", worth ${v}")).unwrap_or_default();
+                format!("{} #{}{worth}", p.get("pool_label").and_then(|v| v.as_str()).unwrap_or("position"), p.get("nft_id").and_then(|v| v.as_u64()).unwrap_or(0))
+            })
+            .collect();
+        out["found_untracked"] = json!(waiting);
+        set(
+            &mut out,
+            "found_untracked",
+            format!(
+                "A USDC/NOCK position the wallet holds was found on-chain and is not tracked or counted yet ({}). No new ladder is measured until it is tracked or set aside (one tap, under Found on-chain).",
+                names.join("; ")
+            ),
+        );
         return out;
     }
 
@@ -423,7 +455,7 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
             .iter()
             .map(|k| if *k == LADDER_BOTTOM_KEY { format!("{k} (your bottom price; NockNock does not choose one)") } else { format!("{k} (the reserve that sizes it)") })
             .collect();
-        set(&mut out, "needs_setting", format!("No ladder is tracked. A suggestion needs {}.", why.join(" and ")));
+        set(&mut out, "needs_setting", format!("{none_tracked} A suggestion needs {}.", why.join(" and ")));
         out["headline"] = json!(if bottom.is_none() {
             "Ladder: needs your bottom price (operator_profile.ladder_bottom_usd) before one is measured."
         } else {
@@ -651,7 +683,7 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
         "lp_nock_budget": s(&body, "/floor_check/lp_nock_budget"),
     });
     out["gates"] = json!({
-        "ladder_tracked": { "status": "none", "reason": "no ladder is tracked (#167)" },
+        "ladder_tracked": { "status": "none", "reason": if tracked.is_empty() { "no ladder is tracked (#167)" } else { "every tracked ladder is empty (#167)" } },
         "bottom_setting": { "status": "set", "key": LADDER_BOTTOM_KEY, "value": format!("{bottom}") },
         "reserve": {
             "status": "allows",
@@ -676,7 +708,7 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
         "floor_breach_effect": body.pointer("/floor_check/floor_breach_effect/status").cloned().unwrap_or(Value::Null),
     });
     out["stated"] = stated(env, &body, below);
-    out["after_deposit"] = after_deposit(&[(target, tl, tu)]);
+    out["after_deposit"] = after_deposit(data.derived_metrics.position_detection.as_ref());
     out["headline"] = json!(format!(
         "Ladder ready: up to ${usdc_txt} USDC in 1 deposit, {} NOCK.",
         if nock_needed > 0.0 { grouped(nock_needed) } else { "0".to_string() }
@@ -691,7 +723,7 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
         "bars": [{ "index": 1, "low_usd": bottom_usd, "high_usd": top_usd, "usdc": usdc_txt, "label": format!("${usdc_txt}") }],
     });
     let sentence = format!(
-        "No ladder is tracked. A new USDC-only position in {name} from ${} ({}) down to ${} ({}) would hold up to ${usdc_txt} USDC and 0 NOCK now: {limit_text}. Fully converted it would hold about {} NOCK, an average of ${}.",
+        "{none_tracked} A new USDC-only position in {name} from ${} ({}) down to ${} ({}) would hold up to ${usdc_txt} USDC and 0 NOCK now: {limit_text}. Fully converted it would hold about {} NOCK, an average of ${}.",
         price4(top_exact),
         pct_plain((top_exact / pool_price - 1.0) * 100.0),
         price4(bottom_exact),
@@ -699,10 +731,12 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
         grouped(nock_held),
         price4(avg_exact),
     );
+    // With no ladder tracked the sentence is what it was before v0.9.0.
+    let lead = if tracked.is_empty() { "No ladder is tracked, and".to_string() } else { format!("{none_tracked} Now") };
     out["what_changed"] = json!(if binding == "wallet" {
-        format!("No ladder is tracked, and the wallet's ${usdc_txt} USDC fits in {name} down to your ${bottom} bottom.")
+        format!("{lead} the wallet's ${usdc_txt} USDC fits in {name} down to your ${bottom} bottom.")
     } else {
-        format!("No ladder is tracked, and the standing reserve allows ${usdc_txt} in {name} down to your ${bottom} bottom.")
+        format!("{lead} the standing reserve allows ${usdc_txt} in {name} down to your ${bottom} bottom.")
     });
     out["sentence"] = json!(sentence);
     out["status"] = json!("ready");
@@ -713,14 +747,24 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
 /// The tracked ladders (#167), from the readings and from any role-ladder position
 /// without one. Pure.
 fn tracked_ladders(data: &SnapshotData) -> Vec<Value> {
+    // A ladder found on-chain and tracked from the database (v0.9.0) carries its source.
+    let with_source = |mut t: Value, source: Option<&String>| {
+        if let Some(src) = source {
+            t["source"] = json!(src);
+        }
+        t
+    };
     let mut tracked: Vec<Value> = data
         .ladders
         .iter()
-        .map(|l| json!({ "position_id": l.position_id, "label": l.label, "rung": l.rung, "state": l.state }))
+        .map(|l| with_source(json!({ "position_id": l.position_id, "label": l.label, "rung": l.rung, "state": l.state }), l.source.as_ref()))
         .collect();
     for p in data.positions.iter().filter(|p| p.role.as_deref() == Some(LADDER_ROLE)) {
         if !tracked.iter().any(|t| t["position_id"] == json!(p.position_id)) {
-            tracked.push(json!({ "position_id": p.position_id, "label": format!("{} #{}", p.protocol, p.nft_id), "rung": p.rung, "state": Value::Null }));
+            tracked.push(with_source(
+                json!({ "position_id": p.position_id, "label": format!("{} #{}", p.protocol, p.nft_id), "rung": p.rung, "state": Value::Null }),
+                p.source.as_ref(),
+            ));
         }
     }
     tracked
@@ -1270,7 +1314,6 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
     let mut rungs: Vec<Value> = Vec::new();
     let mut legs: Vec<(String, Leg)> = Vec::new();
     let mut bars: Vec<Value> = Vec::new();
-    let mut snippets: Vec<(usize, i32, i32, String)> = Vec::new();
     let (mut usdc_sum, mut nock_sum) = (0.0, 0.0);
     for r in &to_deposit {
         let index = r["index"].as_u64().unwrap_or(0) as usize;
@@ -1412,7 +1455,6 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         if let Some(leg) = Leg::new(top_exact, bottom_exact, pool_price, usdc_f, nock_f) {
             legs.push((role.clone(), leg));
         }
-        snippets.push((index, tl, tu, role));
         usdc_sum += usdc_f;
         nock_sum += nock_f;
     }
@@ -1566,8 +1608,7 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         Ok(body) => stated(env, &body, Value::Null),
         Err(_) => json!({ "note": LADDER_STATED_NOT_GATES, "lines": [] }),
     };
-    let named: Vec<(&Position, usize, i32, i32, Option<&str>)> = snippets.iter().map(|(i, tl, tu, role)| (target, *i, *tl, *tu, Some(role.as_str()))).collect();
-    out["after_deposit"] = after_deposit_named(&named);
+    out["after_deposit"] = after_deposit(data.derived_metrics.position_detection.as_ref());
 
     // 10. The headline counts only what is left.
     let nock_words = if nock_sum > 0.0 { format!(" and about {} NOCK", grouped(nock_sum)) } else { String::new() };

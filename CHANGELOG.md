@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Positions found on-chain: deposit in the Uniswap app, and NockNock tracks it
+  (#145 for Uniswap v4).** No transaction hash, no NFT id and no `config.yaml` edit. At
+  the start of every cycle, before the position reads, the worker reads the wallet's
+  Uniswap v4 position NFTs from the chain and decides for each:
+  - **Tracked by itself** only when the wallet minted it in a whitelisted pool and its
+    pool and ticks are exactly a rung of the current ladder suggestion. It is tracked as
+    `role: ladder` with that rung (unset while the suggestion names none, never a guessed
+    one) and its mint transaction as the #167 baseline, checked by the same
+    `parse_ladder_deposit` as a config ladder. It is counted in the cycle that finds it.
+  - **Found, not counted** for anything else the wallet holds with liquidity in a
+    whitelisted pool: stated with what it holds, its value at the cycle's prices and why
+    it was not tracked by itself, with one tap to track it as a ladder rung, track it as
+    LP, or set it aside. It is never tracked silently, and the ladder suggestion waits
+    for that tap instead of measuring a second ladder beside it.
+  - **Never listed**: a pool with a token outside the whitelist (dust), a hooked pool, an
+    empty NFT, an NFT the wallet does not own. They are counted by reason.
+  Tracked positions live in the database and are appended after `config.yaml`'s each
+  cycle; `config.yaml` wins a collision. A database-tracked position is never a price
+  source or a rebuild template. A table that cannot be read fails the cycle rather than
+  publish a total without them. An NFT that left the wallet stops being counted and is
+  named; a burned one is reported closed by the #144 proof; an emptied one reads as empty
+  and no longer stands for a deployed rung, so the suggestion measures again.
+  `derived_metrics.position_detection` (snapshot 2.9.0, additive) states whether new
+  positions were looked for, how far back the transfers were read, and what is missing
+  when the check is partial or could not run. The scan reads the position manager's
+  ERC-721 `Transfer` logs: one request where the RPC allows the whole range, resumable
+  45,000-block chunks where it does not, and the RPC's transfer index while the logs do
+  not cover the history. `balanceOf` on the position manager cross-checks it. After a
+  database loss the positions are found again from the chain; one-tap choices are lost
+  and offered again. New: `GET /v1/positions/found` and `POST /v1/positions/track`,
+  `untrack`, `dismiss` and `restore`, each behind the cross-site write guard and taking a
+  JSON body; a "Found on-chain" block under the ladder card on the dashboard and in the
+  phone cockpit, with one-tap buttons and no typed input; the same statement in both MCP
+  transports (`get_portfolio_state`, and `get_shot_advice` when it bears on the totals).
+  The ladder card's after-deposit sentence is now the automatic path. Migration
+  `20261121000013` adds three tables; from it on a deploy is forward-only
+  (AGENTS.md section 13, DEPLOYMENT.md section 5). NockNock still builds no transaction
+  for a ladder and never signs or sends.
+
 - **The floor-crossing price (#165).** `derived_metrics.floor_breach` (snapshot spec
   2.9.0, additive) measures how far NOCK can rise before the deployed ranges sell the
   stack below the floor. Tracked NOCK at a multiple of spot is wallet NOCK, uncollected

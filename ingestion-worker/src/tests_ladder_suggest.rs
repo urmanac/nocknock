@@ -448,7 +448,8 @@ fn test_ladder_suggest_stale_snapshot_is_not_shown() {
     assert!(fresh.contains("Deposit link (pool and range prefilled): https://app.uniswap.org/positions/add/new?"), "{fresh}");
     assert!(fresh.contains("prefilled): https://app.uniswap.org/positions/add/new?") && fresh.contains("&step=1\n    Amount to enter in the app: $766.99 USDC\n"), "{fresh}");
     assert!(fresh.contains(LADDER_LINK_FORMAT_NOTE), "{fresh}");
-    assert!(fresh.contains("After you deposit (current fallback): Automatic tracking of a new ladder position is not built yet"), "{fresh}");
+    assert!(fresh.contains("After you deposit: After you deposit there is nothing to copy or configure."), "{fresh}");
+    assert!(!fresh.contains("current fallback") && !fresh.contains("config.yaml"), "{fresh}");
     assert!(!fresh.contains("#3163450"), "the pool is named by itself, not by an NFT: {fresh}");
     assert_eq!(s(&l, "/freshness_rule"), LADDER_FRESHNESS_RULE);
 }
@@ -480,20 +481,86 @@ fn test_ladder_suggest_two_rungs_render_as_a_numbered_list() {
 }
 
 #[test]
-fn test_ladder_suggest_after_deposit_is_one_isolated_fallback() {
+fn test_ladder_suggest_after_deposit_is_tracked_automatically() {
     let l = suggest(&sim_fixture(), Some(0.01));
     let a = &l["after_deposit"];
-    assert_eq!(s(a, "/kind"), "manual_config");
-    assert!(s(a, "/is").contains("fallback"));
-    assert_eq!(s(a, "/text"), "Automatic tracking of a new ladder position is not built yet; until it is, a minted rung is tracked only from a config.yaml entry (role: ladder).");
-    let snip = s(a, "/config_snippets/0");
-    for needle in ["protocol: \"uniswap-v4\"", "tick_lower: 273900", "tick_upper: 276300", "role: \"ladder\"", "deposit_tx:", "rung:"] {
-        assert!(snip.contains(needle), "{needle}: {snip}");
+    assert_eq!(s(a, "/kind"), "tracked_automatically");
+    assert_eq!(s(a, "/text"), LADDER_AFTER_DEPOSIT_TEXT);
+    // No config entry, no hash and no NFT id is asked for anywhere on the card.
+    let whole = l.to_string();
+    for banned in ["config.yaml", "deploy.sh", "config_snippets", "manual_config", "transaction hash", "nft_id: <"] {
+        assert!(!whole.contains(banned), "{banned}: {whole}");
     }
-    let mut rest = l.clone();
-    rest.as_object_mut().unwrap().remove("after_deposit");
-    let other = rest.to_string();
-    assert!(!other.contains("config.yaml") && !other.contains("deploy.sh"), "{other}");
+    // The wording promises no number of minutes: it says what the worker does.
+    let t = s(a, "/text");
+    assert!(t.contains("at the start of every cycle") && t.contains("normally found in the first cycle after it lands"), "{t}");
+    assert!(!t.chars().any(|c| c.is_ascii_digit()), "no promised duration: {t}");
+    // With no detection block (a fixture) nothing is claimed about this cycle's check.
+    assert!(a["detection_status"].is_null() && a["detection_note"].is_null());
+
+    // A cycle whose check could not run says so beside it, with the worker's own reason.
+    let mut env = sim_fixture();
+    env.data.derived_metrics.position_detection = Some(json!({
+        "status": "unavailable",
+        "reason": "New positions could not be checked this cycle (transfer logs: the request timed out): a deposit made since the last check would not be counted yet.",
+        "found_not_counted": { "count": 0, "positions": [] },
+    }));
+    let l = suggest(&env, Some(0.01));
+    assert_eq!(s(&l, "/status"), "ready", "a failed check does not hide the card");
+    assert_eq!(s(&l, "/after_deposit/detection_status"), "unavailable");
+    let note = s(&l, "/after_deposit/detection_note");
+    assert!(note.starts_with("This cycle's check did not run: New positions could not be checked this cycle") && note.ends_with("A deposit made now is found once the check runs again."), "{note}");
+    let t = text(&env, &l, Some("ok"));
+    assert!(t.contains("until one tap says how to track it. This cycle's check did not run:"), "{t}");
+}
+
+#[test]
+fn test_an_emptied_ladder_is_not_a_deployed_rung() {
+    // A tracked ladder that holds something: no new one is suggested, as on main.
+    let mut env = sim_fixture();
+    env.data.positions[0].role = Some(LADDER_ROLE.to_string());
+    env.data.positions[0].source = Some(POSITION_SOURCE_TRACKED.to_string());
+    let l = suggest(&env, Some(0.01));
+    assert_eq!(s(&l, "/status"), "ladder_tracked");
+    assert_eq!(s(&l, "/tracked/0/source"), "tracked");
+    assert!(s(&l, "/reason").contains("uniswap-v4 #3163450, found on-chain"), "{}", s(&l, "/reason"));
+
+    // The same ladder emptied (NFT still in the wallet): listed, and a ladder is measured.
+    let empty = LadderReading { position_id: V4_ID.to_string(), label: "v4 USDC/NOCK 3.00% #3163450".to_string(), state: "empty".to_string(), ..Default::default() };
+    env.data.ladders = vec![empty];
+    let l = suggest(&env, Some(0.01));
+    assert_ne!(s(&l, "/status"), "ladder_tracked", "an emptied rung must not read as deployed for ever");
+    assert_eq!(s(&l, "/tracked/0/state"), "empty");
+    assert_eq!(s(&l, "/gates/ladder_tracked/reason"), "every tracked ladder is empty (#167)");
+    assert!(s(&l, "/sentence").starts_with("No tracked ladder holds anything (v4 USDC/NOCK 3.00% #3163450 is empty: emptied, its NFT still in the wallet, so not a deployed rung). A new USDC-only position"), "{}", s(&l, "/sentence"));
+    assert!(s(&l, "/what_changed").contains("so not a deployed rung). Now the"), "{}", s(&l, "/what_changed"));
+}
+
+#[test]
+fn test_a_found_position_waiting_for_a_tap_stops_a_new_suggestion() {
+    let mut env = sim_fixture();
+    let found = |choices: Value| {
+        json!({
+            "status": "ok",
+            "found_not_counted": { "count": 1, "value_usd": "115.03", "positions": [{
+                "nft_id": 3243807, "pool_label": "v4 USDC/NOCK 3.00%", "value_usd": "115.03", "choices": choices,
+            }] },
+        })
+    };
+    env.data.derived_metrics.position_detection = Some(found(json!(["ladder:near", "ladder:deep", "lp", "dismiss"])));
+    let l = suggest(&env, Some(0.01));
+    assert_eq!(s(&l, "/status"), "found_untracked");
+    assert_eq!(l["shown"], json!(false));
+    assert!(l["rungs"].as_array().unwrap().is_empty(), "no deposit is offered beside an uncounted one");
+    assert_eq!(s(&l, "/headline"), "Ladder: a position found on-chain is waiting for one tap.");
+    assert_eq!(
+        s(&l, "/reason"),
+        "A USDC/NOCK position the wallet holds was found on-chain and is not tracked or counted yet (v4 USDC/NOCK 3.00% #3243807, worth $115.03). No new ladder is measured until it is tracked or set aside (one tap, under Found on-chain)."
+    );
+    assert_eq!(l["found_untracked"][0]["nft_id"], json!(3243807));
+    // A found position that cannot be a ladder (a WETH/USDC range) does not stop the card.
+    env.data.derived_metrics.position_detection = Some(found(json!(["lp", "dismiss"])));
+    assert_eq!(s(&suggest(&env, Some(0.01)), "/status"), "ready");
 }
 
 /// Every status the card can take, for the wording checks.

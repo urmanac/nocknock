@@ -36,7 +36,10 @@ pub fn closed_position_statement(entry: &Value) -> String {
         },
     };
     let mut text = format!("{label}: closed. {reason}. Not counted in any total.");
-    if entry.get("supplies_spot_price").and_then(|v| v.as_bool()) == Some(true) {
+    if str_field(entry, "source").is_some() {
+        // A position found on-chain and tracked from the database: no config.yaml entry.
+        text.push_str(" It was tracked from the chain, not from config.yaml: UNTRACK in the dashboard removes it from this list.");
+    } else if entry.get("supplies_spot_price").and_then(|v| v.as_bool()) == Some(true) {
         text.push_str(" Its pool still supplies the NOCK/USD spot: flag another position as is_price_source before removing its entry from config.yaml.");
     } else {
         match str_field(entry, "config_id") {

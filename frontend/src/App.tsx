@@ -52,6 +52,8 @@ import { isLadder, isNockLp, ladderCountClause, ladderReadingFor, laddersOf } fr
 import { FloorBreachNote } from './components/FloorBreachNote.tsx';
 import { LadderSuggestionCard } from './components/LadderSuggestionCard';
 import { ladderSuggestionOf } from './ladderSuggestion';
+import { FoundPositionsCard } from './components/FoundPositions';
+import { positionDetectionOf } from './foundPositions';
 import { priceSourceIsClosedText } from './closedPositions.ts';
 import {
   LP_FEE_COLOR,
@@ -254,6 +256,11 @@ function Dashboard() {
         {/* The ladder suggestion (#168): the top-of-page ladder surface, under the title
             row and above the stat tiles. No input. */}
         <LadderSuggestionCard suggestion={ladderSuggestionOf(rawData)} syncStatus={freshness.syncStatus} />
+
+        {/* Found on-chain (v0.9.0): the positions the worker found in the wallet, with
+            one-tap buttons. Right under the ladder card: after a deposit in the Uniswap
+            app this is where the new position appears. No input. */}
+        <FoundPositionsCard detection={positionDetectionOf(rawData)} onChanged={refetch} />
 
         {/* Primary Dual-Goal Metrics Bar */}
         <div style={styles.globalStats}>

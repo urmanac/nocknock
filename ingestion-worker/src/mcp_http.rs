@@ -94,7 +94,7 @@ pub(crate) async fn mcp_http_handler(
                 "tools": [
                     {
                         "name": "get_portfolio_state",
-                        "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, the floor-crossing price (how far NOCK can rise before the deployed ranges sell the stack below the floor, a measurement), native token balance, active tranche allocations, and the average cost of the plan's verified NOCK buys against spot (plus the whole-stack average when an opening basis is configured).",
+                        "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, the floor-crossing price (how far NOCK can rise before the deployed ranges sell the stack below the floor, a measurement), native token balance, active tranche allocations, and the average cost of the plan's verified NOCK buys against spot (plus the whole-stack average when an opening basis is configured). Also states the positions found on-chain (v0.9.0): whether the wallet's new Uniswap v4 position NFTs were looked for and how far back, which positions are tracked from the chain, and any that is found and NOT counted in the totals, with its value.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {},
@@ -103,7 +103,7 @@ pub(crate) async fn mcp_http_handler(
                     },
                     {
                         "name": "get_shot_advice",
-                        "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics, with uncollected LP fees, collectible AERO rewards and their total as separate labelled lines. The harvest rule counts LP fees only. Also states the ladder suggestion (#168): whether a NOCK ladder fits your bottom setting and standing reserve, its range, the most USDC the reserve allows and the deposit link (no amount prefilled), as a measurement shown only on a fresh snapshot. With a ladder shape set (operator_profile.ladder_rungs) it lists one numbered deposit per rung still to deposit, each with its exact amounts and its own link, and states each rung already deployed.",
+                        "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics, with uncollected LP fees, collectible AERO rewards and their total as separate labelled lines. The harvest rule counts LP fees only. Also states the ladder suggestion (#168): whether a NOCK ladder fits your bottom setting and standing reserve, its range, the most USDC the reserve allows and the deposit link (no amount prefilled), as a measurement shown only on a fresh snapshot. With a ladder shape set (operator_profile.ladder_rungs) it lists one numbered deposit per rung still to deposit, each with its exact amounts and its own link, With a ladder shape set (operator_profile.ladder_rungs) it lists one numbered deposit per rung still to deposit, each with its exact amounts and its own link, and states each rung already deployed. A position found on-chain and not counted, or a check for new positions that did not run, is stated after it.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {},
@@ -176,10 +176,10 @@ pub(crate) async fn mcp_http_handler(
                 let body = match tool_name {
                     "get_portfolio_state" => format_portfolio_state_text(&data_val),
                     // The ladder suggestion (#168) shows only while the snapshot is fresh.
-                    "get_shot_advice" => crate::ladder_suggest_text::with_ladder_suggestion(
-                        &format_shot_advice_text(&data_val),
+                    // A position found on-chain and not counted (v0.9.0) is stated after it.
+                    "get_shot_advice" => crate::position_detect_text::with_position_notice(
+                        &crate::ladder_suggest_text::with_ladder_suggestion(&format_shot_advice_text(&data_val), &data_val, Some(health)),
                         &data_val,
-                        Some(health),
                     ),
                     // Gauge rewards (#142): the gas of collecting one is estimated now,
                     // read-only, and only for a claim call proven for that gauge.

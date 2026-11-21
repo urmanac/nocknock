@@ -198,13 +198,10 @@ fn test_each_deposit_has_its_own_link_with_pool_and_range_and_never_an_amount() 
     }
     assert_eq!(st(deposit(&l, "near"), "/deep_link/amount_to_enter"), "Amount to enter in the app: $114.86 USDC");
     assert_eq!(st(deposit(&l, "deep"), "/deep_link/amount_to_enter"), "Amount to enter in the app: $650.89 USDC");
-    // The fallback snippets name each rung's role and ticks.
-    let snippets = l["after_deposit"]["config_snippets"].as_array().unwrap();
-    assert_eq!(snippets.len(), 3);
-    for (snip, (role, tl)) in snippets.iter().zip([("cap", 273600), ("near", 273900), ("deep", 275400)]) {
-        let snip = snip.as_str().unwrap();
-        assert!(snip.contains(&format!("rung: \"{role}\"")) && snip.contains(&format!("tick_lower: {tl} ")), "{snip}");
-    }
+    // After a deposit nothing is typed: the worker finds the new position on-chain and
+    // matches it to its rung by pool and ticks (position_detect.rs), so no config snippet.
+    assert_eq!(l["after_deposit"]["kind"], "tracked_automatically");
+    assert!(l["after_deposit"].get("config_snippets").is_none());
 }
 
 #[test]

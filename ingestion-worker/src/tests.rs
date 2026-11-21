@@ -1817,6 +1817,7 @@ database_url: "postgresql://localhost/test"
                 fee_yield: None,
                 ladder_shape: None,
                 ladder_suggestion: None,
+                position_detection: None,
                 asset_aggregation_series: AssetAggregationSeries {
                     time_points: vec!["2026-10-11T00:00:00Z".to_string()],
                     safe_haven_series: vec!["48.00".to_string()],

@@ -96,6 +96,11 @@ mod mint_math;
 mod ladder_suggest;
 use ladder_suggest::*;
 mod ladder_suggest_text;
+mod tracked;
+use tracked::*;
+mod position_detect;
+use position_detect::*;
+mod position_detect_text;
 
 // ============================================================
 // Configuration
@@ -642,6 +647,11 @@ struct ClosedPosition {
     /// entry is removed.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     supplies_spot_price: bool,
+    /// `tracked` when the closed position was a database row, not a config.yaml entry
+    /// (2.9.0): UNTRACK removes it from the list, and `config_id` names no config entry.
+    /// Absent for a config.yaml entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source: Option<String>,
 }
 
 /// One read that proved a position closed (#144).
@@ -710,6 +720,13 @@ struct RawOnChainData {
     /// ladder with no entry was not read (fixtures): it reads `no_baseline` only when its
     /// tag says no deposit_tx is set, otherwise `unverified`.
     ladder_baselines: HashMap<String, LadderBaselineRead>,
+    /// position_id -> `tracked` for each live or closed position that comes from a
+    /// database row (tracked.rs), not from config.yaml. Empty with no such row: every
+    /// position then reads exactly as it did before database rows existed.
+    position_sources: HashMap<String, String>,
+    /// What became of each database row this cycle (merged, shadowed by config, not
+    /// owned, quarantined), for `derived_metrics.position_detection.tracked`.
+    tracked_report: Vec<TrackedReport>,
 }
 
 /// One cycle's AERO reads (v0.6.0, #93). Built by fetch_aero_reads and test fixtures.
@@ -871,6 +888,10 @@ struct Position {
     /// (`ladders[].rung` is then null and says so) and on every other position.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     rung: Option<String>,
+    /// `tracked` for a position that comes from a database row: one NockNock found
+    /// on-chain (2.9.0). Absent for a config.yaml entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source: Option<String>,
 }
 
 /// A gauge reward stated as collectible earnings (#142). It says what is there and where
@@ -1060,6 +1081,13 @@ struct DerivedMetrics {
     /// field existed: not reported, never "nothing fits".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ladder_suggestion: Option<serde_json::Value>,
+    /// Positions found on-chain (snapshot 2.9.0; #145 for Uniswap v4): whether the wallet's
+    /// new position NFTs were looked for this cycle and how far back, the positions
+    /// tracked from the database, and every position found and not counted, with its
+    /// value. Built by `position_detect::position_detection_block`. Absent in a snapshot
+    /// stored before the field existed: not reported, never "nothing found".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    position_detection: Option<serde_json::Value>,
 }
 
 /// Fees per unit of liquidity measured on our own tracked ranges (2.10.0). One pool
@@ -2489,3 +2517,7 @@ mod tests_ladder_rungs;
 mod tests_ladder_suggest;
 #[cfg(test)]
 mod tests_ladder_bottle;
+#[cfg(test)]
+mod tests_tracked;
+#[cfg(test)]
+mod tests_position_detect;

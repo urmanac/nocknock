@@ -185,7 +185,9 @@ paths:
         built anymore. Amounts derive from the latest live snapshot and each action is
         pre-simulated via eth_call; clients (web cockpit WalletConnect flow, future
         Android app) MUST only dispatch actions whose `simulation` is "success" and
-        never build calldata themselves.
+        never build calldata themselves. Since v0.9.0 the positions are config.yaml's
+        entries and the database-tracked rows the latest snapshot holds (a row tracked
+        a moment ago gets its action once a cycle has read it).
       responses:
         '200':
           description: Unsigned claim transactions with live amounts, gas estimate and simulation status
@@ -194,7 +196,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ClaimFeesPayload'
         '503':
-          description: No snapshot yet, or no RPC key configured (explicit failure, never mock data)
+          description: No snapshot yet, no RPC key configured, or TRACKED_POSITIONS_UNAVAILABLE (the tracked positions table could not be read, so the actions cannot be listed in full). An explicit failure, never mock data.
           content:
             application/json:
               schema:
@@ -366,6 +368,178 @@ paths:
           description: REFRESH_COOLDOWN. The quotes were read less than 10 seconds ago and the worker holds none to answer with; `Retry-After` gives the seconds left.
         '503':
           description: NO_SNAPSHOT. No snapshot yet, so it is not known whether a tranche is due.
+
+  /positions/found:
+    get:
+      tags: [Execution]
+      summary: Positions found on-chain, and the rows tracked from the database (v0.9.0)
+      operationId: listFoundPositions
+      description: |
+        The latest snapshot's `derived_metrics.position_detection` block as it is (null
+        before the first cycle), and every row of the tracked-positions table with the
+        config.yaml entry that would track the same position. The entries are for a
+        rollback to a release older than v0.9.0, which does not read these rows: without
+        them its totals leave the positions out without saying so. It makes no chain read.
+      responses:
+        '200':
+          description: The detection block and the tracked rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detection: { type: object, nullable: true, additionalProperties: true }
+                  tracked_rows:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        position_id: { type: string }
+                        nft_id: { type: integer }
+                        role: { type: string, nullable: true }
+                        rung: { type: string, nullable: true }
+                        source: { type: string, enum: [detected, confirmed] }
+                        deposit_tx: { type: string, nullable: true }
+                        tracked_at: { type: string, format: date-time, nullable: true }
+                        config_entry: { type: string, description: 'The YAML entry for positions: in config.yaml' }
+                  rollback_note: { type: string }
+        '503':
+          description: TRACKED_POSITIONS_UNAVAILABLE. The tracked positions table could not be read.
+
+  /positions/track:
+    post:
+      tags: [Execution]
+      summary: Track a position found on-chain, with one tap (v0.9.0)
+      operationId: trackFoundPosition
+      description: |
+        Counts a found position from the next cycle on: as a ladder rung (`role: ladder`,
+        measured and never steered, with its mint as the #167 baseline) or as LP
+        (classified by its pair and counted in what LP holds; never a rebuild target).
+        The NFT's owner and liquidity are read on-chain again first. It also changes how
+        a position already tracked from the database is tracked (its rung, say). It
+        builds no transaction, and a config.yaml entry is never changed from here. A
+        cycle runs after the write; `cycle` reports it. Takes a JSON body, like every
+        write, and sits behind the cross-site guard.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nft_id, as]
+              properties:
+                nft_id: { type: integer, description: 'The Uniswap v4 position NFT, as the detection block lists it' }
+                as: { type: string, description: 'ladder:near | ladder:deep | lp (one of the position''s `choices`)' }
+      responses:
+        '200':
+          description: Tracked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [tracked] }
+                  position_id: { type: string }
+                  nft_id: { type: integer }
+                  role: { type: string, nullable: true }
+                  rung: { type: string, nullable: true }
+                  deposit_tx: { type: string, nullable: true }
+                  note: { type: string }
+                  cycle: { type: string, description: '"ok", or why the cycle after the write failed (the write is stored)' }
+        '400':
+          description: UNKNOWN_CHOICE. `as` is not lp or ladder:<rung>.
+        '404':
+          description: NOT_FOUND. NockNock has not found this NFT arriving in the tracked wallet.
+        '422':
+          description: CONFIG_POSITION (config.yaml lists it), NOT_ELIGIBLE (not a whitelisted pool), CHOICE_NOT_OFFERED (not a USDC/NOCK concentrated range, or its pool is unknown), NOT_OWNED, or EMPTY. Nothing changed.
+        '500':
+          description: DB_ERROR. Nothing changed.
+        '503':
+          description: CHAIN_UNAVAILABLE, NO_RPC or NO_TRACKED_WALLET. Nothing changed.
+
+  /positions/untrack:
+    post:
+      tags: [Execution]
+      summary: Stop counting a position tracked from the database (v0.9.0)
+      operationId: untrackPosition
+      description: |
+        Removes the database row and sets the NFT aside, so it is not tracked again by
+        itself. The NFT stays in the wallet; it is then listed under `dismissed`, not
+        counted, with its value, and can be tracked again. Database rows only: a
+        config.yaml entry answers 422 CONFIG_POSITION. A cycle runs after the write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [position_id]
+              properties:
+                position_id: { type: string, description: 'e.g. uniswap-v4:base:3243807' }
+      responses:
+        '200':
+          description: Untracked
+        '404':
+          description: NOT_TRACKED. Not a position tracked from the chain.
+        '422':
+          description: CONFIG_POSITION. A config.yaml entry is removed by editing that file.
+        '500':
+          description: DB_ERROR. Nothing changed.
+
+  /positions/dismiss:
+    post:
+      tags: [Execution]
+      summary: Set a found position aside (NOT NOW) (v0.9.0)
+      operationId: dismissFoundPosition
+      description: |
+        Moves a found position from `found_not_counted` to `dismissed`. Neither is
+        counted; a dismissed one is not tracked by itself even when it matches a rung.
+        Idempotent. The snapshot's lists update on the next ingestion cycle.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nft_id]
+              properties:
+                nft_id: { type: integer }
+      responses:
+        '200':
+          description: Dismissed (`changed` is false when it already was)
+        '404':
+          description: NOT_FOUND
+        '409':
+          description: TRACKED (untrack it instead) or NOT_AN_OFFER (dust, a hooked pool, a burned NFT)
+        '500':
+          description: DB_ERROR. Nothing changed.
+
+  /positions/restore:
+    post:
+      tags: [Execution]
+      summary: Put a set-aside position back on offer (v0.9.0)
+      operationId: restoreFoundPosition
+      description: |
+        Moves a position from `dismissed` back to `found_not_counted`. It is still not
+        counted until it is tracked. Idempotent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nft_id]
+              properties:
+                nft_id: { type: integer }
+      responses:
+        '200':
+          description: Offered again (`changed` is false when it already was)
+        '404':
+          description: NOT_FOUND
+        '409':
+          description: TRACKED or NOT_AN_OFFER
+        '500':
+          description: DB_ERROR. Nothing changed.
 
   /accumulation/candidates:
     get:

@@ -151,6 +151,11 @@ positions:
   # range) entry: each is refused with a configuration error. AERO and ETH ladders are #170.
   # Adding or changing deposit_tx changes config.yaml, which on chudmax means a redeploy
   # (deploy.sh stores config.yaml as the nocknock-config secret).
+  # Since v0.9.0 a Uniswap v4 rung needs NO entry here: NockNock finds the wallet's new
+  # position NFT on-chain and tracks it from its database, with its mint as the baseline
+  # (one tap in the dashboard when its range is not exactly the suggested rung's). An
+  # entry here still works, and wins over a tracked row for the same NFT. No key was
+  # added for this: there is nothing to configure.
   # - id: "ladder-deep-1"
   #   protocol: "uniswap-v4"
   #   network: "base"

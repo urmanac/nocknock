@@ -32,6 +32,9 @@ mod ladder_track_text;
 // The ladder suggestion (issue #168): the same section as the worker's /v1/mcp.
 #[path = "../ladder_suggest_text.rs"]
 mod ladder_suggest_text;
+// Positions found on-chain (v0.9.0): the worker's own lines, from the same source file.
+#[path = "../position_detect_text.rs"]
+mod position_detect_text;
 
 /// Worker base URL when NOCKNOCK_API_URL is unset. Point the variable at a remote
 /// deployment (e.g. `http://chudmax:8081`) to read it instead of a local worker.
@@ -112,7 +115,7 @@ async fn main() -> Result<()> {
                         "tools": [
                             {
                                 "name": "get_portfolio_state",
-                                "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, the floor-crossing price (how far NOCK can rise before the deployed ranges sell the stack below the floor, a measurement), native token balance, tracked LP position totals, and the average cost of the plan's verified NOCK buys against spot (plus the whole-stack average when an opening basis is configured).",
+                                "description": "Returns current sovereign portfolio balances, NOCK floor buffer delta, the floor-crossing price (how far NOCK can rise before the deployed ranges sell the stack below the floor, a measurement), native token balance, tracked LP position totals, and the average cost of the plan's verified NOCK buys against spot (plus the whole-stack average when an opening basis is configured). Also states the positions found on-chain (v0.9.0): whether the wallet's new Uniswap v4 position NFTs were looked for and how far back, which positions are tracked from the chain, and any that is found and NOT counted in the totals, with its value.",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {},
@@ -121,7 +124,7 @@ async fn main() -> Result<()> {
                             },
                             {
                                 "name": "get_shot_advice",
-                                "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics, with uncollected LP fees, collectible AERO rewards and their total as separate labelled lines. The harvest rule counts LP fees only. Also states the ladder suggestion (#168): whether a NOCK ladder fits your bottom setting and standing reserve, its range, the most USDC the reserve allows and the deposit link (no amount prefilled), as a measurement shown only on a fresh snapshot. With a ladder shape set (operator_profile.ladder_rungs) it lists one numbered deposit per rung still to deposit, each with its exact amounts and its own link, and states each rung already deployed.",
+                                "description": "Returns the active tactical directive (e.g. HOLD & ACCRETE, BATCH HARVEST SHOT, DEFENSIVE LOCK) and break-even gas economics, with uncollected LP fees, collectible AERO rewards and their total as separate labelled lines. The harvest rule counts LP fees only. Also states the ladder suggestion (#168): whether a NOCK ladder fits your bottom setting and standing reserve, its range, the most USDC the reserve allows and the deposit link (no amount prefilled), as a measurement shown only on a fresh snapshot. With a ladder shape set (operator_profile.ladder_rungs) it lists one numbered deposit per rung still to deposit, each with its exact amounts and its own link, With a ladder shape set (operator_profile.ladder_rungs) it lists one numbered deposit per rung still to deposit, each with its exact amounts and its own link, and states each rung already deployed. A position found on-chain and not counted, or a check for new positions that did not run, is stated after it.",
                                 "inputSchema": {
                                     "type": "object",
                                     "properties": {},
@@ -281,9 +284,11 @@ async fn handle_tool_call(client: &Client, tool_name: &str, args: Option<&Value>
                     let body = match tool_name {
                         "get_portfolio_state" => format_portfolio_state(data),
                         // The ladder suggestion (#168), shown only on a fresh snapshot.
-                        "get_shot_advice" => {
-                            ladder_suggest_text::with_ladder_suggestion(&format_shot_advice(data), data, health.as_deref())
-                        }
+                        // A position found on-chain and not counted (v0.9.0) is stated after it.
+                        "get_shot_advice" => position_detect_text::with_position_notice(
+                            &ladder_suggest_text::with_ladder_suggestion(&format_shot_advice(data), data, health.as_deref()),
+                            data,
+                        ),
                         "simulate_claim_fees" => format_claim_simulation(data),
                         "get_accumulation_plan" => format_accumulation_plan(data),
                         _ => return (format!("Unknown tool: {tool_name}"), false),
@@ -458,6 +463,8 @@ fn format_portfolio_state(data: &Value) -> String {
     let floor_breach = floor_breach_text::floor_breach_line(data.pointer("/derived_metrics/floor_breach"));
     // Tracked ladders (issue #167), the same lines as the worker's mcp_text.
     let ladders = ladder_track_text::ladders_lines(data);
+    // Positions found on-chain (v0.9.0), the same lines as the worker's mcp_text.
+    let found = position_detect_text::position_detection_lines(data);
 
     format!(
         "📈 NockNock Sovereign Portfolio State\n\
@@ -473,6 +480,7 @@ fn format_portfolio_state(data: &Value) -> String {
          {collectible}\
          {closed}\
          {ladders}\
+         {found}\
          • High-Water Mark: {hwm}\n\
          {cost_basis}\n\
          • Tactical Directive: {advice}"
@@ -803,3 +811,8 @@ mod tests_ladder_track;
 #[cfg(test)]
 #[path = "../mcp_bin_tests_ladder_suggest.rs"]
 mod tests_ladder_suggest;
+
+// Positions found on-chain (v0.9.0), through this binary's own paths.
+#[cfg(test)]
+#[path = "../mcp_bin_tests_position_detect.rs"]
+mod tests_position_detect;
