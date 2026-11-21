@@ -327,7 +327,7 @@ pub(crate) fn candidate(nft: u64) -> CandidateRow {
 }
 
 fn rung(lo: i32, hi: i32, name: Option<&str>) -> SuggestedRung {
-    SuggestedRung { protocol: TRACKED_PROTOCOL_V4.to_string(), pool_id: POOL_3PCT.to_string(), tick_lower: lo, tick_upper: hi, rung: name.map(str::to_string) }
+    SuggestedRung { protocol: TRACKED_PROTOCOL_V4.to_string(), pool_id: POOL_3PCT.to_string(), tick_lower: lo, tick_upper: hi, rung: name.map(str::to_string), from_move: false }
 }
 
 // ------------------------------------------------------------------
@@ -925,7 +925,8 @@ async fn test_a_position_the_wallet_holds_is_found_valued_and_stated_as_not_coun
     assert_eq!(f.row.pool_id.as_deref(), Some(POOL_3PCT));
     assert_eq!((f.row.tick_lower, f.row.tick_upper), (Some(262200), Some(282300)));
     assert_eq!((f.row.mint_tx.as_deref(), f.row.mint_block, f.row.minted_by.as_deref()), (Some(MINT_6CDA), Some(53008241), Some(OPERATOR)));
-    assert_eq!(f.row.deposit_check.as_deref(), Some("ok"));
+    // A plain deposit; it put NOCK in, which #169 records so it never matches a moved near rung.
+    assert_eq!(f.row.deposit_check.as_deref(), Some(DEPOSIT_OK_HOLDS_NOCK));
     assert!(store.tracked(OPERATOR).await.unwrap().is_empty());
     // While it waits for a tap, each cycle reads it again with three calls on top of the
     // steady seven: its liquidity, its owner, and its pool's price. Its pool key and
@@ -1256,7 +1257,8 @@ async fn test_a_position_minted_by_its_wallet_is_tracked_from_the_chain_alone() 
     assert_eq!((row.deposit_tx.as_deref(), row.mint_block), (Some(MINT_AFE4_HASH), Some(59660587)));
     assert_eq!(validate_tracked_row(row), Ok(()));
     let c = store.candidates(MINTER).await.unwrap().into_iter().find(|c| c.nft_id == 3240369).unwrap();
-    assert_eq!((c.minted_by.as_deref(), c.deposit_check.as_deref(), c.owned, c.has_liquidity), (Some(MINTER), Some("ok"), true, Some(true)));
+    assert_eq!((c.minted_by.as_deref(), c.deposit_check.as_deref(), c.owned, c.has_liquidity), (Some(MINTER), Some(DEPOSIT_OK_HOLDS_NOCK), true, Some(true)));
+    // A plain deposit that put NOCK in (#169: never a moved near rung) is still tracked.
     // The pool was not one NockNock already read: it came from the mint receipt, checked
     // against the 25 bytes the position manager stores.
     assert_eq!(c.pool_id.as_deref(), Some(POOL_3PCT));
@@ -1772,7 +1774,7 @@ async fn test_the_scan_block_is_out_of_the_state_hash_and_the_block_is_absent_fr
     assert!(detect_at < read_at, "detection runs before the position reads, so a deposit is counted in the cycle that finds it");
     let (attach, suggest) = (ingest.find("derived_metrics.position_detection = Some(position_detection)").unwrap(), ingest.find("attach_ladder_suggestion(&mut snapshot_data").unwrap());
     assert!(attach < suggest);
-    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.10.0", "additive: detection's 2.9.0 additions ship in 2.10.0 with the ladder shape");
+    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.11.0", "additive: detection's 2.9.0 additions shipped in 2.10.0 with the ladder shape; #169 moved it to 2.11.0");
 }
 
 #[test]
@@ -1810,7 +1812,7 @@ fn test_the_specs_document_the_block_and_the_five_routes() {
 
     let snap_text = include_str!("../../specs/core/snapshot.yaml");
     let snap: serde_yaml::Value = serde_yaml::from_str(snap_text).expect("snapshot.yaml parses");
-    assert_eq!(snap["info"]["version"].as_str(), Some("2.10.0"), "additive: detection's 2.9.0 notes ship in 2.10.0");
+    assert_eq!(snap["info"]["version"].as_str(), Some("2.11.0"), "additive: detection's 2.9.0 notes shipped in 2.10.0; #169 moved it to 2.11.0");
     let prop = &snap["components"]["schemas"]["DerivedMetrics"]["properties"]["position_detection"];
     assert!(prop.is_mapping(), "DerivedMetrics.position_detection is in the schema");
     assert_eq!(prop["nullable"].as_bool(), Some(true));

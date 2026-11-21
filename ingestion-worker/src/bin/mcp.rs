@@ -35,6 +35,9 @@ mod ladder_suggest_text;
 // Positions found on-chain (v0.9.0): the worker's own lines, from the same source file.
 #[path = "../position_detect_text.rs"]
 mod position_detect_text;
+// Calls to action by tier and the ladder maintenance (#169): the same lines as the worker's.
+#[path = "../events_text.rs"]
+mod events_text;
 
 /// Worker base URL when NOCKNOCK_API_URL is unset. Point the variable at a remote
 /// deployment (e.g. `http://chudmax:8081`) to read it instead of a local worker.
@@ -286,7 +289,12 @@ async fn handle_tool_call(client: &Client, tool_name: &str, args: Option<&Value>
                         // The ladder suggestion (#168), shown only on a fresh snapshot.
                         // A position found on-chain and not counted (v0.9.0) is stated after it.
                         "get_shot_advice" => position_detect_text::with_position_notice(
-                            &ladder_suggest_text::with_ladder_suggestion(&format_shot_advice(data), data, health.as_deref()),
+                            &ladder_suggest_text::with_ladder_suggestion(
+                                // Calls to action by tier and the ladder maintenance (#169).
+                                &events_text::with_events(&format_shot_advice(data), data, health.as_deref()),
+                                data,
+                                health.as_deref(),
+                            ),
                             data,
                         ),
                         "simulate_claim_fees" => format_claim_simulation(data),
@@ -816,3 +824,8 @@ mod tests_ladder_suggest;
 #[cfg(test)]
 #[path = "../mcp_bin_tests_position_detect.rs"]
 mod tests_position_detect;
+
+// Calls to action and the ladder maintenance (#169): parity with the worker's golden text.
+#[cfg(test)]
+#[path = "../mcp_bin_tests_events.rs"]
+mod tests_events;

@@ -211,7 +211,7 @@ describe('Freshness Contract', () => {
     brackets.forEach((b: any, i: number) => expect(b.position_id).toBe(data.positions[i].position_id));
     expect(ag.tranche_1_nock).toBeUndefined();
     // Meta version: the current snapshot spec (specs/core/snapshot.yaml info.version).
-    expect(latestSnapshot!.meta.version).toBe('2.10.0');
+    expect(latestSnapshot!.meta.version).toBe('2.11.0');
   });
 
   it('2.9.0 floor_breach is stated, and at spot it is the Floor Health reading (#165)', () => {
@@ -260,6 +260,33 @@ describe('Freshness Contract', () => {
     expect(gs.ladder_rungs !== undefined && gs.ladder_rungs_note !== undefined).toBe(false);
     const shape = data.derived_metrics.ladder_shape;
     if (shape) expect(['computed', 'unavailable']).toContain(shape.status);
+  });
+
+  it('2.11.0 events and the ladder maintenance keep their contract (#169)', () => {
+    if (!latestSnapshot) {
+      console.log('Skipping contract test: backend not reachable in isolated environment');
+      return;
+    }
+    const dm = (latestSnapshot.data as any).derived_metrics;
+    // A 2.11.0 worker lists its calls to action every cycle, top tier first.
+    expect(Array.isArray(dm.events)).toBe(true);
+    const tiers = dm.events.map((e: any) => e.tier);
+    expect(tiers.every((t: string) => t === 'top' || t === 'quiet')).toBe(true);
+    expect(tiers.indexOf('quiet') === -1 || tiers.slice(tiers.indexOf('quiet')).every((t: string) => t === 'quiet')).toBe(true);
+    for (const e of dm.events) {
+      for (const k of ['id', 'kind', 'title', 'what_changed', 'text', 'numbers', 'since', 'deep_link', 'links', 'would_sign', 'card']) {
+        expect(k in e).toBe(true);
+      }
+      expect(e.deep_link).toMatch(/^#event-[a-z0-9-]+$/);
+    }
+    expect(dm.events.filter((e: any) => e.id === 'directive').length).toBe(1);
+    // Restraint settings are echoed or null, never defaulted.
+    const m = dm.ladder_maintenance;
+    if (m) {
+      for (const v of Object.values(m.settings)) expect(v === null || typeof v === 'string').toBe(true);
+      for (const r of Object.values(m.rules) as any[]) expect(['on', 'off', 'invalid']).toContain(r.status);
+      for (const r of m.rungs) expect(typeof r.text).toBe('string');
+    }
   });
 
   it('2.3.0 pillars partition the total and the wallet reports its gas', () => {

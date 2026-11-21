@@ -51,6 +51,12 @@ import { LaddersCard } from './components/Ladders';
 import { isLadder, isNockLp, ladderCountClause, ladderReadingFor, laddersOf } from './ladderTrack';
 import { FloorBreachNote } from './components/FloorBreachNote.tsx';
 import { LadderSuggestionCard } from './components/LadderSuggestionCard';
+import { TopOfPageEvents } from './components/TopOfPage';
+import { EventAnchors } from './components/EventAnchors';
+import { LadderShapeChart } from './components/LadderShapeChart';
+import { FoundQuietLine, LadderDeployedLine, ladderSuggestionAtTop } from './components/QuietLadderLines';
+import { foundNeedsAttention } from './foundPositions';
+import { eventsOf } from './events';
 import { ladderSuggestionOf } from './ladderSuggestion';
 import { FoundPositionsCard } from './components/FoundPositions';
 import { positionDetectionOf } from './foundPositions';
@@ -125,6 +131,14 @@ function Dashboard() {
 
   const rawData = snapshot?.data as any;
   const metrics = rawData?.derived_metrics ?? rawData;
+  // The events (#169): every deep link lands on the place that shows it.
+  const pageEvents = eventsOf(rawData);
+  // Only real calls to action at the top (#169, operator 2026-11-21): a deployed ladder and
+  // found positions with nothing to decide are quiet lines in the ladder section.
+  const suggestion = ladderSuggestionOf(rawData);
+  const suggestionAtTop = ladderSuggestionAtTop(suggestion);
+  const detection = positionDetectionOf(rawData);
+  const foundAtTop = !!detection && foundNeedsAttention(detection);
   const global = metrics?.global_status;
   // Market regime telemetry (v0.3.0): daily/micro RSI + third-party backfill provenance
   const provenance = snapshot?.data_provenance;
@@ -253,14 +267,20 @@ function Dashboard() {
           </div>
         </div>
 
+        {/* The top of the page (#169): every top-tier call to action, first under the
+            title row. Quiet ones stay where they are below. No input. */}
+        <TopOfPageEvents data={rawData} syncStatus={freshness.syncStatus} />
+
         {/* The ladder suggestion (#168): the top-of-page ladder surface, under the title
             row and above the stat tiles. No input. */}
-        <LadderSuggestionCard suggestion={ladderSuggestionOf(rawData)} syncStatus={freshness.syncStatus} />
+        {suggestionAtTop && <EventAnchors events={pageEvents} card="ladder_suggestion" />}
+        {suggestionAtTop && <LadderSuggestionCard suggestion={suggestion} syncStatus={freshness.syncStatus} />}
 
         {/* Found on-chain (v0.9.0): the positions the worker found in the wallet, with
             one-tap buttons. Right under the ladder card: after a deposit in the Uniswap
             app this is where the new position appears. No input. */}
-        <FoundPositionsCard detection={positionDetectionOf(rawData)} onChanged={refetch} />
+        {foundAtTop && <EventAnchors events={pageEvents} card="found_positions" />}
+        {foundAtTop && <FoundPositionsCard detection={detection} onChanged={refetch} />}
 
         {/* Primary Dual-Goal Metrics Bar */}
         <div style={styles.globalStats}>
@@ -278,6 +298,7 @@ function Dashboard() {
             suffix=" USDC"
             subtitle={[`${statValueText(global?.total_fees_accrued_usd, '$')} of LP fees uncollected`, reserveText(global)].filter(Boolean).join(' · ')}
             highlightColor="#00d2d3"
+            note={<EventAnchors events={pageEvents} card="reserve" />}
           />
           <StatCard
             label="Portfolio Value (USD)"
@@ -292,6 +313,7 @@ function Dashboard() {
             value={claimableYieldTile(global, positionsList).value}
             prefix="$"
             subtitle={claimableYieldTile(global, positionsList).subtitle}
+            note={<EventAnchors events={pageEvents} card="collectible" />}
             highlightColor="#f1c40f"
           />
           <StatCard
@@ -300,7 +322,7 @@ function Dashboard() {
             suffix="%"
             subtitle={floorNone ? 'No floor configured' : !nockFloorDeltaKnown ? 'floor status unknown' : floorDeltaText(nockFloorDeltaRaw, floorTarget)}
             highlightColor={floorHealthColor}
-            note={<FloorBreachNote floorBreach={metrics?.floor_breach} />}
+            note={<><EventAnchors events={pageEvents} card="floor_health" /><FloorBreachNote floorBreach={metrics?.floor_breach} /></>}
           />
           <StatCard
             label="High-Water Mark"
@@ -327,6 +349,7 @@ function Dashboard() {
 
       {/* Tactical Shot Advice Cockpit */}
       <section style={styles.shotAdviceBanner}>
+        <EventAnchors events={pageEvents} card="directive" />
         <div style={styles.adviceHeader}>
           <div style={styles.adviceActionRow}>
             <span style={styles.adviceBadge}>TACTICAL SHOT ADVICE</span>
@@ -475,8 +498,17 @@ function Dashboard() {
         </div>
         {/* Closed positions (#144): configured positions whose NFT no longer exists.
             Stated beside the live cards, never as one, and counted nowhere. */}
+        <EventAnchors events={pageEvents} card="closed_positions" />
         <ClosedPositionsCard data={rawData} />
         {/* Tracked ladders (#167): measured readings, no button. Absent without one. */}
+        {/* The ladder section (#169): the shape of what is deployed, the quiet lines of the
+            cards that have nothing to decide, and the compact rung rows. */}
+        <LadderShapeChart data={rawData} />
+        {!suggestionAtTop && <EventAnchors events={pageEvents} card="ladder_suggestion" />}
+        <LadderDeployedLine suggestion={suggestion} syncStatus={freshness.syncStatus} />
+        {!foundAtTop && <EventAnchors events={pageEvents} card="found_positions" />}
+        <FoundQuietLine detection={detection} onChanged={refetch} />
+        <EventAnchors events={pageEvents} card="ladders" />
         <LaddersCard data={rawData} />
       </section>
 
@@ -745,6 +777,7 @@ function Dashboard() {
 
         {/* 5a. Accumulation Plan — DCA pacing + standing LP-rebuild bias (v0.5.0) */}
         <CanvasPanel title="Accumulation Plan (Dollar-Cost-Averaged NOCK Buys)">
+          <EventAnchors events={pageEvents} card="accumulation_plan" />
           <AccumulationPlanPanel
             plan={metrics?.accumulation_plan}
             lpRebuild={metrics?.lp_rebuild}

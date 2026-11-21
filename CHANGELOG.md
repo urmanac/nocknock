@@ -9,6 +9,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Ladder maintenance, with a "keep it in your pants" restraint model (#169).**
+  `derived_metrics.ladder_maintenance` (snapshot 2.11.0, additive) states per tracked
+  ladder rung what its role's rule says this cycle, gated by
+  `operator_profile.ladder_maintenance`: `min_hours_out_of_range`, `cooldown_hours`,
+  `hysteresis_pct`, `max_gas_payback_days`, `deep_pull_fill_fraction` and
+  `deep_pull_recovery_pct`. None has a default: a rule stays off, and says which
+  settings turn it on, until they are all set.
+  - **near**: out of range above (all USDC) past every gate, a move back to just below
+    the price is stated, keeping its width in ticks and its USDC, with the gas (two
+    transactions), the pool's measured in-range fees for the moved range, the payback in
+    days in range and the fees earned so far. Once stated it stands until the price is
+    back in its range (hysteresis).
+  - **deep**: after it converted at least the fill fraction and the price recovered the
+    recovery percent above the lowest price seen while it held NOCK, a pull is stated
+    ("pull the reserve at the right time"). It is never moved or chased down. Fully
+    converted at its bottom it is reported, and no lower ladder is ever suggested.
+  - **cap**: out of range above it sold its NOCK by design; stated, never refilled.
+  The clocks are carried from the previous snapshot (no table, no migration); a gap past
+  the /health window restarts them. Each suggestion states what the operator would sign;
+  NockNock builds and signs nothing.
+- **The ladder shape (#169; operator, 2026-11-21: "so that we can approximate the bottle
+  shape and judge whether it looks bottle-y").** `derived_metrics.ladder_profile` (snapshot
+  2.11.0, additive) and a chart in the dashboard's ladder section and on the phone: every
+  deployed USDC/NOCK range as a bar on a logarithmic price axis, its height
+  capital / ln(high/low) so its area is its capital (a rung's capital is its value as all
+  USDC at its top; any other range's is its value now), overlapping ranges stacked into the
+  depth profile, the price as a vertical line, the ladder bottom dashed with the reserve
+  kept below it noted. Wider ranges are clipped to the ladder zone with where they
+  continue; full-range pools are stated, not drawn; a rung of unknown capital is an
+  outline. Both MCP transports print it as a short table.
+- **Only real calls to action at the top of the page (#169; operator, 2026-11-21: "it is
+  swamped by the 'call to action' that is no longer a call to action").** A ladder with
+  nothing left to deposit is one quiet line ("Ladder: all 3 rungs deployed") in the ladder
+  section, its card behind a collapsed details; positions found on-chain with nothing to
+  decide are one quiet line ("3 positions tracked from the chain · checked at block N"),
+  the rows and buttons behind a collapsed details. An offer or an incomplete check stays at
+  the top. Same on the phone.
+- **Compact ladder rows.** Each rung is one summary line (label, rung, a short badge, what
+  it holds in plain numbers, its range at 4 significant figures); the rest is behind a
+  per-row details. Rows wrap and long text breaks, so nothing leaks out of the card.
+- **Calls to action as events, in two tiers (#169).** `derived_metrics.events[]`
+  (snapshot 2.11.0, additive) lists every call to action with an id, a tier (top |
+  quiet), what changed, its numbers, since, a deep link and what the operator would sign,
+  shaped for the v0.10 push. The dashboard shows the top tier under the title row and the
+  Lite cockpit above the directive; quiet entries stay where they are. Both MCP
+  transports print `• Top of page`, `• Quiet` and `• Ladder maintenance` lines in
+  get_shot_advice from one shared `events_text.rs`.
+
 - **Positions found on-chain: deposit in the Uniswap app, and NockNock tracks it
   (#145 for Uniswap v4).** No transaction hash, no NFT id and no `config.yaml` edit. At
   the start of every cycle, before the position reads, the worker reads the wallet's
@@ -326,6 +374,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `remaining_liquidity`, `found` and `note`; statuses `found`, `below_minimum`, `held`
     and `no_room` (snapshot spec 2.10.0). `shape=configured` no longer answers
     `SHAPE_NO_ROOM`.
+
+### Changed
+
+- **Call-to-action audit (#169).** Top of the page: DEFENSIVE LOCK, DCA TRANCHE DUE and
+  DCA PLAN INVALID, a plan buy to confirm, a position found on-chain, the shown ladder
+  suggestion, the ladder's maintenance, and wallet USDC below the standing reserve. Quiet:
+  every other directive, collectable LP fees (still pushed at the $5.00 BATCH HARVEST
+  rule), AERO rewards, closed positions, the floor-crossing price and a cap that sold its
+  NOCK. The pushes are unchanged.
+- **Wallet USDC below the reserve is at the top (operator's choice, 2026-11-21: "Top when
+  wallet < $950").** No exceptions. The event states the wallet / NOCK LP / ladder split of
+  the stable balance the gate counts, and one measured line on the gas-side ETH/USDC ranges
+  (still outside the gate, #151 and #162): their USDC and WETH now, wallet USDC if they
+  were withdrawn now, and the ETH price at which their USDC side alone would cover the
+  wallet's shortfall, with the WETH still in them there (operator, 2026-11-21: "we can plan
+  to pull the ETH LPs some time after it would cover the $950 usdc reserve").
+- **Ladder maintenance, after review (#169).** A deep pull whose
+  `deep_pull_recovery_pct` is at or above the rung's width can never fire (the rung sells
+  all its NOCK back first): that is now a top-of-page statement naming the setting and the
+  width, and no number is picked. A stated pull says how much of the NOCK the rung held at
+  most it has sold back since the low. A near move from a pool tick on a spacing multiple
+  opens out of range. A standing near move survives a pool_stale cycle, unknown reads and a
+  dip to within one spacing above the top; only a real return into the range clears it. A
+  completed near move (minted by the wallet with USDC only on the moved ticks) is tracked as
+  the near rung by itself, and the move states the stretch to the deep rung's top that no
+  rung would cover. Every event's deep link lands on an element of the page.
 
 ## [0.8.3] - 2026-11-20
 

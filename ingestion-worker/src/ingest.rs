@@ -347,6 +347,15 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // directive strings were captured: it never changes the directive or a push. It reads
     // this cycle's position detection, attached above.
     attach_ladder_suggestion(&mut snapshot_data, &profile, Utc::now());
+    // Ladder maintenance and the calls to action as events (#169), after everything they
+    // read is attached. Their clocks come from the previous snapshot (in memory; the
+    // latest stored one after a restart); a gap past the /health window restarts them.
+    // Measurements only: the directive strings and the pushes were decided above.
+    {
+        let prev = state.latest_snapshot.lock().await;
+        let gap_limit = state.config.sync_window_seconds as i64 + HEALTH_SYNC_GRACE_SECONDS;
+        attach_maintenance_and_events(&mut snapshot_data, &profile, prev.as_ref(), gap_limit, Utc::now());
+    }
 
     // Compute deterministic state hash
     let state_hash = compute_state_hash(&snapshot_data);
@@ -479,7 +488,14 @@ pub(crate) fn canonical_state_json(data: &SnapshotData) -> serde_json::Value {
 }
 
 pub(crate) fn strip_volatile_time_fields(value: &mut serde_json::Value) {
-    const VOLATILE_KEYS: [&str; 14] = [
+    const VOLATILE_KEYS: [&str; 17] = [
+        // The ladder shape (#169): worked out from the hashed positions and ladders.
+        "ladder_profile",
+        // Ladder maintenance and the calls-to-action events (#169): worked out from the
+        // hashed state, the clocks carried from the previous snapshot and this cycle's
+        // time ("out of range above for 3.2 h"). Hashing them would store a row every cycle.
+        "ladder_maintenance",
+        "events",
         // Position detection's scan block (v0.9.0): the chain's head moves every cycle.
         "checked_at_block",
         // Route quotes for a due tranche (issue #115): contract reads at a stated

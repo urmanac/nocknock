@@ -559,6 +559,9 @@ pub(crate) struct SuggestedRung {
     pub(crate) tick_upper: i32,
     /// `near` | `deep` | `cap`, or None when the suggestion names no rung.
     pub(crate) rung: Option<String>,
+    /// A standing near-rung move of #169's ladder maintenance (the moved range's ticks):
+    /// matched only by a mint that put in no NOCK.
+    pub(crate) from_move: bool,
 }
 
 /// Every rung a snapshot's `data` suggests, from either place a release states them:
@@ -576,7 +579,7 @@ pub(crate) fn suggested_rungs(data: &Value) -> Vec<SuggestedRung> {
     let rung_name = |r: &Value| r.get("rung").and_then(|v| v.as_str()).filter(|n| LADDER_RUNGS.contains(n)).map(str::to_string);
     let mut push = |protocol: Option<&str>, pool: Option<&str>, r: &Value| {
         let (Some(protocol), Some(pool), Some((lo, hi))) = (protocol, pool, ticks(r)) else { return };
-        let rung = SuggestedRung { protocol: protocol.to_string(), pool_id: lc(pool), tick_lower: lo, tick_upper: hi, rung: rung_name(r) };
+        let rung = SuggestedRung { protocol: protocol.to_string(), pool_id: lc(pool), tick_lower: lo, tick_upper: hi, rung: rung_name(r), from_move: false };
         if !out.iter().any(|x| x.protocol == rung.protocol && x.pool_id == rung.pool_id && x.tick_lower == lo && x.tick_upper == hi) {
             out.push(rung);
         }
@@ -595,8 +598,36 @@ pub(crate) fn suggested_rungs(data: &Value) -> Vec<SuggestedRung> {
             push(protocol, pool, r);
         }
     }
+    // A standing near-rung move (#169): the moved range, keeping the rung's width, is the
+    // near rung once the wallet mints it with USDC only. Its bottom tick moved with it, so
+    // the drifted-top rule above cannot match it.
+    for m in data.pointer("/derived_metrics/ladder_maintenance/rungs").and_then(|v| v.as_array()).into_iter().flatten() {
+        if m.get("rung").and_then(|v| v.as_str()) != Some("near") || m.get("status").and_then(|v| v.as_str()) != Some("suggested") {
+            continue;
+        }
+        let (Some(lo), Some(hi)) = (
+            m.pointer("/move/new_tick_lower").and_then(|v| v.as_i64()).and_then(|v| i32::try_from(v).ok()),
+            m.pointer("/move/new_tick_upper").and_then(|v| v.as_i64()).and_then(|v| i32::try_from(v).ok()),
+        ) else {
+            continue;
+        };
+        let id = m.get("position_id").and_then(|v| v.as_str());
+        let Some(position) = data.get("positions").and_then(|p| p.as_array()).and_then(|ps| ps.iter().find(|p| id.is_some() && p.get("position_id").and_then(|v| v.as_str()) == id)) else {
+            continue;
+        };
+        let (Some(protocol), Some(pool)) = (position.get("protocol").and_then(|v| v.as_str()), position.get("pool_id").and_then(|v| v.as_str())) else {
+            continue;
+        };
+        if lo < hi && !out.iter().any(|x| x.protocol == protocol && x.pool_id == lc(pool) && x.tick_lower == lo && x.tick_upper == hi) {
+            out.push(SuggestedRung { protocol: protocol.to_string(), pool_id: lc(pool), tick_lower: lo, tick_upper: hi, rung: Some("near".to_string()), from_move: true });
+        }
+    }
     out
 }
+
+/// `deposit_check` for a mint that passed parse_ladder_deposit and put NOCK in (#169): it
+/// is a plain deposit, but not a USDC-only one, so it never matches a moved near rung.
+pub(crate) const DEPOSIT_OK_HOLDS_NOCK: &str = "ok:holds_nock";
 
 /// A range some live ladder already holds (config.yaml's or a database row's).
 #[derive(Debug, Clone, PartialEq)]
@@ -700,7 +731,7 @@ pub(crate) fn decide(c: &CandidateRow, wallet: &str, suggested: &[SuggestedRung]
         },
     }
     match c.deposit_check.as_deref() {
-        Some("ok") => {}
+        Some("ok") | Some(DEPOSIT_OK_HOLDS_NOCK) => {}
         Some(reason) => why.push(format!("its mint is not a plain deposit into it: {reason}")),
         None if c.mint_tx.is_some() => why.push("its mint receipt has not been checked as a deposit".to_string()),
         None => {}
@@ -725,6 +756,9 @@ pub(crate) fn decide(c: &CandidateRow, wallet: &str, suggested: &[SuggestedRung]
         })
     };
     let matched = exact.or_else(drifted);
+    if matched.is_some_and(|m| m.from_move) && c.deposit_check.as_deref() == Some(DEPOSIT_OK_HOLDS_NOCK) {
+        why.push("its mint put NOCK in, and the moved near rung is a USDC-only range".to_string());
+    }
     if matched.is_none() {
         let in_pool: Vec<&SuggestedRung> = suggested.iter().filter(|s| s.protocol == c.protocol && s.pool_id == pool_id).collect();
         if suggested.is_empty() {
@@ -1079,6 +1113,8 @@ impl Reader<'_> {
         }
         row.deposit_check = Some(match row.pool_id.as_deref().and_then(|pool| candidate_raw_position(&row, pool)) {
             Some(p) => match parse_ladder_deposit(&receipt, &self.wallet, &p) {
+                // Which side NOCK is on decides whether the mint put any in (#169).
+                Ok(d) if (if is_nock_token(&p.token1) { d.amount1_raw } else { d.amount0_raw }) > 0 => DEPOSIT_OK_HOLDS_NOCK.to_string(),
                 Ok(_) => "ok".to_string(),
                 Err(reason) => reason,
             },

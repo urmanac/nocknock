@@ -1,9 +1,74 @@
 openapi: 3.0.3
 info:
   title: NockNock Snapshot Data Model
-  version: 2.10.0
+  version: 2.11.0
   description: |
     Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
+
+    2.11.0 (ladder maintenance and calls to action as events, issue #169), additive:
+    - DerivedMetrics.ladder_maintenance (absent without a tracked ladder): per tracked
+      ladder rung (data.ladders[]), what its role's rule says this cycle against the
+      operator's restraint settings, operator_profile.ladder_maintenance, none of which
+      has a default (min_hours_out_of_range, cooldown_hours, hysteresis_pct,
+      max_gas_payback_days, deep_pull_fill_fraction, deep_pull_recovery_pct). A rule
+      whose settings are not all set is `off` and names them; an invalid value makes it
+      `invalid` and names it. rules.near_move: a near rung out of range above (all USDC)
+      past every gate gets a move stated, its width in ticks and its USDC kept, its top at
+      the usable tick at or below the pool price, with gas (two transactions at the
+      per-transaction estimate), the pool's measured in-range fees for the moved range
+      (fee_yield), the payback in days in range and the fees earned so far. rules.
+      deep_pull: a deep rung that converted at least the fill fraction and whose pool
+      price recovered the recovery percent above the lowest price seen while it held NOCK
+      gets a pull stated. deep_bottom_report: a deep rung at or below its bottom is
+      reported (no setting); NockNock never suggests a lower ladder. A cap out of range
+      above is stated (it sold its NOCK by design); NockNock never suggests refilling it.
+      Each rung carries status, gates[] {gate, setting, measured, passes (null =
+      unknown), text}, move | pull, event (the entry it adds to events[]) and clock
+      {above_since, suggested_since, last_cleared_at, episode {started_at,
+      low_price_usd, low_at, peak_converted_pct, gap_note}}. The clocks are carried
+      from the previous snapshot (in memory; the latest stored snapshot after a
+      restart); a gap longer than sync_window_seconds + 90 s restarts above_since and
+      a standing suggestion (watched_since_previous: false). No table holds them. Left
+      out of the state hash.
+    - DerivedMetrics.events (absent in a snapshot stored before 2.11.0: not reported,
+      never "nothing needs you"): every call to action as a structured event (Event),
+      top tier first. Tiers (operator, 2026-11-20): `top` = maintenance the operator
+      signed up for and floor and reserve breaches (a DEFENSIVE LOCK, DCA TRANCHE DUE or
+      DCA PLAN INVALID directive, a detected plan buy to confirm, a position found
+      on-chain waiting for a tap, the shown ladder suggestion, a ladder near move, deep
+      pull, deep bottom report or a deep pull that cannot fire with the operator's
+      recovery setting, and wallet USDC below the reserve);
+      `quiet` = everything else (every other directive, collectable LP fees, AERO
+      rewards, a closed position, the floor-crossing price, a cap that sold its NOCK, an
+      invalid reserve setting). The reserve event (reserve_below) is top whenever wallet
+      USDC alone is below cash_reserve_usdc, with no exceptions (operator's choice,
+      2026-11-21); its text and numbers give the wallet / NOCK LP / ladder split of the
+      stable balance the gate counts, and one measured line on the gas-side ETH/USDC
+      ranges (outside the gate): their USDC and WETH now, wallet USDC if they were
+      withdrawn now, and the ETH price at which their USDC side alone covers the wallet's
+      shortfall (each range's liquidity on its own pool's curve, scaled from the
+      snapshot's eth_price_usd), with the WETH still in them there, or that they cover it
+      already. Every event's deep_link is an element id on the dashboard and in the Lite
+      cockpit: the strip for top entries, else the place its `card` names. The pushes
+      are unchanged (notify.rs does not read events). Left out of the state hash. A
+      ladder suggestion with nothing left to deposit (ladder_deployed) is a quiet entry
+      ("Ladder: all 3 rungs deployed"), and positions found on-chain with nothing to
+      decide are a quiet entry ("3 positions tracked from the chain · checked at block
+      N"); an offer waiting for a tap or a check that did not complete is top.
+    - DerivedMetrics.ladder_profile (absent without a tracked ladder): the ladder shape.
+      bars[] {position_id, label, name, role (cap | near | deep | ladder | other),
+      low_usd, high_usd, capital_usd (null when unknown), capital_basis (usdc_at_top for
+      a ladder rung: its value as all USDC at its top, constant with the price;
+      value_now for any other range), density (capital / ln(high/low), so on a log price
+      axis the bar's area is its capital; null when capital is unknown), status
+      (measured | capital_unknown), clipped_low, clipped_high, clip_text, text}; segments[]
+      {low_usd, high_usd, density, includes_unknown, position_ids}: the stacked depth
+      between consecutive bar edges; view_low_usd / view_high_usd: the ladder zone (its
+      rungs, the ladder bottom and spot) widened by 5% on the log axis, where wider ranges
+      are clipped (their density stays the full-width one); spot_usd, ladder_bottom_usd,
+      cash_reserve_usdc and reserve_note for the markers; full_range[] (no finite width,
+      not drawn) and not_drawn[] (a pair whose bounds are not USD prices). Left out of the
+      state hash.
 
     2.10.0 (the fee yield and the operator's ladder shape, extending #166), additive:
     - DerivedMetrics.fee_yield (absent before 2.10.0): swap fees per unit of liquidity
@@ -1032,6 +1097,35 @@ components:
             ingestion-worker/testdata/ladder_suggest/golden_ladder_suggest.json and
             golden_ladder_bottle.json. Absent in a snapshot stored before it: not
             reported, never "nothing fits".
+        ladder_maintenance:
+          type: object
+          additionalProperties: true
+          description: |
+            Ladder maintenance (2.11.0, issue #169): settings (echoed, null when unset),
+            rules {near_move, deep_pull, deep_bottom_report} {status: on | off | invalid,
+            needs[], invalid[], text}, history, watched_since_previous,
+            gap_limit_seconds, rungs[] and statement; see the 2.11.0 notes at the top of
+            this file. Rung status: suggested | waiting | off | invalid | unknown |
+            trading | holds_nock | waiting_for_dip | holding | fully_converted | sold |
+            in_range | not_applicable. The worker's golden text is in
+            ingestion-worker/testdata/ladder_maintenance/golden_events_text.json. Absent
+            without a tracked ladder. Left out of the state hash.
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
+          description: |
+            Calls to action as structured events (2.11.0, issue #169), top tier first.
+            Absent in a snapshot stored before 2.11.0: not reported, never "nothing
+            needs you". Left out of the state hash.
+        ladder_profile:
+          type: object
+          additionalProperties: true
+          description: |
+            The ladder shape (2.11.0, issue #169): bars whose area on a log price axis is
+            their capital, the stacked depth, the view window and the markers; see the
+            2.11.0 notes at the top of this file. Absent without a tracked ladder. Left out
+            of the state hash.
         position_detection:
           type: object
           nullable: true
@@ -1343,6 +1437,58 @@ components:
           nullable: true
           description: Why the figure is unavailable, naming the position; null otherwise.
 
+    Event:
+      type: object
+      description: |
+        One call to action (2.11.0, issue #169), shaped for a later push channel. The
+        texts are built from the snapshot's own figures; never "should".
+      required: [id, kind, tier, title, what_changed, text, numbers, since, deep_link, links, would_sign, card]
+      properties:
+        id:
+          type: string
+          description: Stable while the call to action stands, e.g. directive, reserve_below, harvest, ladder_near_move:<position_id>.
+        kind:
+          type: string
+          description: directive | reserve_below | reserve_setting | fill_offer | found_positions | ladder_suggestion | ladder_near_move | ladder_deep_pull | ladder_deep_converted | ladder_cap_sold | harvest | aero_rewards | closed_position | floor_crossing
+        tier:
+          type: string
+          enum: [top, quiet]
+        title:
+          type: string
+        what_changed:
+          type: string
+          nullable: true
+        text:
+          type: string
+          nullable: true
+        numbers:
+          type: object
+          additionalProperties: true
+          description: The measured figures the text states, as strings (null when unknown).
+        since:
+          type: string
+          description: RFC 3339. Carried from the previous snapshot by id while the cycles are continuous; a ladder move or pull carries the time it was first stated.
+        deep_link:
+          type: string
+          description: An anchor, '#event-' and the id with every character other than a letter or digit as '-', rendered by the dashboard and the Lite cockpit; a push channel prefixes the cockpit URL.
+        links:
+          type: array
+          items:
+            type: object
+            properties:
+              label: {type: string}
+              url: {type: string}
+        would_sign:
+          type: string
+          nullable: true
+          description: What the operator would sign, in words; NockNock builds and signs nothing. Null for a report.
+        card:
+          type: string
+          nullable: true
+          description: The dashboard card that renders the entry in full (the top-of-page strip leaves ladder_suggestion and found_positions to their own cards), or the place a quiet entry is shown.
+        source:
+          type: string
+          description: Where in the snapshot the entry comes from.
     FloorCrossing:
       type: object
       description: Where one level is crossed (2.9.0, issue #165).

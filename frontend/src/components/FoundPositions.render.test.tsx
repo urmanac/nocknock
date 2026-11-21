@@ -149,7 +149,8 @@ describe('Found on-chain block (v0.9.0)', () => {
   it('is mounted right under the ladder card on the dashboard and in the phone cockpit', () => {
     const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
     const card = app.indexOf('<LadderSuggestionCard suggestion=');
-    const found = app.indexOf('<FoundPositionsCard detection={positionDetectionOf(rawData)} onChanged={refetch} />');
+    // At the top only when it needs a tap or the check did not complete (#169).
+    const found = app.indexOf('{foundAtTop && <FoundPositionsCard detection={detection} onChanged={refetch} />}');
     expect(card).toBeGreaterThan(0);
     expect(found).toBeGreaterThan(card);
     expect(found).toBeLessThan(app.indexOf('{/* Primary Dual-Goal Metrics Bar */}'));

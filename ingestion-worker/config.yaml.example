@@ -261,6 +261,40 @@ operator_profile:
   #   - rung: deep
   #     share: 0.85
   #     low_usd: 0.01
+  #
+  # ladder_maintenance: the restraint on the ladder's maintenance suggestions (#169). In
+  # your words: "I know how to keep it in my pants! But abstractly we need a 'keep it in
+  # your pants' model at some level." No key has a default: a rule stays off until every
+  # setting it needs is set, and the ladder card names the ones it is missing. Nothing
+  # chases the price; NockNock builds no transaction and signs nothing.
+  #   min_hours_out_of_range  near rung: hours it sits out of range above (all USDC)
+  #                           before a move back to just below the price is stated. 0 or
+  #                           more.
+  #   cooldown_hours          every rule: hours after the rung's deposit and after its last
+  #                           suggestion cleared, before another is stated. 0 or more.
+  #   hysteresis_pct          every rule: a move is stated only when the price is this far
+  #                           above the near rung's top, and stands until the price is back
+  #                           in its range; a pull stands until the price falls this far
+  #                           under its recovery point or makes a new low. 0 or more.
+  #   max_gas_payback_days    near rung: the move's gas (two transactions) is repaid by at
+  #                           most this many days of in-range fees at the pool's measured
+  #                           rate. Above 0.
+  #   deep_pull_fill_fraction deep rung: the share of its USDC converted to NOCK (the most
+  #                           seen) before a pull is stated. Above 0, at most 1.
+  #   deep_pull_recovery_pct  deep rung: how far the price recovers above the lowest price
+  #                           seen while it held NOCK before a pull is stated ("pull the
+  #                           reserve at the right time"). Above 0.
+  # The near move keeps the rung's width in ticks and its USDC. A deep rung is never moved
+  # or chased down; fully converted at its bottom it is reported and no lower ladder is
+  # ever suggested ("we can wait it out"). A cap out of range above has sold its NOCK by
+  # design and is only stated.
+  # ladder_maintenance:
+  #   min_hours_out_of_range:
+  #   cooldown_hours:
+  #   hysteresis_pct:
+  #   max_gas_payback_days:
+  #   deep_pull_fill_fraction:
+  #   deep_pull_recovery_pct:
 
   # Target allocation weights in Portfolio Deviation Matrix (basis points, sum = 10000).
   # v2.0.0: Aerodrome tranche liquidated — the LP bucket is the aggregate across the

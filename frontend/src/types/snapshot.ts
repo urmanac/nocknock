@@ -53,6 +53,15 @@ export interface DerivedMetrics {
   ladder_shape?: import('../feeYield').LadderShape;
   /** The ladder suggestion (2.9.0, #168): a top-of-page event; absent from a worker that predates it */
   ladder_suggestion?: import('../ladderSuggestion').LadderSuggestion | null;
+  /** Ladder maintenance (2.11.0, #169): per tracked rung, its rule against the operator's
+   *  restraint settings. Absent without a tracked ladder or from an older worker. */
+  ladder_maintenance?: import('../events').LadderMaintenance | null;
+  /** Calls to action as structured events (2.11.0, #169), top tier first. Absent from a
+   *  worker that predates it: not reported, never "nothing needs you". */
+  events?: import('../events').SnapshotEvent[] | null;
+  /** The ladder shape (2.11.0, #169): bars whose area on a log price axis is their capital.
+   *  Absent without a tracked ladder or from an older worker. */
+  ladder_profile?: import('../ladderProfile').LadderProfile | null;
 }
 
 /** Plan progress, derived from config + receipt-verified buys only (2.1.0) */

@@ -30,8 +30,8 @@ describe('Ladders components (#167)', () => {
     const html = renderToStaticMarkup(<LadderLiteCard data={{ ladders: LADDERS_ABOVE }} />);
     expect(html).toContain('data-testid="ladders-lite"');
     expect(html).toContain('Ladders (measured, not NOCK LP)');
-    expect(html).toContain('v4 USDC/NOCK 3.00% #3240369: above range, all USDC · $1226.09 USDC + 0.0000 NOCK');
-    expect(html).toContain('v4 USDC/NOCK 3.00% #3299001: above range, all USDC · $77.00 USDC + 0.0000 NOCK');
+    expect(html).toContain('v4 USDC/NOCK 3.00% #3240369: above range, all USDC · $1,226.09 USDC + 0 NOCK');
+    expect(html).toContain('v4 USDC/NOCK 3.00% #3299001: above range, all USDC · $77.00 USDC + 0 NOCK');
     expect(html).not.toMatch(/<button|<a /);
   });
 

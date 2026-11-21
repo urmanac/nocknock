@@ -55,6 +55,46 @@ export function ladderStatus(r: { state?: string } | null | undefined): { label:
   }
 }
 
+/** The short badge of a rung's summary row (#169 compact rows). */
+export function ladderBadge(state: string | undefined): string {
+  switch (state) {
+    case 'holds_only_usdc':
+      return 'ABOVE RANGE · ALL USDC';
+    case 'in_range':
+      return 'IN RANGE · BOTH WAYS';
+    case 'holds_only_nock':
+      return 'BELOW RANGE · ALL NOCK';
+    case 'empty':
+      return 'EMPTY';
+    case 'pool_stale':
+      return 'STALE POOL';
+    default:
+      return 'STATE NOT REPORTED';
+  }
+}
+
+/** A price at 4 significant figures, a whole NOCK amount with separators, dollars to cents. */
+export function sig4(v: string | null | undefined): string {
+  const x = Number(v);
+  if (v == null || !(x > 0) || !Number.isFinite(x)) return '?';
+  return x.toFixed(Math.max(0, 3 - Math.floor(Math.log10(x))));
+}
+export function wholeNock(v: string | null | undefined): string {
+  const x = Number(v);
+  return Number.isFinite(x) ? Math.round(x).toLocaleString('en-US') : '?';
+}
+export function cents(v: string | null | undefined): string {
+  const x = Number(v);
+  return Number.isFinite(x) ? x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '?';
+}
+
+/** "holds $111.09 USDC + 0 NOCK · $0.01097–$0.01313". */
+export function ladderSummary(r: LadderReading): string {
+  const low = r.low_price_usd == null ? 'no bottom' : `$${sig4(r.low_price_usd)}`;
+  const high = r.high_price_usd == null ? 'no top' : `$${sig4(r.high_price_usd)}`;
+  return `holds $${cents(r.usdc_now)} USDC + ${wholeNock(r.nock_now)} NOCK · ${low}–${high}`;
+}
+
 /** Short state words for the phone and the summary line. */
 export function ladderStateWords(state: string | undefined): string {
   switch (state) {
@@ -127,7 +167,7 @@ export function ladderSinceDeposit(r: LadderReading): { text: string; verified: 
 
 /** One muted line for the phone: "v4 USDC/NOCK 3.00% #3240369: above range, all USDC · $1226.09 USDC + 0.0000 NOCK". */
 export function ladderLiteLine(r: LadderReading): string {
-  return `${r.label}: ${ladderStateWords(r.state)} · $${r.usdc_now} USDC + ${r.nock_now} NOCK`;
+  return `${r.label}: ${ladderStateWords(r.state)} · $${cents(r.usdc_now)} USDC + ${wholeNock(r.nock_now)} NOCK`;
 }
 
 /** " and 2 ladders" for the Goal 1 line; "" with none. */

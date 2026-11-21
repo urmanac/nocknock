@@ -57,6 +57,7 @@
             cash_reserve_usdc: None,
             ladder_bottom_usd: None,
             ladder_rungs: None,
+            ladder_maintenance: None,
         }
     }
 
@@ -1818,6 +1819,9 @@ database_url: "postgresql://localhost/test"
                 ladder_shape: None,
                 ladder_suggestion: None,
                 position_detection: None,
+                ladder_maintenance: None,
+                events: None,
+                ladder_profile: None,
                 asset_aggregation_series: AssetAggregationSeries {
                     time_points: vec!["2026-10-11T00:00:00Z".to_string()],
                     safe_haven_series: vec!["48.00".to_string()],
@@ -3667,8 +3671,11 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
             contract_fees: raw.contract_fees,
             derived_metrics,
         };
-        // As run_ingestion_cycle does after assembling the snapshot (#168).
+        // As run_ingestion_cycle does after assembling the snapshot (#168, #169). Both
+        // blocks of #169 are left out of the state hash, so the canonical bytes below do
+        // not carry them.
         attach_ladder_suggestion(&mut data, profile, t("2026-11-15T12:00:00Z"));
+        attach_maintenance_and_events(&mut data, profile, None, 390, t("2026-11-15T12:00:00Z"));
         data
     }
 
