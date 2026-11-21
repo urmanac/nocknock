@@ -47,6 +47,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   $0.01 to spot needs none, holds 65,130 NOCK at the bottom at an average $0.01138, and
   leaves the stable balance there $25.99 above the reserve.
 
+- **A deployed ladder is tracked as `role: ladder` (#167).** A position entry may set
+  `role: ladder`, with an optional `rung: near|deep` and an optional `deposit_tx` (no
+  defaults; unset `role` keeps its pre-0.9.0 meaning, and any other value fails every
+  cycle as a configuration error, as do a ladder that is the price source, an Aero basic
+  pool, a ladder that sets a rebuild key or `deposit_url`, and, after the read, a ladder
+  that is not USDC/NOCK). A ladder counts in every total, in the floor-crossing price
+  and in the standing reserve, whose stable balance now includes its USDC
+  (`global_status.reserve_ladder_usdc` names that part, and the reserve, plan-headroom
+  and working-capital sentences say "NOCK LP and ladders"). It is not NOCK LP: no LP
+  target, no NOCK LP deviation row (a no_target "NOCK ladders (measured)" row is
+  appended), no rebuild template or exclusion, no engine or HOLD label. Each ladder gets
+  a reading in `data.ladders[]` (snapshot spec 2.9.0, additive): its state by what it
+  holds (`holds_only_usdc`, `in_range`, `holds_only_nock`, `empty`, `pool_stale`), its
+  bounds against spot, what it holds against its own all-USDC top, and what it bought
+  since its deposit only from the `deposit_tx` receipt, checked against the position
+  (sent by the wallet, one deposit into that NFT, no swap, amounts on the range's curve);
+  otherwise null with the reason (`no_baseline`, `refused`, `unverified`,
+  `liquidity_changed` once a ladder is added to or partly withdrawn). Verified net buys of
+  a ladder deposited after `cost_basis.opening.as_of` enter the whole-stack average cost,
+  and the ladder's own average is on its reading. The ladder simulator (#166) counts a
+  tracked ladder as an existing range. The dashboard shows a Ladders card and a LADDER
+  tag, the phone cockpit one line per ladder, and both MCP transports the same ladder
+  lines. A burned ladder's closed label says it was a ladder. With no ladder configured
+  no snapshot byte changes. On the golden fixture (the recorded mint of NFT #3240369,
+  1,221.85 USDC + 247.58 NOCK): with the pool fallen into it, it holds 5,551.37 NOCK and
+  has net bought 5,303.79 NOCK for $84.35 since its deposit, an average of $0.01590283.
+
 ## [0.8.3] - 2026-11-20
 
 A patch release: the protected cash reserve is a standing rule, and dry powder honours it.
