@@ -50,7 +50,8 @@ import { ClosedPositionsCard } from './components/ClosedPositions.tsx';
 import { LaddersCard } from './components/Ladders';
 import { isLadder, isNockLp, ladderCountClause, ladderReadingFor, laddersOf } from './ladderTrack';
 import { FloorBreachNote } from './components/FloorBreachNote.tsx';
-import { LadderSimulatorPanel } from './components/LadderSimulatorPanel';
+import { LadderSuggestionCard } from './components/LadderSuggestionCard';
+import { ladderSuggestionOf } from './ladderSuggestion';
 import { priceSourceIsClosedText } from './closedPositions.ts';
 import {
   LP_FEE_COLOR,
@@ -385,6 +386,9 @@ function Dashboard() {
           </div>
         </div>
       </section>
+
+      {/* The ladder suggestion (#168): the top-of-page ladder surface, no input. */}
+      <LadderSuggestionCard suggestion={ladderSuggestionOf(rawData)} syncStatus={freshness.syncStatus} />
 
       {/* Tracked Positions — one card per live Uniswap position (v2.0.0) */}
       <section style={styles.positionsSection}>
@@ -740,10 +744,9 @@ function Dashboard() {
           />
         </CanvasPanel>
 
-        {/* 5a'. Ladder simulator (#166): a read-only what-if from the stored snapshot */}
-        <CanvasPanel title="Ladder Simulator (what-if, read-only)">
-          <LadderSimulatorPanel positions={positionsList} snapshotId={snapshot?.meta?.snapshot_id} />
-        </CanvasPanel>
+        {/* The Ladder Simulator panel (#166) is not rendered since #168 (operator, 2026-11-20:
+            no forms). The what-if stays in GET /v1/simulate/ladder and the simulate_ladder
+            MCP tool; the ladder suggestion card above is the page's ladder surface. */}
 
         {/* 5b. Harvest ledger (virtual tax reserve) + change from the recorded peak (#102) */}
         <CanvasPanel title={LEDGER_TITLE}>
