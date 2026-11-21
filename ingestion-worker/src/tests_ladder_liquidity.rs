@@ -476,8 +476,26 @@ fn test_the_stored_row_keeps_the_card_small_and_says_what_it_left_out() {
         assert!(r["mint"]["liquidity_raw"].is_string() && r["tick_lower"].is_i64() && r["pool"]["pool_id"].is_string());
         assert!(r.get("deep_link").is_none() && r.get("nock_limit").is_none());
     }
-    // The state hash is computed before slimming, from the whole card.
-    assert!(serde_json::to_string(&env.data.derived_metrics.ladder_suggestion).unwrap().contains("deep_link"));
+    // The state hash is the whole card's, never the slimmed row's. Slimming changes what a
+    // hash would read (so the order matters)...
+    let full = crate::ingest::canonical_state_json(&env.data);
+    let mut slimmed = stored.clone();
+    crate::ingest::strip_volatile_time_fields(&mut slimmed);
+    assert_ne!(full["derived_metrics"]["ladder_suggestion"], slimmed["derived_metrics"]["ladder_suggestion"]);
+    // ...and the cycle hashes the assembled data, while store_snapshot stores the
+    // envelope's hash as it is and slims only the JSON it writes.
+    let ingest = include_str!("ingest.rs");
+    let store_fn = &ingest[ingest.find("pub(crate) async fn store_snapshot(").unwrap()..];
+    let store_fn = &store_fn[..store_fn.find("\n}\n").unwrap()];
+    assert!(store_fn.contains("slim_stored_data(&mut data_json)") && store_fn.contains("envelope.meta.state_hash"));
+    assert!(!store_fn.contains("compute_state_hash"), "the stored row's hash is never recomputed from the slimmed JSON");
+    let (hash_at, store_at) = (ingest.find("let state_hash = compute_state_hash(&snapshot_data);").unwrap(), ingest.find("store_snapshot(&state.db, &envelope).await?").unwrap());
+    assert!(hash_at < store_at);
+    assert_eq!(crate::ingest::compute_state_hash(&env.data), {
+        let mut h = sha2::Sha256::new();
+        sha2::Digest::update(&mut h, serde_json::to_vec(&full).unwrap());
+        format!("{:x}", sha2::Digest::finalize(h))
+    });
 }
 
 #[test]
