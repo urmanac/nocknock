@@ -99,9 +99,13 @@ This guide captures the operational rules, environment quirks, toolchain configu
   `NOCKNOCK_SCRATCH_DATABASE_URL=postgres://…/nocknock_scratch cargo test scratch_database -- --ignored`.
   CI has no PostgreSQL: run it before a release that touches a query or a migration.
   `testdata/position_detect/chain_fixture.json` holds recorded chain answers for the scan
-  (ONCHAIN_INTEGRATION.md §15); a position is tracked by itself only on an exact pool and
-  tick match with a suggested rung: never loosen that, or a stranger's dust mint on a
-  rung's ticks marks it deployed.
+  (ONCHAIN_INTEGRATION.md §15); a position is tracked by itself only when the wallet itself
+  minted it and its pool and ticks exactly match a suggested rung, or, for a near or deep
+  rung whose top follows the price, it has that rung's bottom tick and a top within one
+  band: never loosen that further, and never count a position that reached the wallet by
+  transfer or was minted by another address, or a stranger's dust on a rung's public
+  ticks marks it deployed. Untracked NFTs are re-read at most 40 a cycle, inside a 40 s
+  budget.
 - **Binaries Produced**:
   - `nocknock-ingestion-worker`: Background ingestion daemon and Axum REST API (port 8080).
   - `nocknock-mcp`: Stdio Model Context Protocol (MCP) server for Claude Desktop, Gemini Antigravity, and AI agents.

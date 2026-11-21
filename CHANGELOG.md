@@ -297,6 +297,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     diluted figure beside the undiluted one. A remainder that needs NOCK the budget
     cannot give is held back with the figures that differ. The headline, outcomes and
     wallet line add the amounts the card says to enter, cut to cents.
+  - *Second review:* only a position the wallet itself minted (its receipt read) counts
+    for a rung; a stranger's position minted or transferred to the wallet never freezes
+    the plan, never reads "found on-chain, being tracked" and never holds the
+    single-rung card back. A withdrawal reads "partly withdrawn" or "withdrawn", never
+    "done", is never offered again and never shrinks the plan (each rung stands for what
+    its verified mint deposited). With near and deep in and no room for the cap, the
+    card reads "Ladder deployed: 2 of 3 deposits are done, and the reserve leaves no
+    room for the cap". A near rung minted a band ago (its top follows the price) is
+    matched by its bottom tick, on the card and by detection. Detection re-reads at most
+    40 untracked NFTs a cycle, in turn, inside a 40-second budget, so dust cannot time it
+    out. After a restart both MCP transports say the stored card is not available until
+    the first cycle.
   - `operator_profile.ladder_rungs` set without `operator_profile.ladder_bottom_usd` is
     now `needs_setting` (OPERATOR_GUIDANCE section 7, `config.yaml.example`).
   - The stored snapshot row keeps the card's rungs, ticks, pools and mints and leaves out
