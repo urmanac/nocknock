@@ -702,7 +702,9 @@ fn near_move(
         payback.map(|pb| pb <= max_pb),
         gas_text,
     ));
-    let all_pass = gates.iter().all(|g| g["passes"].as_bool() == Some(true)) && cool_pass;
+    // A standing move stays until the price is back in the range: a gate that flips
+    // (gas, say) does not withdraw it, so it never churns.
+    let all_pass = standing || (gates.iter().all(|g| g["passes"].as_bool() == Some(true)) && cool_pass);
     let tx_link = position_page_url(p);
     let new_link = new_position_url(p, lo, hi, None).ok().map(|(u, _)| u);
     let opens_below = (new_top / px - 1.0) * 100.0;

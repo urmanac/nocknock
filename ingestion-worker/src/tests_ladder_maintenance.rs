@@ -219,6 +219,9 @@ fn hysteresis_at_the_range_edge_never_churns() {
     let c = near_after_25h(4.0, true, cfg.clone());
     assert_eq!(rung(&c, NEAR)["status"], "suggested");
     assert_eq!(rung(&c, NEAR)["clock"]["suggested_since"], "2026-11-22T17:00:00+00:00");
+    // A gate that flips while the move stands (the gas test, here) does not withdraw it.
+    let c = near_after_25h(4.0, true, LadderMaintenanceConfig { max_gas_payback_days: Some(0.0001), ..cfg.clone() });
+    assert_eq!(rung(&c, NEAR)["status"], "suggested");
     // Within one tick spacing of the top: a move would not change the range, whatever the settings.
     let c = near_after_25h(0.5, false, LadderMaintenanceConfig { hysteresis_pct: Some(0.0), ..example_cfg() });
     assert_eq!(rung(&c, NEAR)["status"], "waiting");
@@ -289,6 +292,10 @@ fn the_gas_test_passes_fails_and_is_unknown_without_a_fee_rate() {
     let base = near_after_25h(4.0, false, example_cfg());
     let mut prev = base.clone();
     prev.meta.generated_at = base.meta.generated_at - chrono::Duration::minutes(5);
+    // Out of range for 25 h, with no move standing yet.
+    for r in prev.data.derived_metrics.ladder_maintenance.as_mut().unwrap()["rungs"].as_array_mut().unwrap() {
+        r["clock"]["suggested_since"] = Value::Null;
+    }
     let c = cycle(&env, Some(example_cfg()), Some(&prev), base.meta.generated_at);
     let near = rung(&c, NEAR);
     let gas = near["gates"].as_array().unwrap().iter().find(|g| g["gate"] == "max_gas_payback_days").unwrap();

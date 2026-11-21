@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Ladder maintenance, with a "keep it in your pants" restraint model (#169).**
+  `derived_metrics.ladder_maintenance` (snapshot 2.11.0, additive) states per tracked
+  ladder rung what its role's rule says this cycle, gated by
+  `operator_profile.ladder_maintenance`: `min_hours_out_of_range`, `cooldown_hours`,
+  `hysteresis_pct`, `max_gas_payback_days`, `deep_pull_fill_fraction` and
+  `deep_pull_recovery_pct`. None has a default: a rule stays off, and says which
+  settings turn it on, until they are all set.
+  - **near**: out of range above (all USDC) past every gate, a move back to just below
+    the price is stated, keeping its width in ticks and its USDC, with the gas (two
+    transactions), the pool's measured in-range fees for the moved range, the payback in
+    days in range and the fees earned so far. Once stated it stands until the price is
+    back in its range (hysteresis).
+  - **deep**: after it converted at least the fill fraction and the price recovered the
+    recovery percent above the lowest price seen while it held NOCK, a pull is stated
+    ("pull the reserve at the right time"). It is never moved or chased down. Fully
+    converted at its bottom it is reported, and no lower ladder is ever suggested.
+  - **cap**: out of range above it sold its NOCK by design; stated, never refilled.
+  The clocks are carried from the previous snapshot (no table, no migration); a gap past
+  the /health window restarts them. Each suggestion states what the operator would sign;
+  NockNock builds and signs nothing.
+- **Calls to action as events, in two tiers (#169).** `derived_metrics.events[]`
+  (snapshot 2.11.0, additive) lists every call to action with an id, a tier (top |
+  quiet), what changed, its numbers, since, a deep link and what the operator would sign,
+  shaped for the v0.10 push. The dashboard shows the top tier under the title row and the
+  Lite cockpit above the directive; quiet entries stay where they are. Both MCP
+  transports print `• Top of page`, `• Quiet` and `• Ladder maintenance` lines in
+  get_shot_advice from one shared `events_text.rs`.
+
 - **Positions found on-chain: deposit in the Uniswap app, and NockNock tracks it
   (#145 for Uniswap v4).** No transaction hash, no NFT id and no `config.yaml` edit. At
   the start of every cycle, before the position reads, the worker reads the wallet's
@@ -326,6 +354,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `remaining_liquidity`, `found` and `note`; statuses `found`, `below_minimum`, `held`
     and `no_room` (snapshot spec 2.10.0). `shape=configured` no longer answers
     `SHAPE_NO_ROOM`.
+
+### Changed
+
+- **Call-to-action audit (#169).** Top of the page: DEFENSIVE LOCK, DCA TRANCHE DUE and
+  DCA PLAN INVALID, a plan buy to confirm, a position found on-chain, the shown ladder
+  suggestion, the ladder's maintenance, and a reserve dip the NOCK ranges' buying does
+  not explain. Quiet: every other directive, collectable LP fees (still pushed at the
+  $5.00 BATCH HARVEST rule), AERO rewards, closed positions, the floor-crossing price,
+  a cap that sold its NOCK, and a reserve dip the ranges' buying explains (stated with
+  the wallet / NOCK LP / ladder split). The pushes are unchanged.
 
 ## [0.8.3] - 2026-11-20
 
