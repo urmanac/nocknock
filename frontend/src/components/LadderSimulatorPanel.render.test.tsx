@@ -48,4 +48,18 @@ describe('LadderSimulatorPanel (#166)', () => {
     expect(html).toContain('NOCK_TOO_MUCH: this range at the pool price takes 0.0000 NOCK');
     expect(html).toContain('Measured: this range needs 0.0000 NOCK at the pool price for this USDC');
   });
+
+  it('prints the NOCK the ladder sells above spot as sold in the grid', () => {
+    const html = renderToStaticMarkup(<LadderResult outcome={{ ok: true, sim: CHAT_900_UNSNAPPED }} />);
+    expect(html).toContain('<td>4,194 sold</td>');
+    expect(html).toContain('<td>11,058 bought</td>');
+    expect(html).not.toMatch(/<td>-[\d,]+<\/td>/);
+  });
+
+  it('shows the budget note next to the floor-budget verdict', () => {
+    const sim = structuredClone(SPOT_741_SNAPPED);
+    sim.floor_check.budget_note = "no treasury_floor_nock is set: the budget is the wallet's NOCK";
+    const html = renderToStaticMarkup(<LadderResult outcome={{ ok: true, sim }} />);
+    expect(html).toContain('(no treasury_floor_nock is set: the budget is the wallet&#x27;s NOCK): fits');
+  });
 });

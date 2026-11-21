@@ -11,6 +11,7 @@ import {
   EMPTY_LADDER_FORM,
   buildLadderQuery,
   ladderErrorLines,
+  ladderNockMoved,
   ladderPoolOptions,
   ladderSnapshotLine,
   ladderSummaryLines,
@@ -68,7 +69,7 @@ export function LadderResult({ outcome }: { outcome: LadderOutcome }) {
           <tr style={{ color: '#8b949e', textAlign: 'right' }}>
             <th style={{ textAlign: 'left' }}>% of spot</th>
             <th>Price</th>
-            <th>NOCK bought</th>
+            <th>NOCK bought / sold</th>
             <th>USDC left</th>
             <th>Stable</th>
             <th>Reserve headroom</th>
@@ -81,7 +82,7 @@ export function LadderResult({ outcome }: { outcome: LadderOutcome }) {
                 {r.pct_of_spot}%{r.markers.length ? ` (${r.markers.join(', ')})` : ''}
               </td>
               <td>${r.price_usd}</td>
-              <td>{Math.round(Number(r.ladder_nock_acquired)).toLocaleString('en-US')}</td>
+              <td>{ladderNockMoved(r.ladder_nock_acquired)}</td>
               <td>${r.ladder_usdc}</td>
               <td>{r.stable_usdc == null ? 'unknown' : `$${r.stable_usdc}`}</td>
               <td style={{ color: r.reserve_headroom_usdc?.startsWith('-') ? MEASURED_RED : undefined }}>

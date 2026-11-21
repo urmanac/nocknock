@@ -4,6 +4,7 @@ import {
   EMPTY_LADDER_FORM,
   buildLadderQuery,
   ladderErrorLines,
+  ladderNockMoved,
   ladderPoolOptions,
   ladderSnapshotLine,
   ladderSummaryLines,
@@ -109,5 +110,30 @@ describe('ladder simulator (#166)', () => {
     expect(opts[2]).toMatchObject({ disabled: false, label: 'uniswap-v4 USDC/NOCK #3163450 (tick spacing 300)' });
     expect(opts[3]).toMatchObject({ disabled: true, reason: 'a basic Aero pool has no ranges: its deposits are full range' });
     expect(opts[4]).toMatchObject({ disabled: true, reason: 'tick spacing not read for this pool' });
+  });
+
+  it('states the budget note: no floor set, and a negative budget with its reason', () => {
+    const noFloor = structuredClone(SPOT_741_SNAPPED);
+    noFloor.floor_check.lp_nock_budget = '90086.7891';
+    noFloor.floor_check.budget_note = "no treasury_floor_nock is set: the budget is the wallet's NOCK";
+    expect(ladderSummaryLines(noFloor)).toContain(
+      "Floor budget: needs 0 of the 90,087 NOCK that may go into LP (no treasury_floor_nock is set: the budget is the wallet's NOCK): fits",
+    );
+    const negative = structuredClone(CHAT_900_UNSNAPPED);
+    negative.floor_check.lp_nock_budget = '-40000.0000';
+    negative.floor_check.budget_note = 'none: wallet NOCK is 40000 below the 100000 NOCK floor less the 10000 tolerated below it';
+    negative.floor_check.max_usdc_within_budget = '0.00';
+    expect(ladderSummaryLines(negative)).toContain(
+      'Floor budget: needs 4,194 of the -40,000 NOCK that may go into LP (none: wallet NOCK is 40000 below the 100000 NOCK floor less the 10000 tolerated below it): exceeds; $0.00 is the most USDC this range holds within it',
+    );
+    // With no note the line is the plain one.
+    expect(ladderSummaryLines(SPOT_741_SNAPPED)).toContain('Floor budget: needs 0 of the 87 NOCK that may go into LP: fits');
+  });
+
+  it('says NOCK sold above spot, never a negative purchase', () => {
+    expect(ladderNockMoved('-4193.9773')).toBe('4,194 sold');
+    expect(ladderNockMoved('11058.4211')).toBe('11,058 bought');
+    expect(ladderNockMoved('0.0000')).toBe('0 bought');
+    expect(ladderNockMoved('-0.0000')).toBe('0 bought');
   });
 });

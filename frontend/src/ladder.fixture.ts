@@ -41,6 +41,7 @@ export const SPOT_741_SNAPPED: LadderSimulation = {
           "price_usd": "0.025404",
           "status": "crosses"
         },
+        "nock_now": "109543",
         "reason": null,
         "status": "crosses",
         "tolerated": {
@@ -60,6 +61,7 @@ export const SPOT_741_SNAPPED: LadderSimulation = {
           "price_usd": "0.025404",
           "status": "crosses"
         },
+        "nock_now": "109543",
         "reason": null,
         "status": "crosses",
         "tolerated": {
@@ -380,6 +382,7 @@ export const CHAT_900_UNSNAPPED: LadderSimulation = {
           "price_usd": "0.018363",
           "status": "crosses"
         },
+        "nock_now": "109543",
         "reason": null,
         "status": "crosses",
         "tolerated": {
@@ -399,6 +402,7 @@ export const CHAT_900_UNSNAPPED: LadderSimulation = {
           "price_usd": "0.025404",
           "status": "crosses"
         },
+        "nock_now": "109543",
         "reason": null,
         "status": "crosses",
         "tolerated": {

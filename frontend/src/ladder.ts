@@ -37,6 +37,8 @@ export interface LadderCrossingView {
   crossing: { level_nock: string; price_usd: string | null; pct_above_spot: string | null; multiple: string | null; status: string } | null;
   tolerated: { level_nock: string; price_usd: string | null; pct_above_spot: string | null; multiple: string | null; status: string } | null;
   reason: string | null;
+  /** Tracked NOCK at spot: the same before and after (the ladder's NOCK leaves the wallet). */
+  nock_now?: string | null;
 }
 
 export interface LadderSimulation {
@@ -241,6 +243,15 @@ const grouped = (v: string | null | undefined) => {
 };
 const signedUsd = (h: string) => (h.startsWith('-') ? `-$${h.slice(1)}` : `+$${h}`);
 
+/** A grid row's NOCK movement: "1,234 bought", or "4,194 sold" above spot (never a
+ *  negative purchase), as the MCP text says it. */
+export function ladderNockMoved(acquired: string): string {
+  const n = Number(acquired);
+  if (!Number.isFinite(n)) return 'unknown';
+  const r = Math.round(n) + 0; // never "-0"
+  return r < 0 ? `${(-r).toLocaleString('en-US')} sold` : `${r.toLocaleString('en-US')} bought`;
+}
+
 /** "From the snapshot generated … (N min ago) · worker health: ok": its age and health. */
 export function ladderSnapshotLine(sim: LadderSimulation): string {
   const s = sim.snapshot;
@@ -297,7 +308,10 @@ export function ladderSummaryLines(sim: LadderSimulation): string[] {
     lines.push(`Floor budget: unknown: ${fc.reason ?? ''}`);
   } else {
     const cap = fc.max_usdc_within_budget ? `; $${fc.max_usdc_within_budget} is the most USDC this range holds within it` : '';
-    lines.push(`Floor budget: needs ${grouped(fc.nock_needed)} of the ${grouped(fc.lp_nock_budget)} NOCK that may go into LP: ${fc.status}${cap}`);
+    // The note says why the budget is not a plain one (no floor set, or negative), as the
+    // MCP text does: "fits" with no floor, or a negative budget, is never shown bare.
+    const note = fc.budget_note ? ` (${fc.budget_note})` : '';
+    lines.push(`Floor budget: needs ${grouped(fc.nock_needed)} of the ${grouped(fc.lp_nock_budget)} NOCK that may go into LP${note}: ${fc.status}${cap}`);
   }
   const e = fc.floor_breach_effect;
   const at = (v: LadderCrossingView | null) =>
