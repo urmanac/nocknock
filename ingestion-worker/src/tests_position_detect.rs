@@ -649,7 +649,8 @@ fn test_a_position_is_tracked_by_itself_only_when_every_condition_holds() {
         other => panic!("expected an offer, got {other:?}"),
     };
     let cases: Vec<(&str, CandidateRow, Vec<SuggestedRung>, Vec<TrackedRange>, &str)> = vec![
-        ("one tick spacing off at the top", CandidateRow { tick_lower: Some(273600), ..c.clone() }, near.to_vec(), vec![], "its ticks 273600..275400 are not a suggested rung's (273900..275400, 275400..276300)"),
+        // One band off at the top is the near rung's drift rule (asserted below); two is not.
+        ("two tick spacings off at the top", CandidateRow { tick_lower: Some(273300), ..c.clone() }, near.to_vec(), vec![], "its ticks 273300..275400 are not a suggested rung's (273900..275400, 275400..276300)"),
         ("one tick spacing off at the bottom", CandidateRow { tick_upper: Some(275700), ..c.clone() }, near.to_vec(), vec![], "its ticks 273900..275700 are not a suggested rung's (273900..275400, 275400..276300)"),
         ("the same ticks in another pool", CandidateRow { pool_id: Some(POOL_075PCT.to_string()), ..c.clone() }, near.to_vec(), vec![], "it is not in the ladder suggestion's pool"),
         ("nothing is suggested", c.clone(), vec![], vec![], "no ladder rung is suggested now to match it against"),
@@ -677,6 +678,15 @@ fn test_a_position_is_tracked_by_itself_only_when_every_condition_holds() {
             "that range is already tracked as uniswap-v4:base:3243000",
         ),
     ];
+    // The near rung's top follows the price until it is deposited: the wallet's own mint
+    // with the rung's bottom tick and its top one band away is that rung (second review of
+    // the bottle), every other condition unchanged.
+    for top in [273600, 274200] {
+        let drifted = CandidateRow { tick_lower: Some(top), ..c.clone() };
+        assert_eq!(decide(&drifted, OPERATOR, &near, &[]), Decision::Track { rung: near[0].rung.clone() }, "{top}");
+        let stranger = CandidateRow { minted_by: Some(MINTER.to_string()), ..drifted.clone() };
+        assert!(matches!(decide(&stranger, OPERATOR, &near, &[]), Decision::Offer { .. }), "{top}: a stranger's mint never");
+    }
     for (name, row, suggested, tracked, expect) in cases {
         let (why, choices) = offered(&row, &suggested, &tracked);
         assert_eq!(why, vec![expect.to_string()], "{name}");
@@ -686,7 +696,7 @@ fn test_a_position_is_tracked_by_itself_only_when_every_condition_holds() {
     let no_mint = CandidateRow { mint_tx: None, mint_block: None, minted_by: None, deposit_check: Some("the transaction that brought it to the wallet does not mint it to the wallet".to_string()), ..c.clone() };
     assert_eq!(offered(&no_mint, &near, &[]).0, vec!["its mint is not a plain deposit into it: the transaction that brought it to the wallet does not mint it to the wallet".to_string()]);
     // Several failed conditions are all stated.
-    let stranger_off = CandidateRow { minted_by: Some(MINTER.to_string()), tick_lower: Some(273600), ..c.clone() };
+    let stranger_off = CandidateRow { minted_by: Some(MINTER.to_string()), tick_lower: Some(273300), ..c.clone() };
     assert_eq!(offered(&stranger_off, &near, &[]).0.len(), 2);
     // A tracked ladder in another range does not stand in the way.
     let elsewhere = [TrackedRange { position_id: "x".to_string(), pool_id: POOL_3PCT.to_string(), tick_lower: 275400, tick_upper: 276300 }];

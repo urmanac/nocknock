@@ -90,7 +90,7 @@ export interface LadderShapeRow {
   index: number;
   of: number;
   rung: 'cap' | 'near' | 'deep';
-  status: 'to_deposit' | 'deployed' | 'over' | 'passed' | 'none' | 'found' | 'below_minimum' | 'held';
+  status: 'to_deposit' | 'deployed' | 'over' | 'passed' | 'none' | 'found' | 'below_minimum' | 'held' | 'not_deposited' | 'partly_withdrawn' | 'withdrawn';
   reason: string | null;
   target_usdc: string;
   deployed_usdc: string;

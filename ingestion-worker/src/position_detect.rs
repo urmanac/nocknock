@@ -65,7 +65,7 @@ pub(crate) const POSITION_LOG_LIMITS_TTL_SECONDS: u64 = 3600;
 
 pub(crate) const POSITION_DETECTION_STATEMENT: &str = "NockNock reads the wallet's Uniswap v4 position NFTs from the chain. It tracks one by itself only when the wallet minted it and its pool and ticks are exactly a rung of the ladder suggestion; anything else it finds waits for one tap and is not counted until then. It never signs or sends.";
 
-const ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
+pub(crate) const ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
 
 fn lc(s: &str) -> String {
     s.trim().to_lowercase()
@@ -685,7 +685,25 @@ pub(crate) fn decide(c: &CandidateRow, wallet: &str, suggested: &[SuggestedRung]
         None => {}
     }
     let (lo, hi) = (c.tick_lower.unwrap_or(0), c.tick_upper.unwrap_or(0));
-    let matched = suggested.iter().find(|s| s.protocol == c.protocol && s.pool_id == pool_id && s.tick_lower == lo && s.tick_upper == hi);
+    let exact = suggested.iter().find(|s| s.protocol == c.protocol && s.pool_id == pool_id && s.tick_lower == lo && s.tick_upper == hi);
+    // A near or deep rung's top follows the price until it is deposited: a mint from a
+    // card read before the price crossed a band edge has the rung's own bottom tick and a
+    // top one band away. It matches that rung when no live ladder already holds a range
+    // with that bottom in this pool (ladder.rs applies the same rule to the card).
+    let drifted = || {
+        let spacing = c.tick_spacing.filter(|s| *s > 0)?;
+        let nock1 = c.currency1.as_deref().and_then(|a| token_info(a).ok()).is_some_and(|t| is_nock_token(&t));
+        let ends = |l: i32, h: i32| if nock1 { (h, l) } else { (l, h) };
+        let (bottom, top) = ends(lo, hi);
+        if tracked.iter().any(|t| t.pool_id == pool_id && ends(t.tick_lower, t.tick_upper).0 == bottom) {
+            return None;
+        }
+        suggested.iter().find(|s| {
+            let (s_bottom, s_top) = ends(s.tick_lower, s.tick_upper);
+            s.protocol == c.protocol && s.pool_id == pool_id && matches!(s.rung.as_deref(), Some("near") | Some("deep")) && s_bottom == bottom && (s_top - top).abs() <= spacing
+        })
+    };
+    let matched = exact.or_else(drifted);
     if matched.is_none() {
         let in_pool: Vec<&SuggestedRung> = suggested.iter().filter(|s| s.protocol == c.protocol && s.pool_id == pool_id).collect();
         if suggested.is_empty() {

@@ -350,6 +350,7 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
     // 1b. A position found on-chain that could be a ladder rung is waiting for a tap
     //     (position_detect.rs). Its USDC already left the wallet and is in no total, so a
     //     new ladder is not measured beside it.
+    let wallet: Option<String> = data.positions.iter().find(|p| p.is_price_source).or(data.positions.first()).map(|p| p.wallet.to_lowercase());
     let waiting: Vec<&Value> = data
         .derived_metrics
         .position_detection
@@ -359,6 +360,10 @@ pub(crate) fn ladder_suggestion(env: &SnapshotEnvelope, bottom: std::result::Res
         .into_iter()
         .flatten()
         .filter(|p| p.get("choices").and_then(|c| c.as_array()).is_some_and(|c| c.iter().any(|x| x.as_str().is_some_and(|x| x.starts_with("ladder:")))))
+        // Only the wallet's own mint: a stranger's position minted or transferred to the
+        // wallet (dust is cheap) never holds the card back.
+        .filter(|p| p.get("minted_by").and_then(|v| v.as_str()).is_some_and(|by| wallet.as_deref() == Some(by.to_lowercase().as_str())))
+        .filter(|p| p.get("received_from").and_then(|v| v.as_str()).map_or(true, |from| from.to_lowercase() == crate::position_detect::ZERO_ADDRESS))
         .collect();
     if !waiting.is_empty() {
         let names: Vec<String> = waiting
@@ -1125,6 +1130,9 @@ fn shape_rows(data: &SnapshotData, shape: &Value, target: Option<&Position>) -> 
                 "passed" => format!("{label}: passed. {}.", sentence_case(reason)),
                 "none" => format!("{label}: no cap this cycle. {}.", sentence_case(reason)),
                 "below_minimum" => format!("{label}: not offered. {}.", sentence_case(reason)),
+                "not_deposited" => format!("{label}: not deposited: {reason}."),
+                "withdrawn" => format!("{label}: withdrawn. {}.", sentence_case(reason)),
+                "partly_withdrawn" => format!("{label}: partly withdrawn. {}.", sentence_case(reason)),
                 "held" => format!("{label}: held back. {}.", sentence_case(reason)),
                 other => format!("{label}: {other}. {}.", sentence_case(reason)),
             };
@@ -1287,6 +1295,9 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
             ("below_minimum", "under the minimum"),
             ("held", "held back"),
             ("none", "with no cap this cycle"),
+            ("not_deposited", "not deposited (the reserve leaves no room)"),
+            ("partly_withdrawn", "partly withdrawn"),
+            ("withdrawn", "withdrawn"),
         ]
         .iter()
         .filter(|(st, _)| count(st) > 0)
@@ -1314,6 +1325,9 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         out["reason"] = json!(format!("Nothing is left to deposit: of the {of} rungs of your shape, {}. Their readings are in the Ladders card.", tally()));
         out["headline"] = json!(if count("deployed") == of {
             format!("Ladder deployed: all {of} deposits are done.")
+        } else if count("deployed") + count("not_deposited") == of && count("not_deposited") == 1 && rows.iter().any(|r| r["status"] == "not_deposited" && r["rung"] == "cap") {
+            // Near and deep are in; the cap is the last rung, and the reserve has no room.
+            format!("Ladder deployed: {} of {of} deposits are done, and the reserve leaves no room for the cap.", count("deployed"))
         } else {
             format!("Ladder: nothing is left to deposit ({}).", tally())
         });
@@ -1357,7 +1371,7 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
     let needed = n(&shape, "/fit/needed_usdc").unwrap_or(0.0);
     let minimum = n(&shape, "/fit/minimum_usdc").unwrap_or(LADDER_SUGGEST_MIN_USDC);
     if shape_status == "no_room" {
-        let left_words = count("to_deposit") + count("below_minimum");
+        let left_words = count("to_deposit") + count("below_minimum") + count("not_deposited");
         out["status"] = json!("no_headroom");
         out["headline"] = json!(format!(
             "Ladder: {left_words} of {of} deposits left, but your reserve leaves under ${} for them.",

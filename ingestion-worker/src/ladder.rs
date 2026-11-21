@@ -2646,8 +2646,14 @@ struct TrackedRung {
     rung: Option<String>,
     tl: i32,
     tu: i32,
-    /// Its liquidity (never changes with the price).
+    /// The liquidity it stands for: the larger of its deposit's (from the verified mint
+    /// receipt) and what it holds now. A liquidity never changes with the price, and a
+    /// withdrawal does not shrink what the rung was deposited with.
     l: f64,
+    /// Its liquidity now (0 when emptied or burned).
+    l_now: f64,
+    /// Its NFT is burned or left the wallet (position detection's tracked row says so).
+    gone: bool,
     /// What it holds as all USDC at its top: its liquidity times the USDC one unit holds there.
     v_top: f64,
     /// What it holds now (stated, never a sizing input).
@@ -2679,6 +2685,11 @@ struct PlanRung {
     found: Vec<String>,
     /// The earliest deposit block of its counterparts; None when any is not known.
     first_block: Option<i64>,
+    /// What its counterparts were deposited with, and what they hold now, as liquidity on
+    /// their own ticks valued at the top (USDC), and whether one is burned or gone.
+    deposited_v: f64,
+    now_v: f64,
+    gone: bool,
     cap: Option<CapSizing>,
     status: &'static str,
     reason: Option<String>,
@@ -2783,14 +2794,19 @@ impl LadderCtx<'_> {
             .map(|p| {
                 let tag = &raw.ladders[&p.position_id];
                 let (usdc_now, nock_now) = existing_at_ratio(p, 1.0);
-                let l = p.liquidity as f64;
-                let block = self.env.data.ladders.iter().find(|r| r.position_id == p.position_id).and_then(|r| r.since_deposit.deposit_block);
+                let reading = self.env.data.ladders.iter().find(|r| r.position_id == p.position_id);
+                let block = reading.and_then(|r| r.since_deposit.deposit_block);
+                let l_now = p.liquidity as f64;
+                let l_dep = reading.and_then(|r| r.since_deposit.deposit_liquidity.as_deref()).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
+                let l = l_now.max(l_dep);
                 TrackedRung {
                     position_id: p.position_id.clone(),
                     rung: tag.rung.clone(),
                     tl: p.tick_lower,
                     tu: p.tick_upper,
                     l,
+                    l_now,
+                    gone: false,
                     v_top: l * self.usdc_per_l_at_top(p.tick_lower, p.tick_upper),
                     usdc_now,
                     nock_now,
@@ -2799,14 +2815,44 @@ impl LadderCtx<'_> {
                 }
             })
             .collect();
+        // A rung tracked from the database whose NFT was burned or left the wallet: it is no
+        // longer read as a position, and position detection states it. It still stands for
+        // its rung, as withdrawn, so that rung is never offered again by itself.
+        let present: Vec<String> = out.iter().map(|r| r.position_id.clone()).collect();
+        for row in self.env.data.derived_metrics.position_detection.as_ref().and_then(|d| d.get("tracked")).and_then(|v| v.as_array()).into_iter().flatten() {
+            let state = row.get("state").and_then(|v| v.as_str()).unwrap_or("");
+            let id = row.get("position_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if !matches!(state, "closed" | "not_owned") || row.get("role").and_then(|v| v.as_str()) != Some(LADDER_ROLE) || present.contains(&id) {
+                continue;
+            }
+            let (Some(tl), Some(tu)) = (row.get("tick_lower").and_then(|v| v.as_i64()), row.get("tick_upper").and_then(|v| v.as_i64())) else { continue };
+            out.push(TrackedRung {
+                position_id: id,
+                rung: row.get("rung").and_then(|v| v.as_str()).map(str::to_string),
+                tl: tl as i32,
+                tu: tu as i32,
+                l: 0.0,
+                l_now: 0.0,
+                gone: true,
+                v_top: 0.0,
+                usdc_now: 0.0,
+                nock_now: 0.0,
+                found: false,
+                block: row.get("mint_block").and_then(|v| v.as_i64()),
+            });
+        }
         out.sort_by(|a, b| a.position_id.cmp(&b.position_id));
         out
     }
 
     /// Positions found on-chain this cycle and not counted (position_detect.rs), in the
-    /// ladder pool, that could be a ladder rung: each with its ticks and liquidity. One
-    /// another address minted, or worth less at its top than the minimum, is left out: a
-    /// stranger's dust on a rung's ticks never stands for that rung.
+    /// ladder pool, that could be a ladder rung: each with its ticks and liquidity. Only a
+    /// position the wallet itself minted counts: its mint receipt was read and names the
+    /// wallet as the sender (`minted_by`), it did not reach the wallet by transfer, and
+    /// the receipt passed the deposit check. Anything else (a stranger's position minted
+    /// to the wallet or transferred to it, or one whose receipt is not read yet) never
+    /// stands for a rung and never freezes the plan; a position worth less at its top
+    /// than the minimum never does either.
     fn found_in_pool(&self) -> Vec<TrackedRung> {
         let pool_id = self.pool.template.pool_id.to_lowercase();
         let wallet = self.pool.template.wallet.to_lowercase();
@@ -2824,7 +2870,11 @@ impl LadderCtx<'_> {
             .iter()
             .filter(|f| f.get("pool_id").and_then(|v| v.as_str()).map(|p| p.to_lowercase()) == Some(pool_id.clone()))
             .filter(|f| f.get("choices").and_then(|c| c.as_array()).is_some_and(|c| c.iter().any(|x| x.as_str().is_some_and(|x| x.starts_with("ladder:")))))
-            .filter(|f| f.get("minted_by").and_then(|v| v.as_str()).map_or(true, |by| by.to_lowercase() == wallet))
+            .filter(|f| f.get("minted_by").and_then(|v| v.as_str()).is_some_and(|by| by.to_lowercase() == wallet))
+            .filter(|f| f.get("received_from").and_then(|v| v.as_str()).map_or(true, |from| from.to_lowercase() == crate::position_detect::ZERO_ADDRESS))
+            .filter(|f| {
+                !f.get("why_not_automatic").and_then(|w| w.as_array()).is_some_and(|w| w.iter().any(|x| x.as_str().is_some_and(|x| x.starts_with("its mint") || x.contains("transfer"))))
+            })
             .filter_map(|f| {
                 let tl = i32::try_from(f.get("tick_lower")?.as_i64()?).ok()?;
                 let tu = i32::try_from(f.get("tick_upper")?.as_i64()?).ok()?;
@@ -2839,6 +2889,8 @@ impl LadderCtx<'_> {
                     tl,
                     tu,
                     l,
+                    l_now: l,
+                    gone: false,
                     v_top,
                     usdc_now,
                     nock_now,
@@ -2909,6 +2961,9 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
             counterparts: Vec::new(),
             found: Vec::new(),
             first_block: None,
+            deposited_v: 0.0,
+            now_v: 0.0,
+            gone: false,
             cap: None,
             status: "to_deposit",
             reason: None,
@@ -3006,13 +3061,30 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
             }));
         }
     }
-    // A position found on-chain and not tracked yet counts for a rung no tracked ladder
-    // holds, when its pool and ticks are exactly that rung's this cycle.
+    // A position found on-chain and not tracked yet (minted by the wallet) counts for a
+    // rung no tracked ladder holds: first when its pool and ticks are exactly that rung's
+    // this cycle; then, for a near or deep rung, when it has the rung's own bottom tick and
+    // its top is within one band of the rung's top now (the near rung's top follows the
+    // price until it is deposited, so a mint from a card read a band ago still matches).
+    // position_detect::decide applies the same rule, and tracks it with that rung.
     let found = ctx.found_in_pool();
     let mut found_owner: Vec<Option<usize>> = vec![None; found.len()];
     for (k, f) in found.iter().enumerate() {
         let taken: Vec<usize> = owner.iter().flatten().copied().chain(found_owner.iter().flatten().copied()).collect();
         found_owner[k] = plan.iter().position(|p| !taken.contains(&p.pos) && p.draw == Some((f.tl, f.tu)));
+    }
+    let usd_ends = |tl: i32, tu: i32| if pool.nock_is_token1 { (tu, tl) } else { (tl, tu) };
+    for (k, f) in found.iter().enumerate() {
+        if found_owner[k].is_some() {
+            continue;
+        }
+        let taken: Vec<usize> = owner.iter().flatten().copied().chain(found_owner.iter().flatten().copied()).collect();
+        let (f_bottom, f_top) = usd_ends(f.tl, f.tu);
+        found_owner[k] = plan.iter().position(|p| {
+            let Some((dl, du)) = p.draw else { return false };
+            let (_, d_top) = usd_ends(dl, du);
+            p.role != "cap" && !taken.contains(&p.pos) && lows[p.pos] == Some(f_bottom) && (f_top - d_top).abs() <= spacing
+        });
     }
     let counted: Vec<(usize, &TrackedRung)> = owner
         .iter()
@@ -3030,6 +3102,10 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
         };
         p.deployed_usdc += if p.role == "cap" { t.usdc_now } else { t.v_top };
         p.deployed_nock += t.nock_now;
+        let w_own = ctx.usdc_per_l_at_top(t.tl, t.tu);
+        p.deposited_v += t.l * w_own;
+        p.now_v += t.l_now * w_own;
+        p.gone |= t.gone;
         if t.found {
             p.found.push(t.position_id.clone());
         } else {
@@ -3117,6 +3193,33 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
             _ => Some(x),
         })
         .map(|a| (a.0, a.1.clone(), a.2));
+    // A tracked rung that holds less liquidity than it was deposited with was withdrawn
+    // from, wholly or in part (the operator pulls a deep rung after it fills). It is
+    // stated as such, never "done", never offered again, and it keeps standing for what
+    // it was deposited with, so the other rungs' targets do not shrink. Re-laddering is
+    // #169's.
+    let withdrawal = |p: &PlanRung| -> Option<(&'static str, Option<String>)> {
+        if p.counterparts.is_empty() {
+            return None;
+        }
+        if p.gone || p.now_v <= 1e-9 {
+            let why = if p.gone { "its NFT is burned or no longer in the wallet" } else { "it holds no liquidity now" };
+            return Some(("withdrawn", Some(format!("{why}; it is not offered again (re-laddering is #169's)"))));
+        }
+        if p.now_v < p.deposited_v * (1.0 - LADDER_SHAPE_L_TOLERANCE) {
+            let pct = (1.0 - p.now_v / p.deposited_v) * 100.0;
+            return Some((
+                "partly_withdrawn",
+                Some(format!(
+                    "{}% of the liquidity it was deposited with was withdrawn: about ${} of its ${} at its top; it is not offered again (re-laddering is #169's)",
+                    fx(pct, 0),
+                    fx(p.deposited_v - p.now_v, 2),
+                    fx(p.deposited_v, 2)
+                )),
+            ));
+        }
+        None
+    };
     let near_share = plan.iter().find(|p| p.role == "near").and_then(|p| p.share);
     let cap_untracked = |p: &PlanRung| p.role == "cap" && p.counterparts.is_empty() && p.found.is_empty();
 
@@ -3128,10 +3231,14 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
         let v_tracked = v_of(p);
         let rem_v = p.target_usdc - v_tracked;
         let tol = (p.target_usdc * LADDER_SHAPE_L_TOLERANCE).max(1e-9);
+        if let Some(st) = withdrawal(p) {
+            (p.status, p.reason) = st;
+            return;
+        }
         (p.status, p.reason) = if held && -rem_v >= minimum.max(tol) {
             ("over", Some(format!("the tracked rung holds ${} of USDC at its top, ${} more than its target", fx(v_tracked, 2), fx(-rem_v, 2))))
         } else if found_only {
-            ("found", Some(format!("the position {} is in this pool on exactly this rung's ticks; it is counted once it is tracked, so it is not offered again", p.found.join(", "))))
+            ("found", Some(format!("the position {}, which your wallet minted, is this rung in this pool; NockNock tracks it by itself and counts it from then, so it is not offered again", p.found.join(", "))))
         } else if held && rem_v <= tol {
             ("deployed", None)
         } else if held && rem_v < minimum {
@@ -3227,9 +3334,13 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
     for p in plan.iter_mut().filter(|p| p.role == "cap") {
         let held = !(p.counterparts.is_empty() && p.found.is_empty());
         let found_only = p.counterparts.is_empty() && !p.found.is_empty();
+        if let Some(st) = withdrawal(p) {
+            (p.status, p.reason) = st;
+            continue;
+        }
         (p.status, p.reason) = if held {
             if found_only {
-                ("found", Some(format!("the position {} is in this pool on exactly this rung's ticks; it is counted once it is tracked, so it is not offered again", p.found.join(", "))))
+                ("found", Some(format!("the position {}, which your wallet minted, is this rung in this pool; NockNock tracks it by itself and counts it from then, so it is not offered again", p.found.join(", "))))
             } else {
                 ("deployed", None)
             }
@@ -3241,7 +3352,7 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
             let worth = fx(p.target_usdc + p.target_nock * pool.price, 2);
             if p.cap.as_ref().is_some_and(|c| c.bound_by_limit == "reserve") {
                 p.no_room = true;
-                ("below_minimum", Some(format!("your reserve leaves room for a cap worth ${worth} beside the other deposits listed, under the ${} minimum", fx(minimum, 2))))
+                ("not_deposited", Some(format!("the reserve leaves ${} for it beside the other rungs, a cap worth ${worth}, under the ${} minimum", fx(p.cap.as_ref().map(|c| c.limit).unwrap_or(0.0), 2), fx(minimum, 2))))
             } else {
                 ("below_minimum", Some(format!("the cap would be worth ${worth}, under the ${} minimum", fx(minimum, 2))))
             }
@@ -3351,7 +3462,10 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
         "no_room"
     } else if plan.iter().any(|p| p.status == "held") {
         "held"
-    } else if plan.iter().any(|p| p.no_room) {
+    } else if plan.iter().any(|p| p.no_room && p.role != "cap") {
+        "no_room"
+    } else if plan.iter().any(|p| p.no_room && p.role == "cap") && plan.iter().filter(|p| p.role != "cap").any(|p| matches!(p.status, "to_deposit" | "below_minimum")) {
+        // The cap has no room and a near or deep rung is still to deposit and cannot be.
         "no_room"
     } else if plan.iter().any(|p| p.status == "below_minimum") && !plan.iter().any(|p| matches!(p.status, "deployed" | "found")) {
         // Nothing is deposited and nothing left is worth listing.

@@ -179,34 +179,57 @@ fn test_cap_and_near_deposited_then_the_price_moves_leaves_the_deep_rung_unchang
 /// not tracked yet (its receipt not read, say): it is in no position list, and position
 /// detection lists it as found and not counted, with its ticks and liquidity.
 pub(crate) fn near_found(tl: i32, tu: i32) -> SnapshotEnvelope {
+    near_found_moved(tl, tu, 0.0)
+}
+
+/// The near rung minted at the fixture's spot through the link, then the price moved
+/// `ticks_up`, and the mint found on-chain, not yet tracked.
+pub(crate) fn near_found_moved(tl: i32, tu: i32, ticks_up: f64) -> SnapshotEnvelope {
     let (_, n, _) = stated_liquidity();
-    let mut env = fixture_with_rungs_moved(&[(9000003, Some("untracked"), tl, tu, n)], 0.0);
+    let env = fixture_with_rungs_moved(&[(9000003, Some("untracked"), tl, tu, n)], ticks_up);
+    // Minted by the wallet itself, its receipt read (the second review of the bottle: only
+    // such a position stands for a rung).
+    let wallet = env.data.positions[0].wallet.to_lowercase();
+    prepared(with_found(env, 9000003, tl, tu, n, Some(&wallet), None))
+}
+
+/// `env` with one position found on-chain and not counted, in the ladder's pool. A
+/// stranger's position has `minted_by` another address, or arrived by transfer
+/// (`received_from`, then no mint receipt is read and `minted_by` is null).
+pub(crate) fn with_found(mut env: SnapshotEnvelope, nft: u64, tl: i32, tu: i32, l: u128, minted_by: Option<&str>, received_from: Option<&str>) -> SnapshotEnvelope {
+    let why: Vec<String> = match (minted_by, received_from) {
+        (_, Some(from)) => vec![format!("it reached the wallet by transfer from {from}, it was not minted to it")],
+        (Some(by), None) if by != env.data.positions[0].wallet.to_lowercase() => vec![format!("its mint was sent by {by}, not by your wallet")],
+        (Some(_), None) => vec!["it matches a suggested rung, and tracking it did not go through this cycle; it is tried again next cycle".to_string()],
+        (None, None) => vec!["its mint transaction has not been read yet".to_string()],
+    };
     env.data.derived_metrics.position_detection = Some(json!({
         "status": "ok",
         "reason": null,
         "found_not_counted": {
             "count": 1,
-            "value_usd": "114.86",
+            "value_usd": null,
             "value_note": null,
             "positions": [{
-                "nft_id": 9000003,
-                "position_id": "uniswap-v4:base:9000003",
+                "nft_id": nft,
+                "position_id": format!("uniswap-v4:base:{nft}"),
                 "protocol": "uniswap-v4",
                 "pool_id": "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13",
                 "pool_label": "v4 USDC/NOCK 3.00%",
                 "tick_lower": tl,
                 "tick_upper": tu,
-                "holds": { "liquidity": n.to_string() },
-                "value_usd": "114.86",
-                "mint_tx": null,
-                "mint_block": null,
-                "minted_by": null,
-                "why_not_automatic": ["its mint transaction has not been read yet"],
+                "holds": { "liquidity": l.to_string() },
+                "value_usd": null,
+                "mint_tx": minted_by.map(|_| "0x6cdabada1ff062b6d3b4ba87bfe04158dd8b14a91e93cabe11dc3e35b587e89e"),
+                "mint_block": minted_by.map(|_| 60240576),
+                "minted_by": minted_by,
+                "received_from": received_from,
+                "why_not_automatic": why,
                 "choices": ["ladder:cap", "ladder:near", "ladder:deep", "lp", "dismiss"],
             }],
         },
     }));
-    prepared(env)
+    env
 }
 
 #[test]
@@ -218,7 +241,7 @@ fn test_a_mint_found_on_chain_and_not_yet_tracked_is_not_offered_again() {
     assert_eq!(st(near, "/status"), "found");
     assert_eq!(
         st(near, "/text"),
-        "Deposit 2 of 3 (near rung): found on-chain, being tracked. The position uniswap-v4:base:9000003 is in this pool on exactly this rung's ticks; it is counted once it is tracked, so it is not offered again."
+        "Deposit 2 of 3 (near rung): found on-chain, being tracked. The position uniswap-v4:base:9000003, which your wallet minted, is this rung in this pool; NockNock tracks it by itself and counts it from then, so it is not offered again."
     );
     // Its USDC left the wallet: it counts for its rung, so the deep rung is not re-sized.
     assert_eq!(st(deposit(&l, "deep"), "/usdc/to_enter"), "650.89");
@@ -231,12 +254,13 @@ fn test_a_mint_found_on_chain_and_not_yet_tracked_is_not_offered_again() {
     let l = card(&replanned(env));
     assert_listed(&l, &["cap", "near", "deep"]);
     // A range found on other ticks matches no rung: stated, and not counted until a tap.
-    let env = near_found(274200, 275400);
+    // (Its top is two bands from the near rung's top, so the drift rule does not match it.)
+    let env = near_found(274500, 275400);
     let l = card(&env);
     assert_listed(&l, &["cap", "near", "deep"]);
     assert_eq!(
         st(&l, "/found_note"),
-        "Found on-chain in this pool and not counted yet: NFT #9000003 on ticks 274200..275400. It matches no rung's ticks exactly, so it is not tracked by itself; one tap under Found on-chain tracks it or sets it aside. The amounts here do not count it."
+        "Found on-chain in this pool and not counted yet: NFT #9000003 on ticks 274500..275400. It matches no rung's ticks exactly, so it is not tracked by itself; one tap under Found on-chain tracks it or sets it aside. The amounts here do not count it."
     );
     assert!(text(&env, &l, Some("ok")).contains(&format!("  {}\n", st(&l, "/found_note"))));
 }
@@ -398,10 +422,11 @@ fn test_an_over_rung_is_stated_by_deposit_order_and_changes_nothing_else() {
         r.since_deposit.deposit_block = Some(if r.position_id.ends_with("9000001") { 100 } else { 200 });
     }
     let l = card(&replanned(env));
-    assert_eq!(st(&l, "/status"), "no_headroom");
-    assert_eq!(st(&l, "/headline"), "Ladder: 1 of 3 deposits left, but your reserve leaves under $1.00 for them.");
-    assert!(st(&l, "/reason").ends_with("so no deposit is listed (1 deployed, 1 over target, 1 under the minimum)."), "{}", st(&l, "/reason"));
-    assert!(st(row(&l, "cap"), "/text").starts_with("Deposit 1 of 3 (cap): not offered. Your reserve leaves room for a cap worth $"), "{}", st(row(&l, "cap"), "/text"));
+    // The cap is the last rung and the reserve has no room for it: nothing is left to
+    // deposit, and the card says why (second review of the bottle, item 3).
+    assert_eq!((st(&l, "/status"), &l["shown"]), ("ladder_deployed", &json!(false)));
+    assert_eq!(st(&l, "/headline"), "Ladder: nothing is left to deposit (1 deployed, 1 over target, 1 not deposited (the reserve leaves no room)).");
+    assert!(st(row(&l, "cap"), "/text").starts_with("Deposit 1 of 3 (cap): not deposited: the reserve leaves $"), "{}", st(row(&l, "cap"), "/text"));
     // Without the deposit order, the rung implying the most freezes the plan: the deep rung
     // then has a remainder to deposit rather than the near rung reading over.
     let l = card(&moved_with(&[(DEEP, d), (NEAR, n + n / 2)], 0.0, 200.0));
@@ -489,4 +514,132 @@ fn test_each_passed_rung_states_its_own_true_reason() {
         st(&l, "/reason"),
         "NOCK at $0.01002405 is at or below the bottom of your ladder shape: every rung is passed (cap, near rung, deep rung), so no USDC-only deposit is possible in any of them."
     );
+}
+
+// ------------------------------------------------------------------
+// Second review of the bottle (HEAD da29b33)
+// ------------------------------------------------------------------
+
+const STRANGER: &str = "0x4598b3ba7d6714091b18da5d110b64f56e94e826";
+
+/// Set what each tracked rung was deposited with (the verified mint's liquidity) and its
+/// deposit block, as the readings state them, then re-plan.
+fn with_deposits(mut env: SnapshotEnvelope, deposits: &[(u64, u128, i64)]) -> SnapshotEnvelope {
+    for (nft, l, block) in deposits {
+        let r = env.data.ladders.iter_mut().find(|r| r.position_id == format!("uniswap-v4:base:{nft}")).unwrap_or_else(|| panic!("no reading for {nft}"));
+        r.since_deposit.deposit_liquidity = Some(l.to_string());
+        r.since_deposit.deposit_block = Some(*block);
+    }
+    replanned(env)
+}
+
+#[test]
+fn test_a_strangers_position_never_stands_for_a_rung() {
+    let (_, _, d) = stated_liquidity();
+    // About $1.50 of USDC at its top, on the deep rung's exact ticks.
+    let dust = d * 150 / 65_090;
+    let fresh_card = card(&fresh());
+    for (by, from) in [(None, Some(STRANGER)), (Some(STRANGER), None), (None, None)] {
+        let env = prepared(with_found(crate::tests_ladder::fixture(), 9000020, 275400, 276300, dust, by, from));
+        let l = card(&env);
+        assert_listed(&l, &["cap", "near", "deep"]);
+        assert_eq!(st(&l, "/headline"), st(&fresh_card, "/headline"), "{by:?} {from:?}: the plan is not frozen by it");
+        assert_eq!(st(deposit(&l, "deep"), "/usdc/to_enter"), "650.89");
+        assert_ne!(st(row(&l, "deep"), "/status"), "found");
+        assert!(!serde_json::to_string(&l).unwrap().contains("being tracked"));
+        assert!(st(&l, "/found_note").contains("NFT #9000020 on ticks 275400..276300"), "{}", l["found_note"]);
+    }
+    // The same on the near rung's ticks, and on the cap's band (public: it contains spot).
+    for (tl, tu) in [(273900, 275400), (273600, 273900)] {
+        let l = card(&prepared(with_found(crate::tests_ladder::fixture(), 9000021, tl, tu, dust, None, Some(STRANGER))));
+        assert_listed(&l, &["cap", "near", "deep"]);
+        assert_eq!(st(&l, "/headline"), st(&fresh_card, "/headline"));
+    }
+}
+
+#[test]
+fn test_a_withdrawal_reads_withdrawn_and_never_shrinks_the_plan() {
+    let (c, n, d) = stated_liquidity();
+    // All three deposited (cap first, then near, then deep); then half the near withdrawn.
+    let env = with_deposits(moved(&[(CAP, c), (NEAR, n / 2), (DEEP, d)], 0.0), &[(9000002, c, 50), (9000003, n, 100), (9000001, d, 200)]);
+    let l = card(&env);
+    assert_eq!((st(&l, "/status"), &l["shown"]), ("ladder_deployed", &json!(false)), "{l:#}");
+    assert_eq!(st(&l, "/headline"), "Ladder: nothing is left to deposit (2 deployed, 1 partly withdrawn).");
+    assert_eq!(
+        st(row(&l, "near"), "/text"),
+        "Deposit 2 of 3 (near rung): partly withdrawn. 50% of the liquidity it was deposited with was withdrawn: about $57.43 of its $114.86 at its top; it is not offered again (re-laddering is #169's)."
+    );
+    assert_eq!(st(row(&l, "deep"), "/status"), "deployed", "the deep rung holds what was planned: never 'over'");
+    assert_eq!(st(row(&l, "cap"), "/status"), "deployed");
+    // All of the near withdrawn: withdrawn, and still nothing is offered.
+    let env = with_deposits(moved(&[(CAP, c), (NEAR, 0), (DEEP, d)], 0.0), &[(9000002, c, 50), (9000003, n, 100), (9000001, d, 200)]);
+    let l = card(&env);
+    assert_eq!(st(&l, "/status"), "ladder_deployed");
+    assert_eq!(st(row(&l, "near"), "/text"), "Deposit 2 of 3 (near rung): withdrawn. It holds no liquidity now; it is not offered again (re-laddering is #169's).");
+    assert_eq!(st(row(&l, "deep"), "/status"), "deployed");
+    // The deep rung deposited first, filled, then pulled ("pull the reserve at the right
+    // time"): withdrawn; no new deep deposit is offered, and the near rung keeps the plan
+    // the deep rung froze.
+    let env = with_deposits(moved(&[(DEEP, 0)], -2000.0), &[(9000001, d, 100)]);
+    let l = card(&env);
+    assert_eq!(st(row(&l, "deep"), "/status"), "withdrawn");
+    assert!(l["rungs"].as_array().unwrap().iter().all(|r| r["rung"] != "deep"), "no new deep deposit");
+    assert_eq!(st(row(&l, "near"), "/target_usdc"), "114.86", "frozen by what the deep rung was deposited with");
+    // Burned: no longer read as a position; detection states it closed, and it stands for
+    // its rung as withdrawn.
+    let mut env = moved(&[], 0.0);
+    env.data.derived_metrics.position_detection = Some(json!({ "status": "ok", "tracked": [{
+        "position_id": "uniswap-v4:base:9000001", "nft_id": 9000001, "role": "ladder", "rung": "deep",
+        "tick_lower": 275400, "tick_upper": 276300, "state": "closed", "mint_block": 100,
+    }] }));
+    let l = card(&replanned(prepared(env)));
+    assert_eq!(st(row(&l, "deep"), "/text"), "Deposit 3 of 3 (deep rung): withdrawn. Its NFT is burned or no longer in the wallet; it is not offered again (re-laddering is #169's).");
+    assert!(l["rungs"].as_array().unwrap().iter().all(|r| r["rung"] != "deep"));
+}
+
+#[test]
+fn test_the_cap_is_the_last_rung_and_the_ladder_reads_deployed_when_the_reserve_has_no_room_for_it() {
+    let (_, n, d) = stated_liquidity();
+    // Near and deep deposited as stated; then the wallet holds $1.10 less: the reserve
+    // leaves the cap less than the $1.00 minimum. Nothing is left to deposit.
+    let env = with_deposits(moved_with(&[(NEAR, n), (DEEP, d)], 0.0, -1.10), &[(9000003, n, 100), (9000001, d, 200)]);
+    let l = card(&env);
+    assert_eq!((st(&l, "/status"), &l["shown"]), ("ladder_deployed", &json!(false)), "{l:#}");
+    assert_eq!(st(&l, "/headline"), "Ladder deployed: 2 of 3 deposits are done, and the reserve leaves no room for the cap.");
+    assert!(st(row(&l, "cap"), "/text").starts_with("Deposit 1 of 3 (cap): not deposited: the reserve leaves $0.13 for it beside the other rungs"), "{}", st(row(&l, "cap"), "/text"));
+    // The same rule while room remains: the near rung deposited, then the price up 1% in
+    // the cap's band. The cap is offered with what the reserve leaves (about 16 NOCK),
+    // typed in the USDC field, and the card says it holds less than the budget.
+    let l = card(&with_deposits(moved(&[(NEAR, n)], 100.0), &[(9000003, n, 100)]));
+    let cap = deposit(&l, "cap");
+    assert_eq!((st(cap, "/cap/bound_by"), st(cap, "/nock_limit/field_to_type")), ("reserve", "USDC"));
+    assert_eq!(cap["nock_limit"]["holds_less_than_budget"], json!(true));
+    assert!(f(cap, "/nock/amount") < 86.0);
+    assert_eq!(st(deposit(&l, "deep"), "/usdc/to_enter"), "650.89", "the deep rung keeps the frozen plan");
+}
+
+#[test]
+fn test_a_near_rung_minted_a_band_ago_is_matched_by_its_bottom_tick_and_tracked() {
+    for ticks in [-200.0, 200.0] {
+        let env = near_found_moved(273900, 275400, ticks);
+        let l = card(&env);
+        assert_listed(&l, &["cap", "deep"]);
+        assert_eq!(st(row(&l, "near"), "/status"), "found", "{ticks}");
+        assert_eq!(st(deposit(&l, "deep"), "/usdc/to_enter"), "650.89", "{ticks}: the deep rung is not re-sized");
+        assert!(l["found_note"].is_null());
+        // Detection tracks it with that role from the card it was read against.
+        let mut prev_env = moved(&[], ticks);
+        prev_env.data.derived_metrics.ladder_suggestion = Some(card(&prev_env));
+        let prev = serde_json::to_value(&prev_env.data).unwrap();
+        let suggested = crate::position_detect::suggested_rungs(&prev);
+        assert!(!suggested.iter().any(|s| s.rung.as_deref() == Some("near") && s.tick_lower == 273900), "{ticks}: the near rung's top moved");
+        let minted = CandidateRow { tick_lower: Some(273900), tick_upper: Some(275400), ..candidate(9000003) };
+        assert_eq!(crate::position_detect::decide(&minted, OPERATOR, &suggested, &[]), Decision::Track { rung: Some("near".to_string()) }, "{ticks}");
+        // Never a second near rung beside one that is tracked, and never two bands away.
+        let tracked = vec![crate::position_detect::TrackedRange { position_id: "uniswap-v4:base:1".into(), pool_id: crate::tests_position_detect::POOL_3PCT.into(), tick_lower: 274200, tick_upper: 275400 }];
+        assert!(matches!(crate::position_detect::decide(&minted, OPERATOR, &suggested, &tracked), Decision::Offer { .. }));
+        let near_top = suggested.iter().find(|s| s.rung.as_deref() == Some("near")).unwrap().tick_lower;
+        let far = CandidateRow { tick_lower: Some(near_top - 600), tick_upper: Some(275400), ..candidate(9000004) };
+        assert!(matches!(crate::position_detect::decide(&far, OPERATOR, &suggested, &[]), Decision::Offer { .. }), "{ticks}");
+    }
 }

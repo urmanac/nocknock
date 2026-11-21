@@ -539,14 +539,17 @@ fn test_an_emptied_ladder_is_not_a_deployed_rung() {
 #[test]
 fn test_a_found_position_waiting_for_a_tap_stops_a_new_suggestion() {
     let mut env = sim_fixture();
-    let found = |choices: Value| {
+    let wallet = env.data.positions[0].wallet.clone();
+    let found_by = |choices: Value, minted_by: Value, received_from: Value| {
         json!({
             "status": "ok",
             "found_not_counted": { "count": 1, "value_usd": "115.03", "positions": [{
                 "nft_id": 3243807, "pool_label": "v4 USDC/NOCK 3.00%", "value_usd": "115.03", "choices": choices,
+                "minted_by": minted_by, "received_from": received_from,
             }] },
         })
     };
+    let found = |choices: Value| found_by(choices, json!(wallet.to_lowercase()), json!(null));
     env.data.derived_metrics.position_detection = Some(found(json!(["ladder:near", "ladder:deep", "lp", "dismiss"])));
     let l = suggest(&env, Some(0.01));
     assert_eq!(s(&l, "/status"), "found_untracked");
@@ -561,6 +564,18 @@ fn test_a_found_position_waiting_for_a_tap_stops_a_new_suggestion() {
     // A found position that cannot be a ladder (a WETH/USDC range) does not stop the card.
     env.data.derived_metrics.position_detection = Some(found(json!(["lp", "dismiss"])));
     assert_eq!(s(&suggest(&env, Some(0.01)), "/status"), "ready");
+    // A stranger's USDC/NOCK position, minted to the wallet or transferred to it (dust is
+    // cheap), never holds the card back (second review of the bottle): nor one whose mint
+    // receipt is not read yet.
+    let ladder = json!(["ladder:near", "ladder:deep", "lp", "dismiss"]);
+    for (by, from) in [
+        (json!("0x4598b3ba7d6714091b18da5d110b64f56e94e826"), json!(null)),
+        (json!(null), json!("0x4598b3ba7d6714091b18da5d110b64f56e94e826")),
+        (json!(null), json!(null)),
+    ] {
+        env.data.derived_metrics.position_detection = Some(found_by(ladder.clone(), by.clone(), from.clone()));
+        assert_eq!(s(&suggest(&env, Some(0.01)), "/status"), "ready", "{by} {from}");
+    }
 }
 
 /// Every status the card can take, for the wording checks.

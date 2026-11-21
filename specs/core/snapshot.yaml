@@ -42,7 +42,8 @@ info:
       configured). New status ladder_deployed: nothing is left to deposit (shown false).
       shape.rungs[] lists every rung of the shape in order with its number (index of
       `of`), its status (to_deposit | deployed | over | passed | none | found |
-      below_minimum | held), what a deployed one holds (holds_now) and one stated line
+      below_minimum | held | not_deposited | partly_withdrawn | withdrawn), what a
+      deployed one holds (holds_now) and one stated line
       (text); shape.of, left, deployed, passed, over, none, found, below_minimum and held
       count them, and the headline counts only what is left. The headline's "up to",
       the outcomes, wallet_after.deposits_usdc and numbers.usdc_max are the sum of the
@@ -1189,7 +1190,7 @@ components:
         share: { type: string, nullable: true, description: 'The setting''s own share at this position; null for the cap' }
         status:
           type: string
-          enum: [to_deposit, deployed, over, passed, none, found, below_minimum, held]
+          enum: [to_deposit, deployed, over, passed, none, found, below_minimum, held, not_deposited, partly_withdrawn, withdrawn]
           description: >
             to_deposit: what is left is worth at least the $1.00 minimum. deployed: the
             tracked liquidity is at least the target's (to 1e-6), or what is left is under
@@ -1197,9 +1198,15 @@ components:
             target by at least the minimum (reason says by how much). passed: the reason
             says why in this rung's terms. none: no cap (reason). found: a position found
             on-chain and not yet tracked has exactly this rung's pool and ticks, so it is
-            not offered again. below_minimum: what is left is under the minimum, or the
-            reserve leaves less than that for it. held: what is left needs NOCK the budget
-            does not give.
+            not offered again (only a position the wallet itself minted, its receipt read,
+            never one that arrived by transfer; its bottom tick and a top within one band
+            match a near or deep rung too). below_minimum: what is left is under the
+            minimum. held: what is left needs NOCK the budget does not give. not_deposited:
+            the cap, when the reserve leaves it less than the minimum beside the other rungs
+            (with every other rung settled the ladder reads deployed). partly_withdrawn and
+            withdrawn: a tracked rung holding less liquidity than it was deposited with (the
+            verified mint's), or none, or burned; never done, never offered again, and it
+            keeps standing for what it was deposited with.
         reason: { type: string, nullable: true }
         target_usdc: { type: string, description: 'Near and deep: its share of rest_usdc, as USDC at its top. The cap: its USDC now' }
         target_liquidity: { type: string, nullable: true, description: 'The target as a liquidity on the rung''s ticks: what deployed is measured against, whatever the price' }
