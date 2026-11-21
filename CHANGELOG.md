@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-11-20
+
+A patch release: the protected cash reserve is a standing rule, and dry powder honours it.
+
+- **The $950 reserve no longer lapses with the plan (#162).** It is now
+  `operator_profile.cash_reserve_usdc`, and dry powder is never more than the headroom
+  above it. Snapshot spec 2.8.3.
+- **The tick bracket chart draws the ETH/USDC ranges (#160).** This is a display-only
+  feature in a patch release, an exception the operator chose (2026-11-20): it reads
+  numbers the snapshot already carried, with no worker, protocol or spec change.
+
+Before you upgrade:
+
+- **To keep a standing reserve, add it under `operator_profile`**, for example
+  `cash_reserve_usdc: 950` (see `config.yaml.example`). A plan's own `cash_reserve_usdc`
+  still works, but it ends with the plan. Without the setting, dry powder is computed as
+  before.
+- **No database migration.** v0.8.3 runs on a v0.8.2 database and the reverse.
+
 ### Fixed
 
 - **The protected cash reserve no longer lapses with the plan, and dry powder honours it
