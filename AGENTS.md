@@ -79,7 +79,7 @@ This guide captures the operational rules, environment quirks, toolchain configu
   startup. Functions live in modules: `adapters/` (one file per protocol; `adapters/mod.rs`
   holds every function that branches on the protocol string), `onchain` (one cycle's reads),
   `valuation`, `advice`, `lp_rebuild`, `plan`, `ledger`, `claims`, `market`, `ingest`, `api`,
-  `aero_rewards`, `aero_text`, `harvest_principal`, `rewards`, `reward_text`, `closed`, `closed_text`, `fill_verify`, `fill_detection`, `fill_text`, `route_quotes`, `quote_text`, `cost_basis`, `cost_basis_text`, `rpc`, `evm`, `calldata`, `contracts`, `notify`, `mcp_text`, `reserve_text` (shared with the stdio MCP), `floor_breach` (the floor-crossing price, #165; `floor_breach_with` adds hypothetical ranges), `floor_breach_text` (shared with the stdio MCP), `ladder` (the read-only ladder simulator, #166: `GET /v1/simulate/ladder` and the `simulate_ladder` tool, from the stored snapshot only), `ladder_text` (its text, tool schema and arguments, shared with the stdio MCP), `ladder_track` (a deployed ladder tracked as `role: ladder`, #167: config checks, the deposit-receipt baseline and `data.ladders[]`; `contracts::is_nock_lp` is NOCK LP without ladders), `ladder_track_text` (its MCP lines, shared with the stdio MCP), `ladder_suggest` (the ladder suggestion, #168: `derived_metrics.ladder_suggestion` from the assembled snapshot through the simulator, a top-of-page event that never changes the directive), `ladder_suggest_text` (its get_shot_advice section, shared with the stdio MCP), `mcp_http`, and `tests` (each feature since #91 adds its own `tests_<topic>.rs`; the v0.8.1 burn-down's are in `tests_burndown.rs`).
+  `aero_rewards`, `aero_text`, `harvest_principal`, `rewards`, `reward_text`, `closed`, `closed_text`, `fill_verify`, `fill_detection`, `fill_text`, `route_quotes`, `quote_text`, `cost_basis`, `cost_basis_text`, `rpc`, `evm`, `calldata`, `contracts`, `notify`, `mcp_text`, `reserve_text` (shared with the stdio MCP), `floor_breach` (the floor-crossing price, #165; `floor_breach_with` adds hypothetical ranges), `floor_breach_text` (shared with the stdio MCP), `ladder` (the read-only ladder simulator, #166: `GET /v1/simulate/ladder` and the `simulate_ladder` tool, from the stored snapshot only), `ladder_text` (its text, tool schema and arguments, shared with the stdio MCP), `ladder_track` (a deployed ladder tracked as `role: ladder`, #167: config checks, the deposit-receipt baseline and `data.ladders[]`; `contracts::is_nock_lp` is NOCK LP without ladders), `ladder_track_text` (its MCP lines, shared with the stdio MCP), `ladder_suggest` (the ladder suggestion, #168: `derived_metrics.ladder_suggestion` from the assembled snapshot through the simulator, a top-of-page event that never changes the directive), `ladder_suggest_text` (its get_shot_advice section, shared with the stdio MCP), `tracked` (positions tracked from the database, v0.9.0: the store and its SQL, the merge after `config.yaml`'s positions, the owner check; `PositionStore::Mem` is the same rules in memory for tests), `position_detect` (finding the wallet's Uniswap v4 position NFTs on-chain before the position reads: the transfer scan, the decision to track or offer, `derived_metrics.position_detection` and the `/v1/positions/*` routes), `position_detect_text` (its MCP lines, shared with the stdio MCP), `mcp_http`, and `tests` (each feature since #91 adds its own `tests_<topic>.rs`; the v0.8.1 burn-down's are in `tests_burndown.rs`).
   The HTTP router is `api::api_router`, with the cross-site write guard (#133); every
   ingestion cycle runs through `ingest::CycleGate`, one at a time (#134).
   `closed` (#144) decides when a configured position's NFT provably does not exist; the
@@ -93,6 +93,15 @@ This guide captures the operational rules, environment quirks, toolchain configu
   Moved items are `pub(crate)`. `testdata/golden_snapshot.json` pins the snapshot bytes: a
   refactor must leave it untouched; an intended behaviour change regenerates it with
   `NOCKNOCK_BLESS_GOLDEN=1 cargo test test_golden_snapshot` and the diff is reviewed.
+  `tracked` and `position_detect` (v0.9.0) use runtime `sqlx::query`, so the `.sqlx` cache
+  does not change with them. Their SQL is run for real by two ignored tests against a
+  scratch PostgreSQL whose name ends in `_scratch` (the migrations are applied to it):
+  `NOCKNOCK_SCRATCH_DATABASE_URL=postgres://…/nocknock_scratch cargo test scratch_database -- --ignored`.
+  CI has no PostgreSQL: run it before a release that touches a query or a migration.
+  `testdata/position_detect/chain_fixture.json` holds recorded chain answers for the scan
+  (ONCHAIN_INTEGRATION.md §15); a position is tracked by itself only on an exact pool and
+  tick match with a suggested rung: never loosen that, or a stranger's dust mint on a
+  rung's ticks marks it deployed.
 - **Binaries Produced**:
   - `nocknock-ingestion-worker`: Background ingestion daemon and Axum REST API (port 8080).
   - `nocknock-mcp`: Stdio Model Context Protocol (MCP) server for Claude Desktop, Gemini Antigravity, and AI agents.
@@ -251,6 +260,12 @@ charts restart. See
   the newer build, or delete the newer rows from `_sqlx_migrations` in the `nocknock-db`
   container (the migrations are additive, so older code runs on the newer schema), or start
   from an empty database. `deploy.sh` does not ship nested git worktrees (#128).
+  The newest is `20261121000013_tracked_positions` (v0.9.0: `tracked_positions`,
+  `position_candidates`, `position_detection_state`). It adds a second reason not to go
+  back: a build older than v0.9.0 does not read `tracked_positions`, so once a position is
+  tracked from the chain an older build publishes a total WITHOUT it and says nothing.
+  Before running one, copy each row's `config_entry` from `GET /v1/positions/found` into
+  `positions:` in `config.yaml` (DEPLOYMENT.md section 5).
 - **Config and secrets**: the operator's `ingestion-worker/config.yaml` on the
   workstation is the source of truth (gitignored; it holds the Alchemy key, the
   accumulation plan and the operator's limits). `deploy.sh` stores it as the Podman

@@ -21,7 +21,7 @@ fn n(v: &Value, ptr: &str) -> Option<u64> {
 }
 
 fn short(h: &str) -> String {
-    if h.len() > 12 { format!("{}…", &h[..10]) } else { h.to_string() }
+    if h.chars().count() > 12 { format!("{}…", h.chars().take(10).collect::<String>()) } else { h.to_string() }
 }
 
 /// A one-tap choice in words, as the dashboard labels its button.

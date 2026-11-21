@@ -15,7 +15,7 @@
 //! - IGNORE a pool with a token outside the whitelist (dust), a hooked pool, an NFT the
 //!   wallet does not own and an empty one. They are counted, never listed as offers.
 //!
-//! How it scans (ONCHAIN_INTEGRATION.md §14). The position manager emits the ERC-721
+//! How it scans (ONCHAIN_INTEGRATION.md §15). The position manager emits the ERC-721
 //! `Transfer(from, to, id)` with the wallet as an indexed topic, so two reads find the
 //! NFTs, and both are hints only (every fact acted on is read from the chain again):
 //!   1. `eth_getLogs`, exact and with no index delay. One request covers the whole
@@ -77,7 +77,8 @@ fn addr_topic(addr: &str) -> String {
 
 /// "0xee11…7a45". Pure.
 pub(crate) fn short_addr(a: &str) -> String {
-    if a.len() > 12 { format!("{}…{}", &a[..6], &a[a.len() - 4..]) } else { a.to_string() }
+    // An address is ASCII; anything else is printed whole rather than cut mid-character.
+    if a.is_ascii() && a.len() > 12 { format!("{}…{}", &a[..6], &a[a.len() - 4..]) } else { a.to_string() }
 }
 
 // ------------------------------------------------------------------
@@ -672,6 +673,8 @@ pub(crate) fn decide(c: &CandidateRow, wallet: &str, suggested: &[SuggestedRung]
         (Some(_), Some(by)) => why.push(format!("its mint was sent by {}, not by your wallet", short_addr(by))),
         _ => match c.received_from.as_deref() {
             Some(from) if lc(from) != ZERO_ADDRESS => why.push(format!("it reached the wallet by transfer from {}, it was not minted to it", short_addr(from))),
+            // Its receipt was read and is no mint: the reason is stated below.
+            _ if c.deposit_check.is_some() => {}
             _ => why.push("its mint transaction has not been read yet".to_string()),
         },
     }
@@ -991,12 +994,19 @@ impl Reader<'_> {
             RpcAnswer::Result(v) if v.get("result").is_some_and(|r| r.is_object()) => v["result"].clone(),
             _ => return Classified::Unread,
         };
-        let Ok(facts) = mint_facts(&receipt, &self.wallet, nft_id) else {
-            return Classified::Row(row);
+        // A receipt that was read and does not show the mint is a verdict too: it is
+        // stored, so the same receipt is not asked for again every cycle.
+        let facts = match mint_facts(&receipt, &self.wallet, nft_id) {
+            Ok(f) if f.minted_to_wallet => f,
+            Ok(_) => {
+                row.deposit_check = Some("the transaction that brought it to the wallet does not mint it to the wallet".to_string());
+                return Classified::Row(row);
+            }
+            Err(why) => {
+                row.deposit_check = Some(format!("the transaction that brought it to the wallet could not be read as a mint ({why})"));
+                return Classified::Row(row);
+            }
         };
-        if !facts.minted_to_wallet {
-            return Classified::Row(row);
-        }
         row.mint_tx = Some(tx);
         row.mint_block = Some(facts.block);
         row.minted_by = Some(facts.sender);
@@ -1500,7 +1510,10 @@ pub(crate) async fn detect_positions(inp: &DetectionInputs<'_>) -> DetectionOutc
         let (why_not_automatic, choices) = match decision {
             Decision::Offer { why_not_automatic, choices } => (why_not_automatic, choices),
             Decision::Track { .. } if dismissed => (vec!["you set it aside (NOT NOW or UNTRACK)".to_string()], track_choices(c)),
-            Decision::Track { .. } => (vec!["it was not read this cycle, so it is not tracked on an old reading".to_string()], track_choices(c)),
+            Decision::Track { .. } if read.is_none() => (vec!["it was not read this cycle, so it is not tracked on an old reading".to_string()], track_choices(c)),
+            // It matched and could not be written (the row did not pass its checks, or
+            // the table could not be written): said as it is, and tried again next cycle.
+            Decision::Track { .. } => (vec!["it matches a suggested rung, and tracking it did not go through this cycle; it is tried again next cycle".to_string()], track_choices(c)),
         };
         out.found.push(FoundPosition { row: c.clone(), dismissed, why_not_automatic, choices, read });
     }

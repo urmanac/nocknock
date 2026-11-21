@@ -495,6 +495,17 @@ fn test_the_transfer_index_page_parses_strictly() {
 }
 
 #[test]
+fn test_short_forms_never_cut_a_character_in_half() {
+    assert_eq!(short_addr(OPERATOR), "0xee11…7a45");
+    assert_eq!(short_addr("0x12"), "0x12");
+    // A node could answer anything in a `from` field: it is printed whole, never sliced.
+    assert_eq!(short_addr("ééééééééééééé"), "ééééééééééééé");
+    assert_eq!(crate::position_detect_text::choice_words("ladder:near"), "TRACK AS NEAR RUNG");
+    assert_eq!(crate::position_detect_text::choice_words("untrack"), "UNTRACK");
+    assert_eq!(crate::position_detect_text::choice_words("else"), "ELSE");
+}
+
+#[test]
 fn test_newest_transfer_wins_per_nft() {
     let t = |id: u64, block: i64, tx: &str| TransferSeen { nft_id: id, block, tx_hash: tx.to_string(), from: "0x0".to_string() };
     let mut seen = HashMap::new();
@@ -671,6 +682,9 @@ fn test_a_position_is_tracked_by_itself_only_when_every_condition_holds() {
         assert_eq!(why, vec![expect.to_string()], "{name}");
         assert_eq!(choices, all, "{name}: a USDC/NOCK range with a known pool has every choice");
     }
+    // A receipt that was read and is not a mint of it: one reason, the receipt's.
+    let no_mint = CandidateRow { mint_tx: None, mint_block: None, minted_by: None, deposit_check: Some("the transaction that brought it to the wallet does not mint it to the wallet".to_string()), ..c.clone() };
+    assert_eq!(offered(&no_mint, &near, &[]).0, vec!["its mint is not a plain deposit into it: the transaction that brought it to the wallet does not mint it to the wallet".to_string()]);
     // Several failed conditions are all stated.
     let stranger_off = CandidateRow { minted_by: Some(MINTER.to_string()), tick_lower: Some(273600), ..c.clone() };
     assert_eq!(offered(&stranger_off, &near, &[]).0.len(), 2);
