@@ -2654,6 +2654,10 @@ struct TrackedRung {
     l_now: f64,
     /// Its NFT is burned or left the wallet (position detection's tracked row says so).
     gone: bool,
+    /// What it was deposited with is known (its verified mint receipt, or what the database
+    /// remembers: the receipt's liquidity and the most a cycle read it holding) and above
+    /// zero. A rung whose deposit is not known never freezes the plan.
+    known: bool,
     /// What it holds as all USDC at its top: its liquidity times the USDC one unit holds there.
     v_top: f64,
     /// What it holds now (stated, never a sizing input).
@@ -2690,6 +2694,8 @@ struct PlanRung {
     deposited_v: f64,
     now_v: f64,
     gone: bool,
+    /// A counterpart's deposit is not known: it never freezes the plan.
+    unknown_deposit: bool,
     cap: Option<CapSizing>,
     status: &'static str,
     reason: Option<String>,
@@ -2784,7 +2790,26 @@ impl LadderCtx<'_> {
         Ok(CapSizing { tick_lower: tl, tick_upper: tu, usdc: l * u1, nock: l * n1, l, per_l: (u1, n1), bound_by, bound_by_limit: limit_name, budget, limit, note, band_rule })
     }
 
-    /// The tracked ladders (role: ladder) in the ladder pool, with what each holds.
+    /// What the database remembers of a tracked row (position detection's `tracked[]`):
+    /// its deposit's liquidity and the most liquidity a cycle read it holding.
+    fn remembered(&self, position_id: &str) -> (Option<f64>, Option<f64>) {
+        let row = self
+            .env
+            .data
+            .derived_metrics
+            .position_detection
+            .as_ref()
+            .and_then(|d| d.get("tracked"))
+            .and_then(|v| v.as_array())
+            .and_then(|rows| rows.iter().find(|r| r.get("position_id").and_then(|v| v.as_str()) == Some(position_id)).cloned());
+        let num = |k: &str| row.as_ref().and_then(|r| r.get(k)).and_then(|v| v.as_str()).and_then(|v| v.parse::<f64>().ok());
+        (num("deposit_liquidity"), num("max_liquidity_seen"))
+    }
+
+    /// The tracked ladders (role: ladder) in the ladder pool, with what each holds. Each
+    /// stands for the largest of its deposit's liquidity (the verified mint receipt, or the
+    /// database's copy of it), the most liquidity a cycle read it holding, and what it
+    /// holds now: a withdrawal, a burn or a transfer away never shrinks what it stands for.
     fn tracked_rungs(&self) -> Vec<TrackedRung> {
         let raw = &self.book.raw;
         let mut out: Vec<TrackedRung> = raw
@@ -2797,8 +2822,10 @@ impl LadderCtx<'_> {
                 let reading = self.env.data.ladders.iter().find(|r| r.position_id == p.position_id);
                 let block = reading.and_then(|r| r.since_deposit.deposit_block);
                 let l_now = p.liquidity as f64;
-                let l_dep = reading.and_then(|r| r.since_deposit.deposit_liquidity.as_deref()).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
-                let l = l_now.max(l_dep);
+                let l_receipt = reading.and_then(|r| r.since_deposit.deposit_liquidity.as_deref()).and_then(|v| v.parse::<f64>().ok());
+                let (l_row, l_max) = self.remembered(&p.position_id);
+                let l_known = [l_receipt, l_row, l_max].into_iter().flatten().fold(0.0f64, f64::max);
+                let l = l_now.max(l_known);
                 TrackedRung {
                     position_id: p.position_id.clone(),
                     rung: tag.rung.clone(),
@@ -2807,6 +2834,7 @@ impl LadderCtx<'_> {
                     l,
                     l_now,
                     gone: false,
+                    known: l_known > 0.0,
                     v_top: l * self.usdc_per_l_at_top(p.tick_lower, p.tick_upper),
                     usdc_now,
                     nock_now,
@@ -2826,15 +2854,20 @@ impl LadderCtx<'_> {
                 continue;
             }
             let (Some(tl), Some(tu)) = (row.get("tick_lower").and_then(|v| v.as_i64()), row.get("tick_upper").and_then(|v| v.as_i64())) else { continue };
+            // It keeps standing for what it was deposited with, as the database remembers it.
+            let (l_row, l_max) = self.remembered(&id);
+            let l = [l_row, l_max].into_iter().flatten().fold(0.0f64, f64::max);
+            let (tl, tu) = (tl as i32, tu as i32);
             out.push(TrackedRung {
                 position_id: id,
                 rung: row.get("rung").and_then(|v| v.as_str()).map(str::to_string),
-                tl: tl as i32,
-                tu: tu as i32,
-                l: 0.0,
+                tl,
+                tu,
+                l,
                 l_now: 0.0,
                 gone: true,
-                v_top: 0.0,
+                known: l > 0.0,
+                v_top: l * self.usdc_per_l_at_top(tl, tu),
                 usdc_now: 0.0,
                 nock_now: 0.0,
                 found: false,
@@ -2891,6 +2924,7 @@ impl LadderCtx<'_> {
                     l,
                     l_now: l,
                     gone: false,
+                    known: true,
                     v_top,
                     usdc_now,
                     nock_now,
@@ -2964,6 +2998,7 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
             deposited_v: 0.0,
             now_v: 0.0,
             gone: false,
+            unknown_deposit: false,
             cap: None,
             status: "to_deposit",
             reason: None,
@@ -3106,6 +3141,7 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
         p.deposited_v += t.l * w_own;
         p.now_v += t.l_now * w_own;
         p.gone |= t.gone;
+        p.unknown_deposit |= !t.known;
         if t.found {
             p.found.push(t.position_id.clone());
         } else {
@@ -3182,6 +3218,9 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
     let held: Vec<(f64, String, f64, Option<i64>)> = plan
         .iter()
         .filter(|p| p.role != "cap" && !(p.counterparts.is_empty() && p.found.is_empty()))
+        // A rung whose deposit is not known (a config.yaml ladder with no deposit_tx, or a
+        // receipt not read yet with nothing remembered) never freezes the plan.
+        .filter(|p| !p.unknown_deposit && p.deposited_v > 0.0)
         .filter_map(|p| p.share.filter(|s| *s > 0.0).map(|s| (v_of(p) / s, p.role.clone(), v_of(p), p.first_block)))
         .collect();
     let by_block = !held.is_empty() && held.iter().all(|h| h.3.is_some());
@@ -3235,7 +3274,11 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
             (p.status, p.reason) = st;
             return;
         }
-        (p.status, p.reason) = if held && -rem_v >= minimum.max(tol) {
+        (p.status, p.reason) = if held && p.unknown_deposit && -rem_v >= minimum.max(tol) {
+            // Its deposit is not known, so the plan was not frozen by it: it is stated as
+            // deployed with that note, never as over a target the gate sized without it.
+            ("deployed", None)
+        } else if held && -rem_v >= minimum.max(tol) {
             ("over", Some(format!("the tracked rung holds ${} of USDC at its top, ${} more than its target", fx(v_tracked, 2), fx(-rem_v, 2))))
         } else if found_only {
             ("found", Some(format!("the position {}, which your wallet minted, is this rung in this pool; NockNock tracks it by itself and counts it from then, so it is not offered again", p.found.join(", "))))
@@ -3328,10 +3371,31 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
             let rest = (headroom - cap_usdc).max(0.0);
             set_targets(&mut plan, rest);
             plan.iter_mut().filter(|p| p.role != "cap").for_each(&plan_lower);
-            (rest, "what the reserve gate allows now, less the cap's USDC: no near or deep rung is deposited yet, so this follows the gate until one is".to_string())
+            let unknown: Vec<String> = plan.iter().filter(|p| p.role != "cap" && p.unknown_deposit).map(|p| format!("the {} rung", p.role)).collect();
+            let rule = if unknown.is_empty() {
+                "what the reserve gate allows now, less the cap's USDC: no near or deep rung is deposited yet, so this follows the gate until one is".to_string()
+            } else {
+                format!(
+                    "what the reserve gate allows now, less the cap's USDC: {} is tracked, but what it was deposited with is not known (no deposit_tx in config.yaml, or its mint receipt not read yet), so it cannot fix the plan",
+                    unknown.join(" and ")
+                )
+            };
+            (rest, rule)
         }
     };
+    // A deposit not known is stated on the rung's row.
+    for p in plan.iter_mut().filter(|p| p.unknown_deposit && p.note.is_none() && !p.gone) {
+        p.note = Some("what it was deposited with is not known (no deposit_tx in config.yaml, or its mint receipt not read yet), so it does not fix the plan and a withdrawal from it cannot be told".to_string());
+    }
+    // Once any rung of the shape was pulled (partly withdrawn or withdrawn), the cap is not
+    // offered: the pulled rung's NOCK went back to the wallet and into the LP budget the
+    // cap is sized by, and re-laddering is #169's.
+    let pulled = plan.iter().any(|p| matches!(p.status, "withdrawn" | "partly_withdrawn"));
     for p in plan.iter_mut().filter(|p| p.role == "cap") {
+        if pulled && p.counterparts.is_empty() && p.found.is_empty() && !p.passed {
+            (p.status, p.reason) = ("not_deposited", Some("not offered after a rung was pulled; re-laddering is #169's".to_string()));
+            continue;
+        }
         let held = !(p.counterparts.is_empty() && p.found.is_empty());
         let found_only = p.counterparts.is_empty() && !p.found.is_empty();
         if let Some(st) = withdrawal(p) {

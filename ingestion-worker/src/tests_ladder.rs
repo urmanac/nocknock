@@ -1082,6 +1082,20 @@ pub(crate) fn fixture_with_rungs_moved(rungs: &[(u64, Option<&str>, i32, i32, u1
     envelope_of(raw, &profile(Some(950.0)))
 }
 
+/// The tracked ladders' readings, each as if its mint receipt had been verified with the
+/// liquidity it holds now (the operator's flow: detection tracks a rung from its mint).
+/// A rung's deposit is what freezes the ladder plan (third review of the bottle); one
+/// with no known deposit never does. Pure.
+pub(crate) fn readings_with_deposits(data: &SnapshotData) -> Vec<LadderReading> {
+    let mut rs = ladder_readings(&stored_book(data).raw);
+    for r in rs.iter_mut() {
+        if r.since_deposit.deposit_liquidity.is_none() {
+            r.since_deposit.deposit_liquidity = Some(r.since_deposit.current_liquidity.clone());
+        }
+    }
+    rs
+}
+
 /// The fixture with the price-source pool at another sqrtPriceX96 (#166 review).
 pub(crate) fn fixture_at_sqrt(sqrt: U256) -> SnapshotEnvelope {
     let mut v = v4();

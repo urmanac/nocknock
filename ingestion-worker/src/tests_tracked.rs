@@ -41,6 +41,8 @@ fn ladder_row(wallet: &str, nft: u64, mint_block: Option<i64>) -> TrackedRow {
         mint_block,
         source: TRACKED_SOURCE_DETECTED.to_string(),
         tracked_at: None,
+        deposit_liquidity: None,
+        max_liquidity_seen: None,
     }
 }
 
@@ -186,10 +188,10 @@ async fn store_contract(store: &PositionStore, w: &str, other: &str) {
     // ---- position_detection_state: PRIMARY KEY (wallet, protocol, network) ----
     assert_eq!(store.scan_state(w, "uniswap-v4", "base").await.unwrap(), ScanState::default(), "nothing read yet");
     let t = |s: i64| Utc.timestamp_opt(1_795_000_000 + s, 0).unwrap();
-    let s1 = ScanState { logs_from_block: Some(58_601_286), logs_to_block: Some(58_646_285), history_complete_at: None, last_checked_at: Some(t(0)) };
+    let s1 = ScanState { logs_from_block: Some(58_601_286), logs_to_block: Some(58_646_285), history_complete_at: None, last_checked_at: Some(t(0)), refresh_cursor: 0 };
     store.save_scan_state(w, "uniswap-v4", "base", &s1).await.unwrap();
     assert_eq!(store.scan_state(&lw, "uniswap-v4", "base").await.unwrap(), s1);
-    let s2 = ScanState { logs_from_block: Some(0), logs_to_block: Some(58_647_000), history_complete_at: Some(t(300)), last_checked_at: Some(t(300)) };
+    let s2 = ScanState { logs_from_block: Some(0), logs_to_block: Some(58_647_000), history_complete_at: Some(t(300)), last_checked_at: Some(t(300)), refresh_cursor: 120 };
     store.save_scan_state(w, "uniswap-v4", "base", &s2).await.unwrap();
     assert_eq!(store.scan_state(w, "uniswap-v4", "base").await.unwrap(), s2, "one row per wallet, protocol and network");
     // A cursor can be cleared, and another protocol's or wallet's is its own.

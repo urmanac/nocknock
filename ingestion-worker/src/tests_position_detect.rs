@@ -1020,6 +1020,9 @@ async fn test_an_exact_rung_match_is_tracked_with_its_mint_as_the_baseline_in_th
             mint_block: Some(53008241),
             source: "detected".to_string(),
             tracked_at: Some(clock("operator")),
+            // Recorded by the cycle after its position reads, not by detection.
+            deposit_liquidity: None,
+            max_liquidity_seen: None,
         }]
     );
 
@@ -1054,7 +1057,7 @@ async fn test_an_exact_rung_match_is_tracked_with_its_mint_as_the_baseline_in_th
             "position_id": "uniswap-v4:base:3163450", "nft_id": 3163450, "config_id": "tracked-v4-3163450",
             "role": "ladder", "rung": null, "rung_note": RUNG_UNSET_NOTE_TRACKED,
             "source": "detected", "deposit_tx": MINT_6CDA, "mint_block": 53008241,
-            "tracked_at": "2026-11-17T12:47:16+00:00", "tick_lower": 262200, "tick_upper": 282300,
+            "tracked_at": "2026-11-17T12:47:16+00:00", "tick_lower": 262200, "tick_upper": 282300, "deposit_liquidity": null, "max_liquidity_seen": null,
             "state": "counted", "note": null,
             "choices": ["ladder:cap", "ladder:near", "ladder:deep", "untrack"],
         }])

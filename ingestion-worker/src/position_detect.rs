@@ -770,6 +770,9 @@ pub(crate) fn tracked_row_for(c: &CandidateRow, role: Option<&str>, rung: Option
         mint_block: c.mint_block,
         source: source.to_string(),
         tracked_at: None,
+        // Recorded from this cycle's reads once it is tracked (record_tracked_liquidity).
+        deposit_liquidity: None,
+        max_liquidity_seen: None,
     })
 }
 
@@ -1761,6 +1764,10 @@ fn tracked_json(r: &TrackedReport, raw: &RawOnChainData) -> Value {
         "tracked_at": row.tracked_at.map(|t| t.to_rfc3339()),
         "tick_lower": row.tick_lower,
         "tick_upper": row.tick_upper,
+        // What a ladder rung stands for once withdrawn, burned or sent away: its mint's
+        // liquidity and the most a cycle read it holding (decimal strings; null unknown).
+        "deposit_liquidity": row.deposit_liquidity.map(|l| l.to_string()),
+        "max_liquidity_seen": row.max_liquidity_seen.map(|l| l.to_string()),
         "state": state,
         "note": note,
         "choices": if ladder && state == "counted" && row.rung.is_none() {

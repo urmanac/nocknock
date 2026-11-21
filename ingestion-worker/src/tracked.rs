@@ -60,6 +60,10 @@ pub(crate) struct TrackedRow {
     pub(crate) source: String,
     /// Set by the database; None on a row not yet stored.
     pub(crate) tracked_at: Option<DateTime<Utc>>,
+    /// The liquidity its verified mint receipt added; None until read.
+    pub(crate) deposit_liquidity: Option<u128>,
+    /// The most liquidity a cycle has read it holding; None until read.
+    pub(crate) max_liquidity_seen: Option<u128>,
 }
 
 /// One row of `position_candidates`: what the chain said about one NFT when last read.
@@ -101,6 +105,8 @@ pub(crate) struct ScanState {
     pub(crate) logs_to_block: Option<i64>,
     pub(crate) history_complete_at: Option<DateTime<Utc>>,
     pub(crate) last_checked_at: Option<DateTime<Utc>>,
+    /// Where the next cycle's re-reads of untracked NFTs start.
+    pub(crate) refresh_cursor: i64,
 }
 
 /// The tables of `PositionStore::Mem`.
@@ -209,10 +215,48 @@ impl PositionStore {
                         if row.deposit_tx.is_some() {
                             old.deposit_tx = row.deposit_tx.clone();
                         }
+                        old.deposit_liquidity = old.deposit_liquidity.or(row.deposit_liquidity);
                     }
                     None => t.tracked.push(TrackedRow { tracked_at: Some(at), ..row }),
                 }
                 Ok(())
+            }
+        }
+    }
+
+    /// Remember what a tracked rung stands for: its deposit's liquidity (kept once known)
+    /// and the most liquidity a cycle has read it holding (`max_seen`, already the larger
+    /// of the stored value and this cycle's read). True when a row was updated.
+    pub(crate) async fn record_liquidity(&self, wallet: &str, position_key: &str, deposit: Option<u128>, max_seen: u128) -> Result<bool> {
+        let wallet = lc(wallet);
+        match self {
+            PositionStore::Pg(db) => {
+                let done = sqlx::query(
+                    "UPDATE tracked_positions SET deposit_liquidity = COALESCE(deposit_liquidity, $3), max_liquidity_seen = $4, updated_at = NOW() \
+                     WHERE wallet = $1 AND position_key = $2",
+                )
+                .bind(&wallet)
+                .bind(position_key)
+                .bind(deposit.map(|d| d.to_string()))
+                .bind(max_seen.to_string())
+                .execute(db)
+                .await?;
+                Ok(done.rows_affected() > 0)
+            }
+            #[cfg(test)]
+            PositionStore::Mem(m) => {
+                let mut t = m.lock().unwrap();
+                if t.unreadable {
+                    return Err(mem_unreadable());
+                }
+                match t.tracked.iter_mut().find(|r| r.wallet == wallet && r.position_key == position_key) {
+                    Some(r) => {
+                        r.deposit_liquidity = r.deposit_liquidity.or(deposit);
+                        r.max_liquidity_seen = Some(max_seen);
+                        Ok(true)
+                    }
+                    None => Ok(false),
+                }
             }
         }
     }
@@ -326,7 +370,7 @@ impl PositionStore {
         match self {
             PositionStore::Pg(db) => {
                 let row = sqlx::query(
-                    "SELECT logs_from_block, logs_to_block, history_complete_at, last_checked_at \
+                    "SELECT logs_from_block, logs_to_block, history_complete_at, last_checked_at, refresh_cursor \
                      FROM position_detection_state WHERE wallet = $1 AND protocol = $2 AND network = $3",
                 )
                 .bind(&wallet)
@@ -341,6 +385,7 @@ impl PositionStore {
                         logs_to_block: r.try_get("logs_to_block")?,
                         history_complete_at: r.try_get("history_complete_at")?,
                         last_checked_at: r.try_get("last_checked_at")?,
+                        refresh_cursor: r.try_get("refresh_cursor")?,
                     }),
                 }
             }
@@ -361,12 +406,12 @@ impl PositionStore {
             PositionStore::Pg(db) => {
                 sqlx::query(
                     "INSERT INTO position_detection_state \
-                        (wallet, protocol, network, logs_from_block, logs_to_block, history_complete_at, last_checked_at) \
-                     VALUES ($1, $2, $3, $4, $5, $6, $7) \
+                        (wallet, protocol, network, logs_from_block, logs_to_block, history_complete_at, last_checked_at, refresh_cursor) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
                      ON CONFLICT (wallet, protocol, network) DO UPDATE SET \
                         logs_from_block = EXCLUDED.logs_from_block, logs_to_block = EXCLUDED.logs_to_block, \
                         history_complete_at = EXCLUDED.history_complete_at, last_checked_at = EXCLUDED.last_checked_at, \
-                        updated_at = NOW()",
+                        refresh_cursor = EXCLUDED.refresh_cursor, updated_at = NOW()",
                 )
                 .bind(&wallet)
                 .bind(protocol)
@@ -375,6 +420,7 @@ impl PositionStore {
                 .bind(s.logs_to_block)
                 .bind(s.history_complete_at)
                 .bind(s.last_checked_at)
+                .bind(s.refresh_cursor)
                 .execute(db)
                 .await?;
                 Ok(())
@@ -399,7 +445,7 @@ impl PositionStore {
 async fn pg_tracked(db: &PgPool, wallet: &str) -> Result<Vec<TrackedRow>> {
     let rows = sqlx::query(
         "SELECT wallet, position_key, protocol, network, nft_id, pool_id, currency0, currency1, tick_lower, tick_upper, \
-                tick_spacing, role, rung, deposit_tx, mint_block, source, tracked_at \
+                tick_spacing, role, rung, deposit_tx, mint_block, source, tracked_at, deposit_liquidity, max_liquidity_seen \
          FROM tracked_positions WHERE wallet = $1 ORDER BY mint_block ASC NULLS LAST, nft_id ASC",
     )
     .bind(wallet)
@@ -408,6 +454,10 @@ async fn pg_tracked(db: &PgPool, wallet: &str) -> Result<Vec<TrackedRow>> {
     let mut out = Vec::with_capacity(rows.len());
     for r in &rows {
         let nft: i64 = r.try_get("nft_id")?;
+        let liquidity = |col: &str| -> Result<Option<u128>> {
+            let v: Option<String> = r.try_get(col)?;
+            v.map(|s| s.parse::<u128>().map_err(|_| anyhow::anyhow!("tracked_positions.{col} is not a liquidity: {s}"))).transpose()
+        };
         out.push(TrackedRow {
             wallet: r.try_get("wallet")?,
             position_key: r.try_get("position_key")?,
@@ -426,6 +476,8 @@ async fn pg_tracked(db: &PgPool, wallet: &str) -> Result<Vec<TrackedRow>> {
             mint_block: r.try_get("mint_block")?,
             source: r.try_get("source")?,
             tracked_at: Some(r.try_get("tracked_at")?),
+            deposit_liquidity: liquidity("deposit_liquidity")?,
+            max_liquidity_seen: liquidity("max_liquidity_seen")?,
         });
     }
     Ok(out)
@@ -436,7 +488,8 @@ async fn pg_tracked(db: &PgPool, wallet: &str) -> Result<Vec<TrackedRow>> {
 async fn pg_write_tracked(db: &PgPool, row: &TrackedRow, replace: bool) -> Result<bool> {
     let on_conflict = if replace {
         "DO UPDATE SET role = EXCLUDED.role, rung = EXCLUDED.rung, source = EXCLUDED.source, \
-            deposit_tx = COALESCE(EXCLUDED.deposit_tx, tracked_positions.deposit_tx), updated_at = NOW()"
+            deposit_tx = COALESCE(EXCLUDED.deposit_tx, tracked_positions.deposit_tx), \
+            deposit_liquidity = COALESCE(tracked_positions.deposit_liquidity, EXCLUDED.deposit_liquidity), updated_at = NOW()"
     } else {
         "DO NOTHING"
     };
@@ -444,8 +497,8 @@ async fn pg_write_tracked(db: &PgPool, row: &TrackedRow, replace: bool) -> Resul
     let sql = format!(
         "INSERT INTO tracked_positions \
             (wallet, position_key, protocol, network, nft_id, pool_id, currency0, currency1, tick_lower, tick_upper, \
-             tick_spacing, role, rung, deposit_tx, mint_block, source) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) \
+             tick_spacing, role, rung, deposit_tx, mint_block, source, deposit_liquidity, max_liquidity_seen) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) \
          ON CONFLICT (wallet, position_key) {on_conflict}"
     );
     let done = sqlx::query(&sql)
@@ -465,6 +518,8 @@ async fn pg_write_tracked(db: &PgPool, row: &TrackedRow, replace: bool) -> Resul
         .bind(&row.deposit_tx)
         .bind(row.mint_block)
         .bind(&row.source)
+        .bind(row.deposit_liquidity.map(|d| d.to_string()))
+        .bind(row.max_liquidity_seen.map(|d| d.to_string()))
         .execute(db)
         .await?;
     Ok(done.rows_affected() > 0)
@@ -757,6 +812,39 @@ pub(crate) async fn tracked_owners(http: &Client, rpc_url: &str, wallet: &str, r
         }
     }
     Ok(not_owned)
+}
+
+/// What to remember of each database-tracked ladder after this cycle's reads: its
+/// verified mint's liquidity (once known) and the most liquidity a cycle read it holding.
+/// Only rows that changed. A rung not read this cycle (burned, sent away) keeps what was
+/// remembered. Pure.
+pub(crate) fn liquidity_updates(raw: &RawOnChainData) -> Vec<(String, Option<u128>, u128)> {
+    let mut out = Vec::new();
+    for r in raw.tracked_report.iter().filter(|r| r.fate == TrackedFate::Merged && r.row.role.as_deref() == Some(LADDER_ROLE)) {
+        let key = &r.row.position_key;
+        let Some(now) = raw.positions.iter().find(|p| &p.position_id == key).map(|p| p.liquidity) else { continue };
+        let deposit = match raw.ladder_baselines.get(key) {
+            Some(LadderBaselineRead::Verified(d)) => Some(d.liquidity),
+            _ => None,
+        };
+        let max_seen = [r.row.max_liquidity_seen, Some(now), deposit].into_iter().flatten().max().unwrap_or(now);
+        let new_deposit = deposit.filter(|_| r.row.deposit_liquidity.is_none());
+        if new_deposit.is_some() || Some(max_seen) != r.row.max_liquidity_seen {
+            out.push((key.clone(), new_deposit, max_seen));
+        }
+    }
+    out
+}
+
+/// Write `liquidity_updates` after the cycle's reads. It never fails the cycle: a write
+/// that fails is logged and tried again next cycle.
+pub(crate) async fn record_tracked_liquidity(store: &PositionStore, wallet: Option<&str>, raw: &RawOnChainData) {
+    let Some(wallet) = wallet else { return };
+    for (key, deposit, max_seen) in liquidity_updates(raw) {
+        if let Err(e) = store.record_liquidity(wallet, &key, deposit, max_seen).await {
+            tracing::warn!("Tracked positions: could not record the liquidity of {key}: {e}");
+        }
+    }
 }
 
 /// The words a failed read of the tracked-positions table fails the cycle with. The

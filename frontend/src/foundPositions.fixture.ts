@@ -259,7 +259,9 @@ export const DETECTION_TRACKED_BY_ITSELF: PositionDetection = {
         "untrack"
       ],
       "config_id": "tracked-v4-3163450",
+      "deposit_liquidity": null,
       "deposit_tx": "0x6cdabada1ff062b6d3b4ba87bfe04158dd8b14a91e93cabe11dc3e35b587e89e",
+      "max_liquidity_seen": null,
       "mint_block": 53008241,
       "nft_id": 3163450,
       "note": null,
@@ -319,7 +321,9 @@ export const DETECTION_TRACKED_BY_TAP: PositionDetection = {
         "untrack"
       ],
       "config_id": "tracked-v4-3163450",
+      "deposit_liquidity": null,
       "deposit_tx": "0x6cdabada1ff062b6d3b4ba87bfe04158dd8b14a91e93cabe11dc3e35b587e89e",
+      "max_liquidity_seen": null,
       "mint_block": 53008241,
       "nft_id": 3163450,
       "note": null,

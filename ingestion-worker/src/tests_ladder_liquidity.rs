@@ -681,3 +681,158 @@ fn test_after_a_restart_both_transports_say_the_stored_card_is_not_available() {
     let live = crate::ladder_suggest_text::with_ladder_suggestion(&advice, &serde_json::to_value(&env.data).unwrap(), Some("ok"));
     assert!(live.contains("Deposit 1 of 3 (cap)") && live.contains("Amount to enter in the app"));
 }
+
+// ------------------------------------------------------------------
+// Third review of the bottle (HEAD 54ee7a9): what a rung stands for after it is gone
+// ------------------------------------------------------------------
+
+/// Detection's `tracked[]` rows, as the database remembers each rung.
+fn with_tracked_rows(mut env: SnapshotEnvelope, rows: Vec<Value>) -> SnapshotEnvelope {
+    env.data.derived_metrics.position_detection = Some(json!({ "status": "ok", "tracked": rows }));
+    env
+}
+
+fn tracked_row(nft: u64, rung: &str, tl: i32, tu: i32, state: &str, deposit: Option<u128>, max_seen: Option<u128>, block: i64) -> Value {
+    json!({
+        "position_id": format!("uniswap-v4:base:{nft}"), "nft_id": nft, "role": "ladder", "rung": rung,
+        "tick_lower": tl, "tick_upper": tu, "state": state, "mint_block": block,
+        "deposit_liquidity": deposit.map(|l| l.to_string()), "max_liquidity_seen": max_seen.map(|l| l.to_string()),
+    })
+}
+
+#[test]
+fn test_a_burned_or_sent_away_anchor_keeps_standing_for_its_deposit() {
+    let (c, n, d) = stated_liquidity();
+    let fresh_card = card(&fresh());
+    for state in ["closed", "not_owned"] {
+        // The deep deposited first, filled, pulled with its NFT burned (or sent away); the
+        // price back at spot. Before: every other target fell to $0.
+        let env = replanned(prepared(with_tracked_rows(moved(&[], 0.0), vec![tracked_row(9000001, "deep", 275400, 276300, state, Some(d), Some(d), 100)])));
+        let l = card(&env);
+        assert_listed(&l, &["near"]);
+        assert_eq!(st(deposit(&l, "near"), "/usdc/to_enter"), st(deposit(&fresh_card, "near"), "/usdc/to_enter"), "{state}: frozen by what the deep rung was deposited with");
+        assert_eq!(st(row(&l, "deep"), "/status"), "withdrawn");
+        assert_eq!(st(row(&l, "cap"), "/text"), "Deposit 1 of 3 (cap): not deposited: not offered after a rung was pulled; re-laddering is #169's.");
+        // The near and the cap deposited after it: done, never "over".
+        let env = replanned(prepared(with_tracked_rows(
+            moved(&[(CAP, c), (NEAR, n)], 0.0),
+            vec![tracked_row(9000001, "deep", 275400, 276300, state, Some(d), None, 100)],
+        )));
+        let l = card(&env);
+        assert_eq!(st(row(&l, "near"), "/status"), "deployed", "{state}");
+        assert_eq!(st(&l, "/status"), "ladder_deployed");
+    }
+    // Nothing remembered of a burned rung (it was burned before a cycle read it): it reads
+    // withdrawn and never freezes the plan, so the others follow the reserve gate.
+    let env = replanned(prepared(with_tracked_rows(moved(&[], 0.0), vec![tracked_row(9000001, "deep", 275400, 276300, "closed", None, None, 100)])));
+    let l = card(&env);
+    assert_eq!(st(row(&l, "deep"), "/status"), "withdrawn");
+    assert!(st(&l, "/shape/rest_rule").starts_with("what the reserve gate allows now"), "{}", st(&l, "/shape/rest_rule"));
+}
+
+#[test]
+fn test_the_database_remembers_a_deposit_when_the_receipt_is_not_read_and_the_most_it_held() {
+    let (_, n, d) = stated_liquidity();
+    // Half the near withdrawn, its receipt not read this cycle (a restart, a failed read):
+    // the database's copy of its deposit says it was pulled. Before: offered again.
+    let mut env = moved(&[(NEAR, n / 2), (DEEP, d)], 0.0);
+    env = with_tracked_rows(env, vec![tracked_row(9000003, "near", 273900, 275400, "counted", Some(n), Some(n), 100), tracked_row(9000001, "deep", 275400, 276300, "counted", Some(d), Some(d), 200)]);
+    let mut env = prepared(env);
+    for r in env.data.ladders.iter_mut() {
+        r.since_deposit.deposit_liquidity = None; // the receipt was not read
+    }
+    let l = card(&replanned(env));
+    assert_eq!(st(row(&l, "near"), "/status"), "partly_withdrawn");
+    assert!(l["rungs"].as_array().unwrap().iter().all(|r| r["rung"] != "near"));
+    // Minted at half, topped up to the whole, then 30% withdrawn: it stands for the most
+    // it held. Before: the plan shrank by 30% and the deep read "over".
+    let mut env = moved(&[(NEAR, n * 7 / 10), (DEEP, d)], 0.0);
+    env = with_tracked_rows(env, vec![tracked_row(9000003, "near", 273900, 275400, "counted", Some(n / 2), Some(n), 100), tracked_row(9000001, "deep", 275400, 276300, "counted", Some(d), Some(d), 200)]);
+    let mut env = prepared(env);
+    for r in env.data.ladders.iter_mut().filter(|r| r.position_id.ends_with("9000003")) {
+        r.since_deposit.deposit_liquidity = Some((n / 2).to_string());
+        r.since_deposit.deposit_block = Some(100);
+    }
+    let l = card(&replanned(env));
+    assert!(st(row(&l, "near"), "/text").starts_with("Deposit 2 of 3 (near rung): partly withdrawn. 30% of the liquidity"), "{}", st(row(&l, "near"), "/text"));
+    assert_eq!(st(row(&l, "deep"), "/status"), "deployed", "never over");
+}
+
+#[test]
+fn test_a_rung_whose_deposit_is_not_known_never_freezes_the_plan_and_the_card_says_so() {
+    let (_, _, d) = stated_liquidity();
+    // A config.yaml ladder with no deposit_tx: nothing says what it was deposited with.
+    let mut env = moved(&[(DEEP, d)], 0.0);
+    env = prepared(env);
+    for r in env.data.ladders.iter_mut() {
+        r.since_deposit.deposit_liquidity = None;
+    }
+    let l = card(&replanned(env));
+    assert!(st(&l, "/shape/rest_rule").contains("the deep rung is tracked, but what it was deposited with is not known"), "{}", st(&l, "/shape/rest_rule"));
+    assert!(st(row(&l, "deep"), "/text").ends_with("What it was deposited with is not known (no deposit_tx in config.yaml, or its mint receipt not read yet), so it does not fix the plan and a withdrawal from it cannot be told."), "{}", st(row(&l, "deep"), "/text"));
+}
+
+#[test]
+fn test_after_the_deep_is_pulled_the_cap_is_not_offered() {
+    let (_, _, d) = stated_liquidity();
+    // The deep deposited at spot, the price down 2000 ticks, the deep emptied: its cheap
+    // NOCK is back in the wallet and the LP budget jumps. Before: a cap of about 1,844 NOCK.
+    let mut env = with_deposits(moved(&[(DEEP, 0)], -2000.0), &[(9000001, d, 100)]);
+    env.data.derived_metrics.global_status.lp_nock_budget = Some("23445.2018".to_string());
+    let l = card(&replanned(env));
+    assert_eq!(st(row(&l, "cap"), "/status"), "not_deposited");
+    assert!(l["rungs"].as_array().unwrap().iter().all(|r| r["rung"] != "cap"), "{:#}", l["rungs"]);
+    assert_eq!(st(row(&l, "deep"), "/status"), "withdrawn");
+    assert_ne!((st(&l, "/status"), &l["shown"]), ("ready", &json!(true)), "the card does not go back to the top");
+}
+
+#[test]
+fn test_the_cycle_remembers_each_rungs_deposit_and_the_most_it_held() {
+    let (_, n, _) = stated_liquidity();
+    let env = moved(&[(NEAR, n / 2)], 0.0);
+    let mut raw = stored_book(&env.data).raw;
+    let row = TrackedRow {
+        wallet: env.data.positions[0].wallet.to_lowercase(),
+        position_key: "uniswap-v4:base:9000003".to_string(),
+        protocol: "uniswap-v4".to_string(),
+        network: "base".to_string(),
+        nft_id: 9000003,
+        pool_id: "0x064a5df2ecfcb7c05779b147aa38e4b0e91c966267fbdbc8cf16addd83636b13".to_string(),
+        currency0: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913".to_string(),
+        currency1: "0x9b5e262cf9bb04869ab40b19af91d2dc85761722".to_string(),
+        tick_lower: 273900,
+        tick_upper: 275400,
+        tick_spacing: Some(300),
+        role: Some(LADDER_ROLE.to_string()),
+        rung: Some("near".to_string()),
+        deposit_tx: Some("0x01".to_string()),
+        mint_block: Some(100),
+        source: TRACKED_SOURCE_DETECTED.to_string(),
+        tracked_at: None,
+        deposit_liquidity: None,
+        max_liquidity_seen: Some(n),
+    };
+    raw.tracked_report = vec![TrackedReport { row: row.clone(), fate: TrackedFate::Merged }];
+    raw.ladder_baselines.insert(
+        "uniswap-v4:base:9000003".to_string(),
+        LadderBaselineRead::Verified(LadderDeposit { tx: "0x01".into(), block: 100, at: None, liquidity: n, amount0_raw: 0, amount1_raw: 0 }),
+    );
+    // The receipt's liquidity is remembered; the most it held stays n though it holds n/2.
+    assert_eq!(liquidity_updates(&raw), vec![("uniswap-v4:base:9000003".to_string(), Some(n), n)]);
+    // Remembered already: nothing to write.
+    raw.tracked_report[0].row.deposit_liquidity = Some(n);
+    assert!(liquidity_updates(&raw).is_empty());
+    // A rung not read this cycle (burned): what was remembered stays.
+    raw.positions.retain(|p| p.position_id != "uniswap-v4:base:9000003");
+    assert!(liquidity_updates(&raw).is_empty());
+    // The store keeps a known deposit and takes the new most.
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let store = PositionStore::mem();
+        store.insert_tracked_if_absent(&TrackedRow { deposit_liquidity: None, max_liquidity_seen: None, ..row.clone() }).await.unwrap();
+        assert!(store.record_liquidity(&row.wallet, &row.position_key, Some(n), n).await.unwrap());
+        assert!(store.record_liquidity(&row.wallet, &row.position_key, Some(1), n + 5).await.unwrap());
+        let got = store.tracked(&row.wallet).await.unwrap();
+        assert_eq!((got[0].deposit_liquidity, got[0].max_liquidity_seen), (Some(n), Some(n + 5)));
+    });
+}

@@ -118,6 +118,10 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // What detection found, valued at this cycle's prices, with what became of each
     // database row in this cycle's reads.
     let position_detection = position_detection_block(&detection, &raw_data);
+    // What each database-tracked ladder stands for after this cycle's reads (its mint's
+    // liquidity, the most it was read holding), so a rung withdrawn, burned or sent away
+    // later keeps standing for it. Never fails the cycle.
+    record_tracked_liquidity(&PositionStore::of(state), state.config.tracked_wallets.first().map(String::as_str), &raw_data).await;
 
     // Persistent high-water mark: the peak stored total and the earliest row that reached
     // it (issue #94, N2). An empty table (a fresh start) has no mark yet. A database error

@@ -77,6 +77,7 @@ fn with_shape(mut env: SnapshotEnvelope, shape: &[LadderRungConfig]) -> Snapshot
     let gs = &mut env.data.derived_metrics.global_status;
     gs.ladder_bottom_usd = Some("0.01000000".into());
     gs.ladder_rungs = Some(ladder_rung_settings(shape));
+    env.data.ladders = crate::tests_ladder::readings_with_deposits(&env.data);
     env
 }
 

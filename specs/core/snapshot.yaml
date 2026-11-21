@@ -164,6 +164,10 @@ info:
       position manager's balanceOf for the wallet; known: the NFTs the scan knows as
       the wallet's); `tracked[]` (each database row: position_id, nft_id, role, rung,
       rung_note, source detected | confirmed, deposit_tx, mint_block, tracked_at,
+      deposit_liquidity and max_liquidity_seen (2.10.0: what a ladder rung stands for
+      once withdrawn, burned or sent away: its verified mint's liquidity and the most a
+      cycle read it holding, as decimal strings; null until known; after a database loss
+      the mint receipt restores deposit_liquidity and max_liquidity_seen starts again),
       state counted | empty | closed | not_owned | shadowed_by_config | quarantined |
       not_read, note, choices); `found_not_counted` and `dismissed` (count, value_usd,
       value_note, positions[]): every position the wallet holds in a whitelisted pool

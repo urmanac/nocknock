@@ -37,6 +37,13 @@ CREATE TABLE IF NOT EXISTS tracked_positions (
     mint_block BIGINT,
     -- 'detected' (matched a suggested rung exactly) or 'confirmed' (the operator's tap).
     source TEXT NOT NULL,
+    -- What a ladder rung stands for after it is withdrawn from, burned or sent away
+    -- (third review of the ladder bottle): the liquidity its verified mint receipt added,
+    -- and the most liquidity a cycle has read it holding. Decimal strings of a uint128.
+    -- NULL until known. deposit_liquidity comes back after a database loss (the mint
+    -- receipt is read again); max_liquidity_seen does not.
+    deposit_liquidity TEXT,
+    max_liquidity_seen TEXT,
     tracked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (wallet, position_key)
@@ -97,6 +104,9 @@ CREATE TABLE IF NOT EXISTS position_detection_state (
     logs_to_block BIGINT,
     history_complete_at TIMESTAMPTZ,
     last_checked_at TIMESTAMPTZ,
+    -- Where the next cycle's re-reads of untracked NFTs start: it moves by the number read,
+    -- so a cycle cut short by its time budget resumes where it stopped.
+    refresh_cursor BIGINT NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (wallet, protocol, network)
 );

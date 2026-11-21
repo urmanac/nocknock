@@ -48,7 +48,7 @@ pub(crate) fn prepared(env: SnapshotEnvelope) -> SnapshotEnvelope {
     gs.ladder_bottom_usd = Some("0.01000000".into());
     gs.ladder_rungs = Some(ladder_rung_settings(&bottle()));
     env.data.derived_metrics.fee_yield = fee_fixture().data.derived_metrics.fee_yield;
-    env.data.ladders = ladder_readings(&stored_book(&env.data).raw);
+    env.data.ladders = crate::tests_ladder::readings_with_deposits(&env.data);
     env.data.derived_metrics.ladder_shape = ladder_shape_block(&env.data, now());
     env
 }
