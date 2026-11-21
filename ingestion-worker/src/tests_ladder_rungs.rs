@@ -12,7 +12,7 @@
 //! (the bottle's cap: the band containing the tick, the budget and the near-USDC limit).
 use super::*;
 use crate::tests_fee_yield::{fee_fixture, V4_ID};
-use crate::tests_ladder::{fixture, fixture_at_sqrt};
+use crate::tests_ladder::{fixture, fixture_at_sqrt, fixture_with_rungs};
 use serde_json::Value;
 
 fn now() -> DateTime<Utc> {
@@ -721,12 +721,17 @@ fn test_the_ladder_shape_block_in_the_snapshot() {
     assert_eq!((st(cap, "/low_usd"), st(cap, "/high_usd")), ("0.01274292", "0.01313098"));
     assert_eq!((st(cap, "/nock_per_usdc_at_low"), st(cap, "/nock_per_usdc_at_high")), ("78.4749", "76.1558"));
     assert_eq!(cap["in_range_now"], true);
-    assert_eq!((st(cap, "/nock"), st(cap, "/usdc")), ("86.78910000", "1.225999"));
+    // The exact mint (review finding 4), recomputed independently with Uniswap's integer
+    // formulas by /tmp/nn-v090/rungs_fixture/exact_mint.py: the cap's USDC (truncated to
+    // 1225999 raw) binds, so it pulls a little less NOCK than the 86.7891 budget.
+    assert_eq!(st(cap, "/liquidity_raw"), "138192109253769");
+    assert_eq!((st(cap, "/amount0_raw"), st(cap, "/amount1_raw")), ("1225999", "867890958577132038"));
+    assert_eq!((st(cap, "/usdc_raw"), st(cap, "/nock_raw")), ("1225999", "867890958577132038"));
+    assert_eq!((st(cap, "/nock"), st(cap, "/usdc")), ("86.7890958577132038", "1.225999"));
     assert_eq!(st(cap, "/liquidity_human"), "1381.9212");
-    let usdc_raw: f64 = st(cap, "/usdc_raw").parse().unwrap();
-    assert_eq!(usdc_raw, 1225999.0);
-    let nock_raw: f64 = st(cap, "/nock_raw").parse().unwrap();
-    assert!(rel(nock_raw, 867891000000000000.0) < 1e-9, "{nock_raw}");
+    assert_eq!((st(&block["rungs"][1], "/liquidity_raw"), st(&block["rungs"][1], "/usdc_raw")), ("1408301615002237", "114864600"));
+    assert_eq!((st(&block["rungs"][2], "/liquidity_raw"), st(&block["rungs"][2], "/usdc_raw")), ("14125167068081104", "650899400"));
+    assert_eq!(st(cap, "/status"), "to_deposit");
     assert_eq!(st(cap, "/cap/bound_by"), "lp_nock_budget");
     assert_eq!(st(cap, "/fee_estimate/status"), "measured");
     let near = &block["rungs"][1];
@@ -814,6 +819,17 @@ fn test_the_rungs_argument_normalises_to_the_indexed_query() {
 fn test_golden_ladder_rungs_is_byte_identical() {
     let fee = fee_fixture();
     let shaped = with_shape(fee_fixture(), &bottle());
+    let plan = block_of(&with_shape(fixture(), &bottle()));
+    let ls: Vec<u128> = ["cap", "near", "deep"].iter().map(|r| liq(shape_rung(&plan, r))).collect();
+    let deep_done = with_shape(fixture_with_rungs(&[(9000001, Some("deep"), 275400, 276300, ls[2])]), &bottle());
+    let all_done = with_shape(
+        fixture_with_rungs(&[(9000002, Some("cap"), 273600, 273900, ls[0]), (9000003, Some("near"), 273900, 275400, ls[1]), (9000001, Some("deep"), 275400, 276300, ls[2])]),
+        &bottle(),
+    );
+    let text = ladder_text::ladder_text(&sim(&deep_done, &[("shape", "configured"), ("position_id", V4_ID)]));
+    assert!(text.contains("  – r3 deep: deployed; target $650.90, deployed $650.90, left to deposit $0.00, tracked: uniswap-v4:base:9000001"), "{text}");
+    let text = ladder_text::ladder_text(&sim(&all_done, &[("shape", "configured"), ("position_id", V4_ID)]));
+    assert!(text.contains("nothing is left to deposit"), "{text}");
     let ok = |env: &SnapshotEnvelope, args: Value| {
         let q: HashMap<String, String> = ladder_text::ladder_query_from_args(Some(&args)).unwrap().into_iter().collect();
         let body = simulate_ladder(env, &LadderRequest::from_params(&q).unwrap(), now(), "ok").unwrap();
@@ -838,6 +854,8 @@ fn test_golden_ladder_rungs_is_byte_identical() {
         "flat_741_measured": ok(&fee, json!({"usdc": 741, "low": 0.01, "high_at_spot": true, "position_id": V4_ID})),
         "two_rungs_measured": ok(&fee, two),
         "the_bottle_configured": ok(&shaped, json!({"shape": "configured", "position_id": V4_ID})),
+        "the_bottle_deep_deployed": ok(&deep_done, json!({"shape": "configured", "position_id": V4_ID})),
+        "the_bottle_all_deployed": ok(&all_done, json!({"shape": "configured", "position_id": V4_ID})),
         "rung_too_narrow": bad(&fee, json!({"position_id": V4_ID, "rungs": [{"rung": "near", "usdc": 100, "low": 0.0127, "high": 0.0128}]})),
         "rungs_exceed_wallet": bad(&fee, json!({"rungs": [{"rung": "near", "usdc": 1000, "low": 0.01, "high_at_spot": true}, {"rung": "deep", "usdc": 1000, "low": 0.009, "high": 0.01}]})),
         "missing_role": bad(&fee, json!({"rungs": [{"usdc": 100, "low": 0.01, "high_at_spot": true}]})),
@@ -892,5 +910,290 @@ fn test_the_specs_document_rungs_shape_and_fees() {
     }
     for key in shape["rungs"][0].as_object().unwrap().keys() {
         assert!(ss["LadderShapeRung"]["properties"][key.as_str()].is_mapping(), "LadderShapeRung.{key}");
+    }
+}
+
+// ------------------------------------------------------------------
+// Review of #166 rungs: the plan-stable shape, passed rungs, exact mints, honest grids
+// ------------------------------------------------------------------
+
+fn block_of(env: &SnapshotEnvelope) -> Value {
+    ladder_shape_block(&env.data, now()).expect("a shape is configured")
+}
+
+fn shape_rung<'a>(b: &'a Value, role: &str) -> &'a Value {
+    b["rungs"].as_array().unwrap().iter().find(|r| r["rung"] == role).unwrap_or_else(|| panic!("no {role} rung in {b}"))
+}
+
+fn liq(r: &Value) -> u128 {
+    st(r, "/liquidity_raw").parse().unwrap()
+}
+
+#[test]
+fn test_depositing_the_deep_rung_as_stated_leaves_near_and_cap_unchanged() {
+    let before = block_of(&with_shape(fixture(), &bottle()));
+    let deep = shape_rung(&before, "deep");
+    let env = with_shape(fixture_with_rungs(&[(9000001, Some("deep"), 275400, 276300, liq(deep))]), &bottle());
+    let after = block_of(&env);
+    assert_eq!(st(&after, "/status"), "computed");
+    assert_eq!(st(&after, "/total_usdc"), st(&before, "/total_usdc"));
+    let d = shape_rung(&after, "deep");
+    assert_eq!(st(d, "/status"), "deployed");
+    assert_eq!(d["counterparts"], json!(["uniswap-v4:base:9000001"]));
+    assert!(f(d, "/remaining_usdc") < LADDER_SHAPE_DUST_USDC);
+    assert!(d["liquidity_raw"].is_null(), "nothing is minted for a deployed rung");
+    for role in ["near", "cap"] {
+        let (a, b) = (shape_rung(&after, role), shape_rung(&before, role));
+        assert_eq!(st(a, "/status"), "to_deposit", "{role}");
+        assert_eq!(fx(f(a, "/target_usdc"), 2), fx(f(b, "/target_usdc"), 2), "{role} target to the cent");
+        assert_eq!(fx(f(a, "/remaining_usdc"), 2), fx(f(b, "/remaining_usdc"), 2), "{role} remaining to the cent");
+        assert_eq!(st(a, "/usdc_raw"), st(b, "/usdc_raw"), "{role} mint");
+    }
+    // No second deep rung is offered, and the gate still holds to the cent.
+    assert_eq!(after["rungs"].as_array().unwrap().iter().filter(|r| r["rung"] == "deep").count(), 1);
+    assert_eq!(st(&after, "/gate/status"), "holds");
+    assert!(f(&after, "/gate/margin_usdc").abs() < 0.02, "{}", after["gate"]);
+}
+
+#[test]
+fn test_depositing_cap_and_near_first_leaves_deep_unchanged() {
+    let before = block_of(&with_shape(fixture(), &bottle()));
+    let (cap, near) = (shape_rung(&before, "cap"), shape_rung(&before, "near"));
+    let env = with_shape(fixture_with_rungs(&[(9000002, Some("cap"), 273600, 273900, liq(cap)), (9000003, Some("near"), 273900, 275400, liq(near))]), &bottle());
+    let after = block_of(&env);
+    for role in ["cap", "near"] {
+        assert_eq!(st(shape_rung(&after, role), "/status"), "deployed", "{role}: {}", shape_rung(&after, role));
+    }
+    // The cap's NOCK left the wallet, and is counted back into the budget it is sized by.
+    assert_eq!(st(shape_rung(&after, "cap"), "/cap/bound_by"), "lp_nock_budget");
+    let (a, b) = (shape_rung(&after, "deep"), shape_rung(&before, "deep"));
+    assert_eq!(st(a, "/status"), "to_deposit");
+    assert_eq!(fx(f(a, "/target_usdc"), 2), fx(f(b, "/target_usdc"), 2));
+    assert_eq!(st(a, "/usdc_raw"), st(b, "/usdc_raw"));
+}
+
+#[test]
+fn test_with_every_rung_deposited_nothing_is_left_to_deposit() {
+    let before = block_of(&with_shape(fixture(), &bottle()));
+    let ls: Vec<u128> = ["cap", "near", "deep"].iter().map(|r| liq(shape_rung(&before, r))).collect();
+    let env = with_shape(
+        fixture_with_rungs(&[(9000002, Some("cap"), 273600, 273900, ls[0]), (9000003, Some("near"), 273900, 275400, ls[1]), (9000001, Some("deep"), 275400, 276300, ls[2])]),
+        &bottle(),
+    );
+    let after = block_of(&env);
+    assert_eq!(st(&after, "/status"), "deployed");
+    assert!(st(&after, "/reason").contains("nothing is left to deposit"));
+    for r in after["rungs"].as_array().unwrap() {
+        assert_eq!(r["status"], "deployed", "{r}");
+        assert!(r["usdc_raw"].is_null());
+    }
+    // The API answers 200 with the status, never a parameter error.
+    let b = sim(&env, &[("shape", "configured"), ("position_id", V4_ID)]);
+    assert_eq!(st(&b, "/shape_status"), "deployed");
+}
+
+#[test]
+fn test_a_tracked_rung_at_other_ticks_keeps_its_ticks_for_the_remainder() {
+    // A deep rung deposited on 275700..276300 with half the deep target's liquidity there.
+    let env0 = with_shape(fixture(), &bottle());
+    let deep0 = shape_rung(&block_of(&env0), "deep").clone();
+    let env = with_shape(fixture_with_rungs(&[(9000004, Some("deep"), 275700, 276300, liq(&deep0) / 3)]), &bottle());
+    let after = block_of(&env);
+    let d = shape_rung(&after, "deep");
+    assert_eq!(d["counterparts"], json!(["uniswap-v4:base:9000004"]));
+    assert_eq!(st(d, "/status"), "to_deposit");
+    // The remainder is drawn on the tracked rung's own ticks.
+    assert_eq!((d["tick_lower"].as_i64(), d["tick_upper"].as_i64()), (Some(275700), Some(276300)));
+    let remaining = f(d, "/remaining_usdc");
+    assert!((f(d, "/target_usdc") - f(d, "/deployed_usdc") - remaining).abs() < 1e-5);
+    assert!(f(d, "/usdc") <= remaining + 1e-9);
+}
+
+#[test]
+fn test_an_unmatched_tracked_ladder_is_listed_and_counts_toward_the_total() {
+    let before = block_of(&with_shape(fixture(), &bottle()));
+    let env = with_shape(fixture_with_rungs(&[(9000005, None, 275400, 276300, 1_000_000_000_000_000)]), &bottle());
+    let after = block_of(&env);
+    let u = &after["unmatched"][0];
+    assert_eq!(st(u, "/position_id"), "uniswap-v4:base:9000005");
+    assert!(st(u, "/reason").contains("its rung is not set"));
+    assert!(st(u, "/note").contains("still counts toward the total"));
+    // Its USDC counts toward the total as if it were in the wallet...
+    assert_eq!(st(&after, "/total_usdc"), st(&before, "/total_usdc"));
+    assert!(f(&after, "/tracked_usdc") > 0.0);
+    // ...and fills no rung, so depositing every remainder reads the gate below the
+    // reserve by its USDC: stated, not hidden.
+    assert_eq!(st(shape_rung(&after, "deep"), "/status"), "to_deposit");
+    assert!((f(&after, "/gate/margin_usdc") + f(u, "/deployed_usdc")).abs() < 0.02, "{}", after["gate"]);
+    assert!(st(&after, "/tracked_note").contains("matched to a configured rung by role, then by ticks"));
+}
+
+#[test]
+fn test_rungs_above_the_price_are_passed_and_the_shape_is_still_drawn() {
+    for (tick, near, deep, cap) in [
+        (275100.5, "passed", "to_deposit", "to_deposit"),
+        (275399.0, "passed", "to_deposit", "to_deposit"),
+        // Exactly on a band edge: the band at the pool's tick holds one token at this
+        // price, so there is no cap, with the reason.
+        (275700.0, "passed", "to_deposit", "none"),
+        (276300.0, "passed", "passed", "passed"),
+    ] {
+        let env = with_shape(fixture_at_sqrt(sqrt_at_tick(tick)), &bottle());
+        // shape=configured answers 200 with the block's status, never INVALID_PARAMETER.
+        let b = sim_on(&env, &[("shape", "configured"), ("position_id", V4_ID)]).unwrap_or_else(|e| panic!("{tick}: {e:?}"));
+        let block = block_of(&env);
+        assert_eq!(st(shape_rung(&block, "near"), "/status"), near, "{tick}");
+        assert_eq!(st(shape_rung(&block, "near"), "/reason"), LADDER_SHAPE_PASSED_REASON, "{tick}");
+        assert_eq!(st(shape_rung(&block, "deep"), "/status"), deep, "{tick}");
+        assert_eq!(st(shape_rung(&block, "cap"), "/status"), cap, "{tick}");
+        if cap == "none" {
+            assert!(st(shape_rung(&block, "cap"), "/reason").contains("holds only one token"), "{tick}");
+        }
+        if deep == "to_deposit" {
+            assert_eq!(st(&block, "/status"), "computed");
+            // The first drawable rung starts at the usable tick at or below spot.
+            let spot_tick = ((tick / 300.0).ceil() * 300.0) as i64;
+            assert_eq!(shape_rung(&block, "deep")["tick_lower"].as_i64(), Some(spot_tick), "{tick}");
+            assert_eq!(shape_rung(&block, "deep")["tick_upper"].as_i64(), Some(276300));
+            assert_eq!(st(&b, "/shape_status"), "computed");
+        } else {
+            assert_eq!(st(&block, "/status"), "price_at_or_below_bottom");
+            assert_eq!(st(&b, "/shape_status"), "price_at_or_below_bottom");
+        }
+    }
+}
+
+#[test]
+fn test_two_rungs_of_one_role_state_their_own_shares() {
+    let shape = vec![
+        LadderRungConfig { rung: "cap".into(), share: None, low_usd: None },
+        LadderRungConfig { rung: "near".into(), share: Some(0.15), low_usd: Some(0.0115) },
+        LadderRungConfig { rung: "deep".into(), share: Some(0.35), low_usd: Some(0.0108) },
+        LadderRungConfig { rung: "deep".into(), share: Some(0.50), low_usd: Some(0.01) },
+    ];
+    let block = block_of(&with_shape(fixture(), &shape));
+    let shares: Vec<&str> = block["rungs"].as_array().unwrap().iter().map(|r| r["share"].as_str().unwrap_or("-")).collect();
+    assert_eq!(shares, vec!["-", "0.15", "0.35", "0.5"]);
+    let rest = f(&block, "/rest_usdc");
+    assert!((f(&block["rungs"][3], "/target_usdc") - 0.5 * rest).abs() < 0.01);
+    assert!((f(&block["rungs"][2], "/target_usdc") - 0.35 * rest).abs() < 0.01);
+    // The cap's limit is the first near rung's target, stated.
+    assert_eq!(st(&block["rungs"][0], "/cap/limit_rule"), "never more USDC than the first near rung's target");
+}
+
+#[test]
+fn test_grid_fees_are_null_with_a_reason_where_nothing_is_measured() {
+    // A rung partly below the measuring range ($0.00550148): rows below it have no figure.
+    let pairs = [("position_id", V4_ID), ("r1_rung", "deep"), ("r1_usdc", "50"), ("r1_high", "0.007"), ("r1_low", "0.004"), ("grid_to_pct", "-70"), ("grid_step_pct", "5")];
+    let b = sim(&fee_fixture(), &pairs);
+    let row = |pct: &str| b["grid"].as_array().unwrap().iter().find(|r| r["pct_of_spot"] == pct).unwrap().clone();
+    let r = row("-60.00");
+    assert_eq!(r["rungs_in_range"], json!([1]));
+    assert!(r["est_fee_usd_per_day"].is_null() && r["est_fee_usd_per_day_diluted"].is_null());
+    assert!(st(&r, "/est_fee_reason").contains("outside the measuring range: no fees are measured here"));
+    assert!(row("-50.00")["est_fee_usd_per_day"].is_string());
+    // A rung wholly outside: null with its reason, never $0.00, and the text says why.
+    let pairs = [("position_id", V4_ID), ("r1_rung", "deep"), ("r1_usdc", "50"), ("r1_high", "0.0054"), ("r1_low", "0.0045"), ("grid_to_pct", "-65"), ("grid_step_pct", "5")];
+    let b = sim(&fee_fixture(), &pairs);
+    let r = b["grid"].as_array().unwrap().iter().find(|r| r["rungs_in_range"] == json!([1])).unwrap().clone();
+    assert!(r["est_fee_usd_per_day"].is_null());
+    assert!(st(&r, "/est_fee_reason").contains("r1 lies wholly outside the measuring range"));
+    let text = ladder_text::ladder_text(&b);
+    assert!(text.contains("r1 in range, fees not estimated (r1 lies wholly outside the measuring range"), "{text}");
+    assert!(!text.contains("fees $0.00/day"), "{text}");
+}
+
+#[test]
+fn test_every_split_row_is_gated_at_the_same_price() {
+    let b = sim(&fee_fixture(), &TWO);
+    let rows = b["tradeoff"]["split"]["rows"].as_array().unwrap();
+    for r in rows {
+        assert_eq!(st(r, "/gate_price_usd"), "0.01002405", "{r}");
+    }
+    // The near-only (100%) row no longer reads a false margin at the near rung's bottom.
+    let last = rows.last().unwrap();
+    assert_eq!(st(last, "/reserve_margin_usdc"), st(&rows[0], "/reserve_margin_usdc"));
+    // Where a fee per day in range is stated, its in-range share and replay are too.
+    for r in rows {
+        for x in r["per_rung"].as_array().unwrap() {
+            if !x["fee_per_day_in_range_usd"].is_null() {
+                for k in ["in_range_share_pct", "replay_inside_upper_usd", "replay_edge_upper_usd", "coverage_whole"] {
+                    assert!(!x[k].is_null(), "{k} null beside a fee figure: {x}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_the_one_rung_text_names_the_gate_price_rule_and_an_invalid_bottom() {
+    let pairs = [("usdc", "300"), ("low", "0.012"), ("high", "spot"), ("position_id", V4_ID)];
+    let text = ladder_text::ladder_text(&sim(&with_bottom(fixture(), "0.01000000"), &pairs));
+    assert!(
+        text.contains("• Reserve: stable $1416.99 at the gate $0.01000000 (your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom) against the $950.00 reserve: holds by $466.99"),
+        "{text}"
+    );
+    let mut env = fixture();
+    env.data.derived_metrics.global_status.ladder_bottom_note = Some(LADDER_BOTTOM_INVALID_NOTE.into());
+    let b = sim(&env, &pairs);
+    let text = ladder_text::ladder_text(&b);
+    assert!(text.contains("at the gate $0.01200086 (the deepest rung's bottom: operator_profile.ladder_bottom_usd must be above 0 USD per NOCK; it is not applied)"), "{text}");
+    assert!(text.contains("is set but invalid and not applied: the gate falls back to the stable balance at the ladder's own bottom"), "{text}");
+    assert!(!text.contains("the lower of the ladder's deepest bottom and your ladder bottom"), "{text}");
+    // With the setting unset the text is the #166 one.
+    let text = ladder_text::ladder_text(&sim(&fixture(), &pairs));
+    assert!(text.contains("• Reserve: stable $1453.43 at the bottom against"), "{text}");
+}
+
+#[test]
+fn test_the_rung_mint_is_exact_and_never_exceeds_the_amounts_stated() {
+    use crate::mint_math::*;
+    let b = sim(&with_shape(fixture(), &bottle()), &[("shape", "configured"), ("position_id", V4_ID)]);
+    let sqrt_p = Big::from_hex("0d69693142532bf9792f0b505c97d4").unwrap();
+    for r in b["rungs"].as_array().unwrap() {
+        let m = &r["mint"];
+        assert_eq!(st(m, "/status"), "exact");
+        let (tl, tu) = (r["bounds"]["tick_lower"].as_i64().unwrap() as i32, r["bounds"]["tick_upper"].as_i64().unwrap() as i32);
+        let l = Big::from_hex(&format!("{:x}", st(m, "/liquidity_raw").parse::<u128>().unwrap())).unwrap();
+        // What a mint of liquidity_raw pulls, from Uniswap's integer formulas.
+        let (a0, a1) = amounts_for_liquidity(273743, &sqrt_p, tl, tu, &l).unwrap();
+        assert_eq!((a0.to_dec(), a1.to_dec()), (st(m, "/amount0_raw").to_string(), st(m, "/amount1_raw").to_string()));
+        let max0: u128 = st(m, "/usdc_max_raw").parse().unwrap();
+        let max1: u128 = st(m, "/nock_max_raw").parse().unwrap();
+        assert!(a0.to_u128().unwrap() <= max0 && a1.to_u128().unwrap() <= max1);
+        // One unit more of liquidity would need more than the maxima.
+        let (b0, b1) = amounts_for_liquidity(273743, &sqrt_p, tl, tu, &l.add(&Big::from_u128(1))).unwrap();
+        assert!(b0.to_u128().unwrap() > max0 || b1.to_u128().unwrap() > max1, "{}", r["index"]);
+        // Never more than the USDC the rung states.
+        assert!(a0.to_u128().unwrap() as f64 / 1e6 <= f(r, "/sizing/usdc_at_spot") + 0.005);
+    }
+}
+
+#[test]
+fn test_a_stored_row_keeps_only_the_summary_and_a_read_back_row_says_so() {
+    let mut env = with_shape(fee_fixture(), &bottle());
+    env.data.derived_metrics.ladder_shape = ladder_shape_block(&env.data, now());
+    let full = serde_json::to_value(&env.data).unwrap();
+    let size = |v: &Value, p: &str| serde_json::to_string(v.pointer(p).unwrap()).unwrap().len();
+    let (fy_full, shape_full) = (size(&full, "/derived_metrics/fee_yield"), size(&full, "/derived_metrics/ladder_shape"));
+    let mut stored = full.clone();
+    slim_stored_data(&mut stored);
+    let (fy_stored, shape_stored) = (size(&stored, "/derived_metrics/fee_yield"), size(&stored, "/derived_metrics/ladder_shape"));
+    // About 30 KB per row before (review finding 8); a few KB now.
+    assert!(fy_full + shape_full > 25_000, "{fy_full} + {shape_full}");
+    assert!(fy_stored < 2_500 && shape_stored < 8_000, "{fy_stored} + {shape_stored}");
+    assert!(stored["derived_metrics"]["fee_yield"]["pools"][0]["detail_note"].as_str().unwrap().contains("left out of the stored row"));
+    assert!(stored["derived_metrics"]["ladder_shape"]["grid"].is_null());
+    assert_eq!(stored["derived_metrics"]["ladder_shape"]["rungs"][2]["fee_estimate"]["per_day_in_range_usd"], full["derived_metrics"]["ladder_shape"]["rungs"][2]["fee_estimate"]["per_day_in_range_usd"]);
+    // A row read back from the database: the rate still applies; the detail it lacks is
+    // stated, never read as a measured zero.
+    let back: SnapshotData = serde_json::from_value(stored).unwrap();
+    let env2 = SnapshotEnvelope { meta: env.meta.clone(), data: back };
+    let b = sim(&env2, &FLAT_741);
+    let fe = &b["fee_estimate"];
+    assert_eq!(st(fe, "/per_day_in_range_usd"), "35.30");
+    for (k, why) in [("in_range_share_stored_history", "in_range_share_reason"), ("stored_history_replay", "replay_reason"), ("band_measured", "band_reason"), ("spread", "spread_reason")] {
+        assert!(fe[k].is_null(), "{k}");
+        assert!(st(fe, &format!("/{why}")).contains("read back from the database"), "{why}");
     }
 }

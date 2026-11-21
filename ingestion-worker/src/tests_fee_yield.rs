@@ -32,6 +32,7 @@ pub(crate) fn history_rows() -> Vec<FeeYieldRow> {
             in_range: r[4].as_bool(),
             pool_active: r[5].as_bool(),
             tick: r[6].as_i64().map(|v| v as i32),
+            staked: false,
         })
         .collect()
 }
@@ -87,7 +88,7 @@ fn test_fee_yield_recorded_history_pins_the_measured_rate() {
     // The skipped intervals, each in its own bucket, with their seconds.
     assert_eq!(
         p.skipped,
-        FeeYieldSkips { liquidity_changed: 4, zero_liquidity: 137, fees_fell: 6, pool_inactive: 0, out_of_range: 0, gap: 1, unreadable: 0 }
+        FeeYieldSkips { liquidity_changed: 4, zero_liquidity: 137, fees_fell: 6, pool_inactive: 0, out_of_range: 0, gap: 1, unreadable: 0, staked: 0 }
     );
     assert!((p.skipped_seconds.zero_liquidity - 38413.578).abs() < 0.01);
     assert!((p.skipped_seconds.liquidity_changed - 1202.240).abs() < 0.01);
@@ -153,7 +154,7 @@ fn test_fee_yield_by_day_is_utc_and_the_median_is_true() {
 }
 
 fn row(at: &str, l: u128, o0: f64, o1: f64, tick: i32) -> FeeYieldRow {
-    FeeYieldRow { at: t(at), position_id: V4_ID.to_string(), liquidity: Some(l), owed0: Some(o0), owed1: Some(o1), in_range: Some(true), pool_active: Some(true), tick: Some(tick) }
+    FeeYieldRow { at: t(at), position_id: V4_ID.to_string(), liquidity: Some(l), owed0: Some(o0), owed1: Some(o1), in_range: Some(true), pool_active: Some(true), tick: Some(tick), staked: false }
 }
 
 fn measure(rows: &[FeeYieldRow]) -> FeeYieldPool {
@@ -189,7 +190,7 @@ fn test_fee_yield_skip_rules_each_count_in_their_own_bucket() {
     let p = measure(&rows);
     assert_eq!(
         p.skipped,
-        FeeYieldSkips { liquidity_changed: 2, zero_liquidity: 1, fees_fell: 1, pool_inactive: 2, out_of_range: 1, gap: 1, unreadable: 1 }
+        FeeYieldSkips { liquidity_changed: 2, zero_liquidity: 1, fees_fell: 1, pool_inactive: 2, out_of_range: 1, gap: 1, unreadable: 1, staked: 0 }
     );
     assert_eq!(p.intervals, 2);
     assert_eq!(p.zero_fee_gap_intervals, 1);
@@ -392,4 +393,34 @@ fn test_golden_fee_yield_block_is_byte_identical() {
     }
     let expected = std::fs::read_to_string(path).expect("testdata/fee_yield/golden_fee_yield.json is checked in");
     assert!(actual == expected, "fee_yield bytes changed; compare {path} with a fresh NOCKNOCK_BLESS_GOLDEN=1 run and `git diff` it");
+}
+
+#[test]
+fn test_fee_yield_never_measures_a_staked_period() {
+    // 20 days staked (owed carried as 0, constant liquidity, in range), then 5 days
+    // unstaked earning fees: only the unstaked days are measured, and the staked seconds
+    // are stated (review of #166 rungs, finding 7).
+    let l = 1_000_000_000_000_000u128;
+    let start = t("2026-10-01T00:00:00Z");
+    let mut rows = Vec::new();
+    let step = chrono::Duration::minutes(5);
+    let mut owed = 0.0;
+    for i in 0..(25 * 288) {
+        let staked = i < 20 * 288;
+        if !staked {
+            owed += 1e-6;
+        }
+        let mut r = row("2026-10-01T00:00:00Z", l, if staked { 0.0 } else { owed }, 0.0, 274000);
+        r.at = start + step * i;
+        r.staked = staked;
+        rows.push(r);
+    }
+    let p = measure(&rows);
+    // The interval from the last staked row to the first unstaked one is staked too.
+    assert_eq!(p.skipped.staked, 20 * 288);
+    assert!((p.skipped_seconds.staked - 20.0 * 86400.0).abs() < 1e-6);
+    assert_eq!(p.intervals as usize, 5 * 288 - 1);
+    let u: f64 = p.usdc_per_liquidity_day.as_deref().unwrap().parse().unwrap();
+    // 1e-6 USDC per 5 minutes on 1e15 L: 288e-6 / 1e15 per day.
+    assert!(rel(u, 288e-6 / l as f64) < 1e-6, "{u}");
 }

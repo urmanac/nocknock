@@ -520,7 +520,8 @@ pub(crate) async fn store_snapshot(db: &PgPool, envelope: &SnapshotEnvelope) -> 
         }
     }
 
-    let data_json = serde_json::to_value(&envelope.data)?;
+    let mut data_json = serde_json::to_value(&envelope.data)?;
+    slim_stored_data(&mut data_json);
     sqlx::query!(
         r#"
         INSERT INTO snapshots (snapshot_id, generated_at, state_hash, version, data)
@@ -540,4 +541,60 @@ pub(crate) async fn store_snapshot(db: &PgPool, envelope: &SnapshotEnvelope) -> 
     .execute(db)
     .await?;
     Ok(())
+}
+
+/// What a stored row leaves out (review of #166 rungs, finding 8). The fee measurement's
+/// by-day and per-band detail and the ladder shape's grid and full fee estimates are
+/// re-derived every cycle and are kept in the worker's memory (the latest snapshot,
+/// served by the API and both MCP transports); a stored row keeps the summary, with a
+/// note naming what is left out. That keeps each row's added size to a few KB, so the
+/// scans over stored rows (the hourly fee query, the high-water mark) stay bounded. Pure.
+pub(crate) const STORED_DETAIL_NOTE: &str = "left out of the stored row: the latest snapshot in the worker's memory carries it, and the next cycle measures it again";
+
+pub(crate) fn slim_stored_data(data: &mut serde_json::Value) {
+    if let Some(pools) = data.pointer_mut("/derived_metrics/fee_yield/pools").and_then(|p| p.as_array_mut()) {
+        for p in pools {
+            if let Some(o) = p.as_object_mut() {
+                o.remove("by_day");
+                o.remove("spans");
+                o.insert("detail_note".to_string(), serde_json::json!(format!("by_day and spans are {STORED_DETAIL_NOTE}")));
+            }
+        }
+    }
+    if let Some(shape) = data.pointer_mut("/derived_metrics/ladder_shape").and_then(|v| v.as_object_mut()) {
+        shape.remove("grid");
+        shape.remove("tracked_note");
+        if let Some(fb) = shape.get_mut("floor_breach_effect").filter(|v| v.is_object()) {
+            *fb = serde_json::json!({ "status": fb["status"], "reason": fb["reason"] });
+        }
+        if let Some(rungs) = shape.get_mut("rungs").and_then(|r| r.as_array_mut()) {
+            for r in rungs {
+                if let Some(o) = r.as_object_mut() {
+                    for k in ["mint_note", "remaining_note", "round_trip", "if_pulled_at_fill"] {
+                        o.remove(k);
+                    }
+                    if let Some(cap) = o.get_mut("cap").and_then(|c| c.as_object_mut()) {
+                        cap.remove("note");
+                        cap.remove("band_rule");
+                    }
+                }
+                let Some(fe) = r.get("fee_estimate").cloned() else { continue };
+                let g = |p: &str| fe.pointer(p).cloned().unwrap_or(serde_json::Value::Null);
+                r["fee_estimate"] = serde_json::json!({
+                    "status": g("/status"),
+                    "reason": g("/reason"),
+                    "per_day_in_range_usd": g("/per_day_in_range_usd"),
+                    "per_day_in_range_diluted_usd": g("/per_day_in_range_diluted_usd"),
+                    "measured_days": g("/measured_days"),
+                    "intervals": g("/intervals"),
+                    "in_range_share_pct": g("/in_range_share_stored_history/share_pct"),
+                    "replay_inside_upper_usd": g("/stored_history_replay/inside_upper_usd"),
+                    "replay_edge_upper_usd": g("/stored_history_replay/edge_upper_usd"),
+                    "band_usd_per_day": g("/band_measured/usd_per_day"),
+                    "detail_note": format!("the full estimate is {STORED_DETAIL_NOTE}"),
+                });
+            }
+        }
+        shape.insert("detail_note".to_string(), serde_json::json!(format!("the grid, the full fee estimates, the floor-crossing detail, round trips and notes are {STORED_DETAIL_NOTE}")));
+    }
 }

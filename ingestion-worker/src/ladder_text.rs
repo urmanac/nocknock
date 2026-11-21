@@ -214,6 +214,9 @@ pub fn ladder_text(b: &Value) -> String {
     if b.get("rungs").map_or(false, |r| r.is_array()) {
         return rungs_text(b);
     }
+    if b.get("shape_status").is_some() {
+        return shape_only_text(b);
+    }
     let or = |ptr: &str, d: &str| s(b, ptr).unwrap_or(d).to_string();
     let mut out = String::from("🧮 Ladder Simulation (what-if, read-only)\n=========================================\n");
 
@@ -355,8 +358,14 @@ pub fn ladder_text(b: &Value) -> String {
                 .filter(|n| *n > 0)
                 .map(|n| format!(", {n} tracked ladder{} among them", if n == 1 { "" } else { "s" }))
                 .unwrap_or_default();
+            // Where the gate is read: the bottom, or the gate price and its rule when
+            // operator_profile.ladder_bottom_usd is set (valid or not).
+            let at = match (rc("gate_price_usd"), rc("gate_price_rule")) {
+                (Some(g), Some(rule)) => format!("at the gate ${g} ({rule})"),
+                _ => "at the bottom".to_string(),
+            };
             format!(
-                "• Reserve: stable ${} at the bottom against the ${} reserve: {verdict} (this range takes at most ${}; the existing NOCK ranges hold ${} USDC there{ladders}). {}\n",
+                "• Reserve: stable ${} {at} against the ${} reserve: {verdict} (this range takes at most ${}; the existing NOCK ranges hold ${} USDC there{ladders}). {}\n",
                 rc("stable_at_bottom_usdc").unwrap_or_default(),
                 rc("cash_reserve_usdc").unwrap_or_default(),
                 rc("max_usdc_for_this_range").unwrap_or_else(|| "unknown".to_string()),
@@ -588,6 +597,7 @@ fn rungs_text(b: &Value) -> String {
             or_v(sh, "/total_usdc"),
             or_v(sh, "/total_rule")
         ));
+        out.push_str(&plan_lines(sh));
     }
     if let Some(note) = s(b, "/pool/note").filter(|_| snapped) {
         out.push_str(&format!("• Pool: {note}\n"));
@@ -682,7 +692,7 @@ fn rungs_text(b: &Value) -> String {
             _ if inr.is_empty() => "no rung in range".to_string(),
             (Some(f), Some(d)) => format!("{} in range, fees ${f}/day (${d} diluted)", inr.join("+")),
             (Some(f), None) => format!("{} in range, fees ${f}/day", inr.join("+")),
-            _ => format!("{} in range, fees not estimated", inr.join("+")),
+            _ => format!("{} in range, fees not estimated ({})", inr.join("+"), s(&row, "/est_fee_reason").unwrap_or("no reason given")),
         };
         out.push_str(&format!(
             "  {}% ${}: {moved}, ${} USDC left; {fee}{stable}{mark}\n",
@@ -863,5 +873,60 @@ pub fn ladder_error_text(e: &Value) -> String {
         ));
     }
     out.push_str("• Nothing was read on-chain, signed or sent.");
+    out
+}
+
+/// The shape's plan: each configured rung's status against the tracked rungs. Pure.
+fn plan_lines(sh: &Value) -> String {
+    let mut out = String::new();
+    for p in sh.get("plan").and_then(|p| p.as_array()).cloned().unwrap_or_default() {
+        let why = s(&p, "/reason").map(|r| format!(" ({r})")).unwrap_or_default();
+        let held = p.get("counterparts").and_then(|c| c.as_array()).filter(|c| !c.is_empty()).map(|c| {
+            format!(", tracked: {}", c.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", "))
+        }).unwrap_or_default();
+        out.push_str(&format!(
+            "  – r{} {}: {}{why}; target ${}, deployed ${}, left to deposit ${}{held}\n",
+            p["index"],
+            or_v(&p, "/rung"),
+            or_v(&p, "/status"),
+            num(&p, "/target_usdc").map(|v| format!("{v:.2}")).unwrap_or_else(|| "?".into()),
+            num(&p, "/deployed_usdc").map(|v| format!("{v:.2}")).unwrap_or_else(|| "?".into()),
+            num(&p, "/remaining_usdc").map(|v| format!("{v:.2}")).unwrap_or_else(|| "?".into()),
+        ));
+    }
+    for u in sh.get("unmatched").and_then(|u| u.as_array()).cloned().unwrap_or_default() {
+        out.push_str(&format!(
+            "  – Unmatched tracked ladder {} (${} USDC): {}; {}\n",
+            or_v(&u, "/position_id"),
+            or_v(&u, "/deployed_usdc"),
+            or_v(&u, "/reason"),
+            or_v(&u, "/note"),
+        ));
+    }
+    if sh.get("unmatched").and_then(|u| u.as_array()).map_or(false, |u| !u.is_empty()) || sh.get("plan").and_then(|p| p.as_array()).map_or(false, |p| p.iter().any(|x| x.get("counterparts").and_then(|c| c.as_array()).map_or(false, |c| !c.is_empty()))) {
+        out.push_str(&format!("  – {}\n", or_v(sh, "/tracked_note")));
+    }
+    out
+}
+
+/// shape=configured with nothing left to deposit: the plan and why. Pure.
+fn shape_only_text(b: &Value) -> String {
+    let mut out = String::from("🧮 Ladder Simulation (what-if, read-only)\n=========================================\n");
+    let sh = b.pointer("/inputs/shape").cloned().unwrap_or(Value::Null);
+    let why = match s(b, "/shape_status") {
+        Some("price_at_or_below_bottom") => "the price is at or below the ladder's bottom: every rung is passed".to_string(),
+        Some("deployed") => "nothing is left to deposit: every rung is deployed, passed, over or has no cap, as each says".to_string(),
+        Some(other) => other.to_string(),
+        None => "unknown".to_string(),
+    };
+    out.push_str(&format!(
+        "• Shape: your operator_profile.ladder_rungs in {}, sized to ${} USDC ({}): {why}\n",
+        s(b, "/pool/label").unwrap_or("?"),
+        or_v(&sh, "/total_usdc"),
+        or_v(&sh, "/total_rule"),
+    ));
+    out.push_str(&plan_lines(&sh));
+    out.push_str(&format!("• {}\n", s(b, "/statement").unwrap_or("")));
+    out.push_str(&snapshot_line(b));
     out
 }

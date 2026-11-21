@@ -1105,6 +1105,47 @@ impl<'a> LadderCtx<'a> {
         )
     }
 
+    /// The exact mint of a snapped rung (review of #166 rungs, finding 4): at most its
+    /// USDC and NOCK, truncated to raw units; the liquidity those buy, rounded down with
+    /// Uniswap's integer formulas, and the amounts that liquidity pulls, rounded up as the
+    /// pool rounds them. Never more than the amounts stated. Null when unsnapped.
+    fn exact_mint_json(&self, r: &SizedRung) -> Value {
+        use crate::mint_math::*;
+        let Some((tl, tu)) = r.range.ticks else {
+            return json!({ "status": "unavailable", "reason": "unsnapped: no ticks to mint on" });
+        };
+        let pool = &self.pool;
+        let floor_raw = |v: f64, dec: i32, keep: i32| -> Big {
+            // Truncate to `keep` decimals in f64 (exact for these sizes), then scale up.
+            let units = (v.max(0.0) * 10f64.powi(keep)).floor() as u128;
+            Big::from_u128(units).mul(&Big::from_u128(10u128.pow((dec - keep).max(0) as u32)))
+        };
+        let usdc_max = floor_raw(r.usdc, pool.usdc_dec, pool.usdc_dec.min(6));
+        let nock_max = if r.n0 > 0.0 { floor_raw(r.n0, pool.nock_dec, pool.nock_dec.min(8)) } else { Big::zero() };
+        let (max0, max1) = if pool.nock_is_token1 { (usdc_max.clone(), nock_max.clone()) } else { (nock_max.clone(), usdc_max.clone()) };
+        let sqrt_p = Big::from_hex(&format!("{:032x}{:032x}", pool.template.sqrt_price_x96.0, pool.template.sqrt_price_x96.1)).unwrap_or(Big::zero());
+        match exact_mint(pool.template.tick, &sqrt_p, tl, tu, &max0, &max1) {
+            None => json!({ "status": "unavailable", "reason": "these amounts buy no liquidity on these ticks" }),
+            Some((l, a0, a1)) => {
+                let (u, n) = if pool.nock_is_token1 { (&a0, &a1) } else { (&a1, &a0) };
+                json!({
+                    "status": "exact",
+                    "liquidity_raw": l.to_dec(),
+                    "amount0_raw": a0.to_dec(),
+                    "amount1_raw": a1.to_dec(),
+                    "usdc_raw": u.to_dec(),
+                    "nock_raw": n.to_dec(),
+                    "usdc": raw_to_decimal(u, pool.usdc_dec as u32),
+                    "nock": raw_to_decimal(n, pool.nock_dec as u32),
+                    "usdc_max_raw": usdc_max.to_dec(),
+                    "nock_max_raw": nock_max.to_dec(),
+                    "tick": pool.template.tick,
+                    "note": "liquidity_raw is what these amounts buy, rounded down (LiquidityAmounts); amount0_raw and amount1_raw are what a mint of it pulls, rounded up (SqrtPriceMath), never more than the maxima (the rung's USDC and NOCK truncated to raw units)",
+                })
+            }
+        }
+    }
+
     fn rebuild_nock(&self) -> f64 {
         self.env
             .data
@@ -1286,6 +1327,7 @@ impl<'a> FeeCtx<'a> {
             "dilution": Value::Null,
             "dilution_reason": Value::Null,
             "spread": Value::Null,
+            "spread_reason": Value::Null,
             "band_measured": Value::Null,
             "band_reason": Value::Null,
             "in_range_share_stored_history": Value::Null,
@@ -1361,6 +1403,16 @@ impl<'a> FeeCtx<'a> {
                 });
             }
             None => v["dilution_reason"] = json!(self.active_reason.clone()),
+        }
+        // A stored row read back from the database has no by-day or band detail: stated,
+        // never read as zero.
+        if let Some(note) = &p.detail_note {
+            let why = format!("this snapshot was read back from the database, whose rows keep no by-day or band detail ({note})");
+            v["band_reason"] = json!(why.clone());
+            v["in_range_share_reason"] = json!(why.clone());
+            v["replay_reason"] = json!(why.clone());
+            v["spread_reason"] = json!(why);
+            return v;
         }
         // Every UTC day of the measurement, at this range's liquidity; the spread is over
         // the days with at least day_min_seconds measured.
@@ -1479,7 +1531,7 @@ pub(crate) fn simulate_ladder(env: &SnapshotEnvelope, req: &LadderRequest, now: 
         return simulate_shape(&ctx, req, shape, now, health);
     }
     if req.indexed {
-        simulate_rungs(&ctx, req, now, health)
+        simulate_rungs(&ctx, req, now, health, None)
     } else {
         simulate_flat(&ctx, req, now, health)
     }
@@ -1595,7 +1647,7 @@ fn simulate_flat(ctx: &LadderCtx, req: &LadderRequest, now: DateTime<Utc>, healt
     let (plan_unspent, plan_reason, tax) = ctx.stated_not_gates();
     let mut reserve_check = json!({
         "status": status,
-        "gate": if gate_set { RESERVE_GATE_CONFIGURED_NOTE } else { RESERVE_GATE_NOTE },
+        "gate": if ctx.ladder_bottom.is_some() { RESERVE_GATE_CONFIGURED_NOTE } else if gate_set { RESERVE_GATE_INVALID_BOTTOM_NOTE } else { RESERVE_GATE_NOTE },
         "cash_reserve_usdc": reserve_amount.map(|v| fx(v, 2)),
         "stable_at_spot_usdc": at_spot.map(|s| fx(s.0, 2)),
         "headroom_at_spot_usdc": at_spot.and_then(|s| s.1).map(|h| fx(h, 2)),
@@ -1798,6 +1850,7 @@ fn reserve_status(existing_ok: bool, problems: &[String], configured: Option<f64
     }
 }
 
+const RESERVE_GATE_INVALID_BOTTOM_NOTE: &str = "operator_profile.ladder_bottom_usd is set but invalid and not applied: the gate falls back to the stable balance at the ladder's own bottom.";
 const RESERVE_GATE_CONFIGURED_NOTE: &str = "The gate is the stable balance at the lower of the ladder's deepest bottom and your ladder bottom (operator_profile.ladder_bottom_usd); the *_at_bottom figures are read at gate_price_usd.";
 const RESERVE_GATE_RUNGS_NOTE: &str = "The gate is the stable balance where every rung is fully NOCK: at the lower of the deepest rung's bottom and your ladder bottom (operator_profile.ladder_bottom_usd) when it is set, otherwise at the deepest rung's bottom; the *_at_bottom figures are read at gate_price_usd.";
 /// The assumptions a ladder of rungs adds to LADDER_ASSUMPTIONS.
@@ -1828,11 +1881,13 @@ struct RungsMeasure {
 }
 
 impl LadderCtx<'_> {
-    fn measure(&self, rungs: &[SizedRung]) -> RungsMeasure {
+    /// `measure` with the gate read at `gate_low` (the whole ladder's deepest bottom) when
+    /// given, so every trade-off row is gated at the same price.
+    fn measure_at(&self, rungs: &[SizedRung], gate_low: Option<f64>) -> RungsMeasure {
         let total_usdc: f64 = rungs.iter().map(|r| r.usdc).sum();
         let total_n0: f64 = rungs.iter().map(|r| r.n0).sum();
         let deepest_low_usd = rungs.iter().map(|r| r.range.low_usd).fold(f64::INFINITY, f64::min);
-        let (r_gate, gate_usd, gate_rule) = self.gate(deepest_low_usd);
+        let (r_gate, gate_usd, gate_rule) = self.gate(gate_low.unwrap_or(deepest_low_usd).min(deepest_low_usd));
         let wallet_after = self.wallet_usdc - total_usdc;
         let at_gate = self.existing(r_gate).map(|(eu, _)| (eu, reserve_reading(self.configured, wallet_after, eu)));
         let deep: Vec<&SizedRung> = rungs.iter().filter(|r| r.is_deep()).collect();
@@ -1872,7 +1927,10 @@ impl LadderCtx<'_> {
     /// One trade-off row: the rungs as varied, every column measured. No ranking.
     fn tradeoff_row(&self, rungs: &[SizedRung], all: &[SizedRung]) -> Value {
         let price = self.price();
-        let m = self.measure(rungs);
+        // Every row is gated where the whole ladder is (review: a row that drops a rung
+        // would otherwise read its margin at another price).
+        let gate_low = all.iter().map(|r| r.range.low_usd).fold(f64::INFINITY, f64::min);
+        let m = self.measure_at(rungs, Some(gate_low));
         let per_rung: Vec<Value> = all
             .iter()
             .map(|a| {
@@ -1883,7 +1941,7 @@ impl LadderCtx<'_> {
                         "fee_per_day_in_range_usd": Value::Null, "fee_per_day_in_range_diluted_usd": Value::Null,
                         "fee_per_100_usd_per_day_in_range_usd": Value::Null, "in_range_share_pct": Value::Null,
                         "replay_inside_upper_usd": Value::Null, "replay_edge_upper_usd": Value::Null,
-                        "band_usd_per_day": Value::Null, "note": "no USDC in this rung in this row",
+                        "band_usd_per_day": Value::Null, "coverage_whole": Value::Null, "note": "no USDC in this rung in this row",
                     });
                 };
                 let r = &rungs[i];
@@ -1901,7 +1959,8 @@ impl LadderCtx<'_> {
                     "replay_inside_upper_usd": fe.pointer("/stored_history_replay/inside_upper_usd").cloned().unwrap_or(Value::Null),
                     "replay_edge_upper_usd": fe.pointer("/stored_history_replay/edge_upper_usd").cloned().unwrap_or(Value::Null),
                     "band_usd_per_day": fe.pointer("/band_measured/usd_per_day").cloned().unwrap_or(Value::Null),
-                    "note": Value::Null,
+                    "coverage_whole": fe.pointer("/coverage/whole").cloned().unwrap_or(Value::Null),
+                    "note": fe.pointer("/coverage/note").filter(|_| fe.pointer("/coverage/whole") == Some(&json!(false))).cloned().unwrap_or(Value::Null),
                 })
             })
             .collect();
@@ -1929,6 +1988,7 @@ impl LadderCtx<'_> {
             "avg_kept_price_usd": (m.kept_bought > 0.0).then(|| fx(m.kept_usdc / m.kept_bought, 8)),
             "nock_by_depth": nock_by_depth,
             "reserve_margin_usdc": margin.map(|h| fx(h, 2)),
+            "gate_price_usd": fx(m.gate_usd, 8),
             "reserve_status": rs,
             "nock_needed": fx(m.total_n0, 4),
             "budget_status": match self.budget { None => "unknown", Some(b) if m.total_n0 <= b.max(0.0) + 1e-9 => "fits", Some(_) => "exceeds" },
@@ -2052,7 +2112,7 @@ impl LadderCtx<'_> {
 
 /// A ladder of rungs (indexed form): every rung sized in one pool, one shared reserve gate
 /// and NOCK budget, each rung's fee estimate, and the trade-off tables.
-fn simulate_rungs(ctx: &LadderCtx, req: &LadderRequest, now: DateTime<Utc>, health: &str) -> Result<Value, LadderError> {
+fn simulate_rungs(ctx: &LadderCtx, req: &LadderRequest, now: DateTime<Utc>, health: &str, gate_low: Option<f64>) -> Result<Value, LadderError> {
     let data = &ctx.env.data;
     let gs = &data.derived_metrics.global_status;
     let raw = &ctx.book.raw;
@@ -2080,7 +2140,7 @@ fn simulate_rungs(ctx: &LadderCtx, req: &LadderRequest, now: DateTime<Utc>, heal
         nock_check(&sr, &bounds_json(&range, price))?;
         rungs.push(sr);
     }
-    let m = ctx.measure(&rungs);
+    let m = ctx.measure_at(&rungs, gate_low);
     let wallet_after = ctx.wallet_usdc - m.total_usdc;
     let existing_ok = ctx.book.problems.is_empty();
     let configured = ctx.configured;
@@ -2136,21 +2196,29 @@ fn simulate_rungs(ctx: &LadderCtx, req: &LadderRequest, now: DateTime<Utc>, heal
             }
             let in_idx: Vec<usize> = (0..rungs.len()).filter(|i| per[*i].2).collect();
             let l_new: f64 = in_idx.iter().map(|i| rungs[*i].l).sum();
-            let counted: Vec<usize> = in_idx.iter().copied().filter(|i| measured_rung[*i]).collect();
+            // A row states a fee figure only where every rung in range there is measured at
+            // that price; otherwise null with the reason, never a partial sum or a zero.
+            let row_tick = { let s = pool.s_at(r); (s * s).ln() / 1.0001f64.ln() };
+            let outside_measured = ctx.fee.pool.map_or(false, |p| row_tick < p.covered_tick_lower as f64 || row_tick >= p.covered_tick_upper as f64);
             let (est, est_dil, est_reason) = match rate {
+                _ if in_idx.is_empty() => (Some(0.0), Some(0.0), Some("no rung is in range at this price, so none earns fees".to_string())),
                 None => (None, None, ctx.fee.reason.clone()),
                 Some(rt) => {
-                    let f: f64 = counted.iter().map(|i| rungs[*i].l * rt).sum();
-                    let dil = ctx.fee.active.map(|a| f * a / (a + l_new));
                     let mut why: Vec<String> = in_idx
                         .iter()
                         .filter(|i| !measured_rung[**i])
-                        .map(|i| format!("r{} lies outside the measuring range: not counted", rungs[*i].req.index))
+                        .map(|i| format!("r{} lies wholly outside the measuring range: its fees are not measured", rungs[*i].req.index))
                         .collect();
-                    if dil.is_none() {
-                        why.push(ctx.fee.active_reason.clone().unwrap_or_default());
+                    if outside_measured {
+                        why.push(format!("at ${} the price is outside the measuring range: no fees are measured here", fx(price * r, 8)));
                     }
-                    (Some(f), dil, (!why.is_empty()).then(|| why.join("; ")))
+                    if !why.is_empty() {
+                        (None, None, Some(why.join("; ")))
+                    } else {
+                        let f: f64 = in_idx.iter().map(|i| rungs[*i].l * rt).sum();
+                        let dil = ctx.fee.active.map(|a| f * a / (a + l_new));
+                        (Some(f), dil, dil.is_none().then(|| ctx.fee.active_reason.clone().unwrap_or_default()))
+                    }
                 }
             };
             json!({
@@ -2291,9 +2359,8 @@ fn simulate_rungs(ctx: &LadderCtx, req: &LadderRequest, now: DateTime<Utc>, heal
                     "nock_needed_at_spot": fx(r.n0, 4),
                     "nock_given": r.req.nock.map(|n| format!("{n}")),
                     "nock_check": if r.req.nock.is_some() { "matches" } else { "not_given" },
-                    "usdc_raw": format!("{}", (r.usdc * 10f64.powi(pool.usdc_dec)).round().max(0.0) as u128),
-                    "nock_raw": format!("{}", (r.n0 * 10f64.powi(pool.nock_dec)).round().max(0.0) as u128),
                 },
+                "mint": ctx.exact_mint_json(r),
                 "bottom": {
                     "price_usd": fx(r.range.low_usd, 8),
                     "pct_of_spot": pct((r_bottom - 1.0) * 100.0),
@@ -2537,17 +2604,59 @@ pub(crate) fn ladder_rung_settings(rungs: &[LadderRungConfig]) -> Vec<LadderRung
         .collect()
 }
 
+/// A shape rung counts as deployed when what is left to deposit is below these; a tracked
+/// rung holding more than its target by more than these is `over`. Display constants,
+/// echoed in the block; not operator settings.
+pub(crate) const LADDER_SHAPE_DUST_USDC: f64 = 0.50;
+pub(crate) const LADDER_SHAPE_DUST_NOCK: f64 = 1.0;
+/// Why a configured rung above the price cannot be drawn (review of #166 rungs).
+pub(crate) const LADDER_SHAPE_PASSED_REASON: &str = "the price is below this rung's range; a USDC-only deposit there is not possible";
+pub(crate) const LADDER_SHAPE_TRACKED_NOTE: &str = "Tracked ladder rungs in this pool (role: ladder) are part of the shape, not existing ranges: the total counts their USDC as if it were still in the wallet. A near or deep rung counts what its range holds as all USDC at its top (vs_top.usdc_at_top); a cap counts the USDC it holds now, and its NOCK is counted back into the NOCK budget the cap is sized by. Each tracked rung is matched to a configured rung by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order). What is left to deposit is drawn on a matched rung's own ticks.";
+
 /// The cap's band, liquidity and the limit that bound it (`shape=configured`).
 struct CapSizing {
     tick_lower: i32,
     tick_upper: i32,
-    low_usd: f64,
-    high_usd: f64,
     usdc: f64,
     nock: f64,
+    /// USDC and NOCK per unit of liquidity at the pool price, on this band.
+    per_l: (f64, f64),
     bound_by: &'static str,
     note: String,
     band_rule: String,
+}
+
+/// A tracked ladder (role: ladder) in the shape's pool.
+struct TrackedRung {
+    position_id: String,
+    rung: Option<String>,
+    tl: i32,
+    tu: i32,
+    /// The USDC it counts toward the total (see LADDER_SHAPE_TRACKED_NOTE).
+    deployed_usdc: f64,
+    /// Its NOCK now (counted back into the budget for a cap).
+    deployed_nock: f64,
+    /// Its USDC at the gate price (0 when the gate is below it).
+    usdc_at_gate: f64,
+}
+
+/// One configured rung of the shape, planned against what is tracked.
+struct PlanRung {
+    pos: usize,
+    role: String,
+    share: Option<f64>,
+    draw: Option<(i32, i32)>,
+    passed: bool,
+    target_usdc: f64,
+    target_nock: f64,
+    deployed_usdc: f64,
+    deployed_nock: f64,
+    counterparts: Vec<String>,
+    cap: Option<CapSizing>,
+    status: &'static str,
+    reason: Option<String>,
+    remaining_usdc: f64,
+    remaining_nock: f64,
 }
 
 impl LadderCtx<'_> {
@@ -2567,28 +2676,31 @@ impl LadderCtx<'_> {
         (lo, lo + spacing, rule)
     }
 
-    /// The cap sized in its band: its NOCK is the LP NOCK budget, or less when the USDC the
-    /// curve pairs with it would exceed `usdc_limit` (the near rung's USDC). Err is the
-    /// reason there is no cap.
-    fn cap_sizing(&self, spacing: i32, usdc_limit: impl Fn(f64) -> f64, limit_name: &'static str) -> Result<CapSizing, String> {
-        let (tl, tu, band_rule) = self.cap_band(spacing);
-        let budget = match self.budget {
+    /// The range of ticks [tl, tu) in USD terms.
+    fn range_of_ticks(&self, tl: i32, tu: i32) -> Range {
+        let (lo_usd, hi_usd) = if self.pool.nock_is_token1 { (tu, tl) } else { (tl, tu) };
+        self.pool.range_from_ticks(lo_usd, hi_usd)
+    }
+
+    /// The cap sized in its band: its NOCK is the LP NOCK budget (`budget`), or less when
+    /// the USDC the curve pairs with it would exceed `limit` (the near rung's USDC). Err
+    /// is the reason there is no cap.
+    fn cap_sizing(&self, band: (i32, i32, String), budget: Option<f64>, limit: f64, limit_name: &'static str) -> Result<CapSizing, String> {
+        let (tl, tu, band_rule) = band;
+        let budget = match budget {
             None => return Err("lp_nock_budget is not in this snapshot (2.9.0): the cap is sized by it, so there is no cap".to_string()),
             Some(b) if !(b > 0.0) => {
                 return Err(format!("the NOCK that may go into LP (lp_nock_budget) is {}: there is no NOCK for a cap, so there is none", fx(b, 4)))
             }
             Some(b) => b,
         };
-        let pool = &self.pool;
-        let (t_low_usd, t_high_usd) = if pool.nock_is_token1 { (tu, tl) } else { (tl, tu) };
-        let range = pool.range_from_ticks(t_low_usd, t_high_usd);
-        let (u1, n1) = pool.amounts(1.0, pool.s_now, range.sa, range.sb);
+        let range = self.range_of_ticks(tl, tu);
+        let (u1, n1) = self.pool.amounts(1.0, self.pool.s_now, range.sa, range.sb);
         if !(n1 > 0.0) || !(u1 > 0.0) {
             return Err(format!("at the pool price the band {tl}..{tu} holds only one token: it cannot pair NOCK with USDC, so there is no cap"));
         }
         let l_budget = budget / n1;
         let usdc_budget = l_budget * u1;
-        let limit = usdc_limit(usdc_budget);
         let (l, bound_by, note) = if usdc_budget <= limit + 1e-9 {
             (l_budget, "lp_nock_budget", format!("the cap holds the whole LP NOCK budget, {} NOCK; the curve pairs it with ${} USDC", fx(budget, 4), fx(usdc_budget, 2)))
         } else {
@@ -2606,15 +2718,45 @@ impl LadderCtx<'_> {
                 ),
             )
         };
-        Ok(CapSizing { tick_lower: tl, tick_upper: tu, low_usd: range.low_usd, high_usd: range.high_usd, usdc: l * u1, nock: l * n1, bound_by, note, band_rule })
+        Ok(CapSizing { tick_lower: tl, tick_upper: tu, usdc: l * u1, nock: l * n1, per_l: (u1, n1), bound_by, note, band_rule })
+    }
+
+    /// The tracked ladders (role: ladder) in the ladder pool, with what each counts.
+    fn tracked_rungs(&self, r_gate: f64) -> Vec<TrackedRung> {
+        let raw = &self.book.raw;
+        let mut out: Vec<TrackedRung> = raw
+            .positions
+            .iter()
+            .filter(|p| p.pool_id == self.pool.template.pool_id && raw.ladders.contains_key(&p.position_id))
+            .map(|p| {
+                let tag = &raw.ladders[&p.position_id];
+                let range = self.range_of_ticks(p.tick_lower, p.tick_upper);
+                let (usdc_now, nock_now) = existing_at_ratio(p, 1.0);
+                let usdc_at_top = self.pool.amounts(p.liquidity as f64, range.s_top, range.sa, range.sb).0;
+                let deployed_usdc = if tag.rung.as_deref() == Some("cap") { usdc_now } else { usdc_at_top };
+                TrackedRung {
+                    position_id: p.position_id.clone(),
+                    rung: tag.rung.clone(),
+                    tl: p.tick_lower,
+                    tu: p.tick_upper,
+                    deployed_usdc,
+                    deployed_nock: nock_now,
+                    usdc_at_gate: existing_at_ratio(p, r_gate).0,
+                }
+            })
+            .collect();
+        out.sort_by(|a, b| a.position_id.cmp(&b.position_id));
+        out
     }
 }
 
-/// `shape=configured`: the operator's ladder_rungs from the snapshot, sized to the total
-/// given or to the shared reserve gate's most, then simulated as a ladder of rungs. The
-/// gate is still read at the lower of the deepest bottom and ladder_bottom_usd. A cap,
-/// when the shape starts with one, is the band containing spot holding the LP NOCK
-/// budget; its USDC comes out of the same total and never exceeds the near rung's.
+/// `shape=configured`: the operator's ladder_rungs from the snapshot, planned against the
+/// tracked ladder rungs already deposited in the pool (review of #166 rungs): the gated
+/// total counts their USDC as if it were in the wallet, each configured rung's target is
+/// sized from that total (the cap rule, then the shares), each tracked rung is matched to
+/// a configured one, and only what is left to deposit is simulated. A configured rung
+/// above the price is `passed`; with every rung passed the status is
+/// price_at_or_below_bottom. A valid configuration never answers a parameter error.
 fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, now: DateTime<Utc>, health: &str) -> Result<Value, LadderError> {
     let gs = &ctx.env.data.derived_metrics.global_status;
     let Some(setting) = gs.ladder_rungs.as_ref().filter(|r| !r.is_empty()) else {
@@ -2623,33 +2765,131 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
             gs.ladder_rungs_note.clone().unwrap_or_else(|| "operator_profile.ladder_rungs is not set in this snapshot: there is no configured shape".to_string()),
         ));
     };
-    let unreadable = |i: usize| LadderError::not_simulated("SHAPE_NOT_CONFIGURED", format!("rung {} of the stored shape could not be read", i + 1));
-    let has_cap = setting.first().map_or(false, |r| r.rung == "cap");
-    // The near and deep rungs: role, share, bottom, top.
-    let mut parsed: Vec<(String, f64, Bound, Bound)> = Vec::new();
-    for (i, r) in setting.iter().enumerate().skip(if has_cap { 1 } else { 0 }) {
-        let share = r.share.as_deref().and_then(|v| v.parse::<f64>().ok()).ok_or_else(|| unreadable(i))?;
-        let low = r.low_usd.as_deref().and_then(|v| v.parse::<f64>().ok()).ok_or_else(|| unreadable(i))?;
-        let high = if r.high == "spot" { Bound::Spot } else { Bound::Usd(r.high.parse::<f64>().map_err(|_| unreadable(i))?) };
-        parsed.push((r.rung.clone(), share, Bound::Usd(low), high));
-    }
-    let offset = if has_cap { 2 } else { 1 };
-    let rung_req = |i: usize, usdc: f64| RungRequest {
-        index: i + offset,
-        rung: Some(parsed[i].0.clone()),
-        usdc,
-        nock: None,
-        low: parsed[i].2.clone(),
-        high: parsed[i].3.clone(),
+    let Some(spacing) = ctx.spacing else {
+        return Err(LadderError::not_simulated(
+            "SHAPE_NEEDS_TICK_SPACING",
+            "the configured shape is drawn on the pool's tick grid (the usable tick at or below spot, the cap's band): give position_id",
+        ));
     };
-    // The deepest snapped bottom decides the gate, whatever the total.
-    let mut deepest = f64::INFINITY;
-    for i in 0..parsed.len() {
-        let rq = rung_req(i, 1.0);
-        let (range, _) = ctx.resolve_range(&rq.low, &rq.high).map_err(|e| e.of_rung(&rq))?;
-        deepest = deepest.min(range.low_usd);
+    let pool = &ctx.pool;
+    let unreadable = |i: usize| LadderError::not_simulated("SHAPE_NOT_CONFIGURED", format!("rung {} of the stored shape could not be read", i + 1));
+    // The setting, by position.
+    let mut plan: Vec<PlanRung> = Vec::new();
+    let mut lows: Vec<Option<i32>> = Vec::new();
+    for (i, r) in setting.iter().enumerate() {
+        let (share, low) = if r.rung == "cap" {
+            (None, None)
+        } else {
+            let share = r.share.as_deref().and_then(|v| v.parse::<f64>().ok()).ok_or_else(|| unreadable(i))?;
+            let low = r.low_usd.as_deref().and_then(|v| v.parse::<f64>().ok()).ok_or_else(|| unreadable(i))?;
+            (Some(share), Some(nearest_usable_tick(pool.tick_f(low), spacing)))
+        };
+        lows.push(low);
+        plan.push(PlanRung {
+            pos: i,
+            role: r.rung.clone(),
+            share,
+            draw: None,
+            passed: false,
+            target_usdc: 0.0,
+            target_nock: 0.0,
+            deployed_usdc: 0.0,
+            deployed_nock: 0.0,
+            counterparts: Vec::new(),
+            cap: None,
+            status: "to_deposit",
+            reason: None,
+            remaining_usdc: 0.0,
+            remaining_nock: 0.0,
+        });
     }
-    let (r_gate, gate_usd, _) = ctx.gate(deepest);
+    // Passed rungs and the drawing ticks: the first rung still drawable starts at the
+    // usable tick at or below spot; each later one at the rung above's bottom.
+    let spot_tick = pool.tick_at_or_below_price(spacing);
+    let usd = |t: i32| pool.usd_at_tick(t);
+    let mut prev_low: Option<i32> = None;
+    let mut first_drawn = false;
+    for (i, p) in plan.iter_mut().enumerate() {
+        let Some(t_low) = lows[i] else { continue };
+        if usd(spot_tick) <= usd(t_low) * (1.0 + 1e-12) {
+            p.passed = true;
+        } else {
+            let top = if first_drawn { prev_low.unwrap_or(spot_tick) } else { spot_tick };
+            first_drawn = true;
+            if top != t_low {
+                p.draw = Some((top.min(t_low), top.max(t_low)));
+            } else {
+                p.passed = true;
+            }
+        }
+        prev_low = Some(t_low);
+    }
+    let all_passed = plan.iter().filter(|p| p.role != "cap").all(|p| p.passed);
+    let cap_band = ctx.cap_band(spacing);
+    for p in plan.iter_mut().filter(|p| p.role == "cap") {
+        p.passed = all_passed;
+        if !all_passed {
+            p.draw = Some((cap_band.0, cap_band.1));
+        }
+    }
+    // The gate: the deepest configured bottom, or the operator's ladder bottom if lower.
+    let deepest = lows.iter().flatten().map(|t| usd(*t)).fold(f64::INFINITY, f64::min);
+    let (r_gate, gate_usd, gate_rule) = ctx.gate(deepest);
+    // Tracked rungs, matched by role, then ticks.
+    let tracked = ctx.tracked_rungs(r_gate);
+    let mut owner: Vec<Option<usize>> = vec![None; tracked.len()];
+    let mut unmatched: Vec<Value> = Vec::new();
+    for (k, t) in tracked.iter().enumerate() {
+        if let Some(role) = &t.rung {
+            owner[k] = plan.iter().position(|p| &p.role == role && p.draw == Some((t.tl, t.tu)));
+        }
+    }
+    for (k, t) in tracked.iter().enumerate() {
+        if owner[k].is_some() {
+            continue;
+        }
+        let reason = match &t.rung {
+            None => Some("its rung is not set in config.yaml, so it matches no configured rung".to_string()),
+            Some(role) => {
+                let taken: Vec<usize> = owner.iter().flatten().copied().collect();
+                match plan.iter().position(|p| &p.role == role && !taken.contains(&p.pos)) {
+                    Some(i) => {
+                        owner[k] = Some(i);
+                        None
+                    }
+                    None if plan.iter().any(|p| &p.role == role) => Some(format!("every configured {role} rung already has a tracked counterpart")),
+                    None => Some(format!("the configured shape has no {role} rung")),
+                }
+            }
+        };
+        if let Some(reason) = reason {
+            unmatched.push(json!({
+                "position_id": t.position_id,
+                "rung": t.rung,
+                "tick_lower": t.tl,
+                "tick_upper": t.tu,
+                "deployed_usdc": fx(t.deployed_usdc, 2),
+                "reason": reason,
+                "note": "it still counts toward the total, and fills no configured rung",
+            }));
+        }
+    }
+    for (k, t) in tracked.iter().enumerate() {
+        if let Some(i) = owner[k] {
+            let p = &mut plan[i];
+            p.deployed_usdc += t.deployed_usdc;
+            p.deployed_nock += t.deployed_nock;
+            if p.counterparts.is_empty() {
+                // What is left to deposit keeps the matched rung's own ticks.
+                p.draw = Some((t.tl, t.tu));
+                let range = ctx.range_of_ticks(t.tl, t.tu);
+                p.passed = !(range.low_usd < pool.price) || (p.role != "cap" && !(usd(spot_tick) > range.low_usd * (1.0 + 1e-12)));
+            }
+            p.counterparts.push(t.position_id.clone());
+        }
+    }
+    // The gated total, as if the tracked rungs' USDC were in the wallet.
+    let tracked_usdc: f64 = tracked.iter().map(|t| t.deployed_usdc).sum();
     let (total, rule) = match shape.total_usdc {
         Some(t) => (t, "given (shape_usdc)".to_string()),
         None => {
@@ -2662,90 +2902,191 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
             let Some((eu, _)) = ctx.existing(r_gate) else {
                 return Err(LadderError::not_simulated("SHAPE_TOTAL_UNKNOWN", ctx.book.problems.join("; ")));
             };
-            let max = floor_cents(ctx.wallet_usdc + eu - res).min(floor_cents(ctx.wallet_usdc));
+            let eu_other = eu - tracked.iter().map(|t| t.usdc_at_gate).sum::<f64>();
+            let max = floor_cents(ctx.wallet_usdc + tracked_usdc + eu_other - res).min(floor_cents(ctx.wallet_usdc + tracked_usdc));
             if !(max > 0.0) {
                 return Err(LadderError::not_simulated(
                     "SHAPE_NO_ROOM",
                     format!("at the gate ${} the stable balance leaves no USDC above the ${} reserve for a ladder", fx(gate_usd, 8), fx(res, 2)),
                 ));
             }
-            (max, format!("the shared reserve gate's most (max_usdc_total) at ${}", fx(gate_usd, 8)))
+            (max, format!("the shared reserve gate's most (max_usdc_total) at ${}, counting the tracked rungs' USDC", fx(gate_usd, 8)))
         }
     };
-    // The cap: the band containing spot, sized by the budget and the near rung's USDC.
-    let (cap, cap_reason) = if has_cap {
-        let Some(spacing) = ctx.spacing else {
-            return Err(LadderError::not_simulated(
-                "SHAPE_NEEDS_TICK_SPACING",
-                "the configured shape has a cap, the tick band containing spot: give position_id (the pool whose band it is)",
-            ));
-        };
-        // cap <= share_near * (total - cap), so cap <= share_near * total / (1 + share_near).
-        let near_share = parsed.iter().find(|p| p.0 == "near").map(|p| p.1);
-        let (limit_name, limit): (&'static str, Box<dyn Fn(f64) -> f64>) = match near_share {
-            Some(sh) => ("near_usdc", Box::new(move |_| sh * total / (1.0 + sh))),
-            None => ("total_usdc", Box::new(move |_| total)),
-        };
-        match ctx.cap_sizing(spacing, limit, limit_name) {
-            Ok(c) => (Some(c), None),
-            Err(why) => (None, Some(why)),
-        }
-    } else {
-        (None, None)
+    // Targets: the cap rule, then the shares of what is left.
+    let mut cap_reason: Option<String> = None;
+    let near_share = plan.iter().find(|p| p.role == "near").and_then(|p| p.share);
+    let (limit_name, limit) = match near_share {
+        Some(sh) => ("near_usdc", sh * total / (1.0 + sh)),
+        None => ("total_usdc", total),
     };
-    let cap_usdc = cap.as_ref().map(|c| c.usdc).unwrap_or(0.0);
+    let budget_eff = ctx.budget.map(|b| b + plan.iter().filter(|p| p.role == "cap").map(|p| p.deployed_nock).sum::<f64>());
+    for p in plan.iter_mut().filter(|p| p.role == "cap") {
+        let band = match (p.counterparts.is_empty(), p.draw) {
+            (false, Some((tl, tu))) => (tl, tu, format!("the tracked cap's own band {tl}..{tu}")),
+            _ => cap_band.clone(),
+        };
+        match ctx.cap_sizing(band, budget_eff, limit, limit_name) {
+            Ok(c) => {
+                p.target_usdc = c.usdc;
+                p.target_nock = c.nock;
+                p.cap = Some(c);
+            }
+            Err(why) => cap_reason = Some(why),
+        }
+    }
+    let cap_usdc: f64 = plan.iter().filter(|p| p.role == "cap").map(|p| p.target_usdc).sum();
     let rest = total - cap_usdc;
     if !(rest > 0.0) {
         return Err(LadderError::not_simulated("SHAPE_NO_ROOM", format!("the cap's ${} leaves no USDC of the ${} total for the other rungs", fx(cap_usdc, 2), fx(total, 2))));
     }
-    let mut rungs: Vec<RungRequest> = Vec::new();
-    if let Some(c) = &cap {
-        rungs.push(RungRequest { index: 1, rung: Some("cap".to_string()), usdc: c.usdc, nock: None, low: Bound::Usd(c.low_usd), high: Bound::Usd(c.high_usd) });
+    for p in plan.iter_mut().filter(|p| p.role != "cap") {
+        p.target_usdc = rest * p.share.unwrap_or(0.0);
     }
-    // Without a cap (none fits) the indices still name the configured rungs.
-    let shift = if has_cap && cap.is_none() { 1 } else { 0 };
-    rungs.extend((0..parsed.len()).map(|i| {
-        let mut r = rung_req(i, rest * parsed[i].1);
-        r.index -= shift;
-        r
-    }));
-    let shaped = LadderRequest { rungs, indexed: true, shape: None, ..req.clone() };
-    let mut body = simulate_rungs(ctx, &shaped, now, health)?;
-    if let Some(c) = &cap {
-        body["rungs"][0]["bounds"]["high_rule"] = json!("the tick band containing the pool's tick (the cap)");
-        body["rungs"][0]["cap"] = json!({
-            "tick_lower": c.tick_lower,
-            "tick_upper": c.tick_upper,
-            "pool_tick": ctx.pool.template.tick,
-            "band_rule": c.band_rule,
-            "lp_nock_budget": ctx.budget.map(|b| fx(b, 4)),
-            "nock": fx(c.nock, 4),
-            "usdc": fx(c.usdc, 2),
-            "bound_by": c.bound_by,
-            "note": c.note,
+    // Statuses.
+    for p in plan.iter_mut() {
+        p.remaining_usdc = p.target_usdc - p.deployed_usdc;
+        p.remaining_nock = if p.role == "cap" { p.target_nock - p.deployed_nock } else { 0.0 };
+        let over_usdc = p.deployed_usdc - p.target_usdc;
+        let over_nock = if p.role == "cap" { p.deployed_nock - p.target_nock } else { 0.0 };
+        let small = p.remaining_usdc < LADDER_SHAPE_DUST_USDC && (p.role != "cap" || p.remaining_nock < LADDER_SHAPE_DUST_NOCK);
+        let cap_missing = p.role == "cap" && p.cap.is_none() && p.counterparts.is_empty();
+        (p.status, p.reason) = if over_usdc > LADDER_SHAPE_DUST_USDC || over_nock > LADDER_SHAPE_DUST_NOCK {
+            ("over", Some(format!("the tracked rung holds ${} USDC{} more than its target", fx(over_usdc.max(0.0), 2), if p.role == "cap" { format!(" and {} NOCK", fx(over_nock.max(0.0), 4)) } else { String::new() })))
+        } else if p.passed && (cap_missing || !small) {
+            ("passed", Some(LADDER_SHAPE_PASSED_REASON.to_string()))
+        } else if cap_missing || (p.role == "cap" && p.cap.is_none()) {
+            ("none", cap_reason.clone())
+        } else if small {
+            ("deployed", None)
+        } else {
+            ("to_deposit", None)
+        };
+    }
+    // What is left to deposit, drawn as rungs; the body's rung index is the setting's.
+    let mut rungs: Vec<RungRequest> = Vec::new();
+    for p in plan.iter().filter(|p| p.status == "to_deposit") {
+        let Some((tl, tu)) = p.draw else { continue };
+        let range = ctx.range_of_ticks(tl, tu);
+        let usdc = match (&p.cap, p.role.as_str()) {
+            // The cap's remainder by its NOCK, paired on its curve.
+            (Some(c), "cap") => p.remaining_nock.max(0.0) / c.per_l.1 * c.per_l.0,
+            _ => p.remaining_usdc,
+        };
+        rungs.push(RungRequest {
+            index: p.pos + 1,
+            rung: Some(p.role.clone()),
+            usdc,
+            nock: None,
+            low: Bound::Usd(range.low_usd),
+            high: Bound::Usd(range.high_usd),
         });
     }
-    body["inputs"]["shape"] = json!({
+    let status = if !rungs.is_empty() {
+        "computed"
+    } else if plan.iter().filter(|p| p.role != "cap").all(|p| p.status == "passed") {
+        "price_at_or_below_bottom"
+    } else {
+        "deployed"
+    };
+    let plan_json: Vec<Value> = plan
+        .iter()
+        .map(|p| {
+            json!({
+                "index": p.pos + 1,
+                "rung": p.role,
+                "share": p.share.map(|s| format!("{s}")),
+                "status": p.status,
+                "reason": p.reason,
+                "tick_lower": p.draw.map(|d| d.0),
+                "tick_upper": p.draw.map(|d| d.1),
+                "target_usdc": fx(p.target_usdc, 6),
+                "target_nock": (p.role == "cap").then(|| fx(p.target_nock, 4)),
+                "deployed_usdc": fx(p.deployed_usdc, 6),
+                "deployed_nock": (p.role == "cap").then(|| fx(p.deployed_nock, 4)),
+                "remaining_usdc": fx(p.remaining_usdc.max(0.0), 6),
+                "remaining_nock": (p.role == "cap").then(|| fx(p.remaining_nock.max(0.0), 4)),
+                "over_by_usdc": (p.status == "over").then(|| fx((p.deployed_usdc - p.target_usdc).max(0.0), 2)),
+                "counterparts": p.counterparts,
+                "cap": p.cap.as_ref().map(|c| json!({
+                    "tick_lower": c.tick_lower,
+                    "tick_upper": c.tick_upper,
+                    "pool_tick": pool.template.tick,
+                    "band_rule": c.band_rule,
+                    "lp_nock_budget": ctx.budget.map(|b| fx(b, 4)),
+                    "budget_counting_the_tracked_cap": budget_eff.map(|b| fx(b, 4)),
+                    "nock": fx(c.nock, 4),
+                    "usdc": fx(c.usdc, 2),
+                    "bound_by": c.bound_by,
+                    "limit_rule": "never more USDC than the first near rung's target",
+                    "note": c.note,
+                })),
+            })
+        })
+        .collect();
+    let has_cap = setting.first().map_or(false, |r| r.rung == "cap");
+    let shape_json = json!({
         "source": "operator_profile.ladder_rungs",
         "note": "the operator's own shape, sized here; NockNock does not choose it",
+        "status": status,
         "total_usdc": fx(total, 2),
         "total_rule": rule,
-        "cap": if has_cap { if cap.is_some() { json!("sized") } else { json!("none") } } else { json!("not in the shape") },
+        "gate_price_usd": fx(gate_usd, 8),
+        "gate_price_rule": gate_rule,
+        "cap": if !has_cap { json!("not in the shape") } else if plan.iter().any(|p| p.role == "cap" && p.cap.is_some()) { json!("sized") } else { json!("none") },
         "cap_reason": cap_reason,
         "rest_usdc": fx(rest, 2),
         "rest_note": "the near and deep shares divide the USDC left after the cap",
+        "tracked_note": LADDER_SHAPE_TRACKED_NOTE,
+        "tracked_usdc": fx(tracked_usdc, 2),
+        "unmatched": unmatched,
+        "dust": { "usdc": LADDER_SHAPE_DUST_USDC, "nock": LADDER_SHAPE_DUST_NOCK, "note": LADDER_DISPLAY_NOTE },
+        "plan": plan_json,
         "rungs": setting,
     });
+    if rungs.is_empty() {
+        return Ok(json!({
+            "snapshot": ctx.snapshot_block(now, health),
+            "inputs": { "shape": shape_json, "position_id": req.position_id },
+            "pool": ctx.pool_block(),
+            "shape_status": status,
+            "statement": LADDER_STATEMENT,
+        }));
+    }
+    let shaped = LadderRequest { rungs, indexed: true, shape: None, ..req.clone() };
+    let mut body = simulate_rungs(ctx, &shaped, now, health, Some(deepest))?;
+    if let Some(arr) = body["rungs"].as_array_mut() {
+        for r in arr.iter_mut() {
+            let idx = r["index"].as_u64().unwrap_or(0) as usize;
+            let Some(p) = idx.checked_sub(1).and_then(|i| plan.get(i)) else { continue };
+            if p.role == "cap" {
+                r["bounds"]["high_rule"] = json!("the tick band containing the pool's tick (the cap)");
+            } else if p.draw.map(|(tl, tu)| if pool.nock_is_token1 { tl } else { tu }) == Some(spot_tick) {
+                r["bounds"]["high_rule"] = json!("the usable tick at or below the pool price (the first rung still drawable)");
+            }
+            r["cap"] = shape_json["plan"][p.pos]["cap"].clone();
+            r["plan"] = json!({
+                "status": p.status,
+                "target_usdc": fx(p.target_usdc, 6),
+                "deployed_usdc": fx(p.deployed_usdc, 6),
+                "remaining_usdc": fx(p.remaining_usdc.max(0.0), 6),
+                "counterparts": p.counterparts,
+            });
+        }
+    }
+    body["inputs"]["shape"] = shape_json;
+    body["shape_status"] = json!(status);
     Ok(body)
 }
 
 /// What `derived_metrics.ladder_shape` says it is, in every block.
-pub(crate) const LADDER_SHAPE_STATEMENT: &str = "The operator's own ladder shape (operator_profile.ladder_rungs), sized from this snapshot to the shared reserve gate's most. A measurement for a card with no inputs: NockNock does not choose the shape, and nothing is signed or sent.";
+pub(crate) const LADDER_SHAPE_STATEMENT: &str = "The operator's own ladder shape (operator_profile.ladder_rungs), planned from this snapshot against the ladder rungs already tracked and sized to the shared reserve gate's most. A measurement for a card with no inputs: NockNock does not choose the shape, and nothing is signed or sent.";
 
 /// `derived_metrics.ladder_shape` (2.10.0): the configured shape (`shape=configured`)
-/// worked out by the cycle in the price-source pool and sized to the shared reserve
-/// gate's most, so a card renders it with no inputs and no call. None when no shape is
-/// configured; `status: unavailable` with the reason when one is but it cannot be drawn.
+/// worked out by the cycle in the price-source pool: each configured rung's target, what
+/// tracked rungs already hold of it, and what is left to deposit (with the exact mint of
+/// the remainder only), so a card renders it with no inputs and no call. None when no
+/// shape is configured; `status: unavailable` with the reason when it cannot be drawn.
 /// Pure: the stored snapshot only, no clock (`at` is the cycle's time).
 pub(crate) fn ladder_shape_block(data: &SnapshotData, at: DateTime<Utc>) -> Option<Value> {
     let gs = &data.derived_metrics.global_status;
@@ -2776,63 +3117,85 @@ pub(crate) fn ladder_shape_block(data: &SnapshotData, at: DateTime<Utc>) -> Opti
         Ok(b) => b,
         Err(e) => return unavailable(format!("{}: {}", e.code.unwrap_or(e.error), e.detail)),
     };
-    let (usdc_dec, nock_dec) = if is_nock_token(&source.token1) { (source.token0.decimals, source.token1.decimals) } else { (source.token1.decimals, source.token0.decimals) };
-    let tick = body.pointer("/rungs/0/cap/pool_tick").and_then(|v| v.as_i64()).or_else(|| data.pool_mechanics.iter().find(|m| m.pool_id == source.pool_id).and_then(|m| m.tick_current).map(|t| t as i64));
+    let sh = &body["inputs"]["shape"];
+    let tick = data.pool_mechanics.iter().find(|m| m.pool_id == source.pool_id).and_then(|m| m.tick_current);
     let num = |v: &Value| v.as_str().and_then(|x| x.parse::<f64>().ok());
     let inv = |v: &Value| num(v).filter(|x| *x > 0.0).map(|x| fx(1.0 / x, 4));
-    let setting = gs.ladder_rungs.clone().unwrap_or_default();
-    let has_cap = setting.first().map_or(false, |r| r.rung == "cap");
-    let rungs: Vec<Value> = body["rungs"]
+    let body_rungs = body["rungs"].as_array().cloned().unwrap_or_default();
+    let rungs: Vec<Value> = sh["plan"]
         .as_array()
         .cloned()
         .unwrap_or_default()
         .iter()
-        .map(|r| {
-            let (tl, tu) = (r.pointer("/bounds/tick_lower").and_then(|v| v.as_i64()), r.pointer("/bounds/tick_upper").and_then(|v| v.as_i64()));
+        .map(|p| {
+            // The setting's own share, by position (never looked up by role).
+            let idx = p["index"].clone();
+            let r = body_rungs.iter().find(|r| r["index"] == idx).cloned().unwrap_or(Value::Null);
+            let drawn = !r.is_null();
+            let (tl, tu) = (p["tick_lower"].as_i64(), p["tick_upper"].as_i64());
             let in_range = match (tl, tu, tick) {
-                (Some(a), Some(b), Some(t)) => json!(a <= t && t < b),
+                (Some(a), Some(b), Some(t)) => json!(a <= t as i64 && (t as i64) < b),
                 _ => Value::Null,
             };
-            let role = r["rung"].as_str().unwrap_or("");
-            let share = setting.iter().filter(|s| s.rung == role).map(|s| s.share.clone()).next().flatten();
-            let dec = |k: &str, d: i32, dp: usize| r["sizing"][k].as_str().and_then(|v| v.parse::<f64>().ok()).map(|v| fx(v / 10f64.powi(d), dp));
+            let mint = &r["mint"];
+            let f = |v: &Value| if drawn { v.clone() } else { Value::Null };
             json!({
-                "index": r["index"],
-                "rung": r["rung"],
-                "share": share,
-                "tick_lower": r["bounds"]["tick_lower"],
-                "tick_upper": r["bounds"]["tick_upper"],
-                "low_usd": r["bounds"]["low_usd"],
-                "high_usd": r["bounds"]["high_usd"],
-                "low_pct": r["bounds"]["low_pct"],
-                "high_pct": r["bounds"]["high_pct"],
-                "nock_per_usdc_at_low": inv(&r["bounds"]["low_usd"]),
-                "nock_per_usdc_at_high": inv(&r["bounds"]["high_usd"]),
-                "high_rule": r["bounds"]["high_rule"],
+                "index": idx,
+                "rung": p["rung"],
+                "share": p["share"],
+                "status": p["status"],
+                "reason": p["reason"],
+                "target_usdc": p["target_usdc"],
+                "target_nock": p["target_nock"],
+                "deployed_usdc": p["deployed_usdc"],
+                "deployed_nock": p["deployed_nock"],
+                "remaining_usdc": p["remaining_usdc"],
+                "remaining_nock": p["remaining_nock"],
+                "over_by_usdc": p["over_by_usdc"],
+                "counterparts": p["counterparts"],
+                "tick_lower": p["tick_lower"],
+                "tick_upper": p["tick_upper"],
+                "low_usd": f(&r["bounds"]["low_usd"]),
+                "high_usd": f(&r["bounds"]["high_usd"]),
+                "low_pct": f(&r["bounds"]["low_pct"]),
+                "high_pct": f(&r["bounds"]["high_pct"]),
+                "nock_per_usdc_at_low": if drawn { json!(inv(&r["bounds"]["low_usd"])) } else { Value::Null },
+                "nock_per_usdc_at_high": if drawn { json!(inv(&r["bounds"]["high_usd"])) } else { Value::Null },
+                "high_rule": f(&r["bounds"]["high_rule"]),
                 "in_range_now": in_range,
-                "out_of_range_above_now": r["top"]["out_of_range_above_now"],
-                "liquidity_raw": r["sizing"]["liquidity_raw"],
-                "liquidity_human": r["sizing"]["liquidity_human"],
-                "usdc": dec("usdc_raw", usdc_dec, 6),
-                "usdc_raw": r["sizing"]["usdc_raw"],
-                "nock": dec("nock_raw", nock_dec, 8),
-                "nock_raw": r["sizing"]["nock_raw"],
-                "nock_held_at_bottom": r["bottom"]["nock_held"],
-                "nock_bought_at_bottom": r["bottom"]["nock_bought"],
-                "avg_buy_price_usd": r["bottom"]["avg_buy_price_usd"],
-                "fee_estimate": r["fee_estimate"],
-                "cap": r.get("cap").cloned().unwrap_or(Value::Null),
-                "round_trip": r["round_trip"],
-                "if_pulled_at_fill": r["if_pulled_at_fill"],
+                "out_of_range_above_now": f(&r["top"]["out_of_range_above_now"]),
+                "remaining_note": if drawn { json!("the figures below are for what is left to deposit only") } else { Value::Null },
+                "liquidity_raw": f(&mint["liquidity_raw"]),
+                "liquidity_human": f(&r["sizing"]["liquidity_human"]),
+                "usdc": f(&mint["usdc"]),
+                "usdc_raw": f(&mint["usdc_raw"]),
+                "nock": f(&mint["nock"]),
+                "nock_raw": f(&mint["nock_raw"]),
+                "amount0_raw": f(&mint["amount0_raw"]),
+                "amount1_raw": f(&mint["amount1_raw"]),
+                "mint_note": f(&mint["note"]),
+                "nock_held_at_bottom": f(&r["bottom"]["nock_held"]),
+                "nock_bought_at_bottom": f(&r["bottom"]["nock_bought"]),
+                "avg_buy_price_usd": f(&r["bottom"]["avg_buy_price_usd"]),
+                "fee_estimate": f(&r["fee_estimate"]),
+                "cap": p["cap"],
+                "round_trip": f(&r["round_trip"]),
+                "if_pulled_at_fill": f(&r["if_pulled_at_fill"]),
             })
         })
         .collect();
+    let computed = body.get("rungs").is_some();
     let rc = &body["reserve_check"];
     let fc = &body["floor_check"];
     let c = &body["combined"];
+    let g = |v: &Value| if computed { v.clone() } else { Value::Null };
     Some(json!({
-        "status": "computed",
-        "reason": Value::Null,
+        "status": sh["status"],
+        "reason": match sh["status"].as_str() {
+            Some("deployed") => json!("every configured rung is deployed (or passed or over, as each says): nothing is left to deposit"),
+            Some("price_at_or_below_bottom") => json!(format!("the price is at or below the ladder's bottom: {LADDER_SHAPE_PASSED_REASON}")),
+            _ => Value::Null,
+        },
         "source": "operator_profile.ladder_rungs",
         "statement": LADDER_SHAPE_STATEMENT,
         "computed_at": at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
@@ -2843,15 +3206,19 @@ pub(crate) fn ladder_shape_block(data: &SnapshotData, at: DateTime<Utc>) -> Opti
             "pool_price_usd": body["pool"]["pool_price_usd"],
             "pool_tick": tick,
         },
-        "total_usdc": body["inputs"]["shape"]["total_usdc"],
-        "total_rule": body["inputs"]["shape"]["total_rule"],
-        "rest_usdc": body["inputs"]["shape"]["rest_usdc"],
-        "cap": if has_cap { body["inputs"]["shape"]["cap"].clone() } else { json!("not in the shape") },
-        "cap_reason": body["inputs"]["shape"]["cap_reason"],
+        "total_usdc": sh["total_usdc"],
+        "total_rule": sh["total_rule"],
+        "rest_usdc": sh["rest_usdc"],
+        "cap": sh["cap"],
+        "cap_reason": sh["cap_reason"],
+        "tracked_note": sh["tracked_note"],
+        "tracked_usdc": sh["tracked_usdc"],
+        "unmatched": sh["unmatched"],
+        "dust": sh["dust"],
         "rungs": rungs,
-        "combined": {
-            "total_usdc": c["total_usdc"],
-            "total_nock_needed": c["total_nock_needed"],
+        "combined": if computed { json!({
+            "remaining_usdc": c["total_usdc"],
+            "remaining_nock_needed": c["total_nock_needed"],
             "deepest_bottom_usd": c["deepest_bottom_usd"],
             "nock_held_at_deepest_bottom": c["nock_held_at_deepest_bottom"],
             "nock_bought_at_deepest_bottom": c["nock_bought_at_deepest_bottom"],
@@ -2859,23 +3226,24 @@ pub(crate) fn ladder_shape_block(data: &SnapshotData, at: DateTime<Utc>) -> Opti
             "nock_kept_if_deep_rungs_pulled": c["nock_kept_if_deep_rungs_pulled"],
             "avg_kept_price_usd": c["avg_kept_price_usd"],
             "overlaps": c["overlaps"],
-        },
+            "note": "for what is left to deposit only",
+        }) } else { Value::Null },
         "gate": {
-            "price_usd": rc["gate_price_usd"],
-            "rule": rc["gate_price_rule"],
-            "cash_reserve_usdc": rc["cash_reserve_usdc"],
-            "stable_at_gate_usdc": rc["stable_at_bottom_usdc"],
-            "margin_usdc": rc["margin_usdc"],
-            "max_usdc_total": rc["max_usdc_for_this_range"],
-            "status": rc["status"],
+            "price_usd": sh["gate_price_usd"],
+            "rule": sh["gate_price_rule"],
+            "cash_reserve_usdc": g(&rc["cash_reserve_usdc"]),
+            "stable_at_gate_usdc": g(&rc["stable_at_bottom_usdc"]),
+            "margin_usdc": g(&rc["margin_usdc"]),
+            "max_usdc_total": sh["total_usdc"],
+            "status": g(&rc["status"]),
         },
         "nock_budget": {
-            "lp_nock_budget": fc["lp_nock_budget"],
-            "nock_needed": fc["nock_needed"],
-            "nock_needed_by_rung": fc["nock_needed_by_rung"],
-            "status": fc["status"],
+            "lp_nock_budget": g(&fc["lp_nock_budget"]),
+            "nock_needed": g(&fc["nock_needed"]),
+            "nock_needed_by_rung": g(&fc["nock_needed_by_rung"]),
+            "status": g(&fc["status"]),
         },
-        "floor_breach_effect": fc["floor_breach_effect"],
+        "floor_breach_effect": g(&fc["floor_breach_effect"]),
         "grid": body["grid"].as_array().map(|g| g.iter().map(|row| json!({
             "price_usd": row["price_usd"],
             "pct_of_spot": row["pct_of_spot"],

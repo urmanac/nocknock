@@ -103,6 +103,7 @@
           "liquidity_changed": 4,
           "out_of_range": 0,
           "pool_inactive": 0,
+          "staked": 0,
           "unreadable": 0,
           "zero_liquidity": 137
         },
@@ -112,6 +113,7 @@
           "liquidity_changed": 1202.24,
           "out_of_range": 0.0,
           "pool_inactive": 0.0,
+          "staked": 0.0,
           "unreadable": 0.0,
           "zero_liquidity": 38413.578
         },
@@ -173,6 +175,7 @@
           "min_usd_per_day": "17.98",
           "note": "UTC days; an interval counts on the date it starts. Every day is listed; the spread is over the days counted."
         },
+        "spread_reason": null,
         "status": "measured",
         "stored_history_replay": {
           "edge_seconds": "300",
@@ -564,6 +567,156 @@
     },
     "mcp_text": "🧮 Ladder Simulation: not simulated\n=========================================\n• RUNGS_EXCEED_WALLET: the rungs' $2000.00 (r1 $1000.00, r2 $1000.00) is more than the $1545.84 of USDC in the wallet\n• Nothing was read on-chain, signed or sent.",
     "status": 422
+  },
+  "the_bottle_all_deployed": {
+    "arguments": {
+      "position_id": "uniswap-v4:base:3163450",
+      "shape": "configured"
+    },
+    "body": {
+      "inputs": {
+        "position_id": "uniswap-v4:base:3163450",
+        "shape": {
+          "cap": "sized",
+          "cap_reason": null,
+          "dust": {
+            "nock": 1.0,
+            "note": "display constants, not settings",
+            "usdc": 0.5
+          },
+          "gate_price_rule": "your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom",
+          "gate_price_usd": "0.01000000",
+          "note": "the operator's own shape, sized here; NockNock does not choose it",
+          "plan": [
+            {
+              "cap": {
+                "band_rule": "the tracked cap's own band 273600..273900",
+                "bound_by": "lp_nock_budget",
+                "budget_counting_the_tracked_cap": "86.7891",
+                "limit_rule": "never more USDC than the first near rung's target",
+                "lp_nock_budget": "0.0000",
+                "nock": "86.7891",
+                "note": "the cap holds the whole LP NOCK budget, 86.7891 NOCK; the curve pairs it with $1.23 USDC",
+                "pool_tick": 273743,
+                "tick_lower": 273600,
+                "tick_upper": 273900,
+                "usdc": "1.23"
+              },
+              "counterparts": [
+                "uniswap-v4:base:9000002"
+              ],
+              "deployed_nock": "86.7891",
+              "deployed_usdc": "1.225999",
+              "index": 1,
+              "over_by_usdc": null,
+              "reason": null,
+              "remaining_nock": "0.0000",
+              "remaining_usdc": "0.000000",
+              "rung": "cap",
+              "share": null,
+              "status": "deployed",
+              "target_nock": "86.7891",
+              "target_usdc": "1.225999",
+              "tick_lower": 273600,
+              "tick_upper": 273900
+            },
+            {
+              "cap": null,
+              "counterparts": [
+                "uniswap-v4:base:9000003"
+              ],
+              "deployed_nock": null,
+              "deployed_usdc": "114.864600",
+              "index": 2,
+              "over_by_usdc": null,
+              "reason": null,
+              "remaining_nock": null,
+              "remaining_usdc": "0.000000",
+              "rung": "near",
+              "share": "0.15",
+              "status": "deployed",
+              "target_nock": null,
+              "target_usdc": "114.864600",
+              "tick_lower": 273900,
+              "tick_upper": 275400
+            },
+            {
+              "cap": null,
+              "counterparts": [
+                "uniswap-v4:base:9000001"
+              ],
+              "deployed_nock": null,
+              "deployed_usdc": "650.899400",
+              "index": 3,
+              "over_by_usdc": null,
+              "reason": null,
+              "remaining_nock": null,
+              "remaining_usdc": "0.000001",
+              "rung": "deep",
+              "share": "0.85",
+              "status": "deployed",
+              "target_nock": null,
+              "target_usdc": "650.899401",
+              "tick_lower": 275400,
+              "tick_upper": 276300
+            }
+          ],
+          "rest_note": "the near and deep shares divide the USDC left after the cap",
+          "rest_usdc": "765.76",
+          "rungs": [
+            {
+              "high": "band",
+              "low_usd": null,
+              "rung": "cap",
+              "share": null
+            },
+            {
+              "high": "spot",
+              "low_usd": "0.01100000",
+              "rung": "near",
+              "share": "0.15"
+            },
+            {
+              "high": "0.01100000",
+              "low_usd": "0.01000000",
+              "rung": "deep",
+              "share": "0.85"
+            }
+          ],
+          "source": "operator_profile.ladder_rungs",
+          "status": "deployed",
+          "total_rule": "the shared reserve gate's most (max_usdc_total) at $0.01000000, counting the tracked rungs' USDC",
+          "total_usdc": "766.99",
+          "tracked_note": "Tracked ladder rungs in this pool (role: ladder) are part of the shape, not existing ranges: the total counts their USDC as if it were still in the wallet. A near or deep rung counts what its range holds as all USDC at its top (vs_top.usdc_at_top); a cap counts the USDC it holds now, and its NOCK is counted back into the NOCK budget the cap is sized by. Each tracked rung is matched to a configured rung by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order). What is left to deposit is drawn on a matched rung's own ticks.",
+          "tracked_usdc": "766.99",
+          "unmatched": []
+        }
+      },
+      "pool": {
+        "label": "v4 USDC/NOCK 3.00% #3163450",
+        "note": "a ladder in this pool is a NEW position (a new NFT); add it to config.yaml to be tracked",
+        "pool_price_usd": "0.01294400",
+        "pool_price_vs_spot_pct": "0.00",
+        "position_id": "uniswap-v4:base:3163450",
+        "snapped": true,
+        "spacing_source": "position",
+        "tick_spacing": 300
+      },
+      "shape_status": "deployed",
+      "snapshot": {
+        "age_minutes": 5,
+        "age_seconds": 300,
+        "generated_at": "2026-11-20T12:00:00Z",
+        "snapshot_id": "00000000-0000-0000-0000-000000000000",
+        "spot_source": "price-source pool sqrtPriceX96 (v4 USDC/NOCK 3.00% #3163450)",
+        "spot_usd": "0.01294400",
+        "version": "2.10.0",
+        "worker_health": "ok"
+      },
+      "statement": "A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts."
+    },
+    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Shape: your operator_profile.ladder_rungs in v4 USDC/NOCK 3.00% #3163450, sized to $766.99 USDC (the shared reserve gate's most (max_usdc_total) at $0.01000000, counting the tracked rungs' USDC): nothing is left to deposit: every rung is deployed, passed, over or has no cap, as each says\n  – r1 cap: deployed; target $1.23, deployed $1.23, left to deposit $0.00, tracked: uniswap-v4:base:9000002\n  – r2 near: deployed; target $114.86, deployed $114.86, left to deposit $0.00, tracked: uniswap-v4:base:9000003\n  – r3 deep: deployed; target $650.90, deployed $650.90, left to deposit $0.00, tracked: uniswap-v4:base:9000001\n  – Tracked ladder rungs in this pool (role: ladder) are part of the shape, not existing ranges: the total counts their USDC as if it were still in the wallet. A near or deep rung counts what its range holds as all USDC at its top (vs_top.usdc_at_top); a cap counts the USDC it holds now, and its NOCK is counted back into the NOCK budget the cap is sized by. Each tracked rung is matched to a configured rung by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order). What is left to deposit is drawn on a matched rung's own ticks.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
+    "status": 200
   },
   "the_bottle_configured": {
     "arguments": {
@@ -1019,7 +1172,7 @@
           "total_tracked_nock": "162624.80"
         },
         {
-          "est_fee_reason": null,
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
           "est_fee_usd_per_day": "0.00",
           "est_fee_usd_per_day_diluted": "0.00",
           "existing_nock_lp_nock": "23888.2905",
@@ -1059,7 +1212,7 @@
           "total_tracked_nock": "185976.94"
         },
         {
-          "est_fee_reason": null,
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
           "est_fee_usd_per_day": "0.00",
           "est_fee_usd_per_day_diluted": "0.00",
           "existing_nock_lp_nock": "23933.8327",
@@ -1099,7 +1252,7 @@
           "total_tracked_nock": "186022.49"
         },
         {
-          "est_fee_reason": null,
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
           "est_fee_usd_per_day": "0.00",
           "est_fee_usd_per_day_diluted": "0.00",
           "existing_nock_lp_nock": "24500.1121",
@@ -1137,7 +1290,7 @@
           "total_tracked_nock": "186588.77"
         },
         {
-          "est_fee_reason": null,
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
           "est_fee_usd_per_day": "0.00",
           "est_fee_usd_per_day_diluted": "0.00",
           "existing_nock_lp_nock": "25851.4339",
@@ -1175,7 +1328,7 @@
           "total_tracked_nock": "187940.09"
         },
         {
-          "est_fee_reason": null,
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
           "est_fee_usd_per_day": "0.00",
           "est_fee_usd_per_day_diluted": "0.00",
           "existing_nock_lp_nock": "27355.8217",
@@ -1213,7 +1366,7 @@
           "total_tracked_nock": "189444.48"
         },
         {
-          "est_fee_reason": null,
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
           "est_fee_usd_per_day": "0.00",
           "est_fee_usd_per_day_diluted": "0.00",
           "existing_nock_lp_nock": "29044.5410",
@@ -1268,17 +1421,17 @@
             "usdc": "1.23"
           },
           {
-            "high_requested": "spot",
+            "high_requested": "0.012742917379855624",
             "index": 2,
-            "low_requested": "0.011",
+            "low_requested": "0.010968012886072376",
             "nock": null,
             "rung": "near",
             "usdc": "114.86"
           },
           {
-            "high_requested": "0.011",
+            "high_requested": "0.010968012886072376",
             "index": 3,
-            "low_requested": "0.01",
+            "low_requested": "0.0100240541221736",
             "nock": null,
             "rung": "deep",
             "usdc": "650.90"
@@ -1287,7 +1440,82 @@
         "shape": {
           "cap": "sized",
           "cap_reason": null,
+          "dust": {
+            "nock": 1.0,
+            "note": "display constants, not settings",
+            "usdc": 0.5
+          },
+          "gate_price_rule": "your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom",
+          "gate_price_usd": "0.01000000",
           "note": "the operator's own shape, sized here; NockNock does not choose it",
+          "plan": [
+            {
+              "cap": {
+                "band_rule": "the band 273600..273900 of the 300-tick grid contains the pool's tick 273743",
+                "bound_by": "lp_nock_budget",
+                "budget_counting_the_tracked_cap": "86.7891",
+                "limit_rule": "never more USDC than the first near rung's target",
+                "lp_nock_budget": "86.7891",
+                "nock": "86.7891",
+                "note": "the cap holds the whole LP NOCK budget, 86.7891 NOCK; the curve pairs it with $1.23 USDC",
+                "pool_tick": 273743,
+                "tick_lower": 273600,
+                "tick_upper": 273900,
+                "usdc": "1.23"
+              },
+              "counterparts": [],
+              "deployed_nock": "0.0000",
+              "deployed_usdc": "0.000000",
+              "index": 1,
+              "over_by_usdc": null,
+              "reason": null,
+              "remaining_nock": "86.7891",
+              "remaining_usdc": "1.225999",
+              "rung": "cap",
+              "share": null,
+              "status": "to_deposit",
+              "target_nock": "86.7891",
+              "target_usdc": "1.225999",
+              "tick_lower": 273600,
+              "tick_upper": 273900
+            },
+            {
+              "cap": null,
+              "counterparts": [],
+              "deployed_nock": null,
+              "deployed_usdc": "0.000000",
+              "index": 2,
+              "over_by_usdc": null,
+              "reason": null,
+              "remaining_nock": null,
+              "remaining_usdc": "114.864600",
+              "rung": "near",
+              "share": "0.15",
+              "status": "to_deposit",
+              "target_nock": null,
+              "target_usdc": "114.864600",
+              "tick_lower": 273900,
+              "tick_upper": 275400
+            },
+            {
+              "cap": null,
+              "counterparts": [],
+              "deployed_nock": null,
+              "deployed_usdc": "0.000000",
+              "index": 3,
+              "over_by_usdc": null,
+              "reason": null,
+              "remaining_nock": null,
+              "remaining_usdc": "650.899401",
+              "rung": "deep",
+              "share": "0.85",
+              "status": "to_deposit",
+              "target_nock": null,
+              "target_usdc": "650.899401",
+              "tick_lower": 275400,
+              "tick_upper": 276300
+            }
+          ],
           "rest_note": "the near and deep shares divide the USDC left after the cap",
           "rest_usdc": "765.76",
           "rungs": [
@@ -1311,8 +1539,12 @@
             }
           ],
           "source": "operator_profile.ladder_rungs",
-          "total_rule": "the shared reserve gate's most (max_usdc_total) at $0.01000000",
-          "total_usdc": "766.99"
+          "status": "computed",
+          "total_rule": "the shared reserve gate's most (max_usdc_total) at $0.01000000, counting the tracked rungs' USDC",
+          "total_usdc": "766.99",
+          "tracked_note": "Tracked ladder rungs in this pool (role: ladder) are part of the shape, not existing ranges: the total counts their USDC as if it were still in the wallet. A near or deep rung counts what its range holds as all USDC at its top (vs_top.usdc_at_top); a cap counts the USDC it holds now, and its NOCK is counted back into the NOCK budget the cap is sized by. Each tracked rung is matched to a configured rung by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order). What is left to deposit is drawn on a matched rung's own ticks.",
+          "tracked_usdc": "0.00",
+          "unmatched": []
         },
         "split_step_note": "display constants, not settings",
         "split_step_pct": 10.0,
@@ -1386,6 +1618,8 @@
           "cap": {
             "band_rule": "the band 273600..273900 of the 300-tick grid contains the pool's tick 273743",
             "bound_by": "lp_nock_budget",
+            "budget_counting_the_tracked_cap": "86.7891",
+            "limit_rule": "never more USDC than the first near rung's target",
             "lp_nock_budget": "86.7891",
             "nock": "86.7891",
             "note": "the cap holds the whole LP NOCK budget, 86.7891 NOCK; the curve pairs it with $1.23 USDC",
@@ -1466,6 +1700,7 @@
               "liquidity_changed": 4,
               "out_of_range": 0,
               "pool_inactive": 0,
+              "staked": 0,
               "unreadable": 0,
               "zero_liquidity": 137
             },
@@ -1475,6 +1710,7 @@
               "liquidity_changed": 1202.24,
               "out_of_range": 0.0,
               "pool_inactive": 0.0,
+              "staked": 0.0,
               "unreadable": 0.0,
               "zero_liquidity": 38413.578
             },
@@ -1536,6 +1772,7 @@
               "min_usd_per_day": "0.43",
               "note": "UTC days; an interval counts on the date it starts. Every day is listed; the spread is over the days counted."
             },
+            "spread_reason": null,
             "status": "measured",
             "stored_history_replay": {
               "edge_seconds": "900",
@@ -1556,6 +1793,27 @@
             "usdc": "1.23"
           },
           "max_usdc_with_the_others_as_given": "1.23",
+          "mint": {
+            "amount0_raw": "1225999",
+            "amount1_raw": "867890958577132038",
+            "liquidity_raw": "138192109253769",
+            "nock": "86.7890958577132038",
+            "nock_max_raw": "867891000000000000",
+            "nock_raw": "867890958577132038",
+            "note": "liquidity_raw is what these amounts buy, rounded down (LiquidityAmounts); amount0_raw and amount1_raw are what a mint of it pulls, rounded up (SqrtPriceMath), never more than the maxima (the rung's USDC and NOCK truncated to raw units)",
+            "status": "exact",
+            "tick": 273743,
+            "usdc": "1.225999",
+            "usdc_max_raw": "1225999",
+            "usdc_raw": "1225999"
+          },
+          "plan": {
+            "counterparts": [],
+            "deployed_usdc": "0.000000",
+            "remaining_usdc": "1.225999",
+            "status": "to_deposit",
+            "target_usdc": "1.225999"
+          },
           "round_trip": {
             "back_to_usd": "0.01294400",
             "down_to_usd": "0.01274292",
@@ -1572,9 +1830,7 @@
             "nock_check": "not_given",
             "nock_given": null,
             "nock_needed_at_spot": "86.7891",
-            "nock_raw": "867891000000000128",
-            "usdc_at_spot": "1.23",
-            "usdc_raw": "1225999"
+            "usdc_at_spot": "1.23"
           },
           "top": {
             "out_of_range_above_now": false,
@@ -1593,13 +1849,14 @@
           },
           "bounds": {
             "high_pct": "-1.55",
-            "high_rule": "the usable tick at or below the pool price (high = spot): it holds no NOCK",
+            "high_rule": "the usable tick at or below the pool price (the first rung still drawable)",
             "high_usd": "0.01274292",
             "low_pct": "-15.27",
             "low_usd": "0.01096801",
             "tick_lower": 273900,
             "tick_upper": 275400
           },
+          "cap": null,
           "fee_estimate": {
             "assumptions": [
               "Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one).",
@@ -1672,6 +1929,7 @@
               "liquidity_changed": 4,
               "out_of_range": 0,
               "pool_inactive": 0,
+              "staked": 0,
               "unreadable": 0,
               "zero_liquidity": 137
             },
@@ -1681,6 +1939,7 @@
               "liquidity_changed": 1202.24,
               "out_of_range": 0.0,
               "pool_inactive": 0.0,
+              "staked": 0.0,
               "unreadable": 0.0,
               "zero_liquidity": 38413.578
             },
@@ -1742,6 +2001,7 @@
               "min_usd_per_day": "4.36",
               "note": "UTC days; an interval counts on the date it starts. Every day is listed; the spread is over the days counted."
             },
+            "spread_reason": null,
             "status": "measured",
             "stored_history_replay": {
               "edge_seconds": "2101",
@@ -1756,12 +2016,33 @@
           "if_pulled_at_fill": null,
           "index": 2,
           "inputs": {
-            "high_requested": "spot",
-            "low_requested": "0.011",
+            "high_requested": "0.012742917379855624",
+            "low_requested": "0.010968012886072376",
             "nock": null,
             "usdc": "114.86"
           },
           "max_usdc_with_the_others_as_given": "114.86",
+          "mint": {
+            "amount0_raw": "114864600",
+            "amount1_raw": "0",
+            "liquidity_raw": "1408301615002237",
+            "nock": "0.0000000000000000",
+            "nock_max_raw": "0",
+            "nock_raw": "0",
+            "note": "liquidity_raw is what these amounts buy, rounded down (LiquidityAmounts); amount0_raw and amount1_raw are what a mint of it pulls, rounded up (SqrtPriceMath), never more than the maxima (the rung's USDC and NOCK truncated to raw units)",
+            "status": "exact",
+            "tick": 273743,
+            "usdc": "114.864600",
+            "usdc_max_raw": "114864600",
+            "usdc_raw": "114864600"
+          },
+          "plan": {
+            "counterparts": [],
+            "deployed_usdc": "0.000000",
+            "remaining_usdc": "114.864600",
+            "status": "to_deposit",
+            "target_usdc": "114.864600"
+          },
           "round_trip": {
             "back_to_usd": "0.01294400",
             "down_to_usd": "0.01096801",
@@ -1778,9 +2059,7 @@
             "nock_check": "not_given",
             "nock_given": null,
             "nock_needed_at_spot": "0.0000",
-            "nock_raw": "0",
-            "usdc_at_spot": "114.86",
-            "usdc_raw": "114864600"
+            "usdc_at_spot": "114.86"
           },
           "top": {
             "out_of_range_above_now": true,
@@ -1806,6 +2085,7 @@
             "tick_lower": 275400,
             "tick_upper": 276300
           },
+          "cap": null,
           "fee_estimate": {
             "assumptions": [
               "Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one).",
@@ -1878,6 +2158,7 @@
               "liquidity_changed": 4,
               "out_of_range": 0,
               "pool_inactive": 0,
+              "staked": 0,
               "unreadable": 0,
               "zero_liquidity": 137
             },
@@ -1887,6 +2168,7 @@
               "liquidity_changed": 1202.24,
               "out_of_range": 0.0,
               "pool_inactive": 0.0,
+              "staked": 0.0,
               "unreadable": 0.0,
               "zero_liquidity": 38413.578
             },
@@ -1948,6 +2230,7 @@
               "min_usd_per_day": "43.74",
               "note": "UTC days; an interval counts on the date it starts. Every day is listed; the spread is over the days counted."
             },
+            "spread_reason": null,
             "status": "measured",
             "stored_history_replay": {
               "edge_seconds": "1801",
@@ -1968,12 +2251,33 @@
           },
           "index": 3,
           "inputs": {
-            "high_requested": "0.011",
-            "low_requested": "0.01",
+            "high_requested": "0.010968012886072376",
+            "low_requested": "0.0100240541221736",
             "nock": null,
             "usdc": "650.90"
           },
           "max_usdc_with_the_others_as_given": "650.90",
+          "mint": {
+            "amount0_raw": "650899400",
+            "amount1_raw": "0",
+            "liquidity_raw": "14125167068081104",
+            "nock": "0.0000000000000000",
+            "nock_max_raw": "0",
+            "nock_raw": "0",
+            "note": "liquidity_raw is what these amounts buy, rounded down (LiquidityAmounts); amount0_raw and amount1_raw are what a mint of it pulls, rounded up (SqrtPriceMath), never more than the maxima (the rung's USDC and NOCK truncated to raw units)",
+            "status": "exact",
+            "tick": 273743,
+            "usdc": "650.899400",
+            "usdc_max_raw": "650899400",
+            "usdc_raw": "650899400"
+          },
+          "plan": {
+            "counterparts": [],
+            "deployed_usdc": "0.000000",
+            "remaining_usdc": "650.899401",
+            "status": "to_deposit",
+            "target_usdc": "650.899401"
+          },
           "round_trip": null,
           "rung": "deep",
           "sizing": {
@@ -1982,9 +2286,7 @@
             "nock_check": "not_given",
             "nock_given": null,
             "nock_needed_at_spot": "0.0000",
-            "nock_raw": "0",
-            "usdc_at_spot": "650.90",
-            "usdc_raw": "650899401"
+            "usdc_at_spot": "650.90"
           },
           "top": {
             "out_of_range_above_now": true,
@@ -1994,6 +2296,7 @@
           }
         }
       ],
+      "shape_status": "computed",
       "sizing": {
         "describes": "the sum over the rungs; liquidity is per rung (rungs[].sizing)",
         "liquidity_human": null,
@@ -2038,7 +2341,1762 @@
       },
       "tradeoff_reason": null
     },
-    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Ladder of 3 rungs at the pool price $0.01294400, snapped to v4 USDC/NOCK 3.00% #3163450 (tick spacing 300)\n• Shape: your operator_profile.ladder_rungs (cap: the tick band containing spot; near 0.15 from spot down to $0.01100000; deep 0.85 from $0.01100000 down to $0.01000000), sized to $766.99 USDC: the shared reserve gate's most (max_usdc_total) at $0.01000000\n• Pool: a ladder in this pool is a NEW position (a new NFT); add it to config.yaml to be tracked\n• r1 cap: $0.01274292 – $0.01313098 (-1.55% / +1.44%), $1.23 USDC and 87 NOCK at spot (liquidity 1381.9212; top: the tick band containing the pool's tick (the cap))\n  – Bottom: fully NOCK at $0.01274292: 182 NOCK held, 95 bought, average $0.01284307\n  – Fees while in range (an estimate): $0.84/day, $0.84 diluted (it would be 0.17% of the pool's active liquidity); $35.77 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – In range over stored history: 1.95% of the measured time (10,659 s of 547,205 s); replayed over it, at most $0.02 from intervals wholly inside and at most $0.15 more from intervals at its edges (900 s), undiluted, no lower bound\n  – Measured inside this range: at most $0.02 over 10,659 s; only 10659 s of stored intervals sat wholly inside: below the 72000 s a per-day figure needs, so only the dollars and seconds are stated\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $0.43, median $0.73, max $1.10 per day; every day: 2026-11-14 $0.53 (30,699 s, not counted), 2026-11-15 $0.69 (86,488 s), 2026-11-16 $0.99 (86,007 s), 2026-11-17 $1.35 (71,106 s, not counted), 2026-11-18 $0.43 (86,146 s), 2026-11-19 $1.10 (85,799 s), 2026-11-20 $0.73 (86,400 s), 2026-11-21 $0.53 (14,559 s, not counted)\n  – Round trip: A fall to $0.01274292 and a return to $0.01294400 (the pool price now) hands back $1.23 USDC and 86.7891 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $1.23 with the other rungs as given\n• r2 near: $0.01096801 – $0.01274292 (-15.27% / -1.55%), $114.86 USDC and 0 NOCK at spot (liquidity 14083.0162; top: the usable tick at or below the pool price (high = spot): it holds no NOCK)\n  – Bottom: fully NOCK at $0.01096801: 9,716 NOCK held, 9,716 bought, average $0.01182220\n  – Fees while in range (an estimate): $8.56/day, $8.42 diluted (it would be 1.73% of the pool's active liquidity); $7.46 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – It earns nothing until the price falls to $0.01274292 (-1.55%)\n  – In range over stored history: 28.63% of the measured time (156,662 s of 547,205 s); replayed over it, at most $6.39 from intervals wholly inside and at most $5.16 more from intervals at its edges (2,101 s), undiluted, no lower bound\n  – Measured inside this range: $3.52/day over 1.81 days (at most $6.39 in all)\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $4.36, median $7.45, max $11.25 per day; every day: 2026-11-14 $5.41 (30,699 s, not counted), 2026-11-15 $7.06 (86,488 s), 2026-11-16 $10.13 (86,007 s), 2026-11-17 $13.71 (71,106 s, not counted), 2026-11-18 $4.36 (86,146 s), 2026-11-19 $11.25 (85,799 s), 2026-11-20 $7.45 (86,400 s), 2026-11-21 $5.44 (14,559 s, not counted)\n  – Round trip: A fall to $0.01096801 and a return to $0.01294400 (the pool price now) hands back $114.86 USDC and 0.0000 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $114.86 with the other rungs as given\n• r3 deep: $0.01002405 – $0.01096801 (-22.56% / -15.27%), $650.90 USDC and 0 NOCK at spot (liquidity 141251.6709; top: the nearest usable tick)\n  – Bottom: fully NOCK at $0.01002405: 62,077 NOCK held, 62,077 bought, average $0.01048542\n  – Fees while in range (an estimate): $85.90/day, $73.03 diluted (it would be 14.98% of the pool's active liquidity); $13.20 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – It earns nothing until the price falls to $0.01096801 (-15.27%)\n  – In range over stored history: 5.82% of the measured time (31,832 s of 547,205 s); replayed over it, at most $32.55 from intervals wholly inside and at most $50.00 more from intervals at its edges (1,801 s), undiluted, no lower bound\n  – Measured inside this range: at most $32.55 over 31,832 s; only 31832 s of stored intervals sat wholly inside: below the 72000 s a per-day figure needs, so only the dollars and seconds are stated\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $43.74, median $74.75, max $112.86 per day; every day: 2026-11-14 $54.23 (30,699 s, not counted), 2026-11-15 $70.76 (86,488 s), 2026-11-16 $101.59 (86,007 s), 2026-11-17 $137.52 (71,106 s, not counted), 2026-11-18 $43.74 (86,146 s), 2026-11-19 $112.86 (85,799 s), 2026-11-20 $74.75 (86,400 s), 2026-11-21 $54.52 (14,559 s, not counted)\n  – If pulled at fill (at $0.01002405): 62,077 NOCK kept, 62,077 bought at an average $0.01048542. Pulled when fully NOCK (at its bottom), the rung keeps this NOCK on a rebound; left in place, a rebound sells it back. Pulling is a withdrawal you sign; gas is not counted.\n  – The reserve gate allows this rung at most $650.90 with the other rungs as given\n• Overlaps: none\n• Combined: $766.99 USDC and 87 NOCK at spot; at the deepest bottom $0.01002405: 71,975 NOCK held, 71,888 bought, average $0.01066922; kept if the 1 deep rung(s) are pulled at fill: 62,077 NOCK, bought at an average $0.01048542\n• Price grid (NOCK bought by the ladder, USDC left in it; rungs in range and their estimated fees per day; stable balance and reserve headroom):\n  +1.44% $0.01313098: 87 NOCK sold, $768.12 USDC left; r1 in range, fees $0.84/day ($0.84 diluted); stable $1773.80 (reserve +$823.80) [r1 top]\n  0.00% $0.01294400: 0 NOCK bought, $766.99 USDC left; r1 in range, fees $0.84/day ($0.84 diluted); stable $1769.54 (reserve +$819.54) [spot]\n  -1.55% $0.01274292: 95 NOCK bought, $765.76 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1764.93 (reserve +$814.93) [r1 bottom, r2 top]\n  -5.00% $0.01229680: 2,338 NOCK bought, $737.69 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1729.25 (reserve +$779.25)\n  -10.00% $0.01164960: 5,818 NOCK bought, $696.04 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1676.31 (reserve +$726.31)\n  -15.00% $0.01100240: 9,601 NOCK bought, $653.21 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1621.88 (reserve +$671.88)\n  -15.27% $0.01096801: 9,811 NOCK bought, $650.90 USDC left; r3 in range, fees $85.90/day ($73.03 diluted); stable $1618.94 (reserve +$668.94) [r2 bottom, r3 top]\n  -20.00% $0.01035520: 49,147 NOCK bought, $231.70 USDC left; r3 in range, fees $85.90/day ($73.03 diluted); stable $1188.42 (reserve +$238.42)\n  -22.56% $0.01002405: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $950.46 (reserve +$0.46) [r3 bottom]\n  -22.74% $0.01000000: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $950.00 (reserve +$0.00) [gate]\n  -25.00% $0.00970800: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $944.39 (reserve -$5.61)\n  -30.00% $0.00906080: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $931.64 (reserve -$18.36)\n  -35.00% $0.00841360: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $918.43 (reserve -$31.57)\n  -40.00% $0.00776640: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $904.70 (reserve -$45.30)\n• Reserve (shared): stable $950.00 at the gate $0.01000000 (your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom) against the $950.00 reserve: holds by $0.00 (the rungs take at most $766.99 in all; the existing NOCK ranges hold $171.16 USDC there)\n• Below the gate: at $0.00776640 (-40.00%) stable $904.70 (reserve -$45.30). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• Floor budget (shared): needs 87 (r1 87, r2 0, r3 0) of the 87 NOCK that may go into LP: fits\n• Floor-crossing price: lowers: the ladder's NOCK leaves the wallet and sells as NOCK rises to the top (without the ladder $0.025404 (+96.3%), with it $0.025220 (+94.8%))\n• Trade-off: Rows are measurements at your depths; NockNock does not choose the split or the depths. Rows are in the order of the quantity varied and are not ranked. Fee per day in range is always shown with the in-range share of stored history and the replay upper bounds: a high rate while in range is not a rate per day.\n  Split: none (the split table is drawn for two rungs)\n  Near rung's bottom: none (the depth tables are drawn for one near and one deep rung)\n  Deep rung's top: none (the depth tables are drawn for one near and one deep rung)\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK. Each rung is its own position (its own NFT) in the same pool; overlapping rungs are allowed and their liquidity adds. The rungs share one reserve gate and one NOCK budget. A deep rung keeps its NOCK on a rebound only if it is pulled when it is fully NOCK; pulling is a withdrawal you sign, and its gas is not counted.\n• Fee estimate assumptions: Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one). Fees per unit of liquidity are shared by every range that contains the price (the same pool, the same fee tier). The pool's swap volume is taken as unchanged by the new liquidity: only its share dilutes. Dilution uses the pool's active liquidity at the current tick, read at 'latest' in the snapshot's cycle (not at the snapshot's block); the liquidity at the range's own ticks is not read and is taken as the same. The NOCK fee leg is valued at the current pool price, not at the price when it accrued. Intervals where the measuring range's liquidity changed or its fees fell (a collect, or a v4 add that collects) are skipped, so the measurement slightly undercounts; the seconds skipped are stated. Gas is not counted. Past fees are not a forecast. The stored market volume of another pool (market_price_history) is never used.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
+    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Ladder of 3 rungs at the pool price $0.01294400, snapped to v4 USDC/NOCK 3.00% #3163450 (tick spacing 300)\n• Shape: your operator_profile.ladder_rungs (cap: the tick band containing spot; near 0.15 from spot down to $0.01100000; deep 0.85 from $0.01100000 down to $0.01000000), sized to $766.99 USDC: the shared reserve gate's most (max_usdc_total) at $0.01000000, counting the tracked rungs' USDC\n  – r1 cap: to_deposit; target $1.23, deployed $0.00, left to deposit $1.23\n  – r2 near: to_deposit; target $114.86, deployed $0.00, left to deposit $114.86\n  – r3 deep: to_deposit; target $650.90, deployed $0.00, left to deposit $650.90\n• Pool: a ladder in this pool is a NEW position (a new NFT); add it to config.yaml to be tracked\n• r1 cap: $0.01274292 – $0.01313098 (-1.55% / +1.44%), $1.23 USDC and 87 NOCK at spot (liquidity 1381.9212; top: the tick band containing the pool's tick (the cap))\n  – Bottom: fully NOCK at $0.01274292: 182 NOCK held, 95 bought, average $0.01284307\n  – Fees while in range (an estimate): $0.84/day, $0.84 diluted (it would be 0.17% of the pool's active liquidity); $35.77 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – In range over stored history: 1.95% of the measured time (10,659 s of 547,205 s); replayed over it, at most $0.02 from intervals wholly inside and at most $0.15 more from intervals at its edges (900 s), undiluted, no lower bound\n  – Measured inside this range: at most $0.02 over 10,659 s; only 10659 s of stored intervals sat wholly inside: below the 72000 s a per-day figure needs, so only the dollars and seconds are stated\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $0.43, median $0.73, max $1.10 per day; every day: 2026-11-14 $0.53 (30,699 s, not counted), 2026-11-15 $0.69 (86,488 s), 2026-11-16 $0.99 (86,007 s), 2026-11-17 $1.35 (71,106 s, not counted), 2026-11-18 $0.43 (86,146 s), 2026-11-19 $1.10 (85,799 s), 2026-11-20 $0.73 (86,400 s), 2026-11-21 $0.53 (14,559 s, not counted)\n  – Round trip: A fall to $0.01274292 and a return to $0.01294400 (the pool price now) hands back $1.23 USDC and 86.7891 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $1.23 with the other rungs as given\n• r2 near: $0.01096801 – $0.01274292 (-15.27% / -1.55%), $114.86 USDC and 0 NOCK at spot (liquidity 14083.0162; top: the usable tick at or below the pool price (the first rung still drawable))\n  – Bottom: fully NOCK at $0.01096801: 9,716 NOCK held, 9,716 bought, average $0.01182220\n  – Fees while in range (an estimate): $8.56/day, $8.42 diluted (it would be 1.73% of the pool's active liquidity); $7.46 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – It earns nothing until the price falls to $0.01274292 (-1.55%)\n  – In range over stored history: 28.63% of the measured time (156,662 s of 547,205 s); replayed over it, at most $6.39 from intervals wholly inside and at most $5.16 more from intervals at its edges (2,101 s), undiluted, no lower bound\n  – Measured inside this range: $3.52/day over 1.81 days (at most $6.39 in all)\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $4.36, median $7.45, max $11.25 per day; every day: 2026-11-14 $5.41 (30,699 s, not counted), 2026-11-15 $7.06 (86,488 s), 2026-11-16 $10.13 (86,007 s), 2026-11-17 $13.71 (71,106 s, not counted), 2026-11-18 $4.36 (86,146 s), 2026-11-19 $11.25 (85,799 s), 2026-11-20 $7.45 (86,400 s), 2026-11-21 $5.44 (14,559 s, not counted)\n  – Round trip: A fall to $0.01096801 and a return to $0.01294400 (the pool price now) hands back $114.86 USDC and 0.0000 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $114.86 with the other rungs as given\n• r3 deep: $0.01002405 – $0.01096801 (-22.56% / -15.27%), $650.90 USDC and 0 NOCK at spot (liquidity 141251.6709; top: the nearest usable tick)\n  – Bottom: fully NOCK at $0.01002405: 62,077 NOCK held, 62,077 bought, average $0.01048542\n  – Fees while in range (an estimate): $85.90/day, $73.03 diluted (it would be 14.98% of the pool's active liquidity); $13.20 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – It earns nothing until the price falls to $0.01096801 (-15.27%)\n  – In range over stored history: 5.82% of the measured time (31,832 s of 547,205 s); replayed over it, at most $32.55 from intervals wholly inside and at most $50.00 more from intervals at its edges (1,801 s), undiluted, no lower bound\n  – Measured inside this range: at most $32.55 over 31,832 s; only 31832 s of stored intervals sat wholly inside: below the 72000 s a per-day figure needs, so only the dollars and seconds are stated\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $43.74, median $74.75, max $112.86 per day; every day: 2026-11-14 $54.23 (30,699 s, not counted), 2026-11-15 $70.76 (86,488 s), 2026-11-16 $101.59 (86,007 s), 2026-11-17 $137.52 (71,106 s, not counted), 2026-11-18 $43.74 (86,146 s), 2026-11-19 $112.86 (85,799 s), 2026-11-20 $74.75 (86,400 s), 2026-11-21 $54.52 (14,559 s, not counted)\n  – If pulled at fill (at $0.01002405): 62,077 NOCK kept, 62,077 bought at an average $0.01048542. Pulled when fully NOCK (at its bottom), the rung keeps this NOCK on a rebound; left in place, a rebound sells it back. Pulling is a withdrawal you sign; gas is not counted.\n  – The reserve gate allows this rung at most $650.90 with the other rungs as given\n• Overlaps: none\n• Combined: $766.99 USDC and 87 NOCK at spot; at the deepest bottom $0.01002405: 71,975 NOCK held, 71,888 bought, average $0.01066922; kept if the 1 deep rung(s) are pulled at fill: 62,077 NOCK, bought at an average $0.01048542\n• Price grid (NOCK bought by the ladder, USDC left in it; rungs in range and their estimated fees per day; stable balance and reserve headroom):\n  +1.44% $0.01313098: 87 NOCK sold, $768.12 USDC left; r1 in range, fees $0.84/day ($0.84 diluted); stable $1773.80 (reserve +$823.80) [r1 top]\n  0.00% $0.01294400: 0 NOCK bought, $766.99 USDC left; r1 in range, fees $0.84/day ($0.84 diluted); stable $1769.54 (reserve +$819.54) [spot]\n  -1.55% $0.01274292: 95 NOCK bought, $765.76 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1764.93 (reserve +$814.93) [r1 bottom, r2 top]\n  -5.00% $0.01229680: 2,338 NOCK bought, $737.69 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1729.25 (reserve +$779.25)\n  -10.00% $0.01164960: 5,818 NOCK bought, $696.04 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1676.31 (reserve +$726.31)\n  -15.00% $0.01100240: 9,601 NOCK bought, $653.21 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1621.88 (reserve +$671.88)\n  -15.27% $0.01096801: 9,811 NOCK bought, $650.90 USDC left; r3 in range, fees $85.90/day ($73.03 diluted); stable $1618.94 (reserve +$668.94) [r2 bottom, r3 top]\n  -20.00% $0.01035520: 49,147 NOCK bought, $231.70 USDC left; r3 in range, fees $85.90/day ($73.03 diluted); stable $1188.42 (reserve +$238.42)\n  -22.56% $0.01002405: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $950.46 (reserve +$0.46) [r3 bottom]\n  -22.74% $0.01000000: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $950.00 (reserve +$0.00) [gate]\n  -25.00% $0.00970800: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $944.39 (reserve -$5.61)\n  -30.00% $0.00906080: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $931.64 (reserve -$18.36)\n  -35.00% $0.00841360: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $918.43 (reserve -$31.57)\n  -40.00% $0.00776640: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $904.70 (reserve -$45.30)\n• Reserve (shared): stable $950.00 at the gate $0.01000000 (your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom) against the $950.00 reserve: holds by $0.00 (the rungs take at most $766.99 in all; the existing NOCK ranges hold $171.16 USDC there)\n• Below the gate: at $0.00776640 (-40.00%) stable $904.70 (reserve -$45.30). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• Floor budget (shared): needs 87 (r1 87, r2 0, r3 0) of the 87 NOCK that may go into LP: fits\n• Floor-crossing price: lowers: the ladder's NOCK leaves the wallet and sells as NOCK rises to the top (without the ladder $0.025404 (+96.3%), with it $0.025220 (+94.8%))\n• Trade-off: Rows are measurements at your depths; NockNock does not choose the split or the depths. Rows are in the order of the quantity varied and are not ranked. Fee per day in range is always shown with the in-range share of stored history and the replay upper bounds: a high rate while in range is not a rate per day.\n  Split: none (the split table is drawn for two rungs)\n  Near rung's bottom: none (the depth tables are drawn for one near and one deep rung)\n  Deep rung's top: none (the depth tables are drawn for one near and one deep rung)\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK. Each rung is its own position (its own NFT) in the same pool; overlapping rungs are allowed and their liquidity adds. The rungs share one reserve gate and one NOCK budget. A deep rung keeps its NOCK on a rebound only if it is pulled when it is fully NOCK; pulling is a withdrawal you sign, and its gas is not counted.\n• Fee estimate assumptions: Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one). Fees per unit of liquidity are shared by every range that contains the price (the same pool, the same fee tier). The pool's swap volume is taken as unchanged by the new liquidity: only its share dilutes. Dilution uses the pool's active liquidity at the current tick, read at 'latest' in the snapshot's cycle (not at the snapshot's block); the liquidity at the range's own ticks is not read and is taken as the same. The NOCK fee leg is valued at the current pool price, not at the price when it accrued. Intervals where the measuring range's liquidity changed or its fees fell (a collect, or a v4 add that collects) are skipped, so the measurement slightly undercounts; the seconds skipped are stated. Gas is not counted. Past fees are not a forecast. The stored market volume of another pool (market_price_history) is never used.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
+    "status": 200
+  },
+  "the_bottle_deep_deployed": {
+    "arguments": {
+      "position_id": "uniswap-v4:base:3163450",
+      "shape": "configured"
+    },
+    "body": {
+      "assumptions": [
+        "Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot.",
+        "Fees and gas are not counted.",
+        "WETH/NOCK ranges hold ETH/USD constant and add no USDC.",
+        "Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals.",
+        "The ladder's USDC comes from the wallet and its NOCK from wallet NOCK.",
+        "Each rung is its own position (its own NFT) in the same pool; overlapping rungs are allowed and their liquidity adds.",
+        "The rungs share one reserve gate and one NOCK budget.",
+        "A deep rung keeps its NOCK on a rebound only if it is pulled when it is fully NOCK; pulling is a withdrawal you sign, and its gas is not counted."
+      ],
+      "bottom": {
+        "avg_buy_price_usd": "0.01183214",
+        "describes": "the sum over the rungs at the deepest rung's bottom",
+        "nock_bought": "9811.4665",
+        "nock_held": "9898.2556",
+        "pct_of_spot": "-15.27",
+        "price_usd": "0.01096801"
+      },
+      "bounds": {
+        "describes": "the span from the deepest rung's bottom to the highest rung's top",
+        "high_pct": "+1.44",
+        "high_rule": "per rung: rungs[].bounds.high_rule",
+        "high_usd": "0.01313098",
+        "low_pct": "-15.27",
+        "low_usd": "0.01096801",
+        "tick_lower": null,
+        "tick_upper": null
+      },
+      "combined": {
+        "avg_buy_price_usd": "0.01183214",
+        "avg_kept_price_usd": null,
+        "deep_rungs": 0,
+        "deepest_bottom_usd": "0.01096801",
+        "gate_price_rule": "your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom",
+        "gate_price_usd": "0.01000000",
+        "max_rungs": 4,
+        "max_rungs_note": "display constants, not settings",
+        "max_usdc_total": "116.09",
+        "nock_bought_at_deepest_bottom": "9811.4665",
+        "nock_bought_by_deep_rungs": "0.0000",
+        "nock_held_at_deepest_bottom": "9898.2556",
+        "nock_kept_if_deep_rungs_pulled": "0.0000",
+        "overlaps": [],
+        "rung_count": 2,
+        "total_nock_needed": "86.7891",
+        "total_usdc": "116.09"
+      },
+      "fee_estimate": null,
+      "fee_estimate_reason": "per rung: rungs[].fee_estimate; each grid row sums the rungs in range there",
+      "floor_check": {
+        "budget_note": null,
+        "floor_breach_effect": {
+          "after": {
+            "crossing": {
+              "level_nock": "100000",
+              "multiple": "1.9484",
+              "pct_above_spot": "94.8",
+              "price_usd": "0.025220",
+              "status": "crosses"
+            },
+            "nock_now": "109543",
+            "reason": null,
+            "status": "crosses",
+            "tolerated": {
+              "level_nock": "90000",
+              "multiple": null,
+              "pct_above_spot": null,
+              "price_usd": null,
+              "status": "never"
+            }
+          },
+          "assumption": "Each pool is moved by the same multiple from its own current price. WETH/NOCK ranges hold ETH/USD constant (a NOCK/USD multiple is the same NOCK/ETH multiple). Full-range pools follow x*y=k on the wallet's share and never sell out. Uncollected NOCK fees count as held. Gas-side ranges with no NOCK leg hold no NOCK.",
+          "before": {
+            "crossing": {
+              "level_nock": "100000",
+              "multiple": "1.9626",
+              "pct_above_spot": "96.3",
+              "price_usd": "0.025404",
+              "status": "crosses"
+            },
+            "nock_now": "109543",
+            "reason": null,
+            "status": "crosses",
+            "tolerated": {
+              "level_nock": "90000",
+              "multiple": null,
+              "pct_above_spot": null,
+              "price_usd": null,
+              "status": "never"
+            }
+          },
+          "reason": "the ladder's NOCK leaves the wallet and sells as NOCK rises to the top",
+          "status": "lowers"
+        },
+        "lp_nock_budget": "86.7891",
+        "max_usdc_within_budget": null,
+        "nock_needed": "86.7891",
+        "nock_needed_by_rung": [
+          {
+            "index": 1,
+            "nock_needed": "86.7891"
+          },
+          {
+            "index": 2,
+            "nock_needed": "0.0000"
+          }
+        ],
+        "reason": null,
+        "rebuild_note": "the rebuild's suggestions this cycle also draw 0 NOCK of the same budget: an alternative use of it, not subtracted",
+        "rebuild_suggested_nock": "0.0000",
+        "status": "fits"
+      },
+      "grid": [
+        {
+          "est_fee_reason": "this snapshot has no fee_yield (2.10.0): fees are not measured in it",
+          "est_fee_usd_per_day": null,
+          "est_fee_usd_per_day_diluted": null,
+          "existing_nock_lp_nock": "19103.7111",
+          "existing_nock_lp_usdc": "877.73",
+          "ladder_nock": "0.0000",
+          "ladder_nock_acquired": "-86.7891",
+          "ladder_usdc": "117.22",
+          "markers": [
+            "r1 top"
+          ],
+          "pct_of_spot": "+1.44",
+          "pool_price_usd": "0.01313098",
+          "price_usd": "0.01313098",
+          "reserve_headroom_usdc": "823.80",
+          "rungs": [
+            {
+              "in_range": true,
+              "index": 1,
+              "ladder_nock": "0.0000",
+              "ladder_usdc": "2.36"
+            },
+            {
+              "in_range": false,
+              "index": 2,
+              "ladder_nock": "0.0000",
+              "ladder_usdc": "114.86"
+            }
+          ],
+          "rungs_in_range": [
+            1
+          ],
+          "stable_usdc": "1773.80",
+          "total_tracked_nock": "109217.47"
+        },
+        {
+          "est_fee_reason": "this snapshot has no fee_yield (2.10.0): fees are not measured in it",
+          "est_fee_usd_per_day": null,
+          "est_fee_usd_per_day_diluted": null,
+          "existing_nock_lp_nock": "19341.9535",
+          "existing_nock_lp_usdc": "874.61",
+          "ladder_nock": "86.7891",
+          "ladder_nock_acquired": "0.0000",
+          "ladder_usdc": "116.09",
+          "markers": [
+            "spot"
+          ],
+          "pct_of_spot": "0.00",
+          "pool_price_usd": "0.01294400",
+          "price_usd": "0.01294400",
+          "reserve_headroom_usdc": "819.54",
+          "rungs": [
+            {
+              "in_range": true,
+              "index": 1,
+              "ladder_nock": "86.7891",
+              "ladder_usdc": "1.23"
+            },
+            {
+              "in_range": false,
+              "index": 2,
+              "ladder_nock": "0.0000",
+              "ladder_usdc": "114.86"
+            }
+          ],
+          "rungs_in_range": [
+            1
+          ],
+          "stable_usdc": "1769.54",
+          "total_tracked_nock": "109542.50"
+        },
+        {
+          "est_fee_reason": "this snapshot has no fee_yield (2.10.0): fees are not measured in it",
+          "est_fee_usd_per_day": null,
+          "est_fee_usd_per_day_diluted": null,
+          "existing_nock_lp_nock": "19603.9982",
+          "existing_nock_lp_usdc": "871.22",
+          "ladder_nock": "182.2491",
+          "ladder_nock_acquired": "95.4600",
+          "ladder_usdc": "114.86",
+          "markers": [
+            "r1 bottom",
+            "r2 top"
+          ],
+          "pct_of_spot": "-1.55",
+          "pool_price_usd": "0.01274292",
+          "price_usd": "0.01274292",
+          "reserve_headroom_usdc": "814.93",
+          "rungs": [
+            {
+              "in_range": false,
+              "index": 1,
+              "ladder_nock": "182.2491",
+              "ladder_usdc": "0.00"
+            },
+            {
+              "in_range": true,
+              "index": 2,
+              "ladder_nock": "0.0000",
+              "ladder_usdc": "114.86"
+            }
+          ],
+          "rungs_in_range": [
+            2
+          ],
+          "stable_usdc": "1764.93",
+          "total_tracked_nock": "109900.01"
+        },
+        {
+          "est_fee_reason": "this snapshot has no fee_yield (2.10.0): fees are not measured in it",
+          "est_fee_usd_per_day": null,
+          "est_fee_usd_per_day_diluted": null,
+          "existing_nock_lp_nock": "20208.1461",
+          "existing_nock_lp_usdc": "863.61",
+          "ladder_nock": "2425.1075",
+          "ladder_nock_acquired": "2338.3184",
+          "ladder_usdc": "86.79",
+          "markers": [],
+          "pct_of_spot": "-5.00",
+          "pool_price_usd": "0.01229680",
+          "price_usd": "0.01229680",
+          "reserve_headroom_usdc": "779.25",
+          "rungs": [
+            {
+              "in_range": false,
+              "index": 1,
+              "ladder_nock": "182.2491",
+              "ladder_usdc": "0.00"
+            },
+            {
+              "in_range": true,
+              "index": 2,
+              "ladder_nock": "2242.8584",
+              "ladder_usdc": "86.79"
+            }
+          ],
+          "rungs_in_range": [
+            2
+          ],
+          "stable_usdc": "1729.25",
+          "total_tracked_nock": "112747.01"
+        },
+        {
+          "est_fee_reason": "this snapshot has no fee_yield (2.10.0): fees are not measured in it",
+          "est_fee_usd_per_day": null,
+          "est_fee_usd_per_day_diluted": null,
+          "existing_nock_lp_nock": "21145.5540",
+          "existing_nock_lp_usdc": "852.33",
+          "ladder_nock": "5905.1711",
+          "ladder_nock_acquired": "5818.3820",
+          "ladder_usdc": "45.14",
+          "markers": [],
+          "pct_of_spot": "-10.00",
+          "pool_price_usd": "0.01164960",
+          "price_usd": "0.01164960",
+          "reserve_headroom_usdc": "726.31",
+          "rungs": [
+            {
+              "in_range": false,
+              "index": 1,
+              "ladder_nock": "182.2491",
+              "ladder_usdc": "0.00"
+            },
+            {
+              "in_range": true,
+              "index": 2,
+              "ladder_nock": "5722.9220",
+              "ladder_usdc": "45.14"
+            }
+          ],
+          "rungs_in_range": [
+            2
+          ],
+          "stable_usdc": "1676.31",
+          "total_tracked_nock": "117164.48"
+        },
+        {
+          "est_fee_reason": "this snapshot has no fee_yield (2.10.0): fees are not measured in it",
+          "est_fee_usd_per_day": null,
+          "est_fee_usd_per_day_diluted": null,
+          "existing_nock_lp_nock": "22164.5030",
+          "existing_nock_lp_usdc": "840.72",
+          "ladder_nock": "9687.9505",
+          "ladder_nock_acquired": "9601.1614",
+          "ladder_usdc": "2.31",
+          "markers": [],
+          "pct_of_spot": "-15.00",
+          "pool_price_usd": "0.01100240",
+          "price_usd": "0.01100240",
+          "reserve_headroom_usdc": "671.88",
+          "rungs": [
+            {
+              "in_range": false,
+              "index": 1,
+              "ladder_nock": "182.2491",
+              "ladder_usdc": "0.00"
+            },
+            {
+              "in_range": true,
+              "index": 2,
+              "ladder_nock": "9505.7014",
+              "ladder_usdc": "2.31"
+            }
+          ],
+          "rungs_in_range": [
+            2
+          ],
+          "stable_usdc": "1621.88",
+          "total_tracked_nock": "121966.21"
+        },
+        {
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
+          "est_fee_usd_per_day": "0.00",
+          "est_fee_usd_per_day_diluted": "0.00",
+          "existing_nock_lp_nock": "22221.1519",
+          "existing_nock_lp_usdc": "840.10",
+          "ladder_nock": "9898.2556",
+          "ladder_nock_acquired": "9811.4665",
+          "ladder_usdc": "0.00",
+          "markers": [
+            "r2 bottom"
+          ],
+          "pct_of_spot": "-15.27",
+          "pool_price_usd": "0.01096801",
+          "price_usd": "0.01096801",
+          "reserve_headroom_usdc": "668.94",
+          "rungs": [
+            {
+              "in_range": false,
+              "index": 1,
+              "ladder_nock": "182.2491",
+              "ladder_usdc": "0.00"
+            },
+            {
+              "in_range": false,
+              "index": 2,
+              "ladder_nock": "9716.0065",
+              "ladder_usdc": "0.00"
+            }
+          ],
+          "rungs_in_range": [],
+          "stable_usdc": "1618.94",
+          "total_tracked_nock": "122233.17"
+        },
+        {
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
+          "est_fee_usd_per_day": "0.00",
+          "est_fee_usd_per_day_diluted": "0.00",
+          "existing_nock_lp_nock": "62612.7834",
+          "existing_nock_lp_usdc": "409.57",
+          "ladder_nock": "9898.2556",
+          "ladder_nock_acquired": "9811.4665",
+          "ladder_usdc": "0.00",
+          "markers": [],
+          "pct_of_spot": "-20.00",
+          "pool_price_usd": "0.01035520",
+          "price_usd": "0.01035520",
+          "reserve_headroom_usdc": "238.42",
+          "rungs": [
+            {
+              "in_range": false,
+              "index": 1,
+              "ladder_nock": "182.2491",
+              "ladder_usdc": "0.00"
+            },
+            {
+              "in_range": false,
+              "index": 2,
+              "ladder_nock": "9716.0065",
+              "ladder_usdc": "0.00"
+            }
+          ],
+          "rungs_in_range": [],
+          "stable_usdc": "1188.42",
+          "total_tracked_nock": "162624.80"
+        },
+        {
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
+          "est_fee_usd_per_day": "0.00",
+          "est_fee_usd_per_day_diluted": "0.00",
+          "existing_nock_lp_nock": "86010.4715",
+          "existing_nock_lp_usdc": "171.16",
+          "ladder_nock": "9898.2556",
+          "ladder_nock_acquired": "9811.4665",
+          "ladder_usdc": "0.00",
+          "markers": [
+            "gate"
+          ],
+          "pct_of_spot": "-22.74",
+          "pool_price_usd": "0.01000000",
+          "price_usd": "0.01000000",
+          "reserve_headroom_usdc": "0.00",
+          "rungs": [
+            {
+              "in_range": false,
+              "index": 1,
+              "ladder_nock": "182.2491",
+              "ladder_usdc": "0.00"
+            },
+            {
+              "in_range": false,
+              "index": 2,
+              "ladder_nock": "9716.0065",
+              "ladder_usdc": "0.00"
+            }
+          ],
+          "rungs_in_range": [],
+          "stable_usdc": "950.00",
+          "total_tracked_nock": "186022.49"
+        },
+        {
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
+          "est_fee_usd_per_day": "0.00",
+          "est_fee_usd_per_day_diluted": "0.00",
+          "existing_nock_lp_nock": "86576.7509",
+          "existing_nock_lp_usdc": "165.55",
+          "ladder_nock": "9898.2556",
+          "ladder_nock_acquired": "9811.4665",
+          "ladder_usdc": "0.00",
+          "markers": [],
+          "pct_of_spot": "-25.00",
+          "pool_price_usd": "0.00970800",
+          "price_usd": "0.00970800",
+          "reserve_headroom_usdc": "-5.61",
+          "rungs": [
+            {
+              "in_range": false,
+              "index": 1,
+              "ladder_nock": "182.2491",
+              "ladder_usdc": "0.00"
+            },
+            {
+              "in_range": false,
+              "index": 2,
+              "ladder_nock": "9716.0065",
+              "ladder_usdc": "0.00"
+            }
+          ],
+          "rungs_in_range": [],
+          "stable_usdc": "944.39",
+          "total_tracked_nock": "186588.77"
+        },
+        {
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
+          "est_fee_usd_per_day": "0.00",
+          "est_fee_usd_per_day_diluted": "0.00",
+          "existing_nock_lp_nock": "87928.0727",
+          "existing_nock_lp_usdc": "152.80",
+          "ladder_nock": "9898.2556",
+          "ladder_nock_acquired": "9811.4665",
+          "ladder_usdc": "0.00",
+          "markers": [],
+          "pct_of_spot": "-30.00",
+          "pool_price_usd": "0.00906080",
+          "price_usd": "0.00906080",
+          "reserve_headroom_usdc": "-18.36",
+          "rungs": [
+            {
+              "in_range": false,
+              "index": 1,
+              "ladder_nock": "182.2491",
+              "ladder_usdc": "0.00"
+            },
+            {
+              "in_range": false,
+              "index": 2,
+              "ladder_nock": "9716.0065",
+              "ladder_usdc": "0.00"
+            }
+          ],
+          "rungs_in_range": [],
+          "stable_usdc": "931.64",
+          "total_tracked_nock": "187940.09"
+        },
+        {
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
+          "est_fee_usd_per_day": "0.00",
+          "est_fee_usd_per_day_diluted": "0.00",
+          "existing_nock_lp_nock": "89432.4605",
+          "existing_nock_lp_usdc": "139.58",
+          "ladder_nock": "9898.2556",
+          "ladder_nock_acquired": "9811.4665",
+          "ladder_usdc": "0.00",
+          "markers": [],
+          "pct_of_spot": "-35.00",
+          "pool_price_usd": "0.00841360",
+          "price_usd": "0.00841360",
+          "reserve_headroom_usdc": "-31.57",
+          "rungs": [
+            {
+              "in_range": false,
+              "index": 1,
+              "ladder_nock": "182.2491",
+              "ladder_usdc": "0.00"
+            },
+            {
+              "in_range": false,
+              "index": 2,
+              "ladder_nock": "9716.0065",
+              "ladder_usdc": "0.00"
+            }
+          ],
+          "rungs_in_range": [],
+          "stable_usdc": "918.43",
+          "total_tracked_nock": "189444.48"
+        },
+        {
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
+          "est_fee_usd_per_day": "0.00",
+          "est_fee_usd_per_day_diluted": "0.00",
+          "existing_nock_lp_nock": "91121.1798",
+          "existing_nock_lp_usdc": "125.85",
+          "ladder_nock": "9898.2556",
+          "ladder_nock_acquired": "9811.4665",
+          "ladder_usdc": "0.00",
+          "markers": [],
+          "pct_of_spot": "-40.00",
+          "pool_price_usd": "0.00776640",
+          "price_usd": "0.00776640",
+          "reserve_headroom_usdc": "-45.30",
+          "rungs": [
+            {
+              "in_range": false,
+              "index": 1,
+              "ladder_nock": "182.2491",
+              "ladder_usdc": "0.00"
+            },
+            {
+              "in_range": false,
+              "index": 2,
+              "ladder_nock": "9716.0065",
+              "ladder_usdc": "0.00"
+            }
+          ],
+          "rungs_in_range": [],
+          "stable_usdc": "904.70",
+          "total_tracked_nock": "191133.19"
+        }
+      ],
+      "inputs": {
+        "grid_step_pct": 5.0,
+        "grid_to_pct": -40.0,
+        "high_requested": null,
+        "low_requested": null,
+        "nock": null,
+        "position_id": "uniswap-v4:base:3163450",
+        "rungs": [
+          {
+            "high_requested": "0.013130977294699456",
+            "index": 1,
+            "low_requested": "0.012742917379855624",
+            "nock": null,
+            "rung": "cap",
+            "usdc": "1.23"
+          },
+          {
+            "high_requested": "0.012742917379855624",
+            "index": 2,
+            "low_requested": "0.010968012886072376",
+            "nock": null,
+            "rung": "near",
+            "usdc": "114.86"
+          }
+        ],
+        "shape": {
+          "cap": "sized",
+          "cap_reason": null,
+          "dust": {
+            "nock": 1.0,
+            "note": "display constants, not settings",
+            "usdc": 0.5
+          },
+          "gate_price_rule": "your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom",
+          "gate_price_usd": "0.01000000",
+          "note": "the operator's own shape, sized here; NockNock does not choose it",
+          "plan": [
+            {
+              "cap": {
+                "band_rule": "the band 273600..273900 of the 300-tick grid contains the pool's tick 273743",
+                "bound_by": "lp_nock_budget",
+                "budget_counting_the_tracked_cap": "86.7891",
+                "limit_rule": "never more USDC than the first near rung's target",
+                "lp_nock_budget": "86.7891",
+                "nock": "86.7891",
+                "note": "the cap holds the whole LP NOCK budget, 86.7891 NOCK; the curve pairs it with $1.23 USDC",
+                "pool_tick": 273743,
+                "tick_lower": 273600,
+                "tick_upper": 273900,
+                "usdc": "1.23"
+              },
+              "counterparts": [],
+              "deployed_nock": "0.0000",
+              "deployed_usdc": "0.000000",
+              "index": 1,
+              "over_by_usdc": null,
+              "reason": null,
+              "remaining_nock": "86.7891",
+              "remaining_usdc": "1.225999",
+              "rung": "cap",
+              "share": null,
+              "status": "to_deposit",
+              "target_nock": "86.7891",
+              "target_usdc": "1.225999",
+              "tick_lower": 273600,
+              "tick_upper": 273900
+            },
+            {
+              "cap": null,
+              "counterparts": [],
+              "deployed_nock": null,
+              "deployed_usdc": "0.000000",
+              "index": 2,
+              "over_by_usdc": null,
+              "reason": null,
+              "remaining_nock": null,
+              "remaining_usdc": "114.864600",
+              "rung": "near",
+              "share": "0.15",
+              "status": "to_deposit",
+              "target_nock": null,
+              "target_usdc": "114.864600",
+              "tick_lower": 273900,
+              "tick_upper": 275400
+            },
+            {
+              "cap": null,
+              "counterparts": [
+                "uniswap-v4:base:9000001"
+              ],
+              "deployed_nock": null,
+              "deployed_usdc": "650.899400",
+              "index": 3,
+              "over_by_usdc": null,
+              "reason": null,
+              "remaining_nock": null,
+              "remaining_usdc": "0.000001",
+              "rung": "deep",
+              "share": "0.85",
+              "status": "deployed",
+              "target_nock": null,
+              "target_usdc": "650.899401",
+              "tick_lower": 275400,
+              "tick_upper": 276300
+            }
+          ],
+          "rest_note": "the near and deep shares divide the USDC left after the cap",
+          "rest_usdc": "765.76",
+          "rungs": [
+            {
+              "high": "band",
+              "low_usd": null,
+              "rung": "cap",
+              "share": null
+            },
+            {
+              "high": "spot",
+              "low_usd": "0.01100000",
+              "rung": "near",
+              "share": "0.15"
+            },
+            {
+              "high": "0.01100000",
+              "low_usd": "0.01000000",
+              "rung": "deep",
+              "share": "0.85"
+            }
+          ],
+          "source": "operator_profile.ladder_rungs",
+          "status": "computed",
+          "total_rule": "the shared reserve gate's most (max_usdc_total) at $0.01000000, counting the tracked rungs' USDC",
+          "total_usdc": "766.99",
+          "tracked_note": "Tracked ladder rungs in this pool (role: ladder) are part of the shape, not existing ranges: the total counts their USDC as if it were still in the wallet. A near or deep rung counts what its range holds as all USDC at its top (vs_top.usdc_at_top); a cap counts the USDC it holds now, and its NOCK is counted back into the NOCK budget the cap is sized by. Each tracked rung is matched to a configured rung by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order). What is left to deposit is drawn on a matched rung's own ticks.",
+          "tracked_usdc": "650.90",
+          "unmatched": []
+        },
+        "split_step_note": "display constants, not settings",
+        "split_step_pct": 10.0,
+        "tick_spacing": null,
+        "usdc": "116.09"
+      },
+      "pool": {
+        "label": "v4 USDC/NOCK 3.00% #3163450",
+        "note": "a ladder in this pool is a NEW position (a new NFT); add it to config.yaml to be tracked",
+        "pool_price_usd": "0.01294400",
+        "pool_price_vs_spot_pct": "0.00",
+        "position_id": "uniswap-v4:base:3163450",
+        "snapped": true,
+        "spacing_source": "position",
+        "tick_spacing": 300
+      },
+      "reserve_check": {
+        "accumulation_plan_unspent": null,
+        "accumulation_plan_unspent_reason": "no accumulation_plan is configured",
+        "at_top": {
+          "headroom_usdc": "823.80",
+          "ladder_usdc": "117.22",
+          "note": "Out of range above (read at the highest top), every rung holds only USDC: its NOCK has sold on the way up.",
+          "out_of_range_above_now": false,
+          "price_usd": "0.01313098",
+          "stable_usdc": "1773.80"
+        },
+        "cash_reserve_usdc": "950.00",
+        "existing_ladders": [
+          "uniswap-v4:base:9000001"
+        ],
+        "existing_ranges_below_bottom": {
+          "headroom_usdc": "-45.30",
+          "note": "The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.",
+          "pct_of_spot": "-40.00",
+          "price_usd": "0.00776640",
+          "stable_usdc": "904.70"
+        },
+        "existing_ranges_below_bottom_reason": null,
+        "existing_ranges_usdc_at_bottom": "171.16",
+        "gate": "The gate is the stable balance where every rung is fully NOCK: at the lower of the deepest rung's bottom and your ladder bottom (operator_profile.ladder_bottom_usd) when it is set, otherwise at the deepest rung's bottom; the *_at_bottom figures are read at gate_price_usd.",
+        "gate_price_rule": "your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom",
+        "gate_price_usd": "0.01000000",
+        "headroom_at_spot_usdc": "819.54",
+        "margin_usdc": "0.00",
+        "max_usdc_for_this_range": "116.09",
+        "reason": null,
+        "stable_at_bottom_usdc": "950.00",
+        "stable_at_spot_usdc": "1769.54",
+        "status": "holds",
+        "tax_reserve_usd": {
+          "is": "stated, not a gate",
+          "usd": "0.00"
+        }
+      },
+      "rungs": [
+        {
+          "bottom": {
+            "avg_buy_price_usd": "0.01284307",
+            "nock_bought": "95.4600",
+            "nock_held": "182.2491",
+            "pct_of_spot": "-1.55",
+            "price_usd": "0.01274292"
+          },
+          "bounds": {
+            "high_pct": "+1.44",
+            "high_rule": "the tick band containing the pool's tick (the cap)",
+            "high_usd": "0.01313098",
+            "low_pct": "-1.55",
+            "low_usd": "0.01274292",
+            "tick_lower": 273600,
+            "tick_upper": 273900
+          },
+          "cap": {
+            "band_rule": "the band 273600..273900 of the 300-tick grid contains the pool's tick 273743",
+            "bound_by": "lp_nock_budget",
+            "budget_counting_the_tracked_cap": "86.7891",
+            "limit_rule": "never more USDC than the first near rung's target",
+            "lp_nock_budget": "86.7891",
+            "nock": "86.7891",
+            "note": "the cap holds the whole LP NOCK budget, 86.7891 NOCK; the curve pairs it with $1.23 USDC",
+            "pool_tick": 273743,
+            "tick_lower": 273600,
+            "tick_upper": 273900,
+            "usdc": "1.23"
+          },
+          "fee_estimate": {
+            "assumptions": [
+              "Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one).",
+              "Fees per unit of liquidity are shared by every range that contains the price (the same pool, the same fee tier).",
+              "The pool's swap volume is taken as unchanged by the new liquidity: only its share dilutes.",
+              "Dilution uses the pool's active liquidity at the current tick, read at 'latest' in the snapshot's cycle (not at the snapshot's block); the liquidity at the range's own ticks is not read and is taken as the same.",
+              "The NOCK fee leg is valued at the current pool price, not at the price when it accrued.",
+              "Intervals where the measuring range's liquidity changed or its fees fell (a collect, or a v4 add that collects) are skipped, so the measurement slightly undercounts; the seconds skipped are stated.",
+              "Gas is not counted. Past fees are not a forecast.",
+              "The stored market volume of another pool (market_price_history) is never used."
+            ],
+            "band_measured": null,
+            "band_reason": null,
+            "constants": {
+              "band_min_seconds": 72000.0,
+              "day_min_seconds": null,
+              "max_gap_seconds": null,
+              "note": "display constants, not settings",
+              "window_days": null
+            },
+            "coverage": null,
+            "dilution": null,
+            "dilution_reason": null,
+            "in_range_share_reason": null,
+            "in_range_share_stored_history": null,
+            "intervals": null,
+            "measured_at": null,
+            "measured_by": null,
+            "measured_days": null,
+            "measured_label": null,
+            "measured_seconds": null,
+            "measurement_age_seconds": null,
+            "per_100_usd_per_day_in_range_usd": null,
+            "per_day_in_range_diluted_usd": null,
+            "per_day_in_range_nock_leg": null,
+            "per_day_in_range_usd": null,
+            "per_day_in_range_usdc_leg": null,
+            "rate": null,
+            "reason": "this snapshot has no fee_yield (2.10.0): fees are not measured in it",
+            "replay_reason": null,
+            "skipped": null,
+            "skipped_seconds": null,
+            "spread": null,
+            "spread_reason": null,
+            "status": "unavailable",
+            "stored_history_replay": null
+          },
+          "if_pulled_at_fill": null,
+          "index": 1,
+          "inputs": {
+            "high_requested": "0.013130977294699456",
+            "low_requested": "0.012742917379855624",
+            "nock": null,
+            "usdc": "1.23"
+          },
+          "max_usdc_with_the_others_as_given": "1.23",
+          "mint": {
+            "amount0_raw": "1225999",
+            "amount1_raw": "867890958577132038",
+            "liquidity_raw": "138192109253769",
+            "nock": "86.7890958577132038",
+            "nock_max_raw": "867891000000000000",
+            "nock_raw": "867890958577132038",
+            "note": "liquidity_raw is what these amounts buy, rounded down (LiquidityAmounts); amount0_raw and amount1_raw are what a mint of it pulls, rounded up (SqrtPriceMath), never more than the maxima (the rung's USDC and NOCK truncated to raw units)",
+            "status": "exact",
+            "tick": 273743,
+            "usdc": "1.225999",
+            "usdc_max_raw": "1225999",
+            "usdc_raw": "1225999"
+          },
+          "plan": {
+            "counterparts": [],
+            "deployed_usdc": "0.000000",
+            "remaining_usdc": "1.225999",
+            "status": "to_deposit",
+            "target_usdc": "1.225999"
+          },
+          "round_trip": {
+            "back_to_usd": "0.01294400",
+            "down_to_usd": "0.01274292",
+            "nock_back": "86.7891",
+            "nock_start": "86.7891",
+            "text": "A fall to $0.01274292 and a return to $0.01294400 (the pool price now) hands back $1.23 USDC and 86.7891 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.",
+            "usdc_back": "1.23",
+            "usdc_start": "1.23"
+          },
+          "rung": "cap",
+          "sizing": {
+            "liquidity_human": "1381.9212",
+            "liquidity_raw": "138192115820500",
+            "nock_check": "not_given",
+            "nock_given": null,
+            "nock_needed_at_spot": "86.7891",
+            "usdc_at_spot": "1.23"
+          },
+          "top": {
+            "out_of_range_above_now": false,
+            "pct_of_spot": "+1.44",
+            "price_usd": "0.01313098",
+            "usdc_held": "2.36"
+          }
+        },
+        {
+          "bottom": {
+            "avg_buy_price_usd": "0.01182220",
+            "nock_bought": "9716.0065",
+            "nock_held": "9716.0065",
+            "pct_of_spot": "-15.27",
+            "price_usd": "0.01096801"
+          },
+          "bounds": {
+            "high_pct": "-1.55",
+            "high_rule": "the usable tick at or below the pool price (the first rung still drawable)",
+            "high_usd": "0.01274292",
+            "low_pct": "-15.27",
+            "low_usd": "0.01096801",
+            "tick_lower": 273900,
+            "tick_upper": 275400
+          },
+          "cap": null,
+          "fee_estimate": {
+            "assumptions": [
+              "Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one).",
+              "Fees per unit of liquidity are shared by every range that contains the price (the same pool, the same fee tier).",
+              "The pool's swap volume is taken as unchanged by the new liquidity: only its share dilutes.",
+              "Dilution uses the pool's active liquidity at the current tick, read at 'latest' in the snapshot's cycle (not at the snapshot's block); the liquidity at the range's own ticks is not read and is taken as the same.",
+              "The NOCK fee leg is valued at the current pool price, not at the price when it accrued.",
+              "Intervals where the measuring range's liquidity changed or its fees fell (a collect, or a v4 add that collects) are skipped, so the measurement slightly undercounts; the seconds skipped are stated.",
+              "Gas is not counted. Past fees are not a forecast.",
+              "The stored market volume of another pool (market_price_history) is never used."
+            ],
+            "band_measured": null,
+            "band_reason": null,
+            "constants": {
+              "band_min_seconds": 72000.0,
+              "day_min_seconds": null,
+              "max_gap_seconds": null,
+              "note": "display constants, not settings",
+              "window_days": null
+            },
+            "coverage": null,
+            "dilution": null,
+            "dilution_reason": null,
+            "in_range_share_reason": null,
+            "in_range_share_stored_history": null,
+            "intervals": null,
+            "measured_at": null,
+            "measured_by": null,
+            "measured_days": null,
+            "measured_label": null,
+            "measured_seconds": null,
+            "measurement_age_seconds": null,
+            "per_100_usd_per_day_in_range_usd": null,
+            "per_day_in_range_diluted_usd": null,
+            "per_day_in_range_nock_leg": null,
+            "per_day_in_range_usd": null,
+            "per_day_in_range_usdc_leg": null,
+            "rate": null,
+            "reason": "this snapshot has no fee_yield (2.10.0): fees are not measured in it",
+            "replay_reason": null,
+            "skipped": null,
+            "skipped_seconds": null,
+            "spread": null,
+            "spread_reason": null,
+            "status": "unavailable",
+            "stored_history_replay": null
+          },
+          "if_pulled_at_fill": null,
+          "index": 2,
+          "inputs": {
+            "high_requested": "0.012742917379855624",
+            "low_requested": "0.010968012886072376",
+            "nock": null,
+            "usdc": "114.86"
+          },
+          "max_usdc_with_the_others_as_given": "114.86",
+          "mint": {
+            "amount0_raw": "114864600",
+            "amount1_raw": "0",
+            "liquidity_raw": "1408301615002237",
+            "nock": "0.0000000000000000",
+            "nock_max_raw": "0",
+            "nock_raw": "0",
+            "note": "liquidity_raw is what these amounts buy, rounded down (LiquidityAmounts); amount0_raw and amount1_raw are what a mint of it pulls, rounded up (SqrtPriceMath), never more than the maxima (the rung's USDC and NOCK truncated to raw units)",
+            "status": "exact",
+            "tick": 273743,
+            "usdc": "114.864600",
+            "usdc_max_raw": "114864600",
+            "usdc_raw": "114864600"
+          },
+          "plan": {
+            "counterparts": [],
+            "deployed_usdc": "0.000000",
+            "remaining_usdc": "114.864600",
+            "status": "to_deposit",
+            "target_usdc": "114.864600"
+          },
+          "round_trip": {
+            "back_to_usd": "0.01294400",
+            "down_to_usd": "0.01096801",
+            "nock_back": "0.0000",
+            "nock_start": "0.0000",
+            "text": "A fall to $0.01096801 and a return to $0.01294400 (the pool price now) hands back $114.86 USDC and 0.0000 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.",
+            "usdc_back": "114.86",
+            "usdc_start": "114.86"
+          },
+          "rung": "near",
+          "sizing": {
+            "liquidity_human": "14083.0162",
+            "liquidity_raw": "1408301616732632",
+            "nock_check": "not_given",
+            "nock_given": null,
+            "nock_needed_at_spot": "0.0000",
+            "usdc_at_spot": "114.86"
+          },
+          "top": {
+            "out_of_range_above_now": true,
+            "pct_of_spot": "-1.55",
+            "price_usd": "0.01274292",
+            "usdc_held": "114.86"
+          }
+        }
+      ],
+      "shape_status": "computed",
+      "sizing": {
+        "describes": "the sum over the rungs; liquidity is per rung (rungs[].sizing)",
+        "liquidity_human": null,
+        "liquidity_raw": null,
+        "nock_check": "per_rung",
+        "nock_given": null,
+        "nock_needed_at_spot": "86.7891",
+        "usdc_at_spot": "116.09"
+      },
+      "snapshot": {
+        "age_minutes": 5,
+        "age_seconds": 300,
+        "generated_at": "2026-11-20T12:00:00Z",
+        "snapshot_id": "00000000-0000-0000-0000-000000000000",
+        "spot_source": "price-source pool sqrtPriceX96 (v4 USDC/NOCK 3.00% #3163450)",
+        "spot_usd": "0.01294400",
+        "version": "2.10.0",
+        "worker_health": "ok"
+      },
+      "statement": "A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.",
+      "top": {
+        "avg_sell_price_usd": "0.01303715",
+        "describes": "the sum over the rungs at the highest rung's top",
+        "multiple_of_spot": "1.0144",
+        "out_of_range_above_now": false,
+        "pct_of_spot": "+1.44",
+        "price_usd": "0.01313098",
+        "usdc_held": "117.22"
+      },
+      "top_neighbours": null,
+      "top_neighbours_reason": "a ladder of rungs lists no neighbouring tops; each rung's bounds are in rungs[]",
+      "tradeoff": {
+        "columns_note": "Fee per day in range is always shown with the in-range share of stored history and the replay upper bounds: a high rate while in range is not a rate per day.",
+        "deep_top": null,
+        "deep_top_reason": "the depth tables are drawn for one near and one deep rung",
+        "near_depth": null,
+        "near_depth_reason": "the depth tables are drawn for one near and one deep rung",
+        "order": "Rows are in the order of the quantity varied and are not ranked.",
+        "split": {
+          "rows": [
+            {
+              "avg_buy_price_usd": "0.01182220",
+              "avg_kept_price_usd": null,
+              "budget_status": "fits",
+              "first_rung_share_pct": "0.00",
+              "gate_price_usd": "0.01000000",
+              "nock_at_deepest_bottom": "9819.7096",
+              "nock_by_depth": [
+                {
+                  "nock_held": "9819.7096",
+                  "pct_of_spot": "-15.27",
+                  "price_usd": "0.01096801"
+                }
+              ],
+              "nock_kept_if_deep_rungs_pulled": "0.0000",
+              "nock_needed": "0.0000",
+              "per_rung": [
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01313098",
+                  "in_range_share_pct": null,
+                  "index": 1,
+                  "low_usd": "0.01274292",
+                  "note": "no USDC in this rung in this row",
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "cap",
+                  "usdc": "0.00"
+                },
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01274292",
+                  "in_range_share_pct": null,
+                  "index": 2,
+                  "low_usd": "0.01096801",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "near",
+                  "usdc": "116.09"
+                }
+              ],
+              "reserve_margin_usdc": "0.00",
+              "reserve_status": "holds",
+              "total_usdc": "116.09"
+            },
+            {
+              "avg_buy_price_usd": "0.01183214",
+              "avg_kept_price_usd": null,
+              "budget_status": "fits",
+              "first_rung_share_pct": "1.06",
+              "gate_price_usd": "0.01000000",
+              "nock_at_deepest_bottom": "9898.2556",
+              "nock_by_depth": [
+                {
+                  "nock_held": "182.2491",
+                  "pct_of_spot": "-1.55",
+                  "price_usd": "0.01274292"
+                },
+                {
+                  "nock_held": "9898.2556",
+                  "pct_of_spot": "-15.27",
+                  "price_usd": "0.01096801"
+                }
+              ],
+              "nock_kept_if_deep_rungs_pulled": "0.0000",
+              "nock_needed": "86.7891",
+              "per_rung": [
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01313098",
+                  "in_range_share_pct": null,
+                  "index": 1,
+                  "low_usd": "0.01274292",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "cap",
+                  "usdc": "1.23"
+                },
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01274292",
+                  "in_range_share_pct": null,
+                  "index": 2,
+                  "low_usd": "0.01096801",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "near",
+                  "usdc": "114.86"
+                }
+              ],
+              "reserve_margin_usdc": "0.00",
+              "reserve_status": "holds",
+              "total_usdc": "116.09"
+            },
+            {
+              "avg_buy_price_usd": "0.01191693",
+              "avg_kept_price_usd": null,
+              "budget_status": "exceeds",
+              "first_rung_share_pct": "10.00",
+              "gate_price_usd": "0.01000000",
+              "nock_at_deepest_bottom": "10563.4665",
+              "nock_by_depth": [
+                {
+                  "nock_held": "1725.7279",
+                  "pct_of_spot": "-1.55",
+                  "price_usd": "0.01274292"
+                },
+                {
+                  "nock_held": "10563.4665",
+                  "pct_of_spot": "-15.27",
+                  "price_usd": "0.01096801"
+                }
+              ],
+              "nock_kept_if_deep_rungs_pulled": "0.0000",
+              "nock_needed": "821.8113",
+              "per_rung": [
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01313098",
+                  "in_range_share_pct": null,
+                  "index": 1,
+                  "low_usd": "0.01274292",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "cap",
+                  "usdc": "11.61"
+                },
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01274292",
+                  "in_range_share_pct": null,
+                  "index": 2,
+                  "low_usd": "0.01096801",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "near",
+                  "usdc": "104.48"
+                }
+              ],
+              "reserve_margin_usdc": "0.00",
+              "reserve_status": "holds",
+              "total_usdc": "116.09"
+            },
+            {
+              "avg_buy_price_usd": "0.01201318",
+              "avg_kept_price_usd": null,
+              "budget_status": "exceeds",
+              "first_rung_share_pct": "20.00",
+              "gate_price_usd": "0.01000000",
+              "nock_at_deepest_bottom": "11307.2234",
+              "nock_by_depth": [
+                {
+                  "nock_held": "3451.4558",
+                  "pct_of_spot": "-1.55",
+                  "price_usd": "0.01274292"
+                },
+                {
+                  "nock_held": "11307.2234",
+                  "pct_of_spot": "-15.27",
+                  "price_usd": "0.01096801"
+                }
+              ],
+              "nock_kept_if_deep_rungs_pulled": "0.0000",
+              "nock_needed": "1643.6226",
+              "per_rung": [
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01313098",
+                  "in_range_share_pct": null,
+                  "index": 1,
+                  "low_usd": "0.01274292",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "cap",
+                  "usdc": "23.22"
+                },
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01274292",
+                  "in_range_share_pct": null,
+                  "index": 2,
+                  "low_usd": "0.01096801",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "near",
+                  "usdc": "92.87"
+                }
+              ],
+              "reserve_margin_usdc": "0.00",
+              "reserve_status": "holds",
+              "total_usdc": "116.09"
+            },
+            {
+              "avg_buy_price_usd": "0.01211100",
+              "avg_kept_price_usd": null,
+              "budget_status": "exceeds",
+              "first_rung_share_pct": "30.00",
+              "gate_price_usd": "0.01000000",
+              "nock_at_deepest_bottom": "12050.9804",
+              "nock_by_depth": [
+                {
+                  "nock_held": "5177.1837",
+                  "pct_of_spot": "-1.55",
+                  "price_usd": "0.01274292"
+                },
+                {
+                  "nock_held": "12050.9804",
+                  "pct_of_spot": "-15.27",
+                  "price_usd": "0.01096801"
+                }
+              ],
+              "nock_kept_if_deep_rungs_pulled": "0.0000",
+              "nock_needed": "2465.4339",
+              "per_rung": [
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01313098",
+                  "in_range_share_pct": null,
+                  "index": 1,
+                  "low_usd": "0.01274292",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "cap",
+                  "usdc": "34.83"
+                },
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01274292",
+                  "in_range_share_pct": null,
+                  "index": 2,
+                  "low_usd": "0.01096801",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "near",
+                  "usdc": "81.26"
+                }
+              ],
+              "reserve_margin_usdc": "0.00",
+              "reserve_status": "holds",
+              "total_usdc": "116.09"
+            },
+            {
+              "avg_buy_price_usd": "0.01221043",
+              "avg_kept_price_usd": null,
+              "budget_status": "exceeds",
+              "first_rung_share_pct": "40.00",
+              "gate_price_usd": "0.01000000",
+              "nock_at_deepest_bottom": "12794.7373",
+              "nock_by_depth": [
+                {
+                  "nock_held": "6902.9116",
+                  "pct_of_spot": "-1.55",
+                  "price_usd": "0.01274292"
+                },
+                {
+                  "nock_held": "12794.7373",
+                  "pct_of_spot": "-15.27",
+                  "price_usd": "0.01096801"
+                }
+              ],
+              "nock_kept_if_deep_rungs_pulled": "0.0000",
+              "nock_needed": "3287.2451",
+              "per_rung": [
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01313098",
+                  "in_range_share_pct": null,
+                  "index": 1,
+                  "low_usd": "0.01274292",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "cap",
+                  "usdc": "46.44"
+                },
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01274292",
+                  "in_range_share_pct": null,
+                  "index": 2,
+                  "low_usd": "0.01096801",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "near",
+                  "usdc": "69.65"
+                }
+              ],
+              "reserve_margin_usdc": "0.00",
+              "reserve_status": "holds",
+              "total_usdc": "116.09"
+            },
+            {
+              "avg_buy_price_usd": "0.01231151",
+              "avg_kept_price_usd": null,
+              "budget_status": "exceeds",
+              "first_rung_share_pct": "50.00",
+              "gate_price_usd": "0.01000000",
+              "nock_at_deepest_bottom": "13538.4943",
+              "nock_by_depth": [
+                {
+                  "nock_held": "8628.6395",
+                  "pct_of_spot": "-1.55",
+                  "price_usd": "0.01274292"
+                },
+                {
+                  "nock_held": "13538.4943",
+                  "pct_of_spot": "-15.27",
+                  "price_usd": "0.01096801"
+                }
+              ],
+              "nock_kept_if_deep_rungs_pulled": "0.0000",
+              "nock_needed": "4109.0564",
+              "per_rung": [
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01313098",
+                  "in_range_share_pct": null,
+                  "index": 1,
+                  "low_usd": "0.01274292",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "cap",
+                  "usdc": "58.05"
+                },
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01274292",
+                  "in_range_share_pct": null,
+                  "index": 2,
+                  "low_usd": "0.01096801",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "near",
+                  "usdc": "58.05"
+                }
+              ],
+              "reserve_margin_usdc": "0.00",
+              "reserve_status": "holds",
+              "total_usdc": "116.09"
+            },
+            {
+              "avg_buy_price_usd": "0.01241427",
+              "avg_kept_price_usd": null,
+              "budget_status": "exceeds",
+              "first_rung_share_pct": "60.00",
+              "gate_price_usd": "0.01000000",
+              "nock_at_deepest_bottom": "14282.2512",
+              "nock_by_depth": [
+                {
+                  "nock_held": "10354.3674",
+                  "pct_of_spot": "-1.55",
+                  "price_usd": "0.01274292"
+                },
+                {
+                  "nock_held": "14282.2512",
+                  "pct_of_spot": "-15.27",
+                  "price_usd": "0.01096801"
+                }
+              ],
+              "nock_kept_if_deep_rungs_pulled": "0.0000",
+              "nock_needed": "4930.8677",
+              "per_rung": [
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01313098",
+                  "in_range_share_pct": null,
+                  "index": 1,
+                  "low_usd": "0.01274292",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "cap",
+                  "usdc": "69.65"
+                },
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01274292",
+                  "in_range_share_pct": null,
+                  "index": 2,
+                  "low_usd": "0.01096801",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "near",
+                  "usdc": "46.44"
+                }
+              ],
+              "reserve_margin_usdc": "0.00",
+              "reserve_status": "holds",
+              "total_usdc": "116.09"
+            },
+            {
+              "avg_buy_price_usd": "0.01251876",
+              "avg_kept_price_usd": null,
+              "budget_status": "exceeds",
+              "first_rung_share_pct": "70.00",
+              "gate_price_usd": "0.01000000",
+              "nock_at_deepest_bottom": "15026.0081",
+              "nock_by_depth": [
+                {
+                  "nock_held": "12080.0953",
+                  "pct_of_spot": "-1.55",
+                  "price_usd": "0.01274292"
+                },
+                {
+                  "nock_held": "15026.0081",
+                  "pct_of_spot": "-15.27",
+                  "price_usd": "0.01096801"
+                }
+              ],
+              "nock_kept_if_deep_rungs_pulled": "0.0000",
+              "nock_needed": "5752.6790",
+              "per_rung": [
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01313098",
+                  "in_range_share_pct": null,
+                  "index": 1,
+                  "low_usd": "0.01274292",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "cap",
+                  "usdc": "81.26"
+                },
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01274292",
+                  "in_range_share_pct": null,
+                  "index": 2,
+                  "low_usd": "0.01096801",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "near",
+                  "usdc": "34.83"
+                }
+              ],
+              "reserve_margin_usdc": "0.00",
+              "reserve_status": "holds",
+              "total_usdc": "116.09"
+            },
+            {
+              "avg_buy_price_usd": "0.01262503",
+              "avg_kept_price_usd": null,
+              "budget_status": "exceeds",
+              "first_rung_share_pct": "80.00",
+              "gate_price_usd": "0.01000000",
+              "nock_at_deepest_bottom": "15769.7651",
+              "nock_by_depth": [
+                {
+                  "nock_held": "13805.8232",
+                  "pct_of_spot": "-1.55",
+                  "price_usd": "0.01274292"
+                },
+                {
+                  "nock_held": "15769.7651",
+                  "pct_of_spot": "-15.27",
+                  "price_usd": "0.01096801"
+                }
+              ],
+              "nock_kept_if_deep_rungs_pulled": "0.0000",
+              "nock_needed": "6574.4903",
+              "per_rung": [
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01313098",
+                  "in_range_share_pct": null,
+                  "index": 1,
+                  "low_usd": "0.01274292",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "cap",
+                  "usdc": "92.87"
+                },
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01274292",
+                  "in_range_share_pct": null,
+                  "index": 2,
+                  "low_usd": "0.01096801",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "near",
+                  "usdc": "23.22"
+                }
+              ],
+              "reserve_margin_usdc": "0.00",
+              "reserve_status": "holds",
+              "total_usdc": "116.09"
+            },
+            {
+              "avg_buy_price_usd": "0.01273311",
+              "avg_kept_price_usd": null,
+              "budget_status": "exceeds",
+              "first_rung_share_pct": "90.00",
+              "gate_price_usd": "0.01000000",
+              "nock_at_deepest_bottom": "16513.5220",
+              "nock_by_depth": [
+                {
+                  "nock_held": "15531.5511",
+                  "pct_of_spot": "-1.55",
+                  "price_usd": "0.01274292"
+                },
+                {
+                  "nock_held": "16513.5220",
+                  "pct_of_spot": "-15.27",
+                  "price_usd": "0.01096801"
+                }
+              ],
+              "nock_kept_if_deep_rungs_pulled": "0.0000",
+              "nock_needed": "7396.3016",
+              "per_rung": [
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01313098",
+                  "in_range_share_pct": null,
+                  "index": 1,
+                  "low_usd": "0.01274292",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "cap",
+                  "usdc": "104.48"
+                },
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01274292",
+                  "in_range_share_pct": null,
+                  "index": 2,
+                  "low_usd": "0.01096801",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "near",
+                  "usdc": "11.61"
+                }
+              ],
+              "reserve_margin_usdc": "0.00",
+              "reserve_status": "holds",
+              "total_usdc": "116.09"
+            },
+            {
+              "avg_buy_price_usd": "0.01284307",
+              "avg_kept_price_usd": null,
+              "budget_status": "exceeds",
+              "first_rung_share_pct": "100.00",
+              "gate_price_usd": "0.01000000",
+              "nock_at_deepest_bottom": "17257.2790",
+              "nock_by_depth": [
+                {
+                  "nock_held": "17257.2790",
+                  "pct_of_spot": "-1.55",
+                  "price_usd": "0.01274292"
+                }
+              ],
+              "nock_kept_if_deep_rungs_pulled": "0.0000",
+              "nock_needed": "8218.1129",
+              "per_rung": [
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01313098",
+                  "in_range_share_pct": null,
+                  "index": 1,
+                  "low_usd": "0.01274292",
+                  "note": null,
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "cap",
+                  "usdc": "116.09"
+                },
+                {
+                  "band_usd_per_day": null,
+                  "coverage_whole": null,
+                  "fee_per_100_usd_per_day_in_range_usd": null,
+                  "fee_per_day_in_range_diluted_usd": null,
+                  "fee_per_day_in_range_usd": null,
+                  "high_usd": "0.01274292",
+                  "in_range_share_pct": null,
+                  "index": 2,
+                  "low_usd": "0.01096801",
+                  "note": "no USDC in this rung in this row",
+                  "replay_edge_upper_usd": null,
+                  "replay_inside_upper_usd": null,
+                  "rung": "near",
+                  "usdc": "0.00"
+                }
+              ],
+              "reserve_margin_usdc": "0.00",
+              "reserve_status": "holds",
+              "total_usdc": "116.09"
+            }
+          ],
+          "step_note": "display constants, not settings",
+          "step_pct": 10.0,
+          "varies": "the share of the $116.09 total in r1; r2 holds the rest"
+        },
+        "split_reason": null,
+        "statement": "Rows are measurements at your depths; NockNock does not choose the split or the depths."
+      },
+      "tradeoff_reason": null
+    },
+    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Ladder of 2 rungs at the pool price $0.01294400, snapped to v4 USDC/NOCK 3.00% #3163450 (tick spacing 300)\n• Shape: your operator_profile.ladder_rungs (cap: the tick band containing spot; near 0.15 from spot down to $0.01100000; deep 0.85 from $0.01100000 down to $0.01000000), sized to $766.99 USDC: the shared reserve gate's most (max_usdc_total) at $0.01000000, counting the tracked rungs' USDC\n  – r1 cap: to_deposit; target $1.23, deployed $0.00, left to deposit $1.23\n  – r2 near: to_deposit; target $114.86, deployed $0.00, left to deposit $114.86\n  – r3 deep: deployed; target $650.90, deployed $650.90, left to deposit $0.00, tracked: uniswap-v4:base:9000001\n  – Tracked ladder rungs in this pool (role: ladder) are part of the shape, not existing ranges: the total counts their USDC as if it were still in the wallet. A near or deep rung counts what its range holds as all USDC at its top (vs_top.usdc_at_top); a cap counts the USDC it holds now, and its NOCK is counted back into the NOCK budget the cap is sized by. Each tracked rung is matched to a configured rung by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order). What is left to deposit is drawn on a matched rung's own ticks.\n• Pool: a ladder in this pool is a NEW position (a new NFT); add it to config.yaml to be tracked\n• r1 cap: $0.01274292 – $0.01313098 (-1.55% / +1.44%), $1.23 USDC and 87 NOCK at spot (liquidity 1381.9212; top: the tick band containing the pool's tick (the cap))\n  – Bottom: fully NOCK at $0.01274292: 182 NOCK held, 95 bought, average $0.01284307\n  – Fees while in range: not estimated: this snapshot has no fee_yield (2.10.0): fees are not measured in it\n  – Round trip: A fall to $0.01274292 and a return to $0.01294400 (the pool price now) hands back $1.23 USDC and 86.7891 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $1.23 with the other rungs as given\n• r2 near: $0.01096801 – $0.01274292 (-15.27% / -1.55%), $114.86 USDC and 0 NOCK at spot (liquidity 14083.0162; top: the usable tick at or below the pool price (the first rung still drawable))\n  – Bottom: fully NOCK at $0.01096801: 9,716 NOCK held, 9,716 bought, average $0.01182220\n  – Fees while in range: not estimated: this snapshot has no fee_yield (2.10.0): fees are not measured in it\n  – Round trip: A fall to $0.01096801 and a return to $0.01294400 (the pool price now) hands back $114.86 USDC and 0.0000 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $114.86 with the other rungs as given\n• Overlaps: none\n• Combined: $116.09 USDC and 87 NOCK at spot; at the deepest bottom $0.01096801: 9,898 NOCK held, 9,811 bought, average $0.01183214; kept if the 0 deep rung(s) are pulled at fill: 0 NOCK, bought at an average $unknown\n• Price grid (NOCK bought by the ladder, USDC left in it; rungs in range and their estimated fees per day; stable balance and reserve headroom):\n  +1.44% $0.01313098: 87 NOCK sold, $117.22 USDC left; r1 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1773.80 (reserve +$823.80) [r1 top]\n  0.00% $0.01294400: 0 NOCK bought, $116.09 USDC left; r1 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1769.54 (reserve +$819.54) [spot]\n  -1.55% $0.01274292: 95 NOCK bought, $114.86 USDC left; r2 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1764.93 (reserve +$814.93) [r1 bottom, r2 top]\n  -5.00% $0.01229680: 2,338 NOCK bought, $86.79 USDC left; r2 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1729.25 (reserve +$779.25)\n  -10.00% $0.01164960: 5,818 NOCK bought, $45.14 USDC left; r2 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1676.31 (reserve +$726.31)\n  -15.00% $0.01100240: 9,601 NOCK bought, $2.31 USDC left; r2 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1621.88 (reserve +$671.88)\n  -15.27% $0.01096801: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $1618.94 (reserve +$668.94) [r2 bottom]\n  -20.00% $0.01035520: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $1188.42 (reserve +$238.42)\n  -22.74% $0.01000000: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $950.00 (reserve +$0.00) [gate]\n  -25.00% $0.00970800: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $944.39 (reserve -$5.61)\n  -30.00% $0.00906080: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $931.64 (reserve -$18.36)\n  -35.00% $0.00841360: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $918.43 (reserve -$31.57)\n  -40.00% $0.00776640: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $904.70 (reserve -$45.30)\n• Reserve (shared): stable $950.00 at the gate $0.01000000 (your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom) against the $950.00 reserve: holds by $0.00 (the rungs take at most $116.09 in all; the existing NOCK ranges hold $171.16 USDC there)\n• Below the gate: at $0.00776640 (-40.00%) stable $904.70 (reserve -$45.30). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• Floor budget (shared): needs 87 (r1 87, r2 0) of the 87 NOCK that may go into LP: fits\n• Floor-crossing price: lowers: the ladder's NOCK leaves the wallet and sells as NOCK rises to the top (without the ladder $0.025404 (+96.3%), with it $0.025220 (+94.8%))\n• Trade-off: Rows are measurements at your depths; NockNock does not choose the split or the depths. Rows are in the order of the quantity varied and are not ranked. Fee per day in range is always shown with the in-range share of stored history and the replay upper bounds: a high rate while in range is not a rate per day.\n  Split (the share of the $116.09 total in r1; r2 holds the rest; step 10.0%, display constants, not settings):\n    r1 0.00%: r1 $0.00: no fee figure, in range ? of stored history, no replay; r2 $116.09: no fee figure, in range ? of stored history, no replay; 9,820 NOCK at the deepest bottom, average $0.01182220; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 0 (fits)\n    r1 1.06%: r1 $1.23: no fee figure, in range ? of stored history, no replay; r2 $114.86: no fee figure, in range ? of stored history, no replay; 9,898 NOCK at the deepest bottom, average $0.01183214; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 87 (fits)\n    r1 10.00%: r1 $11.61: no fee figure, in range ? of stored history, no replay; r2 $104.48: no fee figure, in range ? of stored history, no replay; 10,563 NOCK at the deepest bottom, average $0.01191693; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 822 (exceeds)\n    r1 20.00%: r1 $23.22: no fee figure, in range ? of stored history, no replay; r2 $92.87: no fee figure, in range ? of stored history, no replay; 11,307 NOCK at the deepest bottom, average $0.01201318; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 1,644 (exceeds)\n    r1 30.00%: r1 $34.83: no fee figure, in range ? of stored history, no replay; r2 $81.26: no fee figure, in range ? of stored history, no replay; 12,051 NOCK at the deepest bottom, average $0.01211100; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 2,465 (exceeds)\n    r1 40.00%: r1 $46.44: no fee figure, in range ? of stored history, no replay; r2 $69.65: no fee figure, in range ? of stored history, no replay; 12,795 NOCK at the deepest bottom, average $0.01221043; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 3,287 (exceeds)\n    r1 50.00%: r1 $58.05: no fee figure, in range ? of stored history, no replay; r2 $58.05: no fee figure, in range ? of stored history, no replay; 13,538 NOCK at the deepest bottom, average $0.01231151; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 4,109 (exceeds)\n    r1 60.00%: r1 $69.65: no fee figure, in range ? of stored history, no replay; r2 $46.44: no fee figure, in range ? of stored history, no replay; 14,282 NOCK at the deepest bottom, average $0.01241427; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 4,931 (exceeds)\n    r1 70.00%: r1 $81.26: no fee figure, in range ? of stored history, no replay; r2 $34.83: no fee figure, in range ? of stored history, no replay; 15,026 NOCK at the deepest bottom, average $0.01251876; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 5,753 (exceeds)\n    r1 80.00%: r1 $92.87: no fee figure, in range ? of stored history, no replay; r2 $23.22: no fee figure, in range ? of stored history, no replay; 15,770 NOCK at the deepest bottom, average $0.01262503; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 6,574 (exceeds)\n    r1 90.00%: r1 $104.48: no fee figure, in range ? of stored history, no replay; r2 $11.61: no fee figure, in range ? of stored history, no replay; 16,514 NOCK at the deepest bottom, average $0.01273311; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 7,396 (exceeds)\n    r1 100.00%: r1 $116.09: no fee figure, in range ? of stored history, no replay; r2 $0.00: no fee figure, in range ? of stored history, no replay; 17,257 NOCK at the deepest bottom, average $0.01284307; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 8,218 (exceeds)\n  Near rung's bottom: none (the depth tables are drawn for one near and one deep rung)\n  Deep rung's top: none (the depth tables are drawn for one near and one deep rung)\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK. Each rung is its own position (its own NFT) in the same pool; overlapping rungs are allowed and their liquidity adds. The rungs share one reserve gate and one NOCK budget. A deep rung keeps its NOCK on a rebound only if it is pulled when it is fully NOCK; pulling is a withdrawal you sign, and its gas is not counted.\n• Fee estimate assumptions: Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one). Fees per unit of liquidity are shared by every range that contains the price (the same pool, the same fee tier). The pool's swap volume is taken as unchanged by the new liquidity: only its share dilutes. Dilution uses the pool's active liquidity at the current tick, read at 'latest' in the snapshot's cycle (not at the snapshot's block); the liquidity at the range's own ticks is not read and is taken as the same. The NOCK fee leg is valued at the current pool price, not at the price when it accrued. Intervals where the measuring range's liquidity changed or its fees fell (a collect, or a v4 add that collects) are skipped, so the measurement slightly undercounts; the seconds skipped are stated. Gas is not counted. Past fees are not a forecast. The stored market volume of another pool (market_price_history) is never used.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
     "status": 200
   },
   "two_rungs_measured": {
@@ -2174,7 +4232,7 @@
       },
       "grid": [
         {
-          "est_fee_reason": null,
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
           "est_fee_usd_per_day": "0.00",
           "est_fee_usd_per_day_diluted": "0.00",
           "existing_nock_lp_nock": "19341.9535",
@@ -2278,7 +4336,7 @@
           "total_tracked_nock": "115182.56"
         },
         {
-          "est_fee_reason": null,
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
           "est_fee_usd_per_day": "0.00",
           "est_fee_usd_per_day_diluted": "0.00",
           "existing_nock_lp_nock": "20627.3680",
@@ -2312,7 +4370,7 @@
           "total_tracked_nock": "118914.39"
         },
         {
-          "est_fee_reason": null,
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
           "est_fee_usd_per_day": "0.00",
           "est_fee_usd_per_day_diluted": "0.00",
           "existing_nock_lp_nock": "21145.5540",
@@ -2344,7 +4402,7 @@
           "total_tracked_nock": "119432.58"
         },
         {
-          "est_fee_reason": null,
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
           "est_fee_usd_per_day": "0.00",
           "est_fee_usd_per_day_diluted": "0.00",
           "existing_nock_lp_nock": "22164.5030",
@@ -2446,7 +4504,7 @@
           "total_tracked_nock": "151780.64"
         },
         {
-          "est_fee_reason": null,
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
           "est_fee_usd_per_day": "0.00",
           "est_fee_usd_per_day_diluted": "0.00",
           "existing_nock_lp_nock": "23888.2905",
@@ -2481,7 +4539,7 @@
           "total_tracked_nock": "169860.59"
         },
         {
-          "est_fee_reason": null,
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
           "est_fee_usd_per_day": "0.00",
           "est_fee_usd_per_day_diluted": "0.00",
           "existing_nock_lp_nock": "24500.1121",
@@ -2513,7 +4571,7 @@
           "total_tracked_nock": "170472.42"
         },
         {
-          "est_fee_reason": null,
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
           "est_fee_usd_per_day": "0.00",
           "est_fee_usd_per_day_diluted": "0.00",
           "existing_nock_lp_nock": "25851.4339",
@@ -2545,7 +4603,7 @@
           "total_tracked_nock": "171823.74"
         },
         {
-          "est_fee_reason": null,
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
           "est_fee_usd_per_day": "0.00",
           "est_fee_usd_per_day_diluted": "0.00",
           "existing_nock_lp_nock": "27355.8217",
@@ -2577,7 +4635,7 @@
           "total_tracked_nock": "173328.13"
         },
         {
-          "est_fee_reason": null,
+          "est_fee_reason": "no rung is in range at this price, so none earns fees",
           "est_fee_usd_per_day": "0.00",
           "est_fee_usd_per_day_diluted": "0.00",
           "existing_nock_lp_nock": "29044.5410",
@@ -2775,6 +4833,7 @@
               "liquidity_changed": 4,
               "out_of_range": 0,
               "pool_inactive": 0,
+              "staked": 0,
               "unreadable": 0,
               "zero_liquidity": 137
             },
@@ -2784,6 +4843,7 @@
               "liquidity_changed": 1202.24,
               "out_of_range": 0.0,
               "pool_inactive": 0.0,
+              "staked": 0.0,
               "unreadable": 0.0,
               "zero_liquidity": 38413.578
             },
@@ -2845,6 +4905,7 @@
               "min_usd_per_day": "9.28",
               "note": "UTC days; an interval counts on the date it starts. Every day is listed; the spread is over the days counted."
             },
+            "spread_reason": null,
             "status": "measured",
             "stored_history_replay": {
               "edge_seconds": "600",
@@ -2865,6 +4926,20 @@
             "usdc": "100.00"
           },
           "max_usdc_with_the_others_as_given": "267.45",
+          "mint": {
+            "amount0_raw": "100000000",
+            "amount1_raw": "0",
+            "liquidity_raw": "2997532031714950",
+            "nock": "0.0000000000000000",
+            "nock_max_raw": "0",
+            "nock_raw": "0",
+            "note": "liquidity_raw is what these amounts buy, rounded down (LiquidityAmounts); amount0_raw and amount1_raw are what a mint of it pulls, rounded up (SqrtPriceMath), never more than the maxima (the rung's USDC and NOCK truncated to raw units)",
+            "status": "exact",
+            "tick": 273743,
+            "usdc": "100.000000",
+            "usdc_max_raw": "100000000",
+            "usdc_raw": "100000000"
+          },
           "round_trip": {
             "back_to_usd": "0.01294400",
             "down_to_usd": "0.01200086",
@@ -2881,9 +4956,7 @@
             "nock_check": "not_given",
             "nock_given": null,
             "nock_needed_at_spot": "0.0000",
-            "nock_raw": "0",
-            "usdc_at_spot": "100.00",
-            "usdc_raw": "100000000"
+            "usdc_at_spot": "100.00"
           },
           "top": {
             "out_of_range_above_now": true,
@@ -2981,6 +5054,7 @@
               "liquidity_changed": 4,
               "out_of_range": 0,
               "pool_inactive": 0,
+              "staked": 0,
               "unreadable": 0,
               "zero_liquidity": 137
             },
@@ -2990,6 +5064,7 @@
               "liquidity_changed": 1202.24,
               "out_of_range": 0.0,
               "pool_inactive": 0.0,
+              "staked": 0.0,
               "unreadable": 0.0,
               "zero_liquidity": 38413.578
             },
@@ -3051,6 +5126,7 @@
               "min_usd_per_day": "33.60",
               "note": "UTC days; an interval counts on the date it starts. Every day is listed; the spread is over the days counted."
             },
+            "spread_reason": null,
             "status": "measured",
             "stored_history_replay": {
               "edge_seconds": "1801",
@@ -3077,6 +5153,20 @@
             "usdc": "500.00"
           },
           "max_usdc_with_the_others_as_given": "667.45",
+          "mint": {
+            "amount0_raw": "500000000",
+            "amount1_raw": "0",
+            "liquidity_raw": "10850499376770899",
+            "nock": "0.0000000000000000",
+            "nock_max_raw": "0",
+            "nock_raw": "0",
+            "note": "liquidity_raw is what these amounts buy, rounded down (LiquidityAmounts); amount0_raw and amount1_raw are what a mint of it pulls, rounded up (SqrtPriceMath), never more than the maxima (the rung's USDC and NOCK truncated to raw units)",
+            "status": "exact",
+            "tick": 273743,
+            "usdc": "500.000000",
+            "usdc_max_raw": "500000000",
+            "usdc_raw": "500000000"
+          },
           "round_trip": null,
           "rung": "deep",
           "sizing": {
@@ -3085,9 +5175,7 @@
             "nock_check": "not_given",
             "nock_given": null,
             "nock_needed_at_spot": "0.0000",
-            "nock_raw": "0",
-            "usdc_at_spot": "500.00",
-            "usdc_raw": "500000000"
+            "usdc_at_spot": "500.00"
           },
           "top": {
             "out_of_range_above_now": true,
@@ -3139,6 +5227,7 @@
               "avg_kept_price_usd": "0.01096801",
               "budget_status": "fits",
               "deep_high_usd": "0.01200086",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "53673.5854",
               "nock_by_depth": [
                 {
@@ -3157,6 +5246,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "17.57",
                   "fee_per_day_in_range_usd": "18.23",
@@ -3172,6 +5262,7 @@
                 },
                 {
                   "band_usd_per_day": "20.56",
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "6.45",
                   "fee_per_day_in_range_diluted_usd": "30.25",
                   "fee_per_day_in_range_usd": "32.25",
@@ -3195,6 +5286,7 @@
               "avg_kept_price_usd": "0.01080473",
               "budget_status": "fits",
               "deep_high_usd": "0.01164620",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "54362.5116",
               "nock_by_depth": [
                 {
@@ -3213,6 +5305,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "17.57",
                   "fee_per_day_in_range_usd": "18.23",
@@ -3228,6 +5321,7 @@
                 },
                 {
                   "band_usd_per_day": "24.86",
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "7.80",
                   "fee_per_day_in_range_diluted_usd": "36.11",
                   "fee_per_day_in_range_usd": "38.99",
@@ -3251,6 +5345,7 @@
               "avg_kept_price_usd": "0.01064388",
               "budget_status": "fits",
               "deep_high_usd": "0.01130202",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "55061.8491",
               "nock_by_depth": [
                 {
@@ -3269,6 +5364,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "17.57",
                   "fee_per_day_in_range_usd": "18.23",
@@ -3284,6 +5380,7 @@
                 },
                 {
                   "band_usd_per_day": "32.48",
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "9.82",
                   "fee_per_day_in_range_diluted_usd": "44.62",
                   "fee_per_day_in_range_usd": "49.11",
@@ -3307,6 +5404,7 @@
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
               "deep_high_usd": "0.01096801",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "55771.7551",
               "nock_by_depth": [
                 {
@@ -3325,6 +5423,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "17.57",
                   "fee_per_day_in_range_usd": "18.23",
@@ -3340,6 +5439,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "58.12",
                   "fee_per_day_in_range_usd": "65.98",
@@ -3363,6 +5463,7 @@
               "avg_kept_price_usd": "0.01032932",
               "budget_status": "fits",
               "deep_high_usd": "0.01064388",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "56492.3895",
               "nock_by_depth": [
                 {
@@ -3381,6 +5482,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "17.57",
                   "fee_per_day_in_range_usd": "18.23",
@@ -3396,6 +5498,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "19.94",
                   "fee_per_day_in_range_diluted_usd": "82.79",
                   "fee_per_day_in_range_usd": "99.72",
@@ -3419,6 +5522,7 @@
               "avg_kept_price_usd": "0.01017554",
               "budget_status": "fits",
               "deep_high_usd": "0.01032932",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "57223.9144",
               "nock_by_depth": [
                 {
@@ -3437,6 +5541,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "17.57",
                   "fee_per_day_in_range_usd": "18.23",
@@ -3452,6 +5557,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "40.19",
                   "fee_per_day_in_range_diluted_usd": "142.30",
                   "fee_per_day_in_range_usd": "200.96",
@@ -3484,6 +5590,7 @@
               "avg_buy_price_usd": "0.01078141",
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
+              "gate_price_usd": "0.01002405",
               "near_low_usd": "0.01236633",
               "nock_at_deepest_bottom": "55651.3692",
               "nock_by_depth": [
@@ -3503,6 +5610,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "36.19",
                   "fee_per_day_in_range_diluted_usd": "33.69",
                   "fee_per_day_in_range_usd": "36.19",
@@ -3518,6 +5626,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "58.12",
                   "fee_per_day_in_range_usd": "65.98",
@@ -3540,6 +5649,7 @@
               "avg_buy_price_usd": "0.01075813",
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
+              "gate_price_usd": "0.01002405",
               "near_low_usd": "0.01200086",
               "nock_at_deepest_bottom": "55771.7551",
               "nock_by_depth": [
@@ -3559,6 +5669,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "17.57",
                   "fee_per_day_in_range_usd": "18.23",
@@ -3574,6 +5685,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "58.12",
                   "fee_per_day_in_range_usd": "65.98",
@@ -3596,6 +5708,7 @@
               "avg_buy_price_usd": "0.01073461",
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
+              "gate_price_usd": "0.01002405",
               "near_low_usd": "0.01164620",
               "nock_at_deepest_bottom": "55893.9604",
               "nock_by_depth": [
@@ -3615,6 +5728,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "12.24",
                   "fee_per_day_in_range_diluted_usd": "11.94",
                   "fee_per_day_in_range_usd": "12.24",
@@ -3630,6 +5744,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "58.12",
                   "fee_per_day_in_range_usd": "65.98",
@@ -3652,6 +5767,7 @@
               "avg_buy_price_usd": "0.01071084",
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
+              "gate_price_usd": "0.01002405",
               "near_low_usd": "0.01130202",
               "nock_at_deepest_bottom": "56018.0125",
               "nock_by_depth": [
@@ -3671,6 +5787,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "9.25",
                   "fee_per_day_in_range_diluted_usd": "9.08",
                   "fee_per_day_in_range_usd": "9.25",
@@ -3686,6 +5803,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "58.12",
                   "fee_per_day_in_range_usd": "65.98",
@@ -3708,6 +5826,7 @@
               "avg_buy_price_usd": "0.01068682",
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
+              "gate_price_usd": "0.01002405",
               "near_low_usd": "0.01096801",
               "nock_at_deepest_bottom": "56143.9393",
               "nock_by_depth": [
@@ -3727,6 +5846,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": "3.07",
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "7.46",
                   "fee_per_day_in_range_diluted_usd": "7.34",
                   "fee_per_day_in_range_usd": "7.46",
@@ -3742,6 +5862,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "58.12",
                   "fee_per_day_in_range_usd": "65.98",
@@ -3774,6 +5895,7 @@
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
               "first_rung_share_pct": "0.00",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "57222.3347",
               "nock_by_depth": [
                 {
@@ -3787,6 +5909,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": null,
                   "fee_per_100_usd_per_day_in_range_usd": null,
                   "fee_per_day_in_range_diluted_usd": null,
                   "fee_per_day_in_range_usd": null,
@@ -3802,6 +5925,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "68.12",
                   "fee_per_day_in_range_usd": "79.18",
@@ -3825,6 +5949,7 @@
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
               "first_rung_share_pct": "10.00",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "56351.9869",
               "nock_by_depth": [
                 {
@@ -3843,6 +5968,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "10.70",
                   "fee_per_day_in_range_usd": "10.94",
@@ -3858,6 +5984,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "62.17",
                   "fee_per_day_in_range_usd": "71.26",
@@ -3881,6 +6008,7 @@
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
               "first_rung_share_pct": "16.67",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "55771.7551",
               "nock_by_depth": [
                 {
@@ -3899,6 +6027,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "17.57",
                   "fee_per_day_in_range_usd": "18.23",
@@ -3914,6 +6043,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "58.12",
                   "fee_per_day_in_range_usd": "65.98",
@@ -3937,6 +6067,7 @@
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
               "first_rung_share_pct": "20.00",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "55481.6392",
               "nock_by_depth": [
                 {
@@ -3955,6 +6086,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "20.93",
                   "fee_per_day_in_range_usd": "21.87",
@@ -3970,6 +6102,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "56.06",
                   "fee_per_day_in_range_usd": "63.34",
@@ -3993,6 +6126,7 @@
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
               "first_rung_share_pct": "30.00",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "54611.2915",
               "nock_by_depth": [
                 {
@@ -4011,6 +6145,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "30.74",
                   "fee_per_day_in_range_usd": "32.81",
@@ -4026,6 +6161,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "49.77",
                   "fee_per_day_in_range_usd": "55.43",
@@ -4049,6 +6185,7 @@
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
               "first_rung_share_pct": "40.00",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "53740.9438",
               "nock_by_depth": [
                 {
@@ -4067,6 +6204,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "40.15",
                   "fee_per_day_in_range_usd": "43.75",
@@ -4082,6 +6220,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "43.29",
                   "fee_per_day_in_range_usd": "47.51",
@@ -4105,6 +6244,7 @@
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
               "first_rung_share_pct": "50.00",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "52870.5961",
               "nock_by_depth": [
                 {
@@ -4123,6 +6263,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "49.17",
                   "fee_per_day_in_range_usd": "54.69",
@@ -4138,6 +6279,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "36.62",
                   "fee_per_day_in_range_usd": "39.59",
@@ -4161,6 +6303,7 @@
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
               "first_rung_share_pct": "60.00",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "52000.2484",
               "nock_by_depth": [
                 {
@@ -4179,6 +6322,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "57.84",
                   "fee_per_day_in_range_usd": "65.62",
@@ -4194,6 +6338,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "29.74",
                   "fee_per_day_in_range_usd": "31.67",
@@ -4217,6 +6362,7 @@
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
               "first_rung_share_pct": "70.00",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "51129.9007",
               "nock_by_depth": [
                 {
@@ -4235,6 +6381,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "66.17",
                   "fee_per_day_in_range_usd": "76.56",
@@ -4250,6 +6397,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "22.65",
                   "fee_per_day_in_range_usd": "23.75",
@@ -4273,6 +6421,7 @@
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
               "first_rung_share_pct": "80.00",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "50259.5530",
               "nock_by_depth": [
                 {
@@ -4291,6 +6440,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "74.18",
                   "fee_per_day_in_range_usd": "87.50",
@@ -4306,6 +6456,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "15.34",
                   "fee_per_day_in_range_usd": "15.84",
@@ -4329,6 +6480,7 @@
               "avg_kept_price_usd": "0.01048542",
               "budget_status": "fits",
               "first_rung_share_pct": "90.00",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "49389.2053",
               "nock_by_depth": [
                 {
@@ -4347,6 +6499,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "81.90",
                   "fee_per_day_in_range_usd": "98.43",
@@ -4362,6 +6515,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "13.20",
                   "fee_per_day_in_range_diluted_usd": "7.79",
                   "fee_per_day_in_range_usd": "7.92",
@@ -4385,6 +6539,7 @@
               "avg_kept_price_usd": null,
               "budget_status": "fits",
               "first_rung_share_pct": "100.00",
+              "gate_price_usd": "0.01002405",
               "nock_at_deepest_bottom": "48518.8575",
               "nock_by_depth": [
                 {
@@ -4398,6 +6553,7 @@
               "per_rung": [
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": true,
                   "fee_per_100_usd_per_day_in_range_usd": "18.23",
                   "fee_per_day_in_range_diluted_usd": "89.33",
                   "fee_per_day_in_range_usd": "109.37",
@@ -4413,6 +6569,7 @@
                 },
                 {
                   "band_usd_per_day": null,
+                  "coverage_whole": null,
                   "fee_per_100_usd_per_day_in_range_usd": null,
                   "fee_per_day_in_range_diluted_usd": null,
                   "fee_per_day_in_range_usd": null,
@@ -4427,7 +6584,7 @@
                   "usdc": "0.00"
                 }
               ],
-              "reserve_margin_usdc": "203.43",
+              "reserve_margin_usdc": "167.45",
               "reserve_status": "holds",
               "total_usdc": "600.00"
             }
@@ -4441,7 +6598,7 @@
       },
       "tradeoff_reason": null
     },
-    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Ladder of 2 rungs at the pool price $0.01294400, snapped to v4 USDC/NOCK 3.00% #3163450 (tick spacing 300)\n• Pool: a ladder in this pool is a NEW position (a new NFT); add it to config.yaml to be tracked\n• r1 near: $0.01200086 – $0.01274292 (-7.29% / -1.55%), $100.00 USDC and 0 NOCK at spot (liquidity 29975.3203; top: the usable tick at or below the pool price (high = spot): it holds no NOCK)\n  – Bottom: fully NOCK at $0.01200086: 8,086 NOCK held, 8,086 bought, average $0.01236633\n  – Fees while in range (an estimate): $18.23/day, $17.57 diluted (it would be 3.60% of the pool's active liquidity); $18.23 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – It earns nothing until the price falls to $0.01274292 (-1.55%)\n  – In range over stored history: 0.11% of the measured time (600 s of 547,205 s); replayed over it, at most $1.31 from intervals wholly inside and at most $4.70 more from intervals at its edges (600 s), undiluted, no lower bound\n  – Measured inside this range: at most $1.31 over 600 s; only 600 s of stored intervals sat wholly inside: below the 72000 s a per-day figure needs, so only the dollars and seconds are stated\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $9.28, median $15.86, max $23.95 per day; every day: 2026-11-14 $11.51 (30,699 s, not counted), 2026-11-15 $15.02 (86,488 s), 2026-11-16 $21.56 (86,007 s), 2026-11-17 $29.18 (71,106 s, not counted), 2026-11-18 $9.28 (86,146 s), 2026-11-19 $23.95 (85,799 s), 2026-11-20 $15.86 (86,400 s), 2026-11-21 $11.57 (14,559 s, not counted)\n  – Round trip: A fall to $0.01200086 and a return to $0.01294400 (the pool price now) hands back $100.00 USDC and 0.0000 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $267.45 with the other rungs as given\n• r2 deep: $0.01002405 – $0.01096801 (-22.56% / -15.27%), $500.00 USDC and 0 NOCK at spot (liquidity 108504.9938; top: the nearest usable tick)\n  – Bottom: fully NOCK at $0.01002405: 47,685 NOCK held, 47,685 bought, average $0.01048542\n  – Fees while in range (an estimate): $65.98/day, $58.12 diluted (it would be 11.92% of the pool's active liquidity); $13.20 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – It earns nothing until the price falls to $0.01096801 (-15.27%)\n  – In range over stored history: 5.82% of the measured time (31,832 s of 547,205 s); replayed over it, at most $25.00 from intervals wholly inside and at most $38.41 more from intervals at its edges (1,801 s), undiluted, no lower bound\n  – Measured inside this range: at most $25.00 over 31,832 s; only 31832 s of stored intervals sat wholly inside: below the 72000 s a per-day figure needs, so only the dollars and seconds are stated\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $33.60, median $57.42, max $86.69 per day; every day: 2026-11-14 $41.66 (30,699 s, not counted), 2026-11-15 $54.36 (86,488 s), 2026-11-16 $78.04 (86,007 s), 2026-11-17 $105.64 (71,106 s, not counted), 2026-11-18 $33.60 (86,146 s), 2026-11-19 $86.69 (85,799 s), 2026-11-20 $57.42 (86,400 s), 2026-11-21 $41.88 (14,559 s, not counted)\n  – If pulled at fill (at $0.01002405): 47,685 NOCK kept, 47,685 bought at an average $0.01048542. Pulled when fully NOCK (at its bottom), the rung keeps this NOCK on a rebound; left in place, a rebound sells it back. Pulling is a withdrawal you sign; gas is not counted.\n  – The reserve gate allows this rung at most $667.45 with the other rungs as given\n• Overlaps: none\n• Combined: $600.00 USDC and 0 NOCK at spot; at the deepest bottom $0.01002405: 55,772 NOCK held, 55,772 bought, average $0.01075813; kept if the 1 deep rung(s) are pulled at fill: 47,685 NOCK, bought at an average $0.01048542\n• Price grid (NOCK bought by the ladder, USDC left in it; rungs in range and their estimated fees per day; stable balance and reserve headroom):\n  0.00% $0.01294400: 0 NOCK bought, $600.00 USDC left; no rung in range; stable $1769.54 (reserve +$819.54) [spot]\n  -1.55% $0.01274292: 0 NOCK bought, $600.00 USDC left; r1 in range, fees $18.23/day ($17.57 diluted); stable $1766.16 (reserve +$816.16) [r1 top]\n  -5.00% $0.01229680: 4,774 NOCK bought, $540.24 USDC left; r1 in range, fees $18.23/day ($17.57 diluted); stable $1698.79 (reserve +$748.79)\n  -7.29% $0.01200086: 8,086 NOCK bought, $500.00 USDC left; no rung in range; stable $1653.43 (reserve +$703.43) [r1 bottom]\n  -10.00% $0.01164960: 8,086 NOCK bought, $500.00 USDC left; no rung in range; stable $1647.26 (reserve +$697.26)\n  -15.00% $0.01100240: 8,086 NOCK bought, $500.00 USDC left; no rung in range; stable $1635.66 (reserve +$685.66)\n  -15.27% $0.01096801: 8,086 NOCK bought, $500.00 USDC left; r2 in range, fees $65.98/day ($58.12 diluted); stable $1635.04 (reserve +$685.04) [r2 top]\n  -20.00% $0.01035520: 38,303 NOCK bought, $177.98 USDC left; r2 in range, fees $65.98/day ($58.12 diluted); stable $1301.69 (reserve +$351.69)\n  -22.56% $0.01002405: 55,772 NOCK bought, $0.00 USDC left; no rung in range; stable $1117.45 (reserve +$167.45) [r2 bottom, gate]\n  -25.00% $0.00970800: 55,772 NOCK bought, $0.00 USDC left; no rung in range; stable $1111.38 (reserve +$161.38)\n  -30.00% $0.00906080: 55,772 NOCK bought, $0.00 USDC left; no rung in range; stable $1098.63 (reserve +$148.63)\n  -35.00% $0.00841360: 55,772 NOCK bought, $0.00 USDC left; no rung in range; stable $1085.42 (reserve +$135.42)\n  -40.00% $0.00776640: 55,772 NOCK bought, $0.00 USDC left; no rung in range; stable $1071.69 (reserve +$121.69)\n• Reserve (shared): stable $1117.45 at the gate $0.01002405 (the deepest rung's bottom: operator_profile.ladder_bottom_usd is not set, so the gate falls back to it) against the $950.00 reserve: holds by $167.45 (the rungs take at most $767.45 in all; the existing NOCK ranges hold $171.62 USDC there)\n• Below the gate: at $0.00776640 (-40.00%) stable $1071.69 (reserve +$121.69). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• Floor budget (shared): needs 0 (r1 0, r2 0) of the 87 NOCK that may go into LP: fits\n• Floor-crossing price: none: the ladder holds no NOCK at or above spot, so a rise sells none of it (without the ladder $0.025404 (+96.3%), with it $0.025404 (+96.3%))\n• Trade-off: Rows are measurements at your depths; NockNock does not choose the split or the depths. Rows are in the order of the quantity varied and are not ranked. Fee per day in range is always shown with the in-range share of stored history and the replay upper bounds: a high rate while in range is not a rate per day.\n  Split (the share of the $600.00 total in r1; r2 holds the rest; step 10.0%, display constants, not settings):\n    r1 0.00%: r1 $0.00: no fee figure, in range ? of stored history, no replay; r2 $600.00: $79.18/day in range, in range 5.82% of stored history, replay ≤$30.00 inside, ≤$46.09 edges; 57,222 NOCK at the deepest bottom, average $0.01048542; 57,222 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 10.00%: r1 $60.00: $10.94/day in range, in range 0.11% of stored history, replay ≤$0.78 inside, ≤$2.82 edges; r2 $540.00: $71.26/day in range, in range 5.82% of stored history, replay ≤$27.00 inside, ≤$41.48 edges; 56,352 NOCK at the deepest bottom, average $0.01064736; 51,500 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 16.67%: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $65.98/day in range, in range 5.82% of stored history, replay ≤$25.00 inside, ≤$38.41 edges; 55,772 NOCK at the deepest bottom, average $0.01075813; 47,685 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 20.00%: r1 $120.00: $21.87/day in range, in range 0.11% of stored history, replay ≤$1.57 inside, ≤$5.64 edges; r2 $480.00: $63.34/day in range, in range 5.82% of stored history, replay ≤$24.00 inside, ≤$36.87 edges; 55,482 NOCK at the deepest bottom, average $0.01081439; 45,778 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 30.00%: r1 $180.00: $32.81/day in range, in range 0.11% of stored history, replay ≤$2.35 inside, ≤$8.47 edges; r2 $420.00: $55.43/day in range, in range 5.82% of stored history, replay ≤$21.00 inside, ≤$32.26 edges; 54,611 NOCK at the deepest bottom, average $0.01098674; 40,056 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 40.00%: r1 $240.00: $43.75/day in range, in range 0.11% of stored history, replay ≤$3.14 inside, ≤$11.29 edges; r2 $360.00: $47.51/day in range, in range 5.82% of stored history, replay ≤$18.00 inside, ≤$27.65 edges; 53,741 NOCK at the deepest bottom, average $0.01116467; 34,333 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 50.00%: r1 $300.00: $54.69/day in range, in range 0.11% of stored history, replay ≤$3.92 inside, ≤$14.11 edges; r2 $300.00: $39.59/day in range, in range 5.82% of stored history, replay ≤$15.00 inside, ≤$23.05 edges; 52,871 NOCK at the deepest bottom, average $0.01134846; 28,611 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 60.00%: r1 $360.00: $65.62/day in range, in range 0.11% of stored history, replay ≤$4.71 inside, ≤$16.93 edges; r2 $240.00: $31.67/day in range, in range 5.82% of stored history, replay ≤$12.00 inside, ≤$18.44 edges; 52,000 NOCK at the deepest bottom, average $0.01153841; 22,889 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 70.00%: r1 $420.00: $76.56/day in range, in range 0.11% of stored history, replay ≤$5.49 inside, ≤$19.75 edges; r2 $180.00: $23.75/day in range, in range 5.82% of stored history, replay ≤$9.00 inside, ≤$13.83 edges; 51,130 NOCK at the deepest bottom, average $0.01173482; 17,167 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 80.00%: r1 $480.00: $87.50/day in range, in range 0.11% of stored history, replay ≤$6.28 inside, ≤$22.58 edges; r2 $120.00: $15.84/day in range, in range 5.82% of stored history, replay ≤$6.00 inside, ≤$9.22 edges; 50,260 NOCK at the deepest bottom, average $0.01193803; 11,444 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 90.00%: r1 $540.00: $98.43/day in range, in range 0.11% of stored history, replay ≤$7.06 inside, ≤$25.40 edges; r2 $60.00: $7.92/day in range, in range 5.82% of stored history, replay ≤$3.00 inside, ≤$4.61 edges; 49,389 NOCK at the deepest bottom, average $0.01214840; 5,722 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 100.00%: r1 $600.00: $109.37/day in range, in range 0.11% of stored history, replay ≤$7.85 inside, ≤$28.22 edges; r2 $0.00: no fee figure, in range ? of stored history, no replay; 48,519 NOCK at the deepest bottom, average $0.01236633; 0 kept if deep rungs are pulled; reserve holds (+$203.43); NOCK 0 (fits)\n  Near rung's bottom at each usable tick:\n    $0.01236633: r1 $100.00: $36.19/day in range, in range 0.11% of stored history, replay ≤$2.60 inside, ≤$9.34 edges; r2 $500.00: $65.98/day in range, in range 5.82% of stored history, replay ≤$25.00 inside, ≤$38.41 edges; 55,651 NOCK at the deepest bottom, average $0.01078141; 47,685 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01200086: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $65.98/day in range, in range 5.82% of stored history, replay ≤$25.00 inside, ≤$38.41 edges; 55,772 NOCK at the deepest bottom, average $0.01075813; 47,685 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01164620: r1 $100.00: $12.24/day in range, in range 0.11% of stored history, replay ≤$0.88 inside, ≤$3.16 edges; r2 $500.00: $65.98/day in range, in range 5.82% of stored history, replay ≤$25.00 inside, ≤$38.41 edges; 55,894 NOCK at the deepest bottom, average $0.01073461; 47,685 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01130202: r1 $100.00: $9.25/day in range, in range 11.47% of stored history, replay ≤$3.72 inside, ≤$3.32 edges; r2 $500.00: $65.98/day in range, in range 5.82% of stored history, replay ≤$25.00 inside, ≤$38.41 edges; 56,018 NOCK at the deepest bottom, average $0.01071084; 47,685 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01096801: r1 $100.00: $7.46/day in range, in range 28.63% of stored history, replay ≤$5.56 inside, ≤$4.49 edges; r2 $500.00: $65.98/day in range, in range 5.82% of stored history, replay ≤$25.00 inside, ≤$38.41 edges; 56,144 NOCK at the deepest bottom, average $0.01068682; 47,685 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n  Deep rung's top at each usable tick:\n    $0.01200086: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $32.25/day in range, in range 34.61% of stored history, replay ≤$45.07 inside, ≤$7.67 edges; 53,674 NOCK at the deepest bottom, average $0.01117868; 45,587 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01164620: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $38.99/day in range, in range 34.61% of stored history, replay ≤$54.50 inside, ≤$9.28 edges; 54,363 NOCK at the deepest bottom, average $0.01103702; 46,276 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01130202: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $49.11/day in range, in range 23.08% of stored history, replay ≤$47.48 inside, ≤$16.62 edges; 55,062 NOCK at the deepest bottom, average $0.01089684; 46,975 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01096801: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $65.98/day in range, in range 5.82% of stored history, replay ≤$25.00 inside, ≤$38.41 edges; 55,772 NOCK at the deepest bottom, average $0.01075813; 47,685 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01064388: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $99.72/day in range, in range 0.05% of stored history, replay ≤$2.96 inside, ≤$26.42 edges; 56,492 NOCK at the deepest bottom, average $0.01062090; 48,406 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01032932: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $200.96/day in range, in range 0.00% of stored history, replay ≤$0.00 inside, ≤$41.03 edges; 57,224 NOCK at the deepest bottom, average $0.01048513; 49,137 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK. Each rung is its own position (its own NFT) in the same pool; overlapping rungs are allowed and their liquidity adds. The rungs share one reserve gate and one NOCK budget. A deep rung keeps its NOCK on a rebound only if it is pulled when it is fully NOCK; pulling is a withdrawal you sign, and its gas is not counted.\n• Fee estimate assumptions: Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one). Fees per unit of liquidity are shared by every range that contains the price (the same pool, the same fee tier). The pool's swap volume is taken as unchanged by the new liquidity: only its share dilutes. Dilution uses the pool's active liquidity at the current tick, read at 'latest' in the snapshot's cycle (not at the snapshot's block); the liquidity at the range's own ticks is not read and is taken as the same. The NOCK fee leg is valued at the current pool price, not at the price when it accrued. Intervals where the measuring range's liquidity changed or its fees fell (a collect, or a v4 add that collects) are skipped, so the measurement slightly undercounts; the seconds skipped are stated. Gas is not counted. Past fees are not a forecast. The stored market volume of another pool (market_price_history) is never used.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
+    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Ladder of 2 rungs at the pool price $0.01294400, snapped to v4 USDC/NOCK 3.00% #3163450 (tick spacing 300)\n• Pool: a ladder in this pool is a NEW position (a new NFT); add it to config.yaml to be tracked\n• r1 near: $0.01200086 – $0.01274292 (-7.29% / -1.55%), $100.00 USDC and 0 NOCK at spot (liquidity 29975.3203; top: the usable tick at or below the pool price (high = spot): it holds no NOCK)\n  – Bottom: fully NOCK at $0.01200086: 8,086 NOCK held, 8,086 bought, average $0.01236633\n  – Fees while in range (an estimate): $18.23/day, $17.57 diluted (it would be 3.60% of the pool's active liquidity); $18.23 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – It earns nothing until the price falls to $0.01274292 (-1.55%)\n  – In range over stored history: 0.11% of the measured time (600 s of 547,205 s); replayed over it, at most $1.31 from intervals wholly inside and at most $4.70 more from intervals at its edges (600 s), undiluted, no lower bound\n  – Measured inside this range: at most $1.31 over 600 s; only 600 s of stored intervals sat wholly inside: below the 72000 s a per-day figure needs, so only the dollars and seconds are stated\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $9.28, median $15.86, max $23.95 per day; every day: 2026-11-14 $11.51 (30,699 s, not counted), 2026-11-15 $15.02 (86,488 s), 2026-11-16 $21.56 (86,007 s), 2026-11-17 $29.18 (71,106 s, not counted), 2026-11-18 $9.28 (86,146 s), 2026-11-19 $23.95 (85,799 s), 2026-11-20 $15.86 (86,400 s), 2026-11-21 $11.57 (14,559 s, not counted)\n  – Round trip: A fall to $0.01200086 and a return to $0.01294400 (the pool price now) hands back $100.00 USDC and 0.0000 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $267.45 with the other rungs as given\n• r2 deep: $0.01002405 – $0.01096801 (-22.56% / -15.27%), $500.00 USDC and 0 NOCK at spot (liquidity 108504.9938; top: the nearest usable tick)\n  – Bottom: fully NOCK at $0.01002405: 47,685 NOCK held, 47,685 bought, average $0.01048542\n  – Fees while in range (an estimate): $65.98/day, $58.12 diluted (it would be 11.92% of the pool's active liquidity); $13.20 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – It earns nothing until the price falls to $0.01096801 (-15.27%)\n  – In range over stored history: 5.82% of the measured time (31,832 s of 547,205 s); replayed over it, at most $25.00 from intervals wholly inside and at most $38.41 more from intervals at its edges (1,801 s), undiluted, no lower bound\n  – Measured inside this range: at most $25.00 over 31,832 s; only 31832 s of stored intervals sat wholly inside: below the 72000 s a per-day figure needs, so only the dollars and seconds are stated\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $33.60, median $57.42, max $86.69 per day; every day: 2026-11-14 $41.66 (30,699 s, not counted), 2026-11-15 $54.36 (86,488 s), 2026-11-16 $78.04 (86,007 s), 2026-11-17 $105.64 (71,106 s, not counted), 2026-11-18 $33.60 (86,146 s), 2026-11-19 $86.69 (85,799 s), 2026-11-20 $57.42 (86,400 s), 2026-11-21 $41.88 (14,559 s, not counted)\n  – If pulled at fill (at $0.01002405): 47,685 NOCK kept, 47,685 bought at an average $0.01048542. Pulled when fully NOCK (at its bottom), the rung keeps this NOCK on a rebound; left in place, a rebound sells it back. Pulling is a withdrawal you sign; gas is not counted.\n  – The reserve gate allows this rung at most $667.45 with the other rungs as given\n• Overlaps: none\n• Combined: $600.00 USDC and 0 NOCK at spot; at the deepest bottom $0.01002405: 55,772 NOCK held, 55,772 bought, average $0.01075813; kept if the 1 deep rung(s) are pulled at fill: 47,685 NOCK, bought at an average $0.01048542\n• Price grid (NOCK bought by the ladder, USDC left in it; rungs in range and their estimated fees per day; stable balance and reserve headroom):\n  0.00% $0.01294400: 0 NOCK bought, $600.00 USDC left; no rung in range; stable $1769.54 (reserve +$819.54) [spot]\n  -1.55% $0.01274292: 0 NOCK bought, $600.00 USDC left; r1 in range, fees $18.23/day ($17.57 diluted); stable $1766.16 (reserve +$816.16) [r1 top]\n  -5.00% $0.01229680: 4,774 NOCK bought, $540.24 USDC left; r1 in range, fees $18.23/day ($17.57 diluted); stable $1698.79 (reserve +$748.79)\n  -7.29% $0.01200086: 8,086 NOCK bought, $500.00 USDC left; no rung in range; stable $1653.43 (reserve +$703.43) [r1 bottom]\n  -10.00% $0.01164960: 8,086 NOCK bought, $500.00 USDC left; no rung in range; stable $1647.26 (reserve +$697.26)\n  -15.00% $0.01100240: 8,086 NOCK bought, $500.00 USDC left; no rung in range; stable $1635.66 (reserve +$685.66)\n  -15.27% $0.01096801: 8,086 NOCK bought, $500.00 USDC left; r2 in range, fees $65.98/day ($58.12 diluted); stable $1635.04 (reserve +$685.04) [r2 top]\n  -20.00% $0.01035520: 38,303 NOCK bought, $177.98 USDC left; r2 in range, fees $65.98/day ($58.12 diluted); stable $1301.69 (reserve +$351.69)\n  -22.56% $0.01002405: 55,772 NOCK bought, $0.00 USDC left; no rung in range; stable $1117.45 (reserve +$167.45) [r2 bottom, gate]\n  -25.00% $0.00970800: 55,772 NOCK bought, $0.00 USDC left; no rung in range; stable $1111.38 (reserve +$161.38)\n  -30.00% $0.00906080: 55,772 NOCK bought, $0.00 USDC left; no rung in range; stable $1098.63 (reserve +$148.63)\n  -35.00% $0.00841360: 55,772 NOCK bought, $0.00 USDC left; no rung in range; stable $1085.42 (reserve +$135.42)\n  -40.00% $0.00776640: 55,772 NOCK bought, $0.00 USDC left; no rung in range; stable $1071.69 (reserve +$121.69)\n• Reserve (shared): stable $1117.45 at the gate $0.01002405 (the deepest rung's bottom: operator_profile.ladder_bottom_usd is not set, so the gate falls back to it) against the $950.00 reserve: holds by $167.45 (the rungs take at most $767.45 in all; the existing NOCK ranges hold $171.62 USDC there)\n• Below the gate: at $0.00776640 (-40.00%) stable $1071.69 (reserve +$121.69). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• Floor budget (shared): needs 0 (r1 0, r2 0) of the 87 NOCK that may go into LP: fits\n• Floor-crossing price: none: the ladder holds no NOCK at or above spot, so a rise sells none of it (without the ladder $0.025404 (+96.3%), with it $0.025404 (+96.3%))\n• Trade-off: Rows are measurements at your depths; NockNock does not choose the split or the depths. Rows are in the order of the quantity varied and are not ranked. Fee per day in range is always shown with the in-range share of stored history and the replay upper bounds: a high rate while in range is not a rate per day.\n  Split (the share of the $600.00 total in r1; r2 holds the rest; step 10.0%, display constants, not settings):\n    r1 0.00%: r1 $0.00: no fee figure, in range ? of stored history, no replay; r2 $600.00: $79.18/day in range, in range 5.82% of stored history, replay ≤$30.00 inside, ≤$46.09 edges; 57,222 NOCK at the deepest bottom, average $0.01048542; 57,222 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 10.00%: r1 $60.00: $10.94/day in range, in range 0.11% of stored history, replay ≤$0.78 inside, ≤$2.82 edges; r2 $540.00: $71.26/day in range, in range 5.82% of stored history, replay ≤$27.00 inside, ≤$41.48 edges; 56,352 NOCK at the deepest bottom, average $0.01064736; 51,500 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 16.67%: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $65.98/day in range, in range 5.82% of stored history, replay ≤$25.00 inside, ≤$38.41 edges; 55,772 NOCK at the deepest bottom, average $0.01075813; 47,685 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 20.00%: r1 $120.00: $21.87/day in range, in range 0.11% of stored history, replay ≤$1.57 inside, ≤$5.64 edges; r2 $480.00: $63.34/day in range, in range 5.82% of stored history, replay ≤$24.00 inside, ≤$36.87 edges; 55,482 NOCK at the deepest bottom, average $0.01081439; 45,778 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 30.00%: r1 $180.00: $32.81/day in range, in range 0.11% of stored history, replay ≤$2.35 inside, ≤$8.47 edges; r2 $420.00: $55.43/day in range, in range 5.82% of stored history, replay ≤$21.00 inside, ≤$32.26 edges; 54,611 NOCK at the deepest bottom, average $0.01098674; 40,056 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 40.00%: r1 $240.00: $43.75/day in range, in range 0.11% of stored history, replay ≤$3.14 inside, ≤$11.29 edges; r2 $360.00: $47.51/day in range, in range 5.82% of stored history, replay ≤$18.00 inside, ≤$27.65 edges; 53,741 NOCK at the deepest bottom, average $0.01116467; 34,333 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 50.00%: r1 $300.00: $54.69/day in range, in range 0.11% of stored history, replay ≤$3.92 inside, ≤$14.11 edges; r2 $300.00: $39.59/day in range, in range 5.82% of stored history, replay ≤$15.00 inside, ≤$23.05 edges; 52,871 NOCK at the deepest bottom, average $0.01134846; 28,611 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 60.00%: r1 $360.00: $65.62/day in range, in range 0.11% of stored history, replay ≤$4.71 inside, ≤$16.93 edges; r2 $240.00: $31.67/day in range, in range 5.82% of stored history, replay ≤$12.00 inside, ≤$18.44 edges; 52,000 NOCK at the deepest bottom, average $0.01153841; 22,889 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 70.00%: r1 $420.00: $76.56/day in range, in range 0.11% of stored history, replay ≤$5.49 inside, ≤$19.75 edges; r2 $180.00: $23.75/day in range, in range 5.82% of stored history, replay ≤$9.00 inside, ≤$13.83 edges; 51,130 NOCK at the deepest bottom, average $0.01173482; 17,167 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 80.00%: r1 $480.00: $87.50/day in range, in range 0.11% of stored history, replay ≤$6.28 inside, ≤$22.58 edges; r2 $120.00: $15.84/day in range, in range 5.82% of stored history, replay ≤$6.00 inside, ≤$9.22 edges; 50,260 NOCK at the deepest bottom, average $0.01193803; 11,444 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 90.00%: r1 $540.00: $98.43/day in range, in range 0.11% of stored history, replay ≤$7.06 inside, ≤$25.40 edges; r2 $60.00: $7.92/day in range, in range 5.82% of stored history, replay ≤$3.00 inside, ≤$4.61 edges; 49,389 NOCK at the deepest bottom, average $0.01214840; 5,722 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    r1 100.00%: r1 $600.00: $109.37/day in range, in range 0.11% of stored history, replay ≤$7.85 inside, ≤$28.22 edges; r2 $0.00: no fee figure, in range ? of stored history, no replay; 48,519 NOCK at the deepest bottom, average $0.01236633; 0 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n  Near rung's bottom at each usable tick:\n    $0.01236633: r1 $100.00: $36.19/day in range, in range 0.11% of stored history, replay ≤$2.60 inside, ≤$9.34 edges; r2 $500.00: $65.98/day in range, in range 5.82% of stored history, replay ≤$25.00 inside, ≤$38.41 edges; 55,651 NOCK at the deepest bottom, average $0.01078141; 47,685 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01200086: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $65.98/day in range, in range 5.82% of stored history, replay ≤$25.00 inside, ≤$38.41 edges; 55,772 NOCK at the deepest bottom, average $0.01075813; 47,685 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01164620: r1 $100.00: $12.24/day in range, in range 0.11% of stored history, replay ≤$0.88 inside, ≤$3.16 edges; r2 $500.00: $65.98/day in range, in range 5.82% of stored history, replay ≤$25.00 inside, ≤$38.41 edges; 55,894 NOCK at the deepest bottom, average $0.01073461; 47,685 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01130202: r1 $100.00: $9.25/day in range, in range 11.47% of stored history, replay ≤$3.72 inside, ≤$3.32 edges; r2 $500.00: $65.98/day in range, in range 5.82% of stored history, replay ≤$25.00 inside, ≤$38.41 edges; 56,018 NOCK at the deepest bottom, average $0.01071084; 47,685 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01096801: r1 $100.00: $7.46/day in range, in range 28.63% of stored history, replay ≤$5.56 inside, ≤$4.49 edges; r2 $500.00: $65.98/day in range, in range 5.82% of stored history, replay ≤$25.00 inside, ≤$38.41 edges; 56,144 NOCK at the deepest bottom, average $0.01068682; 47,685 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n  Deep rung's top at each usable tick:\n    $0.01200086: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $32.25/day in range, in range 34.61% of stored history, replay ≤$45.07 inside, ≤$7.67 edges; 53,674 NOCK at the deepest bottom, average $0.01117868; 45,587 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01164620: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $38.99/day in range, in range 34.61% of stored history, replay ≤$54.50 inside, ≤$9.28 edges; 54,363 NOCK at the deepest bottom, average $0.01103702; 46,276 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01130202: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $49.11/day in range, in range 23.08% of stored history, replay ≤$47.48 inside, ≤$16.62 edges; 55,062 NOCK at the deepest bottom, average $0.01089684; 46,975 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01096801: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $65.98/day in range, in range 5.82% of stored history, replay ≤$25.00 inside, ≤$38.41 edges; 55,772 NOCK at the deepest bottom, average $0.01075813; 47,685 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01064388: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $99.72/day in range, in range 0.05% of stored history, replay ≤$2.96 inside, ≤$26.42 edges; 56,492 NOCK at the deepest bottom, average $0.01062090; 48,406 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n    $0.01032932: r1 $100.00: $18.23/day in range, in range 0.11% of stored history, replay ≤$1.31 inside, ≤$4.70 edges; r2 $500.00: $200.96/day in range, in range 0.00% of stored history, replay ≤$0.00 inside, ≤$41.03 edges; 57,224 NOCK at the deepest bottom, average $0.01048513; 49,137 kept if deep rungs are pulled; reserve holds (+$167.45); NOCK 0 (fits)\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK. Each rung is its own position (its own NFT) in the same pool; overlapping rungs are allowed and their liquidity adds. The rungs share one reserve gate and one NOCK budget. A deep rung keeps its NOCK on a rebound only if it is pulled when it is fully NOCK; pulling is a withdrawal you sign, and its gas is not counted.\n• Fee estimate assumptions: Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one). Fees per unit of liquidity are shared by every range that contains the price (the same pool, the same fee tier). The pool's swap volume is taken as unchanged by the new liquidity: only its share dilutes. Dilution uses the pool's active liquidity at the current tick, read at 'latest' in the snapshot's cycle (not at the snapshot's block); the liquidity at the range's own ticks is not read and is taken as the same. The NOCK fee leg is valued at the current pool price, not at the price when it accrued. Intervals where the measuring range's liquidity changed or its fees fell (a collect, or a v4 add that collects) are skipped, so the measurement slightly undercounts; the seconds skipped are stated. Gas is not counted. Past fees are not a forecast. The stored market volume of another pool (market_price_history) is never used.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
     "status": 200
   }
 }

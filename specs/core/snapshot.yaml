@@ -979,6 +979,12 @@ components:
               usdc_per_liquidity: { type: string }
               nock_per_liquidity: { type: string }
         spans_reason: { type: string, nullable: true }
+        detail_note:
+          type: string
+          description: >
+            Present in a stored row: by_day and spans are left out of stored rows (they are
+            re-measured every cycle and kept in the worker's memory, so /snapshot/latest
+            carries them), which keeps each row's added size to a few KB.
 
     LadderShape:
       type: object
@@ -990,11 +996,22 @@ components:
         sent. status unavailable carries the reason (the configuration error named, or
         why it cannot be drawn) and no figures.
       properties:
-        status: { type: string, enum: [computed, unavailable] }
+        status:
+          type: string
+          enum: [computed, deployed, price_at_or_below_bottom, unavailable]
+          description: >
+            computed: something is left to deposit. deployed: nothing is (every rung is
+            deployed, passed, over or has no cap, as each says). price_at_or_below_bottom:
+            the price is at or below the ladder's bottom, so every rung is passed.
         reason: { type: string, nullable: true }
         source: { type: string }
         statement: { type: string }
         computed_at: { type: string }
+        tracked_note: { type: string, description: How tracked ladder rungs (role ladder) in the pool count toward the total and are matched to configured rungs }
+        tracked_usdc: { type: string }
+        unmatched: { type: array, items: { type: object }, description: Tracked ladders that match no configured rung (no rung set, or no rung of that role left); they still count toward the total }
+        dust: { type: object, description: 'The amounts below which a rung counts as deployed (and above which over); display constants, not settings' }
+        detail_note: { type: string, description: 'Present in a stored row: the grid and the full fee estimates are left out (kept in memory)' }
         pool: { type: object, description: 'position_id, label, tick_spacing, pool_price_usd, pool_tick' }
         total_usdc: { type: string }
         total_rule: { type: string }
@@ -1011,9 +1028,30 @@ components:
     LadderShapeRung:
       type: object
       properties:
-        index: { type: integer }
+        index: { type: integer, description: The rung's position in operator_profile.ladder_rungs, from 1 }
         rung: { type: string, enum: [cap, near, deep] }
-        share: { type: string, nullable: true, description: Null for the cap }
+        share: { type: string, nullable: true, description: 'The setting''s own share at this position; null for the cap' }
+        status:
+          type: string
+          enum: [to_deposit, deployed, over, passed, none]
+          description: >
+            to_deposit: what is left is at or above dust. deployed: below dust. over: the
+            tracked rungs hold more than the target (reason says by how much). passed: the
+            price is below this rung's range, so a USDC-only deposit is not possible. none:
+            no cap (reason).
+        reason: { type: string, nullable: true }
+        target_usdc: { type: string, description: Sized from the gated total (the cap rule, then the shares) }
+        target_nock: { type: string, nullable: true, description: The cap only }
+        deployed_usdc: { type: string, description: What the matched tracked rungs count (tracked_note) }
+        deployed_nock: { type: string, nullable: true }
+        remaining_usdc: { type: string }
+        remaining_nock: { type: string, nullable: true }
+        over_by_usdc: { type: string, nullable: true }
+        counterparts: { type: array, items: { type: string }, description: The tracked ladders matched to this rung; the remainder is drawn on the first one's ticks }
+        remaining_note: { type: string, nullable: true, description: The figures that follow are for what is left to deposit only }
+        amount0_raw: { type: string, nullable: true, description: What a mint of liquidity_raw pulls of token0, rounded up }
+        amount1_raw: { type: string, nullable: true }
+        mint_note: { type: string, nullable: true }
         tick_lower: { type: integer, nullable: true }
         tick_upper: { type: integer, nullable: true }
         low_usd: { type: string }
@@ -1025,12 +1063,12 @@ components:
         high_rule: { type: string }
         in_range_now: { type: boolean, nullable: true, description: tick_lower <= pool tick < tick_upper }
         out_of_range_above_now: { type: boolean }
-        liquidity_raw: { type: string }
-        liquidity_human: { type: string }
-        usdc: { type: string, nullable: true, description: 6 dp }
-        usdc_raw: { type: string }
-        nock: { type: string, nullable: true, description: 'The NOCK it needs at the pool price, 8 dp' }
-        nock_raw: { type: string }
+        liquidity_raw: { type: string, nullable: true, description: 'Exact: what the remainder buys, rounded down with Uniswap''s integer formulas' }
+        liquidity_human: { type: string, nullable: true }
+        usdc: { type: string, nullable: true, description: usdc_raw in USDC }
+        usdc_raw: { type: string, nullable: true, description: What a mint of liquidity_raw pulls of USDC, rounded up; never more than the remainder }
+        nock: { type: string, nullable: true, description: nock_raw in NOCK }
+        nock_raw: { type: string, nullable: true }
         nock_held_at_bottom: { type: string }
         nock_bought_at_bottom: { type: string }
         avg_buy_price_usd: { type: string, nullable: true }

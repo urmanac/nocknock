@@ -51,6 +51,9 @@ pub(crate) struct FeeYieldRow {
     pub(crate) in_range: Option<bool>,
     pub(crate) pool_active: Option<bool>,
     pub(crate) tick: Option<i32>,
+    /// The row says its fees were not LP fees then (staked in a gauge, or a fees note):
+    /// the stored owed amounts are carried as 0, so such time is never measured.
+    pub(crate) staked: bool,
 }
 
 /// e-notation with 7 significant digits, the way per-liquidity figures are stored. Pure.
@@ -136,6 +139,7 @@ enum Skip {
     OutOfRange,
     Gap,
     Unreadable,
+    Staked,
 }
 
 fn add_skip(s: &mut FeeYieldSkips, secs: &mut FeeYieldSkipSeconds, why: Skip, dt: f64) {
@@ -147,6 +151,7 @@ fn add_skip(s: &mut FeeYieldSkips, secs: &mut FeeYieldSkipSeconds, why: Skip, dt
         Skip::OutOfRange => (&mut s.out_of_range, &mut secs.out_of_range),
         Skip::Gap => (&mut s.gap, &mut secs.gap),
         Skip::Unreadable => (&mut s.unreadable, &mut secs.unreadable),
+        Skip::Staked => (&mut s.staked, &mut secs.staked),
     };
     *n += 1;
     *t += dt;
@@ -178,6 +183,8 @@ pub(crate) fn measure_pool(p: &Position, rows: &[FeeYieldRow]) -> FeeYieldPool {
             continue;
         }
         let why = match (a.liquidity, b.liquidity, a.owed0, a.owed1, b.owed0, b.owed1) {
+            // Staked at either end: the swap fees went to the gauge, not to the LP.
+            _ if a.staked || b.staked => Some(Skip::Staked),
             (Some(la), Some(lb), Some(a0), Some(a1), Some(b0), Some(b1)) => {
                 if la != lb {
                     Some(Skip::LiquidityChanged)
@@ -238,6 +245,7 @@ pub(crate) fn measure_pool(p: &Position, rows: &[FeeYieldRow]) -> FeeYieldPool {
         out_of_range: ms(skipped_seconds.out_of_range),
         gap: ms(skipped_seconds.gap),
         unreadable: ms(skipped_seconds.unreadable),
+        staked: ms(skipped_seconds.staked),
     };
     FeeYieldPool {
         pool_id: p.pool_id.clone(),
@@ -283,6 +291,7 @@ pub(crate) fn measure_pool(p: &Position, rows: &[FeeYieldRow]) -> FeeYieldPool {
             .map(|((lo, hi), (s, a0, a1))| FeeYieldSpan { bin_lo: lo, bin_hi: hi, seconds: ms(s), usdc_per_liquidity: sci(a0), nock_per_liquidity: sci(a1) })
             .collect(),
         spans_reason: spacing.is_none().then(|| "the pool's tick spacing was not read, so intervals cannot be placed on its tick grid".to_string()),
+        detail_note: None,
     }
 }
 
@@ -377,6 +386,7 @@ async fn fetch_fee_yield_rows(db: &PgPool, ids: &[String], since: DateTime<Utc>)
                p->>'tokens_owed_1' AS owed1,
                (p->>'in_range')::boolean AS in_range,
                (p->>'pool_active')::boolean AS pool_active,
+               (p ? 'staked_in_gauge' OR p ? 'fees_note') AS staked,
                (SELECT (m->>'tick_current')::int
                   FROM jsonb_array_elements(s.data->'pool_mechanics') m
                  WHERE m->>'pool_id' = p->>'pool_id' LIMIT 1) AS tick
@@ -404,6 +414,8 @@ async fn fetch_fee_yield_rows(db: &PgPool, ids: &[String], since: DateTime<Utc>)
                 in_range: r.try_get::<Option<bool>, _>("in_range").ok().flatten(),
                 pool_active: r.try_get::<Option<bool>, _>("pool_active").ok().flatten(),
                 tick: r.try_get::<Option<i32>, _>("tick").ok().flatten(),
+                // Unknown counts as staked: an unread flag is never measured as LP time.
+                staked: r.try_get::<Option<bool>, _>("staked").ok().flatten().unwrap_or(true),
             })
         })
         .collect())

@@ -68,6 +68,7 @@
         "skipped": null,
         "skipped_seconds": null,
         "spread": null,
+        "spread_reason": null,
         "status": "unavailable",
         "stored_history_replay": null
       },
@@ -464,6 +465,7 @@
         "skipped": null,
         "skipped_seconds": null,
         "spread": null,
+        "spread_reason": null,
         "status": "unavailable",
         "stored_history_replay": null
       },
@@ -880,6 +882,7 @@
         "skipped": null,
         "skipped_seconds": null,
         "spread": null,
+        "spread_reason": null,
         "status": "unavailable",
         "stored_history_replay": null
       },
@@ -1276,6 +1279,7 @@
         "skipped": null,
         "skipped_seconds": null,
         "spread": null,
+        "spread_reason": null,
         "status": "unavailable",
         "stored_history_replay": null
       },

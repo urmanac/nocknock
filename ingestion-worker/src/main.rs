@@ -92,6 +92,7 @@ use ladder_track::*;
 mod ladder_track_text;
 mod fee_yield;
 use fee_yield::*;
+mod mint_math;
 
 // ============================================================
 // Configuration
@@ -1099,10 +1100,16 @@ struct FeeYieldPool {
     usd_per_liquidity_day: Option<String>,
     usd_per_1e15_liquidity_day: Option<String>,
     /// One entry per UTC date (an interval counts on the date it starts).
+    #[serde(default)]
     by_day: Vec<FeeYieldDay>,
     /// Intervals aggregated by the tick-spacing bins of their two endpoint ticks.
+    #[serde(default)]
     spans: Vec<FeeYieldSpan>,
     spans_reason: Option<String>,
+    /// Set in a stored row, whose by_day and spans are left out (they are kept in the
+    /// worker's memory and served from the latest snapshot): why they are absent here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    detail_note: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq)]
@@ -1114,6 +1121,10 @@ struct FeeYieldSkips {
     out_of_range: u32,
     gap: u32,
     unreadable: u32,
+    /// Intervals with either row staked in a gauge (or carrying a fees note): those
+    /// fees went to the gauge, so the time is not LP time (review of #166 rungs).
+    #[serde(default)]
+    staked: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq)]
@@ -1125,6 +1136,8 @@ struct FeeYieldSkipSeconds {
     out_of_range: f64,
     gap: f64,
     unreadable: f64,
+    #[serde(default)]
+    staked: f64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]

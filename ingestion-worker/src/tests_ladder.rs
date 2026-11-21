@@ -993,6 +993,41 @@ fn test_ladder_specs_document_the_endpoint_and_the_new_fields() {
 }
 
 
+/// The fixture with ladder rungs deposited and tracked (`role: ladder`): each `(nft id,
+/// rung, ticks, liquidity)` is a new position in the 3% pool, its amounts read from its
+/// liquidity at the pool price, and the wallet pays exactly those amounts (review of
+/// #166 rungs, finding 1).
+pub(crate) fn fixture_with_rungs(rungs: &[(u64, Option<&str>, i32, i32, u128)]) -> SnapshotEnvelope {
+    let mut positions = fixture_positions();
+    let mut tags: HashMap<String, LadderTag> = HashMap::new();
+    let (mut usdc_out, mut nock_out) = (0.0, 0.0);
+    for &(nft, rung, tl, tu, l) in rungs {
+        let p = with_amounts(RawPosition {
+            position_id: format!("uniswap-v4:base:{nft}"),
+            nft_id: nft,
+            liquidity: l,
+            tick_lower: tl,
+            tick_upper: tu,
+            fee0: 0.0,
+            fee1: 0.0,
+            in_range: tl <= 273743 && 273743 < tu,
+            is_price_source: false,
+            ..v4()
+        });
+        usdc_out += p.amount0;
+        nock_out += p.amount1;
+        tags.insert(p.position_id.clone(), LadderTag { config_id: format!("ladder-{nft}"), rung: rung.map(str::to_string), deposit_tx: None });
+        positions.push(p);
+    }
+    let mut raw = raw_book(positions);
+    raw.wallet_balances = vec![
+        row("USDC", USDC_BASE, &format!("{:.6}", 1545.8357 - usdc_out)),
+        row("NOCK", NOCK_BASE, &format!("{:.10}", 90086.7891 - nock_out)),
+    ];
+    raw.ladders = tags;
+    envelope_of(raw, &profile(Some(950.0)))
+}
+
 /// The fixture with the price-source pool at another sqrtPriceX96 (#166 review).
 pub(crate) fn fixture_at_sqrt(sqrt: U256) -> SnapshotEnvelope {
     let mut v = v4();

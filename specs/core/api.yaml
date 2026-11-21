@@ -1165,12 +1165,13 @@ components:
         sizing:
           type: object
           properties:
-            liquidity_raw: { type: string }
-            liquidity_human: { type: string }
+            liquidity_raw: { type: string, nullable: true, description: 'Null for a ladder of rungs: liquidity is per rung (rungs[].sizing, rungs[].mint)' }
+            liquidity_human: { type: string, nullable: true }
             usdc_at_spot: { type: string }
             nock_needed_at_spot: { type: string }
             nock_given: { type: string, nullable: true }
-            nock_check: { type: string, enum: [not_given, matches] }
+            nock_check: { type: string, enum: [not_given, matches, per_rung] }
+            describes: { type: string, description: Rungs only }
         grid: { type: array, items: { $ref: '#/components/schemas/LadderGridRow' } }
         bottom:
           type: object
@@ -1240,6 +1241,14 @@ components:
         combined: { $ref: '#/components/schemas/LadderCombined' }
         tradeoff: { allOf: [{ $ref: '#/components/schemas/LadderTradeoff' }], nullable: true }
         tradeoff_reason: { type: string, nullable: true }
+        shape_status:
+          type: string
+          enum: [computed, deployed, price_at_or_below_bottom]
+          description: >
+            shape=configured only. computed: something is left to deposit (the body
+            simulates those remainders). deployed or price_at_or_below_bottom: nothing is
+            left to deposit; the body then carries only snapshot, inputs (with the plan in
+            inputs.shape.plan), pool, shape_status and statement.
         assumptions: { type: array, items: { type: string } }
         statement: { type: string }
 
@@ -1274,6 +1283,7 @@ components:
         dilution: { type: object, nullable: true }
         dilution_reason: { type: string, nullable: true }
         spread: { type: object, nullable: true, description: 'Every UTC day at this range''s liquidity; min, true median and max over the days with at least day_min_seconds measured' }
+        spread_reason: { type: string, nullable: true, description: Why the spread is null (a snapshot read back from a stored row keeps no by-day detail) }
         band_measured: { type: object, nullable: true, description: 'Stored intervals wholly inside this range: dollars and seconds; a per-day figure only from band_min_seconds' }
         band_reason: { type: string, nullable: true }
         in_range_share_stored_history: { type: object, nullable: true }
@@ -1291,7 +1301,16 @@ components:
         rung: { type: string, enum: [cap, near, deep] }
         inputs: { type: object }
         bounds: { $ref: '#/components/schemas/LadderBounds' }
-        sizing: { type: object, description: 'liquidity_raw, liquidity_human, usdc_at_spot, nock_needed_at_spot, nock_given, nock_check, usdc_raw, nock_raw' }
+        sizing: { type: object, description: 'liquidity_raw (from the float sizing; the exact one is in mint), liquidity_human, usdc_at_spot, nock_needed_at_spot, nock_given, nock_check' }
+        mint:
+          type: object
+          description: >
+            The exact mint of a snapped rung: liquidity_raw is what the rung's USDC and NOCK
+            (truncated to raw units, usdc_max_raw and nock_max_raw) buy, rounded down with
+            Uniswap's integer formulas; amount0_raw and amount1_raw (and usdc_raw, nock_raw
+            by token) are what a mint of it pulls, rounded up, never more than the maxima.
+            status unavailable with a reason when unsnapped.
+        plan: { type: object, description: 'shape=configured only: the rung''s status, target_usdc, deployed_usdc, remaining_usdc and tracked counterparts' }
         bottom: { type: object }
         top: { type: object }
         max_usdc_with_the_others_as_given: { type: string, nullable: true }
