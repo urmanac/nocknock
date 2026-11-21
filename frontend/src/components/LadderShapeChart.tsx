@@ -29,7 +29,9 @@ export function LadderShapeChart({ data, width = 640, compact }: { data: any | n
           width="100%"
           role="img"
           aria-label="Deployed NOCK ranges on a log price axis; each bar's area is its capital"
-          style={{ display: 'block', maxWidth: '100%' }}
+          // The viewBox scales with the width, so on a wide screen its text grew to about three
+          // times its size (v0.9.1): the chart stops growing at 1.25x its drawn width.
+          style={{ display: 'block', maxWidth: compact ? '100%' : Math.round(g.width * 1.25) }}
         >
           <line x1={0} x2={g.width} y1={g.baseY} y2={g.baseY} stroke="#30363d" />
           {g.rects.map((r, i) => (

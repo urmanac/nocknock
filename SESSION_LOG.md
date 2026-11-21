@@ -5,7 +5,7 @@ One entry per working session, newest first. Longer sessions keep their full log
 
 | Dates | Agent | Releases | Log |
 |---|---|---|---|
-| 2026-11-20 → 2026-11-21 | Claude (Fable 5.2, then Opus 5.5) | v0.9.0 (#165-#169, position detection, #177) | [The ladder track: the floor-crossing price, the simulator, the bottle, positions found on-chain, maintenance and the ladder shape, v0.9.0](docs/kb/session-2026-11-20-ladder-track.md) |
+| 2026-11-20 → 2026-11-21 | Claude (Fable 5.2, then Opus 5.5) | v0.9.0 (#165-#169, position detection, #177), v0.9.1 (card and chart layout) | [The ladder track: the floor-crossing price, the simulator, the bottle, positions found on-chain, maintenance and the ladder shape, v0.9.0](docs/kb/session-2026-11-20-ladder-track.md) |
 | 2026-11-17 → 2026-11-20 | Claude (Fable 5.2, then Opus 5.5) | v0.8.1 (#142, #144, #130-#137, #151-#153, #146, #140), v0.8.2 (#156, #157), v0.8.3 (#162, #160) | [The Aero CL position goes live; gauge rewards as collectible earnings; the withdrawal that stalled ingestion; v0.8.1; the harvest ledger books only fees, v0.8.2; the standing cash reserve, v0.8.3](docs/kb/session-2026-11-17-aero-cl-collectible-rewards.md) |
 | 2026-11-14 (evening) → 2026-11-16 | Claude (Opus 5.5, then Fable 5.2) | v0.5.2, v0.5.3, v0.8.0 (the v0.6.0–v0.8.0 stack, PRs #120–#126) | [v0.5.2, v0.5.3, and v0.8.0: the v0.6.0–v0.8.0 stack](docs/kb/session-2026-11-15-overnight-stack.md) |
 | 2026-11-14 (afternoon) | Claude (Fable 5.2, then Opus 5.5) | none: planning | [Planning v0.5.1 and v0.5.2, lore, the mining reply](docs/kb/session-2026-11-14-planning-lore-mining.md) |
