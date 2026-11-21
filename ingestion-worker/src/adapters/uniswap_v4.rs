@@ -36,6 +36,24 @@ pub(crate) fn v4_pool_key_fee_and_spacing(clean: &str) -> (u32, Option<i32>) {
     ((fee / 100) as u32, spacing)
 }
 
+/// The unrounded fee (word 2, hundredths of a basis point) and the hooks address (word 4,
+/// 0x-prefixed, lowercase) of a recorded poolKeys answer (#168), for the new-position
+/// link's pool key. Each is None when the answer is too short to carry it. Pure.
+pub(crate) fn v4_pool_key_fee_raw_and_hooks(clean: &str) -> (Option<u32>, Option<String>) {
+    let fee = clean.get(128..192).and_then(|w| parse_hex_word_u128(w).ok()).and_then(|f| u32::try_from(f).ok());
+    let hooks = clean.get(256..320).filter(|w| w.len() == 64).map(|w| format!("0x{}", w[24..].to_lowercase()));
+    (fee, hooks)
+}
+
+/// What one poolKeys answer states about the pool (#166, #168).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct V4PoolKey {
+    pub(crate) fee_tier_bps: u32,
+    pub(crate) tick_spacing: Option<i32>,
+    pub(crate) fee_raw: Option<u32>,
+    pub(crate) hooks: Option<String>,
+}
+
 /// poolKeys(bytes25) -> (currency0, currency1, fee, tickSpacing, hooks): validates the
 /// config's declared currency ordering and supplies the fee tier in basis points and the
 /// pool's tick spacing (#166; None when not read). It is a read of the pool key, not of
@@ -47,7 +65,7 @@ async fn fetch_v4_pool_key(
     pool_id: &str,
     currency0: &str,
     currency1: &str,
-) -> Result<(u32, Option<i32>)> {
+) -> Result<V4PoolKey> {
     let pk_payload = json!({
         "jsonrpc": "2.0",
         "method": "eth_call",
@@ -59,6 +77,7 @@ async fn fetch_v4_pool_key(
     });
     let mut fee_tier_bps = 0u32;
     let mut tick_spacing: Option<i32> = None;
+    let (mut fee_raw, mut hooks): (Option<u32>, Option<String>) = (None, None);
     if let Some(res_json) = post_rpc_with_retry(http_client, alchemy_url, &pk_payload, 2).await {
         if let Some(hex_str) = res_json.get("result").and_then(|r| r.as_str()) {
             let clean = hex_str.trim_start_matches("0x");
@@ -77,6 +96,7 @@ async fn fetch_v4_pool_key(
                 }
                 // fee is in hundredths of a basis point
                 (fee_tier_bps, tick_spacing) = v4_pool_key_fee_and_spacing(clean);
+                (fee_raw, hooks) = v4_pool_key_fee_raw_and_hooks(clean);
             }
         }
     }
@@ -86,7 +106,7 @@ async fn fetch_v4_pool_key(
             pos.id
         ));
     }
-    Ok((fee_tier_bps, tick_spacing))
+    Ok(V4PoolKey { fee_tier_bps, tick_spacing, fee_raw, hooks })
 }
 
 /// StateView getSlot0(bytes32) -> (sqrtPriceX96, tick, ...). A read of the pool.
@@ -128,7 +148,7 @@ pub(crate) async fn fetch_v4_closed_price_pool(
 ) -> Result<ClosedPricePool> {
     let (pool_id, currency0, currency1) = v4_pool_config(pos)?;
     // The spacing is not needed for a price read.
-    let (fee_tier_bps, _) = fetch_v4_pool_key(http_client, alchemy_url, pos, &pool_id, &currency0, &currency1).await?;
+    let fee_tier_bps = fetch_v4_pool_key(http_client, alchemy_url, pos, &pool_id, &currency0, &currency1).await?.fee_tier_bps;
     let (sqrt_price_x96, tick) = fetch_v4_slot0(http_client, alchemy_url, &pos.id, &pool_id).await?;
     Ok(ClosedPricePool(RawPosition {
         position_id: position_key(pos),
@@ -174,7 +194,7 @@ pub(crate) async fn fetch_v4_position(
     // 0. poolKeys(bytes25) -> (currency0, currency1, fee, tickSpacing, hooks);
     //    validates the config's declared currency ordering and supplies the fee tier
     //    and the pool's tick spacing (#166), from the same answer.
-    let (fee_tier_bps, tick_spacing) =
+    let V4PoolKey { fee_tier_bps, tick_spacing, fee_raw, hooks } =
         fetch_v4_pool_key(http_client, alchemy_url, pos, &pool_id, &currency0, &currency1).await?;
 
     // 1. getPositionLiquidity(uint256)
@@ -333,7 +353,7 @@ pub(crate) async fn fetch_v4_position(
         pos.id, pos.nft_id, liquidity, tick, tick_lower <= tick && tick <= tick_upper, fee0_raw, fee1_raw
     );
 
-    let facts = PositionFacts { tick_spacing, ..Default::default() };
+    let facts = PositionFacts { tick_spacing, fee_raw, hooks, ..Default::default() };
     Ok(PositionRead::Live((RawPosition {
         position_id: format!("uniswap-v4:{}:{}", pos.network, pos.nft_id),
         network: pos.network.clone(),

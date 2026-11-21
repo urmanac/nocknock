@@ -200,6 +200,7 @@ pub(crate) fn with_gas_ranges() -> RawOnChainData {
             tick_spacing: Some(100),
             staked_in_gauge: Some(GAUGE.to_string()),
             fees_note: Some(AERO_CL_STAKED_FEES_NOTE.to_string()),
+            ..Default::default()
         },
     );
     raw.aero = AeroReads {

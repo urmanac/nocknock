@@ -93,6 +93,9 @@ mod ladder_track_text;
 mod fee_yield;
 use fee_yield::*;
 mod mint_math;
+mod ladder_suggest;
+use ladder_suggest::*;
+mod ladder_suggest_text;
 
 // ============================================================
 // Configuration
@@ -120,11 +123,14 @@ pub struct OperatorProfile {
     /// draws below it. Unset = no rule, never a default.
     #[serde(default)]
     pub cash_reserve_usdc: Option<f64>,
-    /// The bottom of the operator's ladder zone in USD per NOCK (operator decision,
-    /// 2026-11-20). The ladder simulator reads its reserve gate at the lower of the
-    /// deepest rung's bottom and this price, so a ladder that stops above it cannot
-    /// recruit the reserve kept for prices below it. Also a labelled prefill for the
-    /// deep rung's bottom on the dashboard. Unset = no rule, never a default.
+    /// The bottom of the operator's NOCK ladder zone in USD per NOCK (operator
+    /// decision, 2026-11-20; #166 rungs and #168): a ladder buys from spot down to
+    /// here, and the standing reserve is for prices below it. The ladder simulator and
+    /// the ladder suggestion read the reserve gate at the lower of the deepest rung's
+    /// bottom and this price, so a ladder that stops above it cannot recruit the
+    /// reserve kept for prices below it. Positive and finite; anything else is
+    /// reported as invalid (never a cycle failure). Unset = no rule and no ladder is
+    /// sized by the suggestion, never a default.
     #[serde(default)]
     pub ladder_bottom_usd: Option<f64>,
     /// The operator's ladder shape (operator decision, 2026-11-20), ordered from the top
@@ -752,6 +758,11 @@ struct PositionFacts {
     /// The pool's tick spacing: Aero CL (the "200" in CL200) and, since 2.9.0 (#166),
     /// Uniswap v4 (word 3 of the poolKeys answer the adapter already reads).
     tick_spacing: Option<i32>,
+    /// Uniswap v4 only (2.9.0, #168): the pool fee as poolKeys answers it, in hundredths
+    /// of a basis point (30000 for 3%; 0x800000 flags a dynamic fee), and the hooks
+    /// address, from the same answer. None when not read.
+    fee_raw: Option<u32>,
+    hooks: Option<String>,
     /// Aero CL: the gauge holding the NFT, when the tracked wallet staked it there.
     staked_in_gauge: Option<String>,
     /// Why this position reports no LP-claimable fee figure. None when fees were read.
@@ -816,6 +827,13 @@ struct Position {
     /// was not read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     tick_spacing: Option<i32>,
+    /// Uniswap v4 only (2.9.0, #168): the pool fee from poolKeys in hundredths of a basis
+    /// point (30000 = 3%), unrounded, and the pool's hooks address (0x-prefixed; the zero
+    /// address for a pool without hooks). Absent elsewhere and whenever not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fee_raw: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hooks: Option<String>,
     /// Aero CL only: the gauge the tracked wallet staked this NFT in. Absent when the
     /// wallet holds the NFT itself and for every other protocol. (v0.6.0, #91)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1033,6 +1051,13 @@ struct DerivedMetrics {
     /// no inputs. Absent when no shape is configured. Left out of the state hash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ladder_shape: Option<serde_json::Value>,
+    /// The ladder suggestion (snapshot 2.9.0, issue #168): a structured top-of-page event
+    /// stating whether a NOCK ladder fits the operator's rules and, when it does, its
+    /// range, the most USDC the standing reserve allows and the deposit link. Built by
+    /// `ladder_suggest::attach_ladder_suggestion` from the assembled snapshot. Absent in a
+    /// snapshot stored before the field existed: not reported, never "nothing fits".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ladder_suggestion: Option<serde_json::Value>,
 }
 
 /// Fees per unit of liquidity measured on our own tracked ranges (2.10.0). One pool
@@ -2458,3 +2483,5 @@ mod tests_ladder_track;
 mod tests_fee_yield;
 #[cfg(test)]
 mod tests_ladder_rungs;
+#[cfg(test)]
+mod tests_ladder_suggest;

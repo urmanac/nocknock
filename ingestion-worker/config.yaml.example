@@ -209,16 +209,28 @@ operator_profile:
   # powder is reported above it and no plan buy draws below it. Unset = no rule.
   # cash_reserve_usdc: 950
 
-  # Optional bottom of your ladder zone, USD per NOCK (2.10.0). The ladder simulator
-  # reads its reserve gate at the lower of a ladder's deepest bottom and this price, so
-  # a ladder that stops above it is still gated where the reserve is meant to start (a
-  # near-only ladder cannot recruit the reserve kept for prices below it). The dashboard
-  # may prefill a deep rung's bottom from it, labelled as your setting. Unset = no rule:
-  # the gate is the ladder's own deepest bottom. No default.
+  # --- The NOCK ladder: its bottom and its shape (v0.9.0; #166, #168) ---------------
+  # Both keys are YOUR numbers. Neither has a default, and NockNock never completes or
+  # chooses them. NockNock measures; it signs and sends nothing.
+  #
+  # ladder_bottom_usd: the bottom of your ladder zone in USD per NOCK, the lowest price
+  # a NOCK ladder buys down to. The standing reserve (cash_reserve_usdc) is for prices
+  # below it. Write a plain number (0.01, not $0.01). Like every numeric key, a value
+  # that is not a number (text, "$0.01", "0,01", .nan, .inf)
+  # stops the worker at startup with a config error; a number at or below 0 is reported
+  # on the ladder card as invalid and nothing is sized (the cycle does not fail).
+  #   - Unset: the ladder card says this setting is needed and lists candidate bottoms
+  #     as a measurement, none picked. The simulator's reserve gate is then a ladder's
+  #     own deepest bottom.
+  #   - Set: the reserve gate is read at the lower of a ladder's deepest bottom and this
+  #     price, so a ladder that stops above it cannot recruit the reserve kept for
+  #     prices below it. With cash_reserve_usdc also set and no ladder_rungs, the card
+  #     states one range from the usable tick at or below spot down to this bottom,
+  #     holding the most USDC that leaves the stable balance at cash_reserve_usdc there.
   # ladder_bottom_usd: 0.01
-
-  # Optional ladder shape (2.10.0), top down, your numbers; there is no default. Each
-  # entry is one rung (each rung is its own position):
+  #
+  # ladder_rungs: your ladder shape, top down. Each entry is one rung, and each rung is
+  # its own position:
   #   rung     cap | near | deep. A cap is optional, at most one, and first: the tick
   #            band containing spot, holding the NOCK that may go into LP
   #            (lp_nock_budget) and the USDC its curve pairs with it, never more USDC
@@ -230,8 +242,12 @@ operator_profile:
   # The first near or deep rung's top is the usable tick at or below spot; each later
   # rung's top is the rung above's bottom. NockNock sizes the shape to the most the
   # reserve gate allows (derived_metrics.ladder_shape, and GET
-  # /v1/simulate/ladder?shape=configured). An invalid shape is a configuration error,
-  # named in every snapshot (global_status.ladder_rungs_note) and never completed.
+  # /v1/simulate/ladder?shape=configured). With a shape set, the ladder card shows one
+  # numbered deposit per rung still to deposit, each with its own range, amounts and
+  # Uniswap link (the link prefills the pool and the range, never an amount), and keeps
+  # showing the rungs that are left as you deposit them. An invalid shape is a
+  # configuration error, named in every snapshot (global_status.ladder_rungs_note) and
+  # on the card, and never completed.
   # ladder_rungs:
   #   - rung: cap
   #   - rung: near

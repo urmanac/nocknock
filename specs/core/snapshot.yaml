@@ -80,6 +80,33 @@ info:
       basis_nock and basis_cost_usd. positions_nock and the tick brackets keep the
       ladder (it holds NOCK). The simulator's stored book (#166) counts a tracked
       ladder as an existing range.
+    - The ladder suggestion (issue #168), also additive. DerivedMetrics.
+      ladder_suggestion (absent in a snapshot stored before it): a structured
+      top-of-page event (id, tier "top", status, shown, headline, what_changed, the
+      numbers, rungs[] with each rung's deep_link and would_sign). status ready |
+      needs_setting | invalid | ladder_tracked | no_target_pool | several_pools |
+      no_headroom | price_at_or_below_bottom | bottom_at_or_above_top | nock_exceeds |
+      unavailable; every status but ready carries `reason` and no rungs; needs_setting
+      names `missing` settings and, only when the bottom is missing, shows `candidates`
+      (the simulator's grid depths as bottoms, none picked); no_target_pool lists
+      `excluded` with each pool's reason. Ready
+      means no ladder is tracked, operator_profile.ladder_bottom_usd is set (no default)
+      and the standing reserve allows at least `minimum_usdc`, read at the lower of the
+      snapped bottom and the setting (gates.reserve.read_at_usd, binding reserve | wallet);
+      the reader applies `freshness_rule` (shown only on a fresh snapshot). Each rung
+      carries the pool (position_id, pool_id, protocol, tokens with addresses and
+      decimals, fee_tier_bps, fee_raw, tick_spacing, hooks), tick_lower/tick_upper, the
+      USDC and NOCK as decimal and raw units, and the bounds in USD per NOCK and NOCK per
+      USDC. outcomes[] are plain-language measurements (a fall inside the range, a fall
+      to the bottom, a rise); stated.lines are the plan budget, tax reserve and cash
+      target (stated, not gates); deep_link prefills the pool and range, never the
+      amount (the app was observed on 2026-11-21 to drop one), and states
+      amount_to_enter beside it; picture is the data of the card's price-axis drawing;
+      after_deposit (kind manual_config today) is the one field that says how a minted
+      rung becomes tracked. It never changes shot_advice_action or shot_advice_details.
+      Position.fee_raw and Position.hooks (uniswap-v4 only; absent when not read): the
+      poolKeys fee in hundredths of a basis point (30000 = 3%) and the hooks address,
+      for the new-position link.
 
     2.8.3 (the standing protected cash reserve, issue #162), additive:
     - GlobalStatus.cash_reserve_usdc, reserve_stable_usdc, reserve_headroom_usdc
@@ -502,6 +529,14 @@ components:
           type: integer
           description: The pool's tick spacing. aerodrome-cl (200 for a CL200 pool; v0.6.0) and, since 2.9.0, uniswap-v4 (300 for the 3% pool, word 3 of poolKeys; #166). Absent for uniswap-v3 and aerodrome basic, and whenever it was not read; never derived from the fee tier. fee_tier_bps is the pool's current swap fee, which is dynamic on Aero CL pools.
           example: 200
+        fee_raw:
+          type: integer
+          description: uniswap-v4 only (2.9.0, #168). The pool fee from poolKeys word 2 in hundredths of a basis point (30000 for 3%), unrounded; 0x800000 flags a dynamic fee. Absent elsewhere and when not read.
+          example: 30000
+        hooks:
+          type: string
+          pattern: '^0x[a-f0-9]{40}$'
+          description: uniswap-v4 only (2.9.0, #168). The pool's hooks address from poolKeys word 4; the zero address for a pool without hooks. Absent elsewhere and when not read.
         staked_in_gauge:
           type: string
           pattern: '^0x[a-fA-F0-9]{40}$'
@@ -904,6 +939,16 @@ components:
           description: >
             The operator's configured ladder shape worked out and sized by the cycle
             (2.10.0). Absent when no shape is configured. Left out of the state hash.
+        ladder_suggestion:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: |
+            The ladder suggestion (2.9.0, issue #168): a structured top-of-page event,
+            a measurement. Shape and statuses are in the 2.9.0 notes at the top of this
+            file; the worker's golden bodies are in
+            ingestion-worker/testdata/ladder_suggest/golden_ladder_suggest.json. Absent
+            in a snapshot stored before it: not reported, never "nothing fits".
 
     FeeYield:
       type: object

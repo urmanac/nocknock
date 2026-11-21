@@ -330,6 +330,9 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // The operator's configured ladder shape, sized to the shared reserve gate (2.10.0):
     // from this snapshot alone, for a card with no inputs. Left out of the state hash.
     snapshot_data.derived_metrics.ladder_shape = ladder_shape_block(&snapshot_data, Utc::now());
+    // The ladder suggestion (#168), measured on the assembled snapshot after the
+    // directive strings were captured: it never changes the directive or a push.
+    attach_ladder_suggestion(&mut snapshot_data, &profile, Utc::now());
 
     // Compute deterministic state hash
     let state_hash = compute_state_hash(&snapshot_data);

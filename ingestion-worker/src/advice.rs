@@ -973,6 +973,8 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         fee_yield: None,
         // Worked out by the cycle once fee_yield is known (ladder_shape_block).
         ladder_shape: None,
+        // Filled from the assembled snapshot (#168): ladder_suggest::attach_ladder_suggestion.
+        ladder_suggestion: None,
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: fee_entries
                 .iter()
