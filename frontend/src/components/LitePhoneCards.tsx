@@ -19,7 +19,11 @@ import { LadderSuggestionLiteCard } from './LadderSuggestionCard';
 import { ladderSuggestionOf } from '../ladderSuggestion';
 import { FoundPositionsLiteCard } from './FoundPositions';
 import { positionDetectionOf } from '../foundPositions';
+import { ladderProfileOf } from '../ladderProfile';
 import { TopOfPageLiteEvents } from './TopOfPage';
+import { LadderShapeChart } from './LadderShapeChart';
+import { FoundQuietLine, LadderDeployedLine, ladderSuggestionAtTop } from './QuietLadderLines';
+import { foundNeedsAttention } from '../foundPositions';
 import { EventAnchors } from './EventAnchors';
 import { eventsOf } from '../events';
 
@@ -114,7 +118,7 @@ export function LiteStatusCard() {
       </section>
       {/* The ladder suggestion (#168): right under the directive, the same headline,
           outcomes and deposits as the dashboard. */}
-      {snapshot ? (
+      {snapshot && ladderSuggestionAtTop(ladderSuggestionOf(snapshot.data)) ? (
         <LadderSuggestionLiteCard
           suggestion={ladderSuggestionOf(snapshot.data)}
           syncStatus={now?.syncStatus ?? freshness.syncStatus}
@@ -124,8 +128,16 @@ export function LiteStatusCard() {
       ) : null}
       {/* Found on-chain (v0.9.0): the same block as the dashboard's, with the same
           one-tap buttons, right under the ladder card. */}
-      {snapshot ? (
+      {snapshot && positionDetectionOf(snapshot.data) && foundNeedsAttention(positionDetectionOf(snapshot.data)!) ? (
         <FoundPositionsLiteCard detection={positionDetectionOf(snapshot.data)} onChanged={refetch} cardStyle={card} labelStyle={label} />
+      ) : null}
+      {/* The ladder's shape and its quiet lines (#169): nothing to decide, so not at the top. */}
+      {snapshot && (ladderProfileOf(snapshot.data) || !ladderSuggestionAtTop(ladderSuggestionOf(snapshot.data))) ? (
+        <section style={{ ...card, minWidth: 0, overflowWrap: 'anywhere' }} data-testid="ladder-lite-section">
+          <LadderShapeChart data={snapshot.data} width={340} compact />
+          <LadderDeployedLine suggestion={ladderSuggestionOf(snapshot.data)} syncStatus={now?.syncStatus ?? freshness.syncStatus} compact />
+          <FoundQuietLine detection={positionDetectionOf(snapshot.data)} onChanged={refetch} compact />
+        </section>
       ) : null}
       {snapshot && metrics?.accumulation_plan ? (
         <section style={card}>

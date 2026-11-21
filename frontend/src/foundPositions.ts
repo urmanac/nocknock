@@ -90,6 +90,19 @@ export function positionDetectionOf(data: any): PositionDetection | null {
   return d && typeof d === 'object' && typeof d.status === 'string' ? (d as PositionDetection) : null;
 }
 
+/** Whether the block is a real call to action (#169, operator 2026-11-21): a position
+ *  waiting for a tap, or a check that did not complete. Otherwise it is one quiet line. */
+export function foundNeedsAttention(d: PositionDetection): boolean {
+  return (d.found_not_counted?.count ?? 0) > 0 || d.status !== 'ok';
+}
+
+/** The quiet line: "3 positions tracked from the chain · checked at block 60435277". */
+export function foundQuietLine(d: PositionDetection): string {
+  const n = d.tracked?.length ?? 0;
+  const block = d.checked_at_block != null ? ` · checked at block ${d.checked_at_block}` : '';
+  return `${n} position${n === 1 ? '' : 's'} tracked from the chain${block}`;
+}
+
 /** Whether the block has anything to show beyond its one status line. */
 export function detectionHasRows(d: PositionDetection): boolean {
   return (d.tracked?.length ?? 0) > 0 || (d.found_not_counted?.count ?? 0) > 0 || (d.dismissed?.count ?? 0) > 0;

@@ -53,6 +53,9 @@ import { FloorBreachNote } from './components/FloorBreachNote.tsx';
 import { LadderSuggestionCard } from './components/LadderSuggestionCard';
 import { TopOfPageEvents } from './components/TopOfPage';
 import { EventAnchors } from './components/EventAnchors';
+import { LadderShapeChart } from './components/LadderShapeChart';
+import { FoundQuietLine, LadderDeployedLine, ladderSuggestionAtTop } from './components/QuietLadderLines';
+import { foundNeedsAttention } from './foundPositions';
 import { eventsOf } from './events';
 import { ladderSuggestionOf } from './ladderSuggestion';
 import { FoundPositionsCard } from './components/FoundPositions';
@@ -130,6 +133,12 @@ function Dashboard() {
   const metrics = rawData?.derived_metrics ?? rawData;
   // The events (#169): every deep link lands on the place that shows it.
   const pageEvents = eventsOf(rawData);
+  // Only real calls to action at the top (#169, operator 2026-11-21): a deployed ladder and
+  // found positions with nothing to decide are quiet lines in the ladder section.
+  const suggestion = ladderSuggestionOf(rawData);
+  const suggestionAtTop = ladderSuggestionAtTop(suggestion);
+  const detection = positionDetectionOf(rawData);
+  const foundAtTop = !!detection && foundNeedsAttention(detection);
   const global = metrics?.global_status;
   // Market regime telemetry (v0.3.0): daily/micro RSI + third-party backfill provenance
   const provenance = snapshot?.data_provenance;
@@ -264,14 +273,14 @@ function Dashboard() {
 
         {/* The ladder suggestion (#168): the top-of-page ladder surface, under the title
             row and above the stat tiles. No input. */}
-        <EventAnchors events={pageEvents} card="ladder_suggestion" />
-        <LadderSuggestionCard suggestion={ladderSuggestionOf(rawData)} syncStatus={freshness.syncStatus} />
+        {suggestionAtTop && <EventAnchors events={pageEvents} card="ladder_suggestion" />}
+        {suggestionAtTop && <LadderSuggestionCard suggestion={suggestion} syncStatus={freshness.syncStatus} />}
 
         {/* Found on-chain (v0.9.0): the positions the worker found in the wallet, with
             one-tap buttons. Right under the ladder card: after a deposit in the Uniswap
             app this is where the new position appears. No input. */}
-        <EventAnchors events={pageEvents} card="found_positions" />
-        <FoundPositionsCard detection={positionDetectionOf(rawData)} onChanged={refetch} />
+        {foundAtTop && <EventAnchors events={pageEvents} card="found_positions" />}
+        {foundAtTop && <FoundPositionsCard detection={detection} onChanged={refetch} />}
 
         {/* Primary Dual-Goal Metrics Bar */}
         <div style={styles.globalStats}>
@@ -492,6 +501,13 @@ function Dashboard() {
         <EventAnchors events={pageEvents} card="closed_positions" />
         <ClosedPositionsCard data={rawData} />
         {/* Tracked ladders (#167): measured readings, no button. Absent without one. */}
+        {/* The ladder section (#169): the shape of what is deployed, the quiet lines of the
+            cards that have nothing to decide, and the compact rung rows. */}
+        <LadderShapeChart data={rawData} />
+        {!suggestionAtTop && <EventAnchors events={pageEvents} card="ladder_suggestion" />}
+        <LadderDeployedLine suggestion={suggestion} syncStatus={freshness.syncStatus} />
+        {!foundAtTop && <EventAnchors events={pageEvents} card="found_positions" />}
+        <FoundQuietLine detection={detection} onChanged={refetch} />
         <EventAnchors events={pageEvents} card="ladders" />
         <LaddersCard data={rawData} />
       </section>

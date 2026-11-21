@@ -90,7 +90,7 @@ describe('tracked ladders (#167)', () => {
     expect(ladderCurveLine(r)).toBe(
       'Against its all-USDC top ($1226.09 USDC): 5551.3674 NOCK held, $88.59 converted (7.23%), curve average $0.01595807; all NOCK at the bottom: not stated (no bottom)',
     );
-    expect(ladderLiteLine(deep(LADDERS_ABOVE))).toBe('v4 USDC/NOCK 3.00% #3299001: above range, all USDC · $77.00 USDC + 0.0000 NOCK');
+    expect(ladderLiteLine(deep(LADDERS_ABOVE))).toBe('v4 USDC/NOCK 3.00% #3299001: above range, all USDC · $77.00 USDC + 0 NOCK');
   });
 
   it('what it bought comes from the verified receipt only; otherwise the reason', () => {

@@ -62,6 +62,41 @@ export const EVENTS_LIVE_UNSET: EventsFixture = {
         "would_sign": null
       },
       {
+        "card": "found_positions",
+        "deep_link": "#event-found-positions",
+        "id": "found_positions",
+        "kind": "found_positions",
+        "links": [],
+        "numbers": {
+          "tracked": "3"
+        },
+        "since": "2026-11-21T16:10:35.795544312+00:00",
+        "source": "derived_metrics.position_detection",
+        "text": "3 positions tracked from the chain · checked at block 60435277",
+        "tier": "quiet",
+        "title": "FOUND ON-CHAIN",
+        "what_changed": "Nothing new to decide.",
+        "would_sign": null
+      },
+      {
+        "card": "ladder_suggestion",
+        "deep_link": "#event-ladder-suggestion-nock",
+        "id": "ladder_suggestion:NOCK",
+        "kind": "ladder_suggestion",
+        "links": [],
+        "numbers": {
+          "deployed": "3",
+          "of": "3"
+        },
+        "since": "2026-11-21T16:10:35.795544312+00:00",
+        "source": "derived_metrics.ladder_suggestion",
+        "text": "Ladder: all 3 rungs deployed",
+        "tier": "quiet",
+        "title": "LADDER",
+        "what_changed": "Nothing is left to deposit.",
+        "would_sign": null
+      },
+      {
         "card": "ladders",
         "deep_link": "#event-ladder-cap-sold-uniswap-v4-base-3244699",
         "id": "ladder_cap_sold:uniswap-v4:base:3244699",
@@ -283,6 +318,141 @@ export const EVENTS_LIVE_UNSET: EventsFixture = {
       "settings_key": "operator_profile.ladder_maintenance",
       "statement": "Measurements against your own restraint settings (operator_profile.ladder_maintenance, no defaults). NockNock builds no transaction and signs and sends nothing; whether and when is your decision.",
       "watched_since_previous": false
+    },
+    "ladder_profile": {
+      "axis": "usd_per_nock_log",
+      "bars": [
+        {
+          "capital_basis": "value_now",
+          "capital_usd": "260.40",
+          "clip_text": "continues from $0.005501 to $0.04106",
+          "clipped_high": true,
+          "clipped_low": true,
+          "density": "129.558716",
+          "high_usd": "0.04105518",
+          "label": "v4 USDC/NOCK 3.00% #3163450",
+          "low_usd": "0.00550148",
+          "name": "#3163450",
+          "position_id": "uniswap-v4:base:3163450",
+          "role": "other",
+          "status": "measured",
+          "text": "#3163450 $260.40"
+        },
+        {
+          "capital_basis": "usdc_at_top",
+          "capital_usd": "27.63",
+          "clip_text": null,
+          "clipped_high": false,
+          "clipped_low": false,
+          "density": "921.046049",
+          "high_usd": "0.01353085",
+          "label": "v4 USDC/NOCK 3.00% #3244699",
+          "low_usd": "0.01313098",
+          "name": "cap",
+          "position_id": "uniswap-v4:base:3244699",
+          "role": "cap",
+          "status": "measured",
+          "text": "cap $27.63"
+        },
+        {
+          "capital_basis": "usdc_at_top",
+          "capital_usd": "111.09",
+          "clip_text": null,
+          "clipped_high": false,
+          "clipped_low": false,
+          "density": "617.197524",
+          "high_usd": "0.01313098",
+          "label": "v4 USDC/NOCK 3.00% #3244700",
+          "low_usd": "0.01096801",
+          "name": "near",
+          "position_id": "uniswap-v4:base:3244700",
+          "role": "near",
+          "status": "measured",
+          "text": "near $111.09"
+        },
+        {
+          "capital_basis": "usdc_at_top",
+          "capital_usd": "629.52",
+          "clip_text": null,
+          "clipped_high": false,
+          "clipped_low": false,
+          "density": "6995.016394",
+          "high_usd": "0.01096801",
+          "label": "v4 USDC/NOCK 3.00% #3244701",
+          "low_usd": "0.01002405",
+          "name": "deep",
+          "position_id": "uniswap-v4:base:3244701",
+          "role": "deep",
+          "status": "measured",
+          "text": "deep $629.52"
+        }
+      ],
+      "cash_reserve_usdc": "950.00",
+      "full_range": [
+        {
+          "label": "Aero USDC/NOCK 0.30% (full range)",
+          "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+          "text": "Aero USDC/NOCK 0.30% (full range) $225.36: full range, no finite width, not drawn",
+          "value_usd": "225.36"
+        }
+      ],
+      "ladder_bottom_usd": "0.01000000",
+      "not_drawn": [],
+      "reserve_note": "$950.00 reserve kept for prices below the ladder bottom",
+      "segments": [
+        {
+          "density": "129.558716",
+          "high_usd": "0.01002405",
+          "includes_unknown": false,
+          "low_usd": "0.00550148",
+          "position_ids": [
+            "uniswap-v4:base:3163450"
+          ]
+        },
+        {
+          "density": "7124.575110",
+          "high_usd": "0.01096801",
+          "includes_unknown": false,
+          "low_usd": "0.01002405",
+          "position_ids": [
+            "uniswap-v4:base:3163450",
+            "uniswap-v4:base:3244701"
+          ]
+        },
+        {
+          "density": "746.756240",
+          "high_usd": "0.01313098",
+          "includes_unknown": false,
+          "low_usd": "0.01096801",
+          "position_ids": [
+            "uniswap-v4:base:3163450",
+            "uniswap-v4:base:3244700"
+          ]
+        },
+        {
+          "density": "1050.604765",
+          "high_usd": "0.01353085",
+          "includes_unknown": false,
+          "low_usd": "0.01313098",
+          "position_ids": [
+            "uniswap-v4:base:3163450",
+            "uniswap-v4:base:3244699"
+          ]
+        },
+        {
+          "density": "129.558716",
+          "high_usd": "0.04105518",
+          "includes_unknown": false,
+          "low_usd": "0.01353085",
+          "position_ids": [
+            "uniswap-v4:base:3163450"
+          ]
+        }
+      ],
+      "spot_usd": "0.01355744",
+      "statement": "Each bar spans a range's low to high price on a logarithmic axis; its height is capital / ln(high/low), so its area is its capital. A ladder rung's capital is its value as all USDC at its top, which does not change with the price; any other range's is its value now. A measurement of what is deployed, not a target.",
+      "view_high_usd": "0.01423531",
+      "view_low_usd": "0.00952381"
     }
   }
 } as unknown as EventsFixture;
@@ -398,6 +568,41 @@ export const EVENTS_NEAR_MOVE: EventsFixture = {
         "tier": "quiet",
         "title": "HOLD & ACCRETE (Dual Growth Engine Active)",
         "what_changed": "The directive is HOLD & ACCRETE (Dual Growth Engine Active).",
+        "would_sign": null
+      },
+      {
+        "card": "found_positions",
+        "deep_link": "#event-found-positions",
+        "id": "found_positions",
+        "kind": "found_positions",
+        "links": [],
+        "numbers": {
+          "tracked": "3"
+        },
+        "since": "2026-11-22T17:30:00+00:00",
+        "source": "derived_metrics.position_detection",
+        "text": "3 positions tracked from the chain · checked at block 60435277",
+        "tier": "quiet",
+        "title": "FOUND ON-CHAIN",
+        "what_changed": "Nothing new to decide.",
+        "would_sign": null
+      },
+      {
+        "card": "ladder_suggestion",
+        "deep_link": "#event-ladder-suggestion-nock",
+        "id": "ladder_suggestion:NOCK",
+        "kind": "ladder_suggestion",
+        "links": [],
+        "numbers": {
+          "deployed": "3",
+          "of": "3"
+        },
+        "since": "2026-11-22T17:30:00+00:00",
+        "source": "derived_metrics.ladder_suggestion",
+        "text": "Ladder: all 3 rungs deployed",
+        "tier": "quiet",
+        "title": "LADDER",
+        "what_changed": "Nothing is left to deposit.",
         "would_sign": null
       },
       {
@@ -716,6 +921,141 @@ export const EVENTS_NEAR_MOVE: EventsFixture = {
       "settings_key": "operator_profile.ladder_maintenance",
       "statement": "Measurements against your own restraint settings (operator_profile.ladder_maintenance, no defaults). NockNock builds no transaction and signs and sends nothing; whether and when is your decision.",
       "watched_since_previous": true
+    },
+    "ladder_profile": {
+      "axis": "usd_per_nock_log",
+      "bars": [
+        {
+          "capital_basis": "value_now",
+          "capital_usd": "260.40",
+          "clip_text": "continues from $0.005501 to $0.04106",
+          "clipped_high": true,
+          "clipped_low": true,
+          "density": "129.558716",
+          "high_usd": "0.04105518",
+          "label": "v4 USDC/NOCK 3.00% #3163450",
+          "low_usd": "0.00550148",
+          "name": "#3163450",
+          "position_id": "uniswap-v4:base:3163450",
+          "role": "other",
+          "status": "measured",
+          "text": "#3163450 $260.40"
+        },
+        {
+          "capital_basis": "usdc_at_top",
+          "capital_usd": "27.63",
+          "clip_text": null,
+          "clipped_high": false,
+          "clipped_low": false,
+          "density": "921.046049",
+          "high_usd": "0.01353085",
+          "label": "v4 USDC/NOCK 3.00% #3244699",
+          "low_usd": "0.01313098",
+          "name": "cap",
+          "position_id": "uniswap-v4:base:3244699",
+          "role": "cap",
+          "status": "measured",
+          "text": "cap $27.63"
+        },
+        {
+          "capital_basis": "usdc_at_top",
+          "capital_usd": "111.09",
+          "clip_text": null,
+          "clipped_high": false,
+          "clipped_low": false,
+          "density": "617.197524",
+          "high_usd": "0.01313098",
+          "label": "v4 USDC/NOCK 3.00% #3244700",
+          "low_usd": "0.01096801",
+          "name": "near",
+          "position_id": "uniswap-v4:base:3244700",
+          "role": "near",
+          "status": "measured",
+          "text": "near $111.09"
+        },
+        {
+          "capital_basis": "usdc_at_top",
+          "capital_usd": "629.52",
+          "clip_text": null,
+          "clipped_high": false,
+          "clipped_low": false,
+          "density": "6995.016394",
+          "high_usd": "0.01096801",
+          "label": "v4 USDC/NOCK 3.00% #3244701",
+          "low_usd": "0.01002405",
+          "name": "deep",
+          "position_id": "uniswap-v4:base:3244701",
+          "role": "deep",
+          "status": "measured",
+          "text": "deep $629.52"
+        }
+      ],
+      "cash_reserve_usdc": "950.00",
+      "full_range": [
+        {
+          "label": "Aero USDC/NOCK 0.30% (full range)",
+          "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+          "text": "Aero USDC/NOCK 0.30% (full range) $225.36: full range, no finite width, not drawn",
+          "value_usd": "225.36"
+        }
+      ],
+      "ladder_bottom_usd": "0.01000000",
+      "not_drawn": [],
+      "reserve_note": "$950.00 reserve kept for prices below the ladder bottom",
+      "segments": [
+        {
+          "density": "129.558716",
+          "high_usd": "0.01002405",
+          "includes_unknown": false,
+          "low_usd": "0.00550148",
+          "position_ids": [
+            "uniswap-v4:base:3163450"
+          ]
+        },
+        {
+          "density": "7124.575110",
+          "high_usd": "0.01096801",
+          "includes_unknown": false,
+          "low_usd": "0.01002405",
+          "position_ids": [
+            "uniswap-v4:base:3163450",
+            "uniswap-v4:base:3244701"
+          ]
+        },
+        {
+          "density": "746.756240",
+          "high_usd": "0.01313098",
+          "includes_unknown": false,
+          "low_usd": "0.01096801",
+          "position_ids": [
+            "uniswap-v4:base:3163450",
+            "uniswap-v4:base:3244700"
+          ]
+        },
+        {
+          "density": "1050.604765",
+          "high_usd": "0.01353085",
+          "includes_unknown": false,
+          "low_usd": "0.01313098",
+          "position_ids": [
+            "uniswap-v4:base:3163450",
+            "uniswap-v4:base:3244699"
+          ]
+        },
+        {
+          "density": "129.558716",
+          "high_usd": "0.04105518",
+          "includes_unknown": false,
+          "low_usd": "0.01353085",
+          "position_ids": [
+            "uniswap-v4:base:3163450"
+          ]
+        }
+      ],
+      "spot_usd": "0.01355744",
+      "statement": "Each bar spans a range's low to high price on a logarithmic axis; its height is capital / ln(high/low), so its area is its capital. A ladder rung's capital is its value as all USDC at its top, which does not change with the price; any other range's is its value now. A measurement of what is deployed, not a target.",
+      "view_high_usd": "0.01423531",
+      "view_low_usd": "0.00952381"
     }
   }
 } as unknown as EventsFixture;
@@ -790,6 +1130,41 @@ export const EVENTS_DEEP_CONVERTED: EventsFixture = {
         "tier": "quiet",
         "title": "HOLD & ACCRETE (Dual Growth Engine Active)",
         "what_changed": "The directive is HOLD & ACCRETE (Dual Growth Engine Active).",
+        "would_sign": null
+      },
+      {
+        "card": "found_positions",
+        "deep_link": "#event-found-positions",
+        "id": "found_positions",
+        "kind": "found_positions",
+        "links": [],
+        "numbers": {
+          "tracked": "3"
+        },
+        "since": "2026-11-21T16:10:35.795544312+00:00",
+        "source": "derived_metrics.position_detection",
+        "text": "3 positions tracked from the chain · checked at block 60435277",
+        "tier": "quiet",
+        "title": "FOUND ON-CHAIN",
+        "what_changed": "Nothing new to decide.",
+        "would_sign": null
+      },
+      {
+        "card": "ladder_suggestion",
+        "deep_link": "#event-ladder-suggestion-nock",
+        "id": "ladder_suggestion:NOCK",
+        "kind": "ladder_suggestion",
+        "links": [],
+        "numbers": {
+          "deployed": "3",
+          "of": "3"
+        },
+        "since": "2026-11-21T16:10:35.795544312+00:00",
+        "source": "derived_metrics.ladder_suggestion",
+        "text": "Ladder: all 3 rungs deployed",
+        "tier": "quiet",
+        "title": "LADDER",
+        "what_changed": "Nothing is left to deposit.",
         "would_sign": null
       },
       {
@@ -1035,6 +1410,141 @@ export const EVENTS_DEEP_CONVERTED: EventsFixture = {
       "settings_key": "operator_profile.ladder_maintenance",
       "statement": "Measurements against your own restraint settings (operator_profile.ladder_maintenance, no defaults). NockNock builds no transaction and signs and sends nothing; whether and when is your decision.",
       "watched_since_previous": false
+    },
+    "ladder_profile": {
+      "axis": "usd_per_nock_log",
+      "bars": [
+        {
+          "capital_basis": "value_now",
+          "capital_usd": "260.40",
+          "clip_text": "continues from $0.005501 to $0.04106",
+          "clipped_high": true,
+          "clipped_low": true,
+          "density": "129.558716",
+          "high_usd": "0.04105518",
+          "label": "v4 USDC/NOCK 3.00% #3163450",
+          "low_usd": "0.00550148",
+          "name": "#3163450",
+          "position_id": "uniswap-v4:base:3163450",
+          "role": "other",
+          "status": "measured",
+          "text": "#3163450 $260.40"
+        },
+        {
+          "capital_basis": "usdc_at_top",
+          "capital_usd": "27.63",
+          "clip_text": null,
+          "clipped_high": false,
+          "clipped_low": false,
+          "density": "921.046049",
+          "high_usd": "0.01353085",
+          "label": "v4 USDC/NOCK 3.00% #3244699",
+          "low_usd": "0.01313098",
+          "name": "cap",
+          "position_id": "uniswap-v4:base:3244699",
+          "role": "cap",
+          "status": "measured",
+          "text": "cap $27.63"
+        },
+        {
+          "capital_basis": "usdc_at_top",
+          "capital_usd": "111.09",
+          "clip_text": null,
+          "clipped_high": false,
+          "clipped_low": false,
+          "density": "617.197524",
+          "high_usd": "0.01313098",
+          "label": "v4 USDC/NOCK 3.00% #3244700",
+          "low_usd": "0.01096801",
+          "name": "near",
+          "position_id": "uniswap-v4:base:3244700",
+          "role": "near",
+          "status": "measured",
+          "text": "near $111.09"
+        },
+        {
+          "capital_basis": "usdc_at_top",
+          "capital_usd": "629.52",
+          "clip_text": null,
+          "clipped_high": false,
+          "clipped_low": false,
+          "density": "6995.016394",
+          "high_usd": "0.01096801",
+          "label": "v4 USDC/NOCK 3.00% #3244701",
+          "low_usd": "0.01002405",
+          "name": "deep",
+          "position_id": "uniswap-v4:base:3244701",
+          "role": "deep",
+          "status": "measured",
+          "text": "deep $629.52"
+        }
+      ],
+      "cash_reserve_usdc": "950.00",
+      "full_range": [
+        {
+          "label": "Aero USDC/NOCK 0.30% (full range)",
+          "position_id": "aerodrome:base:0x770fe8fc9248c6382950a86e39a9391b41d59e0a",
+          "text": "Aero USDC/NOCK 0.30% (full range) $225.36: full range, no finite width, not drawn",
+          "value_usd": "225.36"
+        }
+      ],
+      "ladder_bottom_usd": "0.01000000",
+      "not_drawn": [],
+      "reserve_note": "$950.00 reserve kept for prices below the ladder bottom",
+      "segments": [
+        {
+          "density": "129.558716",
+          "high_usd": "0.01002405",
+          "includes_unknown": false,
+          "low_usd": "0.00550148",
+          "position_ids": [
+            "uniswap-v4:base:3163450"
+          ]
+        },
+        {
+          "density": "7124.575110",
+          "high_usd": "0.01096801",
+          "includes_unknown": false,
+          "low_usd": "0.01002405",
+          "position_ids": [
+            "uniswap-v4:base:3163450",
+            "uniswap-v4:base:3244701"
+          ]
+        },
+        {
+          "density": "746.756240",
+          "high_usd": "0.01313098",
+          "includes_unknown": false,
+          "low_usd": "0.01096801",
+          "position_ids": [
+            "uniswap-v4:base:3163450",
+            "uniswap-v4:base:3244700"
+          ]
+        },
+        {
+          "density": "1050.604765",
+          "high_usd": "0.01353085",
+          "includes_unknown": false,
+          "low_usd": "0.01313098",
+          "position_ids": [
+            "uniswap-v4:base:3163450",
+            "uniswap-v4:base:3244699"
+          ]
+        },
+        {
+          "density": "129.558716",
+          "high_usd": "0.04105518",
+          "includes_unknown": false,
+          "low_usd": "0.01353085",
+          "position_ids": [
+            "uniswap-v4:base:3163450"
+          ]
+        }
+      ],
+      "spot_usd": "0.01355744",
+      "statement": "Each bar spans a range's low to high price on a logarithmic axis; its height is capital / ln(high/low), so its area is its capital. A ladder rung's capital is its value as all USDC at its top, which does not change with the price; any other range's is its value now. A measurement of what is deployed, not a target.",
+      "view_high_usd": "0.01423531",
+      "view_low_usd": "0.00952381"
     }
   }
 } as unknown as EventsFixture;

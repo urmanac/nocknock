@@ -42,7 +42,8 @@ describe('calls to action as events (#169)', () => {
     expect(tierTone(top[0])).toBe('alarm');
     // The quiet ones are all there: the directive, the cap, the fees, the rewards, the floor price.
     const quiet = events!.filter((e) => e.tier === 'quiet').map((e) => e.kind);
-    expect(quiet).toEqual(['directive', 'ladder_cap_sold', 'harvest', 'aero_rewards', 'floor_crossing']);
+    // A deployed ladder and found positions with nothing to decide are quiet lines (#169).
+    expect(quiet).toEqual(['directive', 'found_positions', 'ladder_suggestion', 'ladder_cap_sold', 'harvest', 'aero_rewards', 'floor_crossing']);
   });
 
   it('a near-rung move is at the top, with what would be signed and its deep link', () => {

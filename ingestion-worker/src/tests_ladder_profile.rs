@@ -97,6 +97,17 @@ fn a_rung_whose_capital_is_unknown_has_no_height() {
     assert_eq!(seg["includes_unknown"], true);
 }
 
+/// Writes the live bottle, as a cycle with the operator's chosen settings would publish it, to
+/// NOCKNOCK_PREVIEW_OUT for a dashboard preview. Ignored: a tool, not a test.
+#[test]
+#[ignore]
+fn write_preview_snapshot() {
+    let Ok(out) = std::env::var("NOCKNOCK_PREVIEW_OUT") else { return };
+    let env = live_bottle();
+    let c = cycle(&env, Some(crate::tests_ladder_maintenance::example_cfg()), None, env.meta.generated_at);
+    std::fs::write(out, serde_json::to_string_pretty(&c).unwrap()).unwrap();
+}
+
 #[test]
 fn no_ladder_no_profile_and_the_mcp_table() {
     let mut env = live_bottle();

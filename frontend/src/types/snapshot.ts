@@ -59,6 +59,9 @@ export interface DerivedMetrics {
   /** Calls to action as structured events (2.11.0, #169), top tier first. Absent from a
    *  worker that predates it: not reported, never "nothing needs you". */
   events?: import('../events').SnapshotEvent[] | null;
+  /** The ladder shape (2.11.0, #169): bars whose area on a log price axis is their capital.
+   *  Absent without a tracked ladder or from an older worker. */
+  ladder_profile?: import('../ladderProfile').LadderProfile | null;
 }
 
 /** Plan progress, derived from config + receipt-verified buys only (2.1.0) */
