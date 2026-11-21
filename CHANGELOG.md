@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The floor-crossing price (#165).** `derived_metrics.floor_breach` (snapshot spec
+  2.9.0, additive) measures how far NOCK can rise before the deployed ranges sell the
+  stack below the floor. Tracked NOCK at a multiple of spot is wallet NOCK, uncollected
+  NOCK fees and every NOCK range at that price (concentrated ranges from their own
+  liquidity and ticks, full-range pools by x*y=k), so at spot it is the Floor Health
+  reading. It reports both the hard floor and the tolerated level (floor less
+  `lp_floor_tolerance_bps`), the NOCK left if every range sells out (wallet plus fees),
+  the range that sells out first and the one that sells the most, and each range's
+  sell-out multiple. WETH/NOCK ranges hold ETH/USD constant, as stated. It is
+  unavailable with a reason naming the position when one cannot be evaluated (no
+  spot, a zero sqrtPrice, or a range holding NOCK on a frozen pool), never "safe". The
+  dashboard shows it under the Floor Health tile and both MCP transports state it in
+  `get_portfolio_state`. A measurement, never an instruction. On the live book of
+  2026-11-21: the 100,000 floor is crossed at NOCK ≥ $0.025405 (+96.3%), and the
+  tolerated 90,000 is never crossed (90,201 NOCK would remain).
+
 ## [0.8.3] - 2026-11-20
 
 A patch release: the protected cash reserve is a standing rule, and dry powder honours it.
