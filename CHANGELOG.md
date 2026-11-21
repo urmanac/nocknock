@@ -226,7 +226,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from `derived_metrics.ladder_shape` instead of one rung. With no shape set, the card
   is the single rung above, byte for byte.
   - *One numbered deposit per rung still to deposit,* numbered as in your shape:
-    "Deposit 1 of 3 (cap): about 86.79 NOCK + $1.23 USDC, in range now", then the near
+    "Deposit 1 of 3 (cap): about 86.79 NOCK + $1.22 USDC, in range now", then the near
     and deep rungs, USDC only. Each states its exact ticks, its bounds in USD per NOCK
     and in NOCK per USDC (from the ticks), the exact liquidity and raw amounts of its
     mint (for the transaction builder that follows) and its own Uniswap link, which
@@ -239,15 +239,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - *The card follows the plan as rungs are deposited.* A tracked ladder no longer hides
     it. A deployed rung is shown as done with what it holds and is not offered again; a
     passed rung states its plain reason; a rung over its target says so. The headline
-    counts only what is left ("Ladder: 2 of 3 deposits left, up to $116.09 USDC and
+    counts only what is left ("Ladder: 2 of 3 deposits left, up to $116.08 USDC and
     about 87 NOCK"), and with every rung deployed the card says the ladder is deployed
-    (new status `ladder_deployed`). When what is left would read the stable balance
-    below the reserve (a tracked rung over its target, or one that matches no rung), no
-    deposit is listed and the card says why.
+    (new status `ladder_deployed`). How it keeps up while the price moves is the next
+    entry.
   - *What the deposits leave in the wallet,* in the numbers and on the card: "After
     these deposits your wallet holds about $779 USDC; the $950 reserve counts the $224
     of USDC inside your existing NOCK ranges. At $0.01 with every rung converted, the
-    stable balance reads $950.00: the wallet's $778.85 plus $171.15 still inside those
+    stable balance reads $950.02: the wallet's $778.87 plus $171.15 still inside those
     ranges." (the test fixture's figures).
   - *The picture* draws one bar per rung on the price axis: the cap across the spot
     marker, a deployed rung hatched and muted, each label a dollar amount, placed beside
@@ -262,6 +261,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Both MCP transports list the same deposits in `get_shot_advice`, and the phone
     cockpit shows the same headline, outcomes and deposits. Nothing on the card takes
     typed input, and it still never changes the directive or sends a push.
+
+- **The ladder card keeps up deposit by deposit while the price moves (review of the
+  bottle, 2026-11-21).** The operator follows the card in the Uniswap app over minutes or
+  hours; before this, one tick of price after the first deposit could hide every
+  remaining deposit behind "no USDC is free", a deployed cap out of its band read "over
+  its target" for good, and a rung minted through the link was offered again.
+  - *Measured by liquidity.* Each rung's target is a liquidity on its own ticks, and a
+    liquidity does not change with the price. A tracked rung is deployed when it holds
+    at least its target's liquidity, wherever the price is; a tracked cap is the cap.
+    What is left is the remaining liquidity on the same ticks, at the price now.
+  - *Frozen by the first deposit.* The first near or deep rung deposited fixes the plan
+    (the earliest by deposit block when the blocks are known, otherwise the one implying
+    the most); the total is no longer re-divided each cycle. The plan is worked out from
+    the tracked rungs, not stored, so the database stays disposable.
+  - *Never all or nothing.* Once the plan is frozen the cap takes what the reserve
+    leaves beside the near and deep rungs, and says when it holds less than the budget.
+    When they alone need more than the reserve allows, each deposit left is cut pro
+    rata and the shortfall is stated in dollars (`fit`). `no_headroom` now means nothing
+    above the $1.00 minimum fits, and its headline says so ("Ladder: 1 of 3 deposits
+    left, but your reserve leaves under $1.00 for them").
+  - *Nothing under a dollar.* A remainder under the $1.00 minimum is never offered, so
+    a harvest or a cent of rounding never brings a deployed ladder back to the top of
+    the page.
+  - *Found on-chain.* A position found on-chain and not yet tracked on exactly a rung's
+    pool and ticks counts for that rung and reads "found on-chain, being tracked"; one
+    another address minted, or worth less than the minimum, never does. One that
+    matches no rung is named on the card and not counted until one tap. Position
+    detection already matches a new mint against the shape's cap, near and deep rungs
+    and tracks it with that rung's role.
+  - *The cap's text* states both limits, which one binds now and the field that keeps
+    it: the USDC field, with "the cap holds less than the budget", when its USDC limit
+    binds. *Passed rungs* give their own reason (the price at or below the rung's
+    bottom, or the cap's band covering what is left of it). *Fee lines* state the
+    diluted figure beside the undiluted one. A remainder that needs NOCK the budget
+    cannot give is held back with the figures that differ. The headline, outcomes and
+    wallet line add the amounts the card says to enter, cut to cents.
+  - `operator_profile.ladder_rungs` set without `operator_profile.ladder_bottom_usd` is
+    now `needs_setting` (OPERATOR_GUIDANCE section 7, `config.yaml.example`).
+  - The stored snapshot row keeps the card's rungs, ticks, pools and mints and leaves out
+    its links, texts, limits, picture, gates and outcomes (`detail_note`; a stored ready
+    card reads shown false with the reason), so the card no longer adds about 18.7 KB to
+    every row. `derived_metrics.ladder_shape` gains `fit`, `headroom_usdc`,
+    `rest_rule` and, per rung, `target_liquidity`, `tracked_liquidity`,
+    `remaining_liquidity`, `found` and `note`; statuses `found`, `below_minimum`, `held`
+    and `no_room` (snapshot spec 2.10.0). `shape=configured` no longer answers
+    `SHAPE_NO_ROOM`.
 
 ## [0.8.3] - 2026-11-20
 

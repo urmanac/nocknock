@@ -239,7 +239,10 @@ public certificate authority can vouch for the name, see
    what the rungs hold, the rungs are in no total, and nothing says so. Before running an
    older build, read `GET /v1/positions/found` and add each row's `config_entry` under
    `positions:` in `config.yaml` (it carries the NFT id, pool, ticks, role, rung and
-   `deposit_tx`), redeploy the secret, and only then remove the migration row.
+   `deposit_tx`), redeploy the secret, and only then remove the migration row. The
+   ladder card's plan is worked out from the tracked rungs (it is not stored), so a rung
+   left out of `config.yaml` this way is a rung the older card offers again: do not
+   deposit from an older build's card until every row is copied.
 
 2. **Deduplication Safeguard**:
    The ingestion worker includes built-in deduplication. If on-chain balances and pool reserves do not change between intervals, `store_snapshot` refreshes the `generated_at` timestamp on the active record rather than inserting redundant rows. Storage footprint remains under 50 MB/year.
