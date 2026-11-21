@@ -95,6 +95,7 @@ export const FEE_YIELD: FeeYield = {
         "liquidity_changed": 4,
         "out_of_range": 0,
         "pool_inactive": 0,
+        "staked": 0,
         "unreadable": 0,
         "zero_liquidity": 137
       },
@@ -104,6 +105,7 @@ export const FEE_YIELD: FeeYield = {
         "liquidity_changed": 1202.24,
         "out_of_range": 0.0,
         "pool_inactive": 0.0,
+        "staked": 0.0,
         "unreadable": 0.0,
         "zero_liquidity": 38413.578
       },

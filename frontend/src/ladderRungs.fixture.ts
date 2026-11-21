@@ -122,7 +122,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
   },
   "grid": [
     {
-      "est_fee_reason": null,
+      "est_fee_reason": "no rung is in range at this price, so none earns fees",
       "est_fee_usd_per_day": "0.00",
       "est_fee_usd_per_day_diluted": "0.00",
       "existing_nock_lp_nock": "19341.9535",
@@ -226,7 +226,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
       "total_tracked_nock": "115182.56"
     },
     {
-      "est_fee_reason": null,
+      "est_fee_reason": "no rung is in range at this price, so none earns fees",
       "est_fee_usd_per_day": "0.00",
       "est_fee_usd_per_day_diluted": "0.00",
       "existing_nock_lp_nock": "20627.3680",
@@ -260,7 +260,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
       "total_tracked_nock": "118914.39"
     },
     {
-      "est_fee_reason": null,
+      "est_fee_reason": "no rung is in range at this price, so none earns fees",
       "est_fee_usd_per_day": "0.00",
       "est_fee_usd_per_day_diluted": "0.00",
       "existing_nock_lp_nock": "21145.5540",
@@ -292,7 +292,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
       "total_tracked_nock": "119432.58"
     },
     {
-      "est_fee_reason": null,
+      "est_fee_reason": "no rung is in range at this price, so none earns fees",
       "est_fee_usd_per_day": "0.00",
       "est_fee_usd_per_day_diluted": "0.00",
       "existing_nock_lp_nock": "22164.5030",
@@ -394,7 +394,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
       "total_tracked_nock": "151780.64"
     },
     {
-      "est_fee_reason": null,
+      "est_fee_reason": "no rung is in range at this price, so none earns fees",
       "est_fee_usd_per_day": "0.00",
       "est_fee_usd_per_day_diluted": "0.00",
       "existing_nock_lp_nock": "23888.2905",
@@ -429,7 +429,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
       "total_tracked_nock": "169860.59"
     },
     {
-      "est_fee_reason": null,
+      "est_fee_reason": "no rung is in range at this price, so none earns fees",
       "est_fee_usd_per_day": "0.00",
       "est_fee_usd_per_day_diluted": "0.00",
       "existing_nock_lp_nock": "24500.1121",
@@ -461,7 +461,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
       "total_tracked_nock": "170472.42"
     },
     {
-      "est_fee_reason": null,
+      "est_fee_reason": "no rung is in range at this price, so none earns fees",
       "est_fee_usd_per_day": "0.00",
       "est_fee_usd_per_day_diluted": "0.00",
       "existing_nock_lp_nock": "25851.4339",
@@ -493,7 +493,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
       "total_tracked_nock": "171823.74"
     },
     {
-      "est_fee_reason": null,
+      "est_fee_reason": "no rung is in range at this price, so none earns fees",
       "est_fee_usd_per_day": "0.00",
       "est_fee_usd_per_day_diluted": "0.00",
       "existing_nock_lp_nock": "27355.8217",
@@ -525,7 +525,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
       "total_tracked_nock": "173328.13"
     },
     {
-      "est_fee_reason": null,
+      "est_fee_reason": "no rung is in range at this price, so none earns fees",
       "est_fee_usd_per_day": "0.00",
       "est_fee_usd_per_day_diluted": "0.00",
       "existing_nock_lp_nock": "29044.5410",
@@ -723,6 +723,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "liquidity_changed": 4,
           "out_of_range": 0,
           "pool_inactive": 0,
+          "staked": 0,
           "unreadable": 0,
           "zero_liquidity": 137
         },
@@ -732,6 +733,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "liquidity_changed": 1202.24,
           "out_of_range": 0.0,
           "pool_inactive": 0.0,
+          "staked": 0.0,
           "unreadable": 0.0,
           "zero_liquidity": 38413.578
         },
@@ -793,6 +795,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "min_usd_per_day": "9.28",
           "note": "UTC days; an interval counts on the date it starts. Every day is listed; the spread is over the days counted."
         },
+        "spread_reason": null,
         "status": "measured",
         "stored_history_replay": {
           "edge_seconds": "600",
@@ -813,6 +816,20 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
         "usdc": "100.00"
       },
       "max_usdc_with_the_others_as_given": "267.45",
+      "mint": {
+        "amount0_raw": "100000000",
+        "amount1_raw": "0",
+        "liquidity_raw": "2997532031714950",
+        "nock": "0.0000000000000000",
+        "nock_max_raw": "0",
+        "nock_raw": "0",
+        "note": "liquidity_raw is what these amounts buy, rounded down (LiquidityAmounts); amount0_raw and amount1_raw are what a mint of it pulls, rounded up (SqrtPriceMath), never more than the maxima (the rung's USDC and NOCK truncated to raw units)",
+        "status": "exact",
+        "tick": 273743,
+        "usdc": "100.000000",
+        "usdc_max_raw": "100000000",
+        "usdc_raw": "100000000"
+      },
       "round_trip": {
         "back_to_usd": "0.01294400",
         "down_to_usd": "0.01200086",
@@ -829,9 +846,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
         "nock_check": "not_given",
         "nock_given": null,
         "nock_needed_at_spot": "0.0000",
-        "nock_raw": "0",
-        "usdc_at_spot": "100.00",
-        "usdc_raw": "100000000"
+        "usdc_at_spot": "100.00"
       },
       "top": {
         "out_of_range_above_now": true,
@@ -929,6 +944,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "liquidity_changed": 4,
           "out_of_range": 0,
           "pool_inactive": 0,
+          "staked": 0,
           "unreadable": 0,
           "zero_liquidity": 137
         },
@@ -938,6 +954,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "liquidity_changed": 1202.24,
           "out_of_range": 0.0,
           "pool_inactive": 0.0,
+          "staked": 0.0,
           "unreadable": 0.0,
           "zero_liquidity": 38413.578
         },
@@ -999,6 +1016,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "min_usd_per_day": "33.60",
           "note": "UTC days; an interval counts on the date it starts. Every day is listed; the spread is over the days counted."
         },
+        "spread_reason": null,
         "status": "measured",
         "stored_history_replay": {
           "edge_seconds": "1801",
@@ -1025,6 +1043,20 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
         "usdc": "500.00"
       },
       "max_usdc_with_the_others_as_given": "667.45",
+      "mint": {
+        "amount0_raw": "500000000",
+        "amount1_raw": "0",
+        "liquidity_raw": "10850499376770899",
+        "nock": "0.0000000000000000",
+        "nock_max_raw": "0",
+        "nock_raw": "0",
+        "note": "liquidity_raw is what these amounts buy, rounded down (LiquidityAmounts); amount0_raw and amount1_raw are what a mint of it pulls, rounded up (SqrtPriceMath), never more than the maxima (the rung's USDC and NOCK truncated to raw units)",
+        "status": "exact",
+        "tick": 273743,
+        "usdc": "500.000000",
+        "usdc_max_raw": "500000000",
+        "usdc_raw": "500000000"
+      },
       "round_trip": null,
       "rung": "deep",
       "sizing": {
@@ -1033,9 +1065,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
         "nock_check": "not_given",
         "nock_given": null,
         "nock_needed_at_spot": "0.0000",
-        "nock_raw": "0",
-        "usdc_at_spot": "500.00",
-        "usdc_raw": "500000000"
+        "usdc_at_spot": "500.00"
       },
       "top": {
         "out_of_range_above_now": true,
@@ -1087,6 +1117,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01096801",
           "budget_status": "fits",
           "deep_high_usd": "0.01200086",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "53673.5854",
           "nock_by_depth": [
             {
@@ -1105,6 +1136,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "17.57",
               "fee_per_day_in_range_usd": "18.23",
@@ -1120,6 +1152,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": "20.56",
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "6.45",
               "fee_per_day_in_range_diluted_usd": "30.25",
               "fee_per_day_in_range_usd": "32.25",
@@ -1143,6 +1176,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01080473",
           "budget_status": "fits",
           "deep_high_usd": "0.01164620",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "54362.5116",
           "nock_by_depth": [
             {
@@ -1161,6 +1195,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "17.57",
               "fee_per_day_in_range_usd": "18.23",
@@ -1176,6 +1211,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": "24.86",
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "7.80",
               "fee_per_day_in_range_diluted_usd": "36.11",
               "fee_per_day_in_range_usd": "38.99",
@@ -1199,6 +1235,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01064388",
           "budget_status": "fits",
           "deep_high_usd": "0.01130202",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "55061.8491",
           "nock_by_depth": [
             {
@@ -1217,6 +1254,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "17.57",
               "fee_per_day_in_range_usd": "18.23",
@@ -1232,6 +1270,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": "32.48",
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "9.82",
               "fee_per_day_in_range_diluted_usd": "44.62",
               "fee_per_day_in_range_usd": "49.11",
@@ -1255,6 +1294,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
           "deep_high_usd": "0.01096801",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "55771.7551",
           "nock_by_depth": [
             {
@@ -1273,6 +1313,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "17.57",
               "fee_per_day_in_range_usd": "18.23",
@@ -1288,6 +1329,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "58.12",
               "fee_per_day_in_range_usd": "65.98",
@@ -1311,6 +1353,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01032932",
           "budget_status": "fits",
           "deep_high_usd": "0.01064388",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "56492.3895",
           "nock_by_depth": [
             {
@@ -1329,6 +1372,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "17.57",
               "fee_per_day_in_range_usd": "18.23",
@@ -1344,6 +1388,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "19.94",
               "fee_per_day_in_range_diluted_usd": "82.79",
               "fee_per_day_in_range_usd": "99.72",
@@ -1367,6 +1412,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01017554",
           "budget_status": "fits",
           "deep_high_usd": "0.01032932",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "57223.9144",
           "nock_by_depth": [
             {
@@ -1385,6 +1431,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "17.57",
               "fee_per_day_in_range_usd": "18.23",
@@ -1400,6 +1447,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "40.19",
               "fee_per_day_in_range_diluted_usd": "142.30",
               "fee_per_day_in_range_usd": "200.96",
@@ -1432,6 +1480,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_buy_price_usd": "0.01078141",
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
+          "gate_price_usd": "0.01002405",
           "near_low_usd": "0.01236633",
           "nock_at_deepest_bottom": "55651.3692",
           "nock_by_depth": [
@@ -1451,6 +1500,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "36.19",
               "fee_per_day_in_range_diluted_usd": "33.69",
               "fee_per_day_in_range_usd": "36.19",
@@ -1466,6 +1516,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "58.12",
               "fee_per_day_in_range_usd": "65.98",
@@ -1488,6 +1539,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_buy_price_usd": "0.01075813",
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
+          "gate_price_usd": "0.01002405",
           "near_low_usd": "0.01200086",
           "nock_at_deepest_bottom": "55771.7551",
           "nock_by_depth": [
@@ -1507,6 +1559,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "17.57",
               "fee_per_day_in_range_usd": "18.23",
@@ -1522,6 +1575,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "58.12",
               "fee_per_day_in_range_usd": "65.98",
@@ -1544,6 +1598,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_buy_price_usd": "0.01073461",
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
+          "gate_price_usd": "0.01002405",
           "near_low_usd": "0.01164620",
           "nock_at_deepest_bottom": "55893.9604",
           "nock_by_depth": [
@@ -1563,6 +1618,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "12.24",
               "fee_per_day_in_range_diluted_usd": "11.94",
               "fee_per_day_in_range_usd": "12.24",
@@ -1578,6 +1634,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "58.12",
               "fee_per_day_in_range_usd": "65.98",
@@ -1600,6 +1657,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_buy_price_usd": "0.01071084",
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
+          "gate_price_usd": "0.01002405",
           "near_low_usd": "0.01130202",
           "nock_at_deepest_bottom": "56018.0125",
           "nock_by_depth": [
@@ -1619,6 +1677,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "9.25",
               "fee_per_day_in_range_diluted_usd": "9.08",
               "fee_per_day_in_range_usd": "9.25",
@@ -1634,6 +1693,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "58.12",
               "fee_per_day_in_range_usd": "65.98",
@@ -1656,6 +1716,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_buy_price_usd": "0.01068682",
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
+          "gate_price_usd": "0.01002405",
           "near_low_usd": "0.01096801",
           "nock_at_deepest_bottom": "56143.9393",
           "nock_by_depth": [
@@ -1675,6 +1736,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": "3.07",
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "7.46",
               "fee_per_day_in_range_diluted_usd": "7.34",
               "fee_per_day_in_range_usd": "7.46",
@@ -1690,6 +1752,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "58.12",
               "fee_per_day_in_range_usd": "65.98",
@@ -1722,6 +1785,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
           "first_rung_share_pct": "0.00",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "57222.3347",
           "nock_by_depth": [
             {
@@ -1735,6 +1799,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": null,
               "fee_per_100_usd_per_day_in_range_usd": null,
               "fee_per_day_in_range_diluted_usd": null,
               "fee_per_day_in_range_usd": null,
@@ -1750,6 +1815,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "68.12",
               "fee_per_day_in_range_usd": "79.18",
@@ -1773,6 +1839,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
           "first_rung_share_pct": "10.00",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "56351.9869",
           "nock_by_depth": [
             {
@@ -1791,6 +1858,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "10.70",
               "fee_per_day_in_range_usd": "10.94",
@@ -1806,6 +1874,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "62.17",
               "fee_per_day_in_range_usd": "71.26",
@@ -1829,6 +1898,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
           "first_rung_share_pct": "16.67",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "55771.7551",
           "nock_by_depth": [
             {
@@ -1847,6 +1917,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "17.57",
               "fee_per_day_in_range_usd": "18.23",
@@ -1862,6 +1933,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "58.12",
               "fee_per_day_in_range_usd": "65.98",
@@ -1885,6 +1957,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
           "first_rung_share_pct": "20.00",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "55481.6392",
           "nock_by_depth": [
             {
@@ -1903,6 +1976,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "20.93",
               "fee_per_day_in_range_usd": "21.87",
@@ -1918,6 +1992,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "56.06",
               "fee_per_day_in_range_usd": "63.34",
@@ -1941,6 +2016,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
           "first_rung_share_pct": "30.00",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "54611.2915",
           "nock_by_depth": [
             {
@@ -1959,6 +2035,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "30.74",
               "fee_per_day_in_range_usd": "32.81",
@@ -1974,6 +2051,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "49.77",
               "fee_per_day_in_range_usd": "55.43",
@@ -1997,6 +2075,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
           "first_rung_share_pct": "40.00",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "53740.9438",
           "nock_by_depth": [
             {
@@ -2015,6 +2094,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "40.15",
               "fee_per_day_in_range_usd": "43.75",
@@ -2030,6 +2110,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "43.29",
               "fee_per_day_in_range_usd": "47.51",
@@ -2053,6 +2134,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
           "first_rung_share_pct": "50.00",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "52870.5961",
           "nock_by_depth": [
             {
@@ -2071,6 +2153,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "49.17",
               "fee_per_day_in_range_usd": "54.69",
@@ -2086,6 +2169,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "36.62",
               "fee_per_day_in_range_usd": "39.59",
@@ -2109,6 +2193,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
           "first_rung_share_pct": "60.00",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "52000.2484",
           "nock_by_depth": [
             {
@@ -2127,6 +2212,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "57.84",
               "fee_per_day_in_range_usd": "65.62",
@@ -2142,6 +2228,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "29.74",
               "fee_per_day_in_range_usd": "31.67",
@@ -2165,6 +2252,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
           "first_rung_share_pct": "70.00",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "51129.9007",
           "nock_by_depth": [
             {
@@ -2183,6 +2271,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "66.17",
               "fee_per_day_in_range_usd": "76.56",
@@ -2198,6 +2287,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "22.65",
               "fee_per_day_in_range_usd": "23.75",
@@ -2221,6 +2311,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
           "first_rung_share_pct": "80.00",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "50259.5530",
           "nock_by_depth": [
             {
@@ -2239,6 +2330,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "74.18",
               "fee_per_day_in_range_usd": "87.50",
@@ -2254,6 +2346,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "15.34",
               "fee_per_day_in_range_usd": "15.84",
@@ -2277,6 +2370,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": "0.01048542",
           "budget_status": "fits",
           "first_rung_share_pct": "90.00",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "49389.2053",
           "nock_by_depth": [
             {
@@ -2295,6 +2389,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "81.90",
               "fee_per_day_in_range_usd": "98.43",
@@ -2310,6 +2405,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "13.20",
               "fee_per_day_in_range_diluted_usd": "7.79",
               "fee_per_day_in_range_usd": "7.92",
@@ -2333,6 +2429,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "avg_kept_price_usd": null,
           "budget_status": "fits",
           "first_rung_share_pct": "100.00",
+          "gate_price_usd": "0.01002405",
           "nock_at_deepest_bottom": "48518.8575",
           "nock_by_depth": [
             {
@@ -2346,6 +2443,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
           "per_rung": [
             {
               "band_usd_per_day": null,
+              "coverage_whole": true,
               "fee_per_100_usd_per_day_in_range_usd": "18.23",
               "fee_per_day_in_range_diluted_usd": "89.33",
               "fee_per_day_in_range_usd": "109.37",
@@ -2361,6 +2459,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
             },
             {
               "band_usd_per_day": null,
+              "coverage_whole": null,
               "fee_per_100_usd_per_day_in_range_usd": null,
               "fee_per_day_in_range_diluted_usd": null,
               "fee_per_day_in_range_usd": null,
@@ -2375,7 +2474,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
               "usdc": "0.00"
             }
           ],
-          "reserve_margin_usdc": "203.43",
+          "reserve_margin_usdc": "167.45",
           "reserve_status": "holds",
           "total_usdc": "600.00"
         }
@@ -2839,7 +2938,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
       "total_tracked_nock": "162624.80"
     },
     {
-      "est_fee_reason": null,
+      "est_fee_reason": "no rung is in range at this price, so none earns fees",
       "est_fee_usd_per_day": "0.00",
       "est_fee_usd_per_day_diluted": "0.00",
       "existing_nock_lp_nock": "23888.2905",
@@ -2879,7 +2978,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
       "total_tracked_nock": "185976.94"
     },
     {
-      "est_fee_reason": null,
+      "est_fee_reason": "no rung is in range at this price, so none earns fees",
       "est_fee_usd_per_day": "0.00",
       "est_fee_usd_per_day_diluted": "0.00",
       "existing_nock_lp_nock": "23933.8327",
@@ -2919,7 +3018,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
       "total_tracked_nock": "186022.49"
     },
     {
-      "est_fee_reason": null,
+      "est_fee_reason": "no rung is in range at this price, so none earns fees",
       "est_fee_usd_per_day": "0.00",
       "est_fee_usd_per_day_diluted": "0.00",
       "existing_nock_lp_nock": "24500.1121",
@@ -2957,7 +3056,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
       "total_tracked_nock": "186588.77"
     },
     {
-      "est_fee_reason": null,
+      "est_fee_reason": "no rung is in range at this price, so none earns fees",
       "est_fee_usd_per_day": "0.00",
       "est_fee_usd_per_day_diluted": "0.00",
       "existing_nock_lp_nock": "25851.4339",
@@ -2995,7 +3094,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
       "total_tracked_nock": "187940.09"
     },
     {
-      "est_fee_reason": null,
+      "est_fee_reason": "no rung is in range at this price, so none earns fees",
       "est_fee_usd_per_day": "0.00",
       "est_fee_usd_per_day_diluted": "0.00",
       "existing_nock_lp_nock": "27355.8217",
@@ -3033,7 +3132,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
       "total_tracked_nock": "189444.48"
     },
     {
-      "est_fee_reason": null,
+      "est_fee_reason": "no rung is in range at this price, so none earns fees",
       "est_fee_usd_per_day": "0.00",
       "est_fee_usd_per_day_diluted": "0.00",
       "existing_nock_lp_nock": "29044.5410",
@@ -3088,17 +3187,17 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
         "usdc": "1.23"
       },
       {
-        "high_requested": "spot",
+        "high_requested": "0.012742917379855624",
         "index": 2,
-        "low_requested": "0.011",
+        "low_requested": "0.010968012886072376",
         "nock": null,
         "rung": "near",
         "usdc": "114.86"
       },
       {
-        "high_requested": "0.011",
+        "high_requested": "0.010968012886072376",
         "index": 3,
-        "low_requested": "0.01",
+        "low_requested": "0.0100240541221736",
         "nock": null,
         "rung": "deep",
         "usdc": "650.90"
@@ -3107,7 +3206,82 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
     "shape": {
       "cap": "sized",
       "cap_reason": null,
+      "dust": {
+        "nock": 1.0,
+        "note": "display constants, not settings",
+        "usdc": 0.5
+      },
+      "gate_price_rule": "your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom",
+      "gate_price_usd": "0.01000000",
       "note": "the operator's own shape, sized here; NockNock does not choose it",
+      "plan": [
+        {
+          "cap": {
+            "band_rule": "the band 273600..273900 of the 300-tick grid contains the pool's tick 273743",
+            "bound_by": "lp_nock_budget",
+            "budget_counting_the_tracked_cap": "86.7891",
+            "limit_rule": "never more USDC than the first near rung's target",
+            "lp_nock_budget": "86.7891",
+            "nock": "86.7891",
+            "note": "the cap holds the whole LP NOCK budget, 86.7891 NOCK; the curve pairs it with $1.23 USDC",
+            "pool_tick": 273743,
+            "tick_lower": 273600,
+            "tick_upper": 273900,
+            "usdc": "1.23"
+          },
+          "counterparts": [],
+          "deployed_nock": "0.0000",
+          "deployed_usdc": "0.000000",
+          "index": 1,
+          "over_by_usdc": null,
+          "reason": null,
+          "remaining_nock": "86.7891",
+          "remaining_usdc": "1.225999",
+          "rung": "cap",
+          "share": null,
+          "status": "to_deposit",
+          "target_nock": "86.7891",
+          "target_usdc": "1.225999",
+          "tick_lower": 273600,
+          "tick_upper": 273900
+        },
+        {
+          "cap": null,
+          "counterparts": [],
+          "deployed_nock": null,
+          "deployed_usdc": "0.000000",
+          "index": 2,
+          "over_by_usdc": null,
+          "reason": null,
+          "remaining_nock": null,
+          "remaining_usdc": "114.864600",
+          "rung": "near",
+          "share": "0.15",
+          "status": "to_deposit",
+          "target_nock": null,
+          "target_usdc": "114.864600",
+          "tick_lower": 273900,
+          "tick_upper": 275400
+        },
+        {
+          "cap": null,
+          "counterparts": [],
+          "deployed_nock": null,
+          "deployed_usdc": "0.000000",
+          "index": 3,
+          "over_by_usdc": null,
+          "reason": null,
+          "remaining_nock": null,
+          "remaining_usdc": "650.899401",
+          "rung": "deep",
+          "share": "0.85",
+          "status": "to_deposit",
+          "target_nock": null,
+          "target_usdc": "650.899401",
+          "tick_lower": 275400,
+          "tick_upper": 276300
+        }
+      ],
       "rest_note": "the near and deep shares divide the USDC left after the cap",
       "rest_usdc": "765.76",
       "rungs": [
@@ -3131,8 +3305,12 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
         }
       ],
       "source": "operator_profile.ladder_rungs",
-      "total_rule": "the shared reserve gate's most (max_usdc_total) at $0.01000000",
-      "total_usdc": "766.99"
+      "status": "computed",
+      "total_rule": "the shared reserve gate's most (max_usdc_total) at $0.01000000, counting the tracked rungs' USDC",
+      "total_usdc": "766.99",
+      "tracked_note": "Tracked ladder rungs in this pool (role: ladder) are part of the shape, not existing ranges: the total counts their USDC as if it were still in the wallet. A near or deep rung counts what its range holds as all USDC at its top (vs_top.usdc_at_top); a cap counts the USDC it holds now, and its NOCK is counted back into the NOCK budget the cap is sized by. Each tracked rung is matched to a configured rung by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order). What is left to deposit is drawn on a matched rung's own ticks.",
+      "tracked_usdc": "0.00",
+      "unmatched": []
     },
     "split_step_note": "display constants, not settings",
     "split_step_pct": 10.0,
@@ -3206,6 +3384,8 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
       "cap": {
         "band_rule": "the band 273600..273900 of the 300-tick grid contains the pool's tick 273743",
         "bound_by": "lp_nock_budget",
+        "budget_counting_the_tracked_cap": "86.7891",
+        "limit_rule": "never more USDC than the first near rung's target",
         "lp_nock_budget": "86.7891",
         "nock": "86.7891",
         "note": "the cap holds the whole LP NOCK budget, 86.7891 NOCK; the curve pairs it with $1.23 USDC",
@@ -3286,6 +3466,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
           "liquidity_changed": 4,
           "out_of_range": 0,
           "pool_inactive": 0,
+          "staked": 0,
           "unreadable": 0,
           "zero_liquidity": 137
         },
@@ -3295,6 +3476,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
           "liquidity_changed": 1202.24,
           "out_of_range": 0.0,
           "pool_inactive": 0.0,
+          "staked": 0.0,
           "unreadable": 0.0,
           "zero_liquidity": 38413.578
         },
@@ -3356,6 +3538,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
           "min_usd_per_day": "0.43",
           "note": "UTC days; an interval counts on the date it starts. Every day is listed; the spread is over the days counted."
         },
+        "spread_reason": null,
         "status": "measured",
         "stored_history_replay": {
           "edge_seconds": "900",
@@ -3376,6 +3559,27 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
         "usdc": "1.23"
       },
       "max_usdc_with_the_others_as_given": "1.23",
+      "mint": {
+        "amount0_raw": "1225999",
+        "amount1_raw": "867890958577132038",
+        "liquidity_raw": "138192109253769",
+        "nock": "86.7890958577132038",
+        "nock_max_raw": "867891000000000000",
+        "nock_raw": "867890958577132038",
+        "note": "liquidity_raw is what these amounts buy, rounded down (LiquidityAmounts); amount0_raw and amount1_raw are what a mint of it pulls, rounded up (SqrtPriceMath), never more than the maxima (the rung's USDC and NOCK truncated to raw units)",
+        "status": "exact",
+        "tick": 273743,
+        "usdc": "1.225999",
+        "usdc_max_raw": "1225999",
+        "usdc_raw": "1225999"
+      },
+      "plan": {
+        "counterparts": [],
+        "deployed_usdc": "0.000000",
+        "remaining_usdc": "1.225999",
+        "status": "to_deposit",
+        "target_usdc": "1.225999"
+      },
       "round_trip": {
         "back_to_usd": "0.01294400",
         "down_to_usd": "0.01274292",
@@ -3392,9 +3596,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
         "nock_check": "not_given",
         "nock_given": null,
         "nock_needed_at_spot": "86.7891",
-        "nock_raw": "867891000000000128",
-        "usdc_at_spot": "1.23",
-        "usdc_raw": "1225999"
+        "usdc_at_spot": "1.23"
       },
       "top": {
         "out_of_range_above_now": false,
@@ -3413,13 +3615,14 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
       },
       "bounds": {
         "high_pct": "-1.55",
-        "high_rule": "the usable tick at or below the pool price (high = spot): it holds no NOCK",
+        "high_rule": "the usable tick at or below the pool price (the first rung still drawable)",
         "high_usd": "0.01274292",
         "low_pct": "-15.27",
         "low_usd": "0.01096801",
         "tick_lower": 273900,
         "tick_upper": 275400
       },
+      "cap": null,
       "fee_estimate": {
         "assumptions": [
           "Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one).",
@@ -3492,6 +3695,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
           "liquidity_changed": 4,
           "out_of_range": 0,
           "pool_inactive": 0,
+          "staked": 0,
           "unreadable": 0,
           "zero_liquidity": 137
         },
@@ -3501,6 +3705,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
           "liquidity_changed": 1202.24,
           "out_of_range": 0.0,
           "pool_inactive": 0.0,
+          "staked": 0.0,
           "unreadable": 0.0,
           "zero_liquidity": 38413.578
         },
@@ -3562,6 +3767,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
           "min_usd_per_day": "4.36",
           "note": "UTC days; an interval counts on the date it starts. Every day is listed; the spread is over the days counted."
         },
+        "spread_reason": null,
         "status": "measured",
         "stored_history_replay": {
           "edge_seconds": "2101",
@@ -3576,12 +3782,33 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
       "if_pulled_at_fill": null,
       "index": 2,
       "inputs": {
-        "high_requested": "spot",
-        "low_requested": "0.011",
+        "high_requested": "0.012742917379855624",
+        "low_requested": "0.010968012886072376",
         "nock": null,
         "usdc": "114.86"
       },
       "max_usdc_with_the_others_as_given": "114.86",
+      "mint": {
+        "amount0_raw": "114864600",
+        "amount1_raw": "0",
+        "liquidity_raw": "1408301615002237",
+        "nock": "0.0000000000000000",
+        "nock_max_raw": "0",
+        "nock_raw": "0",
+        "note": "liquidity_raw is what these amounts buy, rounded down (LiquidityAmounts); amount0_raw and amount1_raw are what a mint of it pulls, rounded up (SqrtPriceMath), never more than the maxima (the rung's USDC and NOCK truncated to raw units)",
+        "status": "exact",
+        "tick": 273743,
+        "usdc": "114.864600",
+        "usdc_max_raw": "114864600",
+        "usdc_raw": "114864600"
+      },
+      "plan": {
+        "counterparts": [],
+        "deployed_usdc": "0.000000",
+        "remaining_usdc": "114.864600",
+        "status": "to_deposit",
+        "target_usdc": "114.864600"
+      },
       "round_trip": {
         "back_to_usd": "0.01294400",
         "down_to_usd": "0.01096801",
@@ -3598,9 +3825,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
         "nock_check": "not_given",
         "nock_given": null,
         "nock_needed_at_spot": "0.0000",
-        "nock_raw": "0",
-        "usdc_at_spot": "114.86",
-        "usdc_raw": "114864600"
+        "usdc_at_spot": "114.86"
       },
       "top": {
         "out_of_range_above_now": true,
@@ -3626,6 +3851,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
         "tick_lower": 275400,
         "tick_upper": 276300
       },
+      "cap": null,
       "fee_estimate": {
         "assumptions": [
           "Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one).",
@@ -3698,6 +3924,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
           "liquidity_changed": 4,
           "out_of_range": 0,
           "pool_inactive": 0,
+          "staked": 0,
           "unreadable": 0,
           "zero_liquidity": 137
         },
@@ -3707,6 +3934,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
           "liquidity_changed": 1202.24,
           "out_of_range": 0.0,
           "pool_inactive": 0.0,
+          "staked": 0.0,
           "unreadable": 0.0,
           "zero_liquidity": 38413.578
         },
@@ -3768,6 +3996,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
           "min_usd_per_day": "43.74",
           "note": "UTC days; an interval counts on the date it starts. Every day is listed; the spread is over the days counted."
         },
+        "spread_reason": null,
         "status": "measured",
         "stored_history_replay": {
           "edge_seconds": "1801",
@@ -3788,12 +4017,33 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
       },
       "index": 3,
       "inputs": {
-        "high_requested": "0.011",
-        "low_requested": "0.01",
+        "high_requested": "0.010968012886072376",
+        "low_requested": "0.0100240541221736",
         "nock": null,
         "usdc": "650.90"
       },
       "max_usdc_with_the_others_as_given": "650.90",
+      "mint": {
+        "amount0_raw": "650899400",
+        "amount1_raw": "0",
+        "liquidity_raw": "14125167068081104",
+        "nock": "0.0000000000000000",
+        "nock_max_raw": "0",
+        "nock_raw": "0",
+        "note": "liquidity_raw is what these amounts buy, rounded down (LiquidityAmounts); amount0_raw and amount1_raw are what a mint of it pulls, rounded up (SqrtPriceMath), never more than the maxima (the rung's USDC and NOCK truncated to raw units)",
+        "status": "exact",
+        "tick": 273743,
+        "usdc": "650.899400",
+        "usdc_max_raw": "650899400",
+        "usdc_raw": "650899400"
+      },
+      "plan": {
+        "counterparts": [],
+        "deployed_usdc": "0.000000",
+        "remaining_usdc": "650.899401",
+        "status": "to_deposit",
+        "target_usdc": "650.899401"
+      },
       "round_trip": null,
       "rung": "deep",
       "sizing": {
@@ -3802,9 +4052,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
         "nock_check": "not_given",
         "nock_given": null,
         "nock_needed_at_spot": "0.0000",
-        "nock_raw": "0",
-        "usdc_at_spot": "650.90",
-        "usdc_raw": "650899401"
+        "usdc_at_spot": "650.90"
       },
       "top": {
         "out_of_range_above_now": true,
@@ -3814,6 +4062,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
       }
     }
   ],
+  "shape_status": "computed",
   "sizing": {
     "describes": "the sum over the rungs; liquidity is per rung (rungs[].sizing)",
     "liquidity_human": null,

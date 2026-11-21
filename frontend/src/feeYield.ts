@@ -15,6 +15,8 @@ export interface FeeYieldSkips {
   out_of_range: number;
   gap: number;
   unreadable: number;
+  /** Intervals with a row staked in a gauge: their fees went to the gauge. */
+  staked: number;
 }
 
 export interface FeeYieldDay {
@@ -83,6 +85,20 @@ export interface LadderShapeRung {
   index: number;
   rung: 'cap' | 'near' | 'deep';
   share: string | null;
+  /** Against the tracked rungs (2.10.0 review): what is left to deposit, if anything. */
+  status: 'to_deposit' | 'deployed' | 'over' | 'passed' | 'none';
+  reason: string | null;
+  target_usdc: string;
+  target_nock: string | null;
+  deployed_usdc: string;
+  deployed_nock: string | null;
+  remaining_usdc: string;
+  remaining_nock: string | null;
+  over_by_usdc: string | null;
+  counterparts: string[];
+  /** What a mint of liquidity_raw pulls, rounded up (null unless to_deposit). */
+  amount0_raw: string | null;
+  amount1_raw: string | null;
   tick_lower: number | null;
   tick_upper: number | null;
   low_usd: string;
@@ -91,12 +107,12 @@ export interface LadderShapeRung {
   nock_per_usdc_at_high: string | null;
   in_range_now: boolean | null;
   out_of_range_above_now: boolean;
-  liquidity_raw: string;
-  liquidity_human: string;
+  liquidity_raw: string | null;
+  liquidity_human: string | null;
   usdc: string | null;
-  usdc_raw: string;
+  usdc_raw: string | null;
   nock: string | null;
-  nock_raw: string;
+  nock_raw: string | null;
   nock_held_at_bottom: string;
   nock_bought_at_bottom: string;
   avg_buy_price_usd: string | null;
@@ -105,7 +121,7 @@ export interface LadderShapeRung {
 }
 
 export interface LadderShape {
-  status: 'computed' | 'unavailable';
+  status: 'computed' | 'deployed' | 'price_at_or_below_bottom' | 'unavailable';
   reason: string | null;
   source: string;
   statement: string;
@@ -219,4 +235,37 @@ export function feeYieldSpreadLine(s: FeeYieldSpread): string {
   return `Daily spread: min ${f(s.min)}, median ${f(s.median)}, max ${f(s.max)} per 1e15 liquidity per day over ${s.days_counted} UTC day${
     s.days_counted === 1 ? '' : 's'
   } with at least ${h} h measured`;
+}
+
+/**
+ * A fee estimate as lines (2.10.0). The rules the worker states are kept here too: a fee
+ * per day while in range is never printed without its sample size (days and intervals),
+ * the in-range share of stored history and the replay upper bound beside it; when one of
+ * those is missing its reason is printed in its place; an unavailable estimate prints
+ * its reason, never a zero.
+ */
+export function feeEstimateLines(fe: import('./ladder').LadderFeeEstimate | null | undefined): string[] {
+  if (!fe) return ['Fees while in range: not stated in this body'];
+  if (fe.status !== 'measured' || fe.per_day_in_range_usd == null) {
+    return [`Fees while in range: not estimated: ${fe.reason ?? 'no reason given'}`];
+  }
+  const sample =
+    fe.measured_days != null && fe.intervals != null
+      ? `over ${fe.measured_days} days (${fe.intervals.toLocaleString('en-US')} intervals) on ${fe.measured_label ?? 'the measuring range'}`
+      : 'sample size not stated';
+  const lines = [`Fees while in range (an estimate): $${fe.per_day_in_range_usd}/day, measured ${sample}`];
+  const sh = fe.in_range_share_stored_history;
+  const rp = fe.stored_history_replay;
+  lines.push(
+    sh
+      ? `In range ${sh.share_pct}% of the measured time`
+      : `In range over stored history: not stated (${fe.in_range_share_reason ?? 'no reason given'})`,
+  );
+  lines.push(
+    rp
+      ? `Replayed over it: at most $${rp.inside_upper_usd} inside and $${rp.edge_upper_usd} more at its edges (no lower bound)`
+      : `Replay: not stated (${fe.replay_reason ?? 'no reason given'})`,
+  );
+  if (fe.coverage && !fe.coverage.whole) lines.push(fe.coverage.note);
+  return lines;
 }

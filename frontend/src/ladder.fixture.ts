@@ -73,6 +73,7 @@ export const SPOT_741_SNAPPED: LadderSimulation = {
     "skipped": null,
     "skipped_seconds": null,
     "spread": null,
+    "spread_reason": null,
     "status": "unavailable",
     "stored_history_replay": null
   },
@@ -460,6 +461,7 @@ export const CHAT_900_UNSNAPPED: LadderSimulation = {
     "skipped": null,
     "skipped_seconds": null,
     "spread": null,
+    "spread_reason": null,
     "status": "unavailable",
     "stored_history_replay": null
   },

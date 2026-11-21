@@ -63,6 +63,8 @@ export interface LadderFeeEstimate {
   per_day_in_range_diluted_usd: string | null;
   dilution: { active_liquidity_raw: string | null; new_liquidity_raw: string; factor: string; share_of_active_pct: string } | null;
   dilution_reason: string | null;
+  /** Why the spread is null (a snapshot read back from a stored row). */
+  spread_reason?: string | null;
   spread: {
     days_counted: number;
     day_min_seconds: number;
@@ -104,16 +106,45 @@ export interface LadderRung {
     nock_needed_at_spot: string;
     nock_given: string | null;
     nock_check: 'not_given' | 'matches';
-    usdc_raw: string;
-    nock_raw: string;
   };
+  /** The exact mint (2.10.0 review): liquidity rounded down from the amounts, the
+   *  amounts it pulls rounded up, never more than the maxima. */
+  mint: {
+    status: 'exact' | 'unavailable';
+    reason?: string;
+    liquidity_raw?: string;
+    amount0_raw?: string;
+    amount1_raw?: string;
+    usdc_raw?: string;
+    nock_raw?: string;
+    usdc?: string;
+    nock?: string;
+    usdc_max_raw?: string;
+    nock_max_raw?: string;
+    tick?: number;
+    note?: string;
+  };
+  /** shape=configured only: the rung against the tracked rungs. */
+  plan?: { status: string; target_usdc: string; deployed_usdc: string; remaining_usdc: string; counterparts: string[] };
   bottom: { price_usd: string; pct_of_spot: string; nock_held: string; nock_bought: string; avg_buy_price_usd: string | null };
   top: { price_usd: string; pct_of_spot: string; usdc_held: string; out_of_range_above_now: boolean };
   max_usdc_with_the_others_as_given: string | null;
   fee_estimate: LadderFeeEstimate;
   round_trip: { down_to_usd: string; back_to_usd: string; usdc_start: string; nock_start: string; usdc_back: string; nock_back: string; text: string } | null;
   if_pulled_at_fill: { at_usd: string; nock_kept: string; nock_bought: string; avg_price_usd: string | null; note: string } | null;
-  cap?: { tick_lower: number; tick_upper: number; pool_tick: number; band_rule: string; lp_nock_budget: string | null; nock: string; usdc: string; bound_by: string; note: string };
+  cap?: {
+    tick_lower: number;
+    tick_upper: number;
+    pool_tick: number;
+    band_rule: string;
+    lp_nock_budget: string | null;
+    budget_counting_the_tracked_cap: string | null;
+    nock: string;
+    usdc: string;
+    bound_by: string;
+    limit_rule: string;
+    note: string;
+  } | null;
 }
 
 export interface LadderCombined {
@@ -260,6 +291,8 @@ export interface LadderSimulation {
   combined?: LadderCombined;
   tradeoff?: LadderTradeoff | null;
   tradeoff_reason?: string | null;
+  /** shape=configured only: computed, deployed or price_at_or_below_bottom. */
+  shape_status?: 'computed' | 'deployed' | 'price_at_or_below_bottom';
   assumptions: string[];
   statement: string;
 }
@@ -432,6 +465,14 @@ export function ladderSnapshotLine(sim: LadderSimulation): string {
   return `From the snapshot generated ${s.generated_at} (${s.age_minutes} min ago) · worker health: ${s.worker_health}`;
 }
 
+/** Where the reserve gate is read, as the MCP text says it: "at the gate $0.01000000
+ *  (rule)" when the worker states a gate price (operator_profile.ladder_bottom_usd set,
+ *  valid or not, or a ladder of rungs), otherwise "at the bottom". */
+export function ladderGateWhere(sim: LadderSimulation): string {
+  const rc = sim.reserve_check;
+  return rc.gate_price_usd && rc.gate_price_rule ? `at the gate $${rc.gate_price_usd} (${rc.gate_price_rule})` : 'at the bottom';
+}
+
 /** The result as measured lines, in the MCP text's words. */
 export function ladderSummaryLines(sim: LadderSimulation): string[] {
   const lines: string[] = [];
@@ -466,7 +507,7 @@ export function ladderSummaryLines(sim: LadderSimulation): string[] {
     const m = rc.margin_usdc ?? '';
     const verdict = m.startsWith('-') ? `breached: below it by $${m.slice(1)}` : `holds by $${m}`;
     lines.push(
-      `Reserve: stable $${rc.stable_at_bottom_usdc} at the bottom against the $${rc.cash_reserve_usdc} reserve: ${verdict} (this range takes at most $${rc.max_usdc_for_this_range ?? 'unknown'})`,
+      `Reserve: stable $${rc.stable_at_bottom_usdc} ${ladderGateWhere(sim)} against the $${rc.cash_reserve_usdc} reserve: ${verdict} (this range takes at most $${rc.max_usdc_for_this_range ?? 'unknown'})`,
     );
   } else {
     lines.push(`Reserve: ${rc.status}: ${rc.reason ?? ''}`);
