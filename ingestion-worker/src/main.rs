@@ -84,6 +84,9 @@ use closed_text::*;
 mod floor_breach;
 use floor_breach::*;
 mod floor_breach_text;
+mod ladder;
+use ladder::*;
+mod ladder_text;
 
 // ============================================================
 // Configuration
@@ -2163,3 +2166,5 @@ mod tests_harvest_principal;
 mod tests_reserve;
 #[cfg(test)]
 mod tests_floor_breach;
+#[cfg(test)]
+mod tests_ladder;
