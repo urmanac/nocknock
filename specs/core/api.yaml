@@ -797,10 +797,16 @@ paths:
           deepest bottom, stated in gate_price_rule); the NOCK budget is met by the sum.
           The floor-crossing effect adds every rung as a hypothetical position.
         - shape=configured: the operator's own operator_profile.ladder_rungs
-          (GlobalStatus.ladder_rungs), sized to shape_usdc or to the shared reserve
-          gate's most (max_usdc_total). A cap, when the shape starts with one, is the
-          tick band containing the pool's tick, holding the LP NOCK budget and the USDC
-          its curve pairs with it, never more USDC than the near rung's.
+          (GlobalStatus.ladder_rungs). Each rung's target is a liquidity on its own
+          ticks; the plan is frozen by the first near or deep rung deposited (tracked, or
+          found on-chain on a rung's exact ticks) and otherwise sized to what the shared
+          reserve gate allows. What is left to deposit is sized to shape_usdc when given,
+          else to that headroom (the wallet's USDC plus every range's USDC at the gate,
+          less the reserve), cut pro rata when it needs more (inputs.shape.fit). A cap,
+          when the shape starts with one, is the tick band containing the pool's tick,
+          holding the LP NOCK budget and the USDC its curve pairs with it, never more USDC
+          than the near rung's nor, once the plan is frozen, than the reserve leaves for
+          it; a tracked cap is the cap. A remainder under $1.00 is not offered.
         - fee_estimate: fees per day while in range, measured from our own tracked
           range (snapshot derived_metrics.fee_yield), the measuring range's average fee
           per unit of liquidity times the range's liquidity, valued at the current pool
@@ -829,7 +835,7 @@ paths:
         - { name: r1_high_pct, in: query, required: false, schema: { type: number } }
         - { name: split_step_pct, in: query, required: false, schema: { type: number, minimum: 5, maximum: 50, default: 10 }, description: 'Rungs only: the split table''s step, a display step, echoed' }
         - { name: shape, in: query, required: false, schema: { type: string, enum: [configured] }, description: 'operator_profile.ladder_rungs, instead of the flat or indexed rungs' }
-        - { name: shape_usdc, in: query, required: false, schema: { type: number, exclusiveMinimum: true, minimum: 0 }, description: 'With shape: the total to size it to (default: the shared reserve gate''s most)' }
+        - { name: shape_usdc, in: query, required: false, schema: { type: number, exclusiveMinimum: true, minimum: 0 }, description: 'With shape: what is left to deposit is sized to it (default: what the shared reserve gate allows)' }
       responses:
         '200':
           description: The simulation. Amounts are strings; a figure that cannot be stated is null with a stated reason.
@@ -843,7 +849,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/LadderError' }
         '422':
-          description: LADDER_NOT_SIMULATED; `code` is NOCK_TOO_LITTLE, NOCK_TOO_MUCH, USDC_EXCEEDS_WALLET, RANGE_ABOVE_SPOT, RANGE_TOO_NARROW, RANGE_OUTSIDE_TICKS (an unsnapped bound past MIN_TICK or MAX_TICK, a range that cannot exist), POOL_NOT_SNAPPABLE or SPOT_UNAVAILABLE; for rungs also RUNG_TOO_NARROW and RUNGS_EXCEED_WALLET (a rung's own error names it first, as r2 (deep)); for shape=configured SHAPE_NOT_CONFIGURED (none set, or the configuration error named), SHAPE_TOTAL_UNKNOWN (no reserve to size by, so give shape_usdc), SHAPE_NO_ROOM and SHAPE_NEEDS_TICK_SPACING (a cap needs position_id). A NOCK mismatch carries nock_needed (a measured figure) and the bounds.
+          description: LADDER_NOT_SIMULATED; `code` is NOCK_TOO_LITTLE, NOCK_TOO_MUCH, USDC_EXCEEDS_WALLET, RANGE_ABOVE_SPOT, RANGE_TOO_NARROW, RANGE_OUTSIDE_TICKS (an unsnapped bound past MIN_TICK or MAX_TICK, a range that cannot exist), POOL_NOT_SNAPPABLE or SPOT_UNAVAILABLE; for rungs also RUNG_TOO_NARROW and RUNGS_EXCEED_WALLET (a rung's own error names it first, as r2 (deep)); for shape=configured SHAPE_NOT_CONFIGURED (none set, or the configuration error named), SHAPE_TOTAL_UNKNOWN (no reserve to size by, so give shape_usdc), SHAPE_NO_ROOM (no longer returned since the bottle review; a shape with no room answers 200 with shape_status no_room and every rung stated) and SHAPE_NEEDS_TICK_SPACING (a cap needs position_id). A NOCK mismatch carries nock_needed (a measured figure) and the bounds.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LadderError' }

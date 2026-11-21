@@ -45,10 +45,10 @@ fn test_stdio_prints_the_bottle_the_worker_prints() {
     // The three deposits, numbered the same in both transports, with the cap's limit.
     let bottle = g["bottle"]["text"].as_str().unwrap();
     for needle in [
-        "Deposit 1 of 3 (cap): about 86.79 NOCK + $1.23 USDC, in range now.",
+        "Deposit 1 of 3 (cap): about 86.79 NOCK + $1.22 USDC, in range now.",
         "Deposit 2 of 3 (near rung): $114.86 USDC, no NOCK, below the price now.",
         "Deposit 3 of 3 (deep rung): $650.89 USDC, no NOCK, below the price now.",
-        "The NOCK side must not exceed 86.7891 NOCK, your LP NOCK budget.",
+        "The NOCK side must not exceed 86.7891 NOCK, your LP NOCK budget, which binds now;",
         "After these deposits your wallet holds about $779 USDC;",
         "Exact mint: liquidity 14125167068081104, 650899400 raw USDC and 0 raw NOCK.",
     ] {

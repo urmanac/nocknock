@@ -296,7 +296,7 @@ fn assert_no_url(text: &str, node_url: &str) {
     assert!(!text.contains(node_url) && !text.contains("127.0.0.1") && !text.contains("not-a-real-key") && !text.contains("http://"), "{text}");
 }
 
-fn candidate(nft: u64) -> CandidateRow {
+pub(crate) fn candidate(nft: u64) -> CandidateRow {
     CandidateRow {
         wallet: OPERATOR.to_string(),
         protocol: TRACKED_PROTOCOL_V4.to_string(),

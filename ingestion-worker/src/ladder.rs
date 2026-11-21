@@ -2604,14 +2604,19 @@ pub(crate) fn ladder_rung_settings(rungs: &[LadderRungConfig]) -> Vec<LadderRung
         .collect()
 }
 
-/// A shape rung counts as deployed when what is left to deposit is below these; a tracked
-/// rung holding more than its target by more than these is `over`. Display constants,
-/// echoed in the block; not operator settings.
-pub(crate) const LADDER_SHAPE_DUST_USDC: f64 = 0.50;
-pub(crate) const LADDER_SHAPE_DUST_NOCK: f64 = 1.0;
-/// Why a configured rung above the price cannot be drawn (review of #166 rungs).
-pub(crate) const LADDER_SHAPE_PASSED_REASON: &str = "the price is below this rung's range; a USDC-only deposit there is not possible";
-pub(crate) const LADDER_SHAPE_TRACKED_NOTE: &str = "Tracked ladder rungs in this pool (role: ladder) are part of the shape, not existing ranges: the total counts their USDC as if it were still in the wallet. A near or deep rung counts what its range holds as all USDC at its top (vs_top.usdc_at_top); a cap counts the USDC it holds now, and its NOCK is counted back into the NOCK budget the cap is sized by. Each tracked rung is matched to a configured rung by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order). What is left to deposit is drawn on a matched rung's own ticks.";
+/// The least a deposit is worth listing for, and the least a remainder is offered for: the
+/// plan's dust threshold, the same $1.00 the single-rung card uses (`minimum_usdc`). A
+/// tracked rung whose remainder is worth less is deployed; one worth more than its target by
+/// at least this is `over`. A display constant, not a setting.
+pub(crate) const LADDER_SHAPE_MIN_USDC: f64 = PLAN_DUST_USDC;
+/// A rung is deployed by liquidity: its tracked liquidity is at least its target's, to this
+/// relative tolerance.
+pub(crate) const LADDER_SHAPE_L_TOLERANCE: f64 = 1e-6;
+/// Why the price at or below the ladder's bottom leaves nothing to draw (review of #166 rungs).
+pub(crate) const LADDER_SHAPE_PASSED_REASON: &str = "the price is at or below every rung's bottom, so a USDC-only deposit is possible in none of them";
+pub(crate) const LADDER_SHAPE_TRACKED_NOTE: &str = "Each configured rung's target is a liquidity on its own ticks; a liquidity does not change with the price, so a deployed rung stays deployed when the price moves, in range or out of it. Tracked ladder rungs in this pool (role: ladder) are matched to configured rungs by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order); a position found on-chain and not yet tracked counts for the rung whose pool and ticks it matches exactly. A near or deep rung is measured by what it holds as all USDC at its top (liquidity times the USDC one unit holds there). The plan is frozen by the first near or deep rung deposited: the shares divide what that rung's USDC at its top implies (the largest, when several are deposited), never the total again. Until then the shares divide what the reserve gate allows now, less the cap. A tracked cap is the cap: its liquidity is its target. What is left to deposit is drawn on a matched rung's own ticks.";
+/// How the deposits left are cut when the reserve gate allows less than they need.
+pub(crate) const LADDER_SHAPE_FIT_RULE: &str = "once a near or deep rung is deposited the cap takes only what the reserve leaves beside the near and deep rungs still to deposit; when they alone need more than the reserve allows, each deposit left is cut pro rata (by the same fraction), so the shape keeps its proportions, and the shortfall is stated";
 
 /// The cap's band, liquidity and the limit that bound it (`shape=configured`).
 struct CapSizing {
@@ -2619,25 +2624,39 @@ struct CapSizing {
     tick_upper: i32,
     usdc: f64,
     nock: f64,
+    l: f64,
     /// USDC and NOCK per unit of liquidity at the pool price, on this band.
     per_l: (f64, f64),
     bound_by: &'static str,
+    /// What the USDC limit is: near_share (not frozen yet: the most that keeps the cap at
+    /// or below the near rung), near_usdc (the frozen near rung's USDC), reserve (what the
+    /// reserve leaves beside the deposits listed) or total_usdc.
+    bound_by_limit: &'static str,
+    /// The NOCK budget and the USDC limit it was sized against.
+    budget: f64,
+    limit: f64,
     note: String,
     band_rule: String,
 }
 
-/// A tracked ladder (role: ladder) in the shape's pool.
+/// A tracked ladder (role: ladder) in the shape's pool, or a position found on-chain that
+/// is not tracked yet but matches a rung's pool and ticks exactly.
 struct TrackedRung {
     position_id: String,
     rung: Option<String>,
     tl: i32,
     tu: i32,
-    /// The USDC it counts toward the total (see LADDER_SHAPE_TRACKED_NOTE).
-    deployed_usdc: f64,
-    /// Its NOCK now (counted back into the budget for a cap).
-    deployed_nock: f64,
-    /// Its USDC at the gate price (0 when the gate is below it).
-    usdc_at_gate: f64,
+    /// Its liquidity (never changes with the price).
+    l: f64,
+    /// What it holds as all USDC at its top: its liquidity times the USDC one unit holds there.
+    v_top: f64,
+    /// What it holds now (stated, never a sizing input).
+    usdc_now: f64,
+    nock_now: f64,
+    /// Found on-chain, not tracked yet (position_detect.rs).
+    found: bool,
+    /// The block of its deposit, when its receipt was read: the order rungs were deposited.
+    block: Option<i64>,
 }
 
 /// One configured rung of the shape, planned against what is tracked.
@@ -2647,16 +2666,34 @@ struct PlanRung {
     share: Option<f64>,
     draw: Option<(i32, i32)>,
     passed: bool,
+    passed_reason: Option<String>,
+    /// Near and deep: the target and the tracked rungs as USDC at the top, and the
+    /// liquidity on the draw ticks they come to. The cap: its USDC and NOCK now.
     target_usdc: f64,
     target_nock: f64,
+    target_l: Option<f64>,
+    tracked_l: f64,
     deployed_usdc: f64,
     deployed_nock: f64,
     counterparts: Vec<String>,
+    found: Vec<String>,
+    /// The earliest deposit block of its counterparts; None when any is not known.
+    first_block: Option<i64>,
     cap: Option<CapSizing>,
     status: &'static str,
     reason: Option<String>,
+    note: Option<String>,
+    /// What is left: as USDC at the top (near and deep), its liquidity on the draw ticks,
+    /// and the amounts that liquidity takes at the pool price now.
+    remaining_v: f64,
+    remaining_l: f64,
     remaining_usdc: f64,
     remaining_nock: f64,
+    /// The fraction the reserve gate's cut left (1 when it fits).
+    fit_factor: f64,
+    /// Not offered because the reserve leaves too little for it (not because the shape is
+    /// small): the card says the reserve leaves no room.
+    no_room: bool,
 }
 
 impl LadderCtx<'_> {
@@ -2682,6 +2719,13 @@ impl LadderCtx<'_> {
         self.pool.range_from_ticks(lo_usd, hi_usd)
     }
 
+    /// The USDC one unit of liquidity holds at the top of [tl, tu): what a near or deep
+    /// rung is measured by.
+    fn usdc_per_l_at_top(&self, tl: i32, tu: i32) -> f64 {
+        let range = self.range_of_ticks(tl, tu);
+        self.pool.amounts(1.0, range.s_top, range.sa, range.sb).0
+    }
+
     /// The cap sized in its band: its NOCK is the LP NOCK budget (`budget`), or less when
     /// the USDC the curve pairs with it would exceed `limit` (the near rung's USDC). Err
     /// is the reason there is no cap.
@@ -2701,28 +2745,36 @@ impl LadderCtx<'_> {
         }
         let l_budget = budget / n1;
         let usdc_budget = l_budget * u1;
+        let limit = limit.max(0.0);
+        let limit_words = match limit_name {
+            "near_share" => "most that keeps it at or below the near rung's USDC",
+            "near_usdc" => "near rung's USDC",
+            "reserve" => "USDC the reserve leaves for it beside the other deposits listed",
+            _ => "ladder total",
+        };
+        // The near rung's share (not frozen) and the near rung's USDC (frozen) are one rule.
+        let bound_name = if limit_name == "near_share" { "near_usdc" } else { limit_name };
         let (l, bound_by, note) = if usdc_budget <= limit + 1e-9 {
             (l_budget, "lp_nock_budget", format!("the cap holds the whole LP NOCK budget, {} NOCK; the curve pairs it with ${} USDC", fx(budget, 4), fx(usdc_budget, 2)))
         } else {
             let l = limit / u1;
             (
                 l,
-                limit_name,
+                bound_name,
                 format!(
-                    "the budget's {} NOCK would pair with ${} USDC, more than the {}'s ${}: the cap's liquidity is reduced until its USDC equals that, so it holds {} NOCK, less than the budget",
+                    "the budget's {} NOCK would pair with ${} USDC, more than the {limit_words}, ${}: the cap's liquidity is reduced until its USDC equals that, so it holds {} NOCK, less than the budget",
                     fx(budget, 4),
                     fx(usdc_budget, 2),
-                    if limit_name == "near_usdc" { "near rung" } else { "ladder total" },
                     fx(limit, 2),
                     fx(l * n1, 4)
                 ),
             )
         };
-        Ok(CapSizing { tick_lower: tl, tick_upper: tu, usdc: l * u1, nock: l * n1, per_l: (u1, n1), bound_by, note, band_rule })
+        Ok(CapSizing { tick_lower: tl, tick_upper: tu, usdc: l * u1, nock: l * n1, l, per_l: (u1, n1), bound_by, bound_by_limit: limit_name, budget, limit, note, band_rule })
     }
 
-    /// The tracked ladders (role: ladder) in the ladder pool, with what each counts.
-    fn tracked_rungs(&self, r_gate: f64) -> Vec<TrackedRung> {
+    /// The tracked ladders (role: ladder) in the ladder pool, with what each holds.
+    fn tracked_rungs(&self) -> Vec<TrackedRung> {
         let raw = &self.book.raw;
         let mut out: Vec<TrackedRung> = raw
             .positions
@@ -2730,33 +2782,86 @@ impl LadderCtx<'_> {
             .filter(|p| p.pool_id == self.pool.template.pool_id && raw.ladders.contains_key(&p.position_id))
             .map(|p| {
                 let tag = &raw.ladders[&p.position_id];
-                let range = self.range_of_ticks(p.tick_lower, p.tick_upper);
                 let (usdc_now, nock_now) = existing_at_ratio(p, 1.0);
-                let usdc_at_top = self.pool.amounts(p.liquidity as f64, range.s_top, range.sa, range.sb).0;
-                let deployed_usdc = if tag.rung.as_deref() == Some("cap") { usdc_now } else { usdc_at_top };
+                let l = p.liquidity as f64;
+                let block = self.env.data.ladders.iter().find(|r| r.position_id == p.position_id).and_then(|r| r.since_deposit.deposit_block);
                 TrackedRung {
                     position_id: p.position_id.clone(),
                     rung: tag.rung.clone(),
                     tl: p.tick_lower,
                     tu: p.tick_upper,
-                    deployed_usdc,
-                    deployed_nock: nock_now,
-                    usdc_at_gate: existing_at_ratio(p, r_gate).0,
+                    l,
+                    v_top: l * self.usdc_per_l_at_top(p.tick_lower, p.tick_upper),
+                    usdc_now,
+                    nock_now,
+                    found: false,
+                    block,
                 }
             })
             .collect();
         out.sort_by(|a, b| a.position_id.cmp(&b.position_id));
         out
     }
+
+    /// Positions found on-chain this cycle and not counted (position_detect.rs), in the
+    /// ladder pool, that could be a ladder rung: each with its ticks and liquidity. One
+    /// another address minted, or worth less at its top than the minimum, is left out: a
+    /// stranger's dust on a rung's ticks never stands for that rung.
+    fn found_in_pool(&self) -> Vec<TrackedRung> {
+        let pool_id = self.pool.template.pool_id.to_lowercase();
+        let wallet = self.pool.template.wallet.to_lowercase();
+        let found = self
+            .env
+            .data
+            .derived_metrics
+            .position_detection
+            .as_ref()
+            .and_then(|d| d.pointer("/found_not_counted/positions"))
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        found
+            .iter()
+            .filter(|f| f.get("pool_id").and_then(|v| v.as_str()).map(|p| p.to_lowercase()) == Some(pool_id.clone()))
+            .filter(|f| f.get("choices").and_then(|c| c.as_array()).is_some_and(|c| c.iter().any(|x| x.as_str().is_some_and(|x| x.starts_with("ladder:")))))
+            .filter(|f| f.get("minted_by").and_then(|v| v.as_str()).map_or(true, |by| by.to_lowercase() == wallet))
+            .filter_map(|f| {
+                let tl = i32::try_from(f.get("tick_lower")?.as_i64()?).ok()?;
+                let tu = i32::try_from(f.get("tick_upper")?.as_i64()?).ok()?;
+                let l: f64 = f.pointer("/holds/liquidity")?.as_str()?.parse().ok()?;
+                let id = f.get("position_id").and_then(|v| v.as_str()).map(str::to_string).unwrap_or_else(|| format!("nft #{}", f.get("nft_id").and_then(|v| v.as_u64()).unwrap_or(0)));
+                let range = self.range_of_ticks(tl, tu);
+                let (usdc_now, nock_now) = self.pool.amounts(l, self.pool.s_now, range.sa, range.sb);
+                let v_top = l * self.usdc_per_l_at_top(tl, tu);
+                (tl < tu && l > 0.0 && v_top + nock_now * self.pool.price >= LADDER_SHAPE_MIN_USDC).then(|| TrackedRung {
+                    position_id: id,
+                    rung: None,
+                    tl,
+                    tu,
+                    l,
+                    v_top,
+                    usdc_now,
+                    nock_now,
+                    found: true,
+                    block: f.get("mint_block").and_then(|v| v.as_i64()),
+                })
+            })
+            .collect()
+    }
 }
 
 /// `shape=configured`: the operator's ladder_rungs from the snapshot, planned against the
-/// tracked ladder rungs already deposited in the pool (review of #166 rungs): the gated
-/// total counts their USDC as if it were in the wallet, each configured rung's target is
-/// sized from that total (the cap rule, then the shares), each tracked rung is matched to
-/// a configured one, and only what is left to deposit is simulated. A configured rung
-/// above the price is `passed`; with every rung passed the status is
-/// price_at_or_below_bottom. A valid configuration never answers a parameter error.
+/// tracked ladder rungs already deposited in the pool (review of the bottle, 2026-11-21):
+/// - every configured rung's target is a liquidity on its own ticks, so a deployed rung
+///   stays deployed whatever the price does (a cap whose band the price has left included);
+/// - the plan is frozen by the first near or deep rung deposited (the shares divide what
+///   its USDC at its top implies), never re-divided from the reserve gate each cycle;
+/// - what is left is drawn on the rung's own ticks at the price now, then cut pro rata to
+///   what the reserve gate allows, with the shortfall stated: never all or nothing;
+/// - a remainder worth less than `LADDER_SHAPE_MIN_USDC` is never offered.
+/// A configured rung above the price is `passed`, with its own reason; with every rung
+/// passed the status is price_at_or_below_bottom. A valid configuration never answers a
+/// parameter error.
 fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, now: DateTime<Utc>, health: &str) -> Result<Value, LadderError> {
     let gs = &ctx.env.data.derived_metrics.global_status;
     let Some(setting) = gs.ladder_rungs.as_ref().filter(|r| !r.is_empty()) else {
@@ -2772,7 +2877,10 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
         ));
     };
     let pool = &ctx.pool;
+    let minimum = LADDER_SHAPE_MIN_USDC;
     let unreadable = |i: usize| LadderError::not_simulated("SHAPE_NOT_CONFIGURED", format!("rung {} of the stored shape could not be read", i + 1));
+    let usd = |t: i32| pool.usd_at_tick(t);
+    let has_cap = setting.first().map_or(false, |r| r.rung == "cap");
     // The setting, by position.
     let mut plan: Vec<PlanRung> = Vec::new();
     let mut lows: Vec<Option<i32>> = Vec::new();
@@ -2791,28 +2899,49 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
             share,
             draw: None,
             passed: false,
+            passed_reason: None,
             target_usdc: 0.0,
             target_nock: 0.0,
+            target_l: None,
+            tracked_l: 0.0,
             deployed_usdc: 0.0,
             deployed_nock: 0.0,
             counterparts: Vec::new(),
+            found: Vec::new(),
+            first_block: None,
             cap: None,
             status: "to_deposit",
             reason: None,
+            note: None,
+            remaining_v: 0.0,
+            remaining_l: 0.0,
             remaining_usdc: 0.0,
             remaining_nock: 0.0,
+            fit_factor: 1.0,
+            no_room: false,
         });
     }
     // Passed rungs and the drawing ticks: the first rung still drawable starts at the
-    // usable tick at or below spot; each later one at the rung above's bottom.
+    // usable tick at or below spot; each later one at the rung above's bottom. Each passed
+    // rung says why in its own terms.
     let spot_tick = pool.tick_at_or_below_price(spacing);
-    let usd = |t: i32| pool.usd_at_tick(t);
+    let price_words = format!("${}", fx(pool.price, 8));
     let mut prev_low: Option<i32> = None;
     let mut first_drawn = false;
     for (i, p) in plan.iter_mut().enumerate() {
         let Some(t_low) = lows[i] else { continue };
+        let bottom_words = format!("${}", fx(usd(t_low), 8));
         if usd(spot_tick) <= usd(t_low) * (1.0 + 1e-12) {
             p.passed = true;
+            p.passed_reason = Some(if pool.price <= usd(t_low) * (1.0 + 1e-12) {
+                format!("the price {price_words} is at or below this rung's bottom {bottom_words}: a USDC-only deposit there is not possible")
+            } else if has_cap {
+                format!(
+                    "the price {price_words} is less than one tick spacing above this rung's bottom {bottom_words}: the cap's band, the one containing the price, covers all that is left of it, so it has no range of its own"
+                )
+            } else {
+                format!("the price {price_words} is less than one tick spacing above this rung's bottom {bottom_words}: its range would be empty")
+            });
         } else {
             let top = if first_drawn { prev_low.unwrap_or(spot_tick) } else { spot_tick };
             first_drawn = true;
@@ -2820,6 +2949,7 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
                 p.draw = Some((top.min(t_low), top.max(t_low)));
             } else {
                 p.passed = true;
+                p.passed_reason = Some(format!("its top and its bottom {bottom_words} are the same tick, so its range would be empty"));
             }
         }
         prev_low = Some(t_low);
@@ -2828,7 +2958,9 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
     let cap_band = ctx.cap_band(spacing);
     for p in plan.iter_mut().filter(|p| p.role == "cap") {
         p.passed = all_passed;
-        if !all_passed {
+        if all_passed {
+            p.passed_reason = Some("every rung below the cap is passed (the price is at or below the ladder's bottom), so no cap is drawn".to_string());
+        } else {
             p.draw = Some((cap_band.0, cap_band.1));
         }
     }
@@ -2836,7 +2968,7 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
     let deepest = lows.iter().flatten().map(|t| usd(*t)).fold(f64::INFINITY, f64::min);
     let (r_gate, gate_usd, gate_rule) = ctx.gate(deepest);
     // Tracked rungs, matched by role, then ticks.
-    let tracked = ctx.tracked_rungs(r_gate);
+    let tracked = ctx.tracked_rungs();
     let mut owner: Vec<Option<usize>> = vec![None; tracked.len()];
     let mut unmatched: Vec<Value> = Vec::new();
     for (k, t) in tracked.iter().enumerate() {
@@ -2849,7 +2981,7 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
             continue;
         }
         let reason = match &t.rung {
-            None => Some("its rung is not set in config.yaml, so it matches no configured rung".to_string()),
+            None => Some("its rung is not set, so it matches no configured rung".to_string()),
             Some(role) => {
                 let taken: Vec<usize> = owner.iter().flatten().copied().collect();
                 match plan.iter().position(|p| &p.role == role && !taken.contains(&p.pos)) {
@@ -2868,30 +3000,84 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
                 "rung": t.rung,
                 "tick_lower": t.tl,
                 "tick_upper": t.tu,
-                "deployed_usdc": fx(t.deployed_usdc, 2),
+                "deployed_usdc": fx(t.usdc_now, 2),
                 "reason": reason,
-                "note": "it still counts toward the total, and fills no configured rung",
+                "note": "it fills no configured rung; the reserve gate counts what it holds like any other range",
             }));
         }
     }
-    for (k, t) in tracked.iter().enumerate() {
-        if let Some(i) = owner[k] {
-            let p = &mut plan[i];
-            p.deployed_usdc += t.deployed_usdc;
-            p.deployed_nock += t.deployed_nock;
-            if p.counterparts.is_empty() {
-                // What is left to deposit keeps the matched rung's own ticks.
-                p.draw = Some((t.tl, t.tu));
-                let range = ctx.range_of_ticks(t.tl, t.tu);
-                p.passed = !(range.low_usd < pool.price) || (p.role != "cap" && !(usd(spot_tick) > range.low_usd * (1.0 + 1e-12)));
-            }
+    // A position found on-chain and not tracked yet counts for a rung no tracked ladder
+    // holds, when its pool and ticks are exactly that rung's this cycle.
+    let found = ctx.found_in_pool();
+    let mut found_owner: Vec<Option<usize>> = vec![None; found.len()];
+    for (k, f) in found.iter().enumerate() {
+        let taken: Vec<usize> = owner.iter().flatten().copied().chain(found_owner.iter().flatten().copied()).collect();
+        found_owner[k] = plan.iter().position(|p| !taken.contains(&p.pos) && p.draw == Some((f.tl, f.tu)));
+    }
+    let counted: Vec<(usize, &TrackedRung)> = owner
+        .iter()
+        .zip(tracked.iter())
+        .chain(found_owner.iter().zip(found.iter()))
+        .filter_map(|(o, t)| o.map(|i| (i, t)))
+        .collect();
+    for (i, t) in &counted {
+        let p = &mut plan[*i];
+        let first = p.counterparts.is_empty() && p.found.is_empty();
+        p.first_block = match (first, p.first_block, t.block) {
+            (true, _, b) => b,
+            (false, Some(a), Some(b)) => Some(a.min(b)),
+            _ => None,
+        };
+        p.deployed_usdc += if p.role == "cap" { t.usdc_now } else { t.v_top };
+        p.deployed_nock += t.nock_now;
+        if t.found {
+            p.found.push(t.position_id.clone());
+        } else {
             p.counterparts.push(t.position_id.clone());
         }
+        if first {
+            // What is left to deposit keeps the matched rung's own ticks.
+            p.draw = Some((t.tl, t.tu));
+            if p.role != "cap" {
+                let range = ctx.range_of_ticks(t.tl, t.tu);
+                p.passed = !(range.low_usd < pool.price);
+                p.passed_reason = p.passed.then(|| {
+                    format!(
+                        "the price {price_words} is below this rung's range (${} to ${}): what is left of it would hold only NOCK, so no USDC deposit is possible",
+                        fx(range.low_usd, 8),
+                        fx(range.high_usd, 8)
+                    )
+                });
+            } else {
+                p.passed = false;
+                p.passed_reason = None;
+            }
+        }
     }
-    // The gated total, as if the tracked rungs' USDC were in the wallet.
-    let tracked_usdc: f64 = tracked.iter().map(|t| t.deployed_usdc).sum();
-    let (total, rule) = match shape.total_usdc {
-        Some(t) => (t, "given (shape_usdc)".to_string()),
+    // Near and deep rungs are measured by their USDC at the top: what their liquidity is
+    // worth there, whatever the price does now.
+    for (i, t) in &counted {
+        let p = &mut plan[*i];
+        if p.role != "cap" {
+            if let Some((tl, tu)) = p.draw {
+                let w = ctx.usdc_per_l_at_top(tl, tu);
+                if w > 0.0 {
+                    p.tracked_l += t.v_top / w;
+                }
+            }
+        } else {
+            p.tracked_l += t.l;
+        }
+    }
+    let v_of = |p: &PlanRung| -> f64 { p.draw.map(|(tl, tu)| p.tracked_l * ctx.usdc_per_l_at_top(tl, tu)).unwrap_or(p.deployed_usdc) };
+
+    // The headroom: what the shared reserve gate allows for what is left to deposit. Every
+    // rung, tracked or not, holds no USDC at the gate (it is at or below their bottoms), so
+    // this is the wallet's USDC plus every range's USDC at the gate, less the reserve.
+    // `headroom` is cut to whole cents for display; `headroom_exact` is what the deposits
+    // are fitted to, so a shortfall under a cent is absorbed, never stated as "$0.00".
+    let (headroom, headroom_exact, headroom_rule) = match shape.total_usdc {
+        Some(t) => (t, t, "given (shape_usdc): what is left to deposit is sized to it".to_string()),
         None => {
             let Some(res) = ctx.reserve_amount() else {
                 return Err(LadderError::not_simulated(
@@ -2902,81 +3088,256 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
             let Some((eu, _)) = ctx.existing(r_gate) else {
                 return Err(LadderError::not_simulated("SHAPE_TOTAL_UNKNOWN", ctx.book.problems.join("; ")));
             };
-            let eu_other = eu - tracked.iter().map(|t| t.usdc_at_gate).sum::<f64>();
-            let max = floor_cents(ctx.wallet_usdc + tracked_usdc + eu_other - res).min(floor_cents(ctx.wallet_usdc + tracked_usdc));
-            if !(max > 0.0) {
-                return Err(LadderError::not_simulated(
-                    "SHAPE_NO_ROOM",
-                    format!("at the gate ${} the stable balance leaves no USDC above the ${} reserve for a ladder", fx(gate_usd, 8), fx(res, 2)),
-                ));
-            }
-            (max, format!("the shared reserve gate's most (max_usdc_total) at ${}, counting the tracked rungs' USDC", fx(gate_usd, 8)))
+            (
+                floor_cents(ctx.wallet_usdc + eu - res).min(floor_cents(ctx.wallet_usdc)).max(0.0),
+                (ctx.wallet_usdc + eu - res).min(ctx.wallet_usdc).max(0.0),
+                format!(
+                    "the shared reserve gate's most at ${}: the wallet's USDC plus the USDC every range holds there, less the ${} reserve, and never more than the wallet holds",
+                    fx(gate_usd, 8),
+                    fx(res, 2)
+                ),
+            )
         }
     };
-    // Targets: the cap rule, then the shares of what is left.
-    let mut cap_reason: Option<String> = None;
+
+    // The anchor: the first near or deep rung deposited freezes the plan. With every
+    // deposit block known it is the earliest; otherwise the one implying the most, so a
+    // rung deposited short asks for its own remainder rather than shrinking the others.
+    let held: Vec<(f64, String, f64, Option<i64>)> = plan
+        .iter()
+        .filter(|p| p.role != "cap" && !(p.counterparts.is_empty() && p.found.is_empty()))
+        .filter_map(|p| p.share.filter(|s| *s > 0.0).map(|s| (v_of(p) / s, p.role.clone(), v_of(p), p.first_block)))
+        .collect();
+    let by_block = !held.is_empty() && held.iter().all(|h| h.3.is_some());
+    let anchor: Option<(f64, String, f64)> = held
+        .iter()
+        .fold(None::<&(f64, String, f64, Option<i64>)>, |acc, x| match acc {
+            Some(a) if by_block && (a.3 < x.3 || (a.3 == x.3 && a.0 >= x.0)) => Some(a),
+            Some(a) if !by_block && a.0 >= x.0 => Some(a),
+            _ => Some(x),
+        })
+        .map(|a| (a.0, a.1.clone(), a.2));
     let near_share = plan.iter().find(|p| p.role == "near").and_then(|p| p.share);
-    let (limit_name, limit) = match near_share {
-        Some(sh) => ("near_usdc", sh * total / (1.0 + sh)),
-        None => ("total_usdc", total),
-    };
-    let budget_eff = ctx.budget.map(|b| b + plan.iter().filter(|p| p.role == "cap").map(|p| p.deployed_nock).sum::<f64>());
-    for p in plan.iter_mut().filter(|p| p.role == "cap") {
-        let band = match (p.counterparts.is_empty(), p.draw) {
-            (false, Some((tl, tu))) => (tl, tu, format!("the tracked cap's own band {tl}..{tu}")),
-            _ => cap_band.clone(),
-        };
-        match ctx.cap_sizing(band, budget_eff, limit, limit_name) {
-            Ok(c) => {
-                p.target_usdc = c.usdc;
-                p.target_nock = c.nock;
-                p.cap = Some(c);
-            }
-            Err(why) => cap_reason = Some(why),
-        }
-    }
-    let cap_usdc: f64 = plan.iter().filter(|p| p.role == "cap").map(|p| p.target_usdc).sum();
-    let rest = total - cap_usdc;
-    if !(rest > 0.0) {
-        return Err(LadderError::not_simulated("SHAPE_NO_ROOM", format!("the cap's ${} leaves no USDC of the ${} total for the other rungs", fx(cap_usdc, 2), fx(total, 2))));
-    }
-    for p in plan.iter_mut().filter(|p| p.role != "cap") {
-        p.target_usdc = rest * p.share.unwrap_or(0.0);
-    }
-    // Statuses.
-    for p in plan.iter_mut() {
-        p.remaining_usdc = p.target_usdc - p.deployed_usdc;
-        p.remaining_nock = if p.role == "cap" { p.target_nock - p.deployed_nock } else { 0.0 };
-        let over_usdc = p.deployed_usdc - p.target_usdc;
-        let over_nock = if p.role == "cap" { p.deployed_nock - p.target_nock } else { 0.0 };
-        let small = p.remaining_usdc < LADDER_SHAPE_DUST_USDC && (p.role != "cap" || p.remaining_nock < LADDER_SHAPE_DUST_NOCK);
-        let cap_missing = p.role == "cap" && p.cap.is_none() && p.counterparts.is_empty();
-        (p.status, p.reason) = if over_usdc > LADDER_SHAPE_DUST_USDC || over_nock > LADDER_SHAPE_DUST_NOCK {
-            ("over", Some(format!("the tracked rung holds ${} USDC{} more than its target", fx(over_usdc.max(0.0), 2), if p.role == "cap" { format!(" and {} NOCK", fx(over_nock.max(0.0), 4)) } else { String::new() })))
-        } else if p.passed && (cap_missing || !small) {
-            ("passed", Some(LADDER_SHAPE_PASSED_REASON.to_string()))
-        } else if cap_missing || (p.role == "cap" && p.cap.is_none()) {
-            ("none", cap_reason.clone())
-        } else if small {
+    let cap_untracked = |p: &PlanRung| p.role == "cap" && p.counterparts.is_empty() && p.found.is_empty();
+
+    // A near or deep rung by liquidity: deployed, over, found, passed, under the minimum or
+    // what is left of it at the price now.
+    let plan_lower = |p: &mut PlanRung| {
+        let held = !(p.counterparts.is_empty() && p.found.is_empty());
+        let found_only = p.counterparts.is_empty() && !p.found.is_empty();
+        let v_tracked = v_of(p);
+        let rem_v = p.target_usdc - v_tracked;
+        let tol = (p.target_usdc * LADDER_SHAPE_L_TOLERANCE).max(1e-9);
+        (p.status, p.reason) = if held && -rem_v >= minimum.max(tol) {
+            ("over", Some(format!("the tracked rung holds ${} of USDC at its top, ${} more than its target", fx(v_tracked, 2), fx(-rem_v, 2))))
+        } else if found_only {
+            ("found", Some(format!("{} is in this pool on exactly this rung's ticks; it is counted once it is tracked, so it is not offered again", p.found.join(", "))))
+        } else if held && rem_v <= tol {
             ("deployed", None)
+        } else if held && rem_v < minimum {
+            p.note = Some(format!("${} of its target is not deposited: under the ${} minimum, so it is not offered", fx(rem_v, 2), fx(minimum, 2)));
+            ("deployed", None)
+        } else if p.passed {
+            ("passed", p.passed_reason.clone())
+        } else if rem_v < minimum {
+            ("below_minimum", Some(format!("its ${} is under the ${} minimum, so it is not offered", fx(rem_v.max(0.0), 2), fx(minimum, 2))))
         } else {
+            p.remaining_v = rem_v;
+            let (tl, tu) = p.draw.expect("a rung that is not passed is drawn");
+            let w = ctx.usdc_per_l_at_top(tl, tu);
+            p.remaining_l = rem_v / w;
+            let range = ctx.range_of_ticks(tl, tu);
+            // Wholly below the price it holds only USDC: exactly its USDC at the top.
+            let (u, n) = if range.high_usd <= pool.price { (rem_v, 0.0) } else { pool.amounts(p.remaining_l, pool.s_now, range.sa, range.sb) };
+            p.remaining_usdc = u;
+            p.remaining_nock = n;
+            ("to_deposit", None)
+        };
+    };
+    let set_targets = |plan: &mut Vec<PlanRung>, rest: f64| {
+        for p in plan.iter_mut().filter(|p| p.role != "cap") {
+            p.target_usdc = rest * p.share.unwrap_or(0.0);
+            p.target_l = p.draw.map(|(tl, tu)| ctx.usdc_per_l_at_top(tl, tu)).filter(|w| *w > 0.0).map(|w| p.target_usdc / w);
+        }
+    };
+    // The cap: tracked, it is the cap; otherwise sized in the band containing spot, by the
+    // LP NOCK budget and never more USDC than `limit`.
+    let mut cap_reason: Option<String> = None;
+    let mut size_cap = |plan: &mut Vec<PlanRung>, limit: f64, limit_name: &'static str| {
+        for p in plan.iter_mut().filter(|p| p.role == "cap") {
+            if !(p.counterparts.is_empty() && p.found.is_empty()) {
+                p.target_usdc = p.deployed_usdc;
+                p.target_nock = p.deployed_nock;
+                p.target_l = Some(p.tracked_l);
+                continue;
+            }
+            if p.passed {
+                continue;
+            }
+            match ctx.cap_sizing(cap_band.clone(), ctx.budget, limit, limit_name) {
+                Ok(c) => {
+                    p.target_usdc = c.usdc;
+                    p.target_nock = c.nock;
+                    p.target_l = Some(c.l);
+                    p.cap = Some(c);
+                }
+                Err(why) => cap_reason = Some(why),
+            }
+        }
+    };
+    let (rest, rest_rule) = match &anchor {
+        // Frozen: the near and deep rungs first, then the cap within the rule and within
+        // what the reserve leaves beside what they still need, so a price move inside the
+        // cap's band changes the cap, never them.
+        Some((r, role, v)) => {
+            set_targets(&mut plan, *r);
+            plan.iter_mut().filter(|p| p.role != "cap").for_each(&plan_lower);
+            let others: f64 = plan.iter().filter(|p| p.role != "cap" && p.status == "to_deposit").map(|p| p.remaining_usdc).sum();
+            let reserve_left = (headroom_exact - others).max(0.0);
+            let (rule_name, rule_limit) = match near_share {
+                Some(sh) => ("near_usdc", sh * r),
+                None => ("total_usdc", headroom_exact),
+            };
+            let (name, limit) = if reserve_left < rule_limit { ("reserve", reserve_left) } else { (rule_name, rule_limit) };
+            size_cap(&mut plan, limit, name);
+            (
+                *r,
+                format!(
+                    "frozen by the {role} rung already deposited ({}): its ${} of USDC at its top is its share of ${}, which the near and deep shares divide; it does not move with the price",
+                    if by_block { "the first deposited, by its deposit block" } else { "the deposit order is not known for every rung, so the one implying the most" },
+                    fx(*v, 2),
+                    fx(*r, 2)
+                ),
+            )
+        }
+        // Not frozen yet: the cap within the rule, then the shares divide what is left.
+        None => {
+            let (name, limit) = match near_share {
+                Some(sh) => ("near_share", sh * headroom / (1.0 + sh)),
+                None => ("total_usdc", headroom),
+            };
+            size_cap(&mut plan, limit, name);
+            let cap_usdc: f64 = plan.iter().filter(|p| cap_untracked(p)).map(|p| p.target_usdc).sum();
+            let rest = (headroom - cap_usdc).max(0.0);
+            set_targets(&mut plan, rest);
+            plan.iter_mut().filter(|p| p.role != "cap").for_each(&plan_lower);
+            (rest, "what the reserve gate allows now, less the cap's USDC: no near or deep rung is deposited yet, so this follows the gate until one is".to_string())
+        }
+    };
+    for p in plan.iter_mut().filter(|p| p.role == "cap") {
+        let held = !(p.counterparts.is_empty() && p.found.is_empty());
+        let found_only = p.counterparts.is_empty() && !p.found.is_empty();
+        (p.status, p.reason) = if held {
+            if found_only {
+                ("found", Some(format!("{} is in this pool on exactly this rung's ticks; it is counted once it is tracked, so it is not offered again", p.found.join(", "))))
+            } else {
+                ("deployed", None)
+            }
+        } else if p.passed {
+            ("passed", p.passed_reason.clone())
+        } else if p.cap.is_none() {
+            ("none", cap_reason.clone())
+        } else if p.target_usdc + p.target_nock * pool.price < minimum {
+            let worth = fx(p.target_usdc + p.target_nock * pool.price, 2);
+            if p.cap.as_ref().is_some_and(|c| c.bound_by_limit == "reserve") {
+                p.no_room = true;
+                ("below_minimum", Some(format!("your reserve leaves room for a cap worth ${worth} beside the other deposits listed, under the ${} minimum", fx(minimum, 2))))
+            } else {
+                ("below_minimum", Some(format!("the cap would be worth ${worth}, under the ${} minimum", fx(minimum, 2))))
+            }
+        } else {
+            let c = p.cap.as_ref().expect("checked above");
+            p.remaining_l = c.l;
+            p.remaining_nock = c.nock;
+            // The cap's USDC by its NOCK, paired on its curve.
+            p.remaining_usdc = c.nock / c.per_l.1 * c.per_l.0;
             ("to_deposit", None)
         };
     }
+
+    // The NOCK budget: the cap's NOCK comes first (it is sized by the budget); a remainder
+    // of an in-range rung that needs NOCK the rest of the budget cannot give is held back,
+    // with what it would need and what the budget allows.
+    let need_nock: f64 = plan.iter().filter(|p| p.status == "to_deposit").map(|p| p.remaining_nock).sum();
+    let mut nock_left = ctx.budget;
+    for p in plan.iter_mut().filter(|p| p.status == "to_deposit" && p.remaining_nock > LADDER_NOCK_DUST) {
+        match nock_left {
+            None => {
+                p.status = "held";
+                p.reason = Some(format!(
+                    "it would need {} NOCK now, and the floor + tolerance budget (lp_nock_budget) is not reported, so it cannot be checked against it",
+                    fx(p.remaining_nock, 4)
+                ));
+            }
+            Some(b) if p.remaining_nock > b + 1e-9 => {
+                p.status = "held";
+                let all = if (need_nock - p.remaining_nock).abs() > 1e-9 { format!("; the deposits left that hold NOCK would need {} in all", fx(need_nock, 4)) } else { String::new() };
+                p.reason = Some(format!(
+                    "it would need {} NOCK now{all}, and the floor + tolerance budget has {} left for it",
+                    fx(p.remaining_nock, 4),
+                    fx(b.max(0.0), 4)
+                ));
+            }
+            Some(b) => nock_left = Some(b - p.remaining_nock),
+        }
+    }
+
+    // The fit: the deposits left together within what the reserve gate allows. Cut pro
+    // rata when they need more; never all or nothing.
+    let needed: f64 = plan.iter().filter(|p| p.status == "to_deposit").map(|p| p.remaining_usdc).sum();
+    let any_left = plan.iter().any(|p| matches!(p.status, "to_deposit" | "held"));
+    let fit_status = if !any_left {
+        "nothing_left"
+    } else if needed <= headroom_exact + 1e-9 {
+        "fits"
+    } else if headroom_exact < minimum {
+        "no_room"
+    } else if needed - headroom_exact < 0.01 {
+        // Under a cent over: cut silently below; the amounts typed are cut to cents anyway.
+        "fits"
+    } else {
+        "reduced"
+    };
+    if needed > headroom_exact + 1e-9 && fit_status != "no_room" {
+        let f = headroom_exact / needed;
+        for p in plan.iter_mut().filter(|p| p.status == "to_deposit") {
+            p.fit_factor = if fit_status == "reduced" { f } else { 1.0 };
+            p.remaining_l *= f;
+            p.remaining_usdc *= f;
+            p.remaining_nock *= f;
+            p.remaining_v *= f;
+            if p.remaining_usdc + p.remaining_nock * pool.price < minimum {
+                p.status = "below_minimum";
+                p.no_room = true;
+                p.reason = Some(format!(
+                    "the reserve gate's cut leaves ${} for it, under the ${} minimum, so it is not offered",
+                    fx(p.remaining_usdc + p.remaining_nock * pool.price, 2),
+                    fx(minimum, 2)
+                ));
+            }
+        }
+    }
+    let fit_json = json!({
+        "status": fit_status,
+        "allowed_usdc": fx(headroom, 2),
+        "allowed_rule": headroom_rule,
+        "needed_usdc": fx(needed, 2),
+        "shortfall_usdc": (fit_status == "reduced" || fit_status == "no_room").then(|| fx(needed - headroom_exact, 2)),
+        "factor": (fit_status == "reduced").then(|| fx(headroom_exact / needed, 6)),
+        "minimum_usdc": fx(minimum, 2),
+        "rule": LADDER_SHAPE_FIT_RULE,
+    });
+
     // What is left to deposit, drawn as rungs; the body's rung index is the setting's.
+    let draw_now = fit_status != "no_room";
     let mut rungs: Vec<RungRequest> = Vec::new();
-    for p in plan.iter().filter(|p| p.status == "to_deposit") {
+    for p in plan.iter().filter(|p| draw_now && p.status == "to_deposit") {
         let Some((tl, tu)) = p.draw else { continue };
         let range = ctx.range_of_ticks(tl, tu);
-        let usdc = match (&p.cap, p.role.as_str()) {
-            // The cap's remainder by its NOCK, paired on its curve.
-            (Some(c), "cap") => p.remaining_nock.max(0.0) / c.per_l.1 * c.per_l.0,
-            _ => p.remaining_usdc,
-        };
         rungs.push(RungRequest {
             index: p.pos + 1,
             rung: Some(p.role.clone()),
-            usdc,
+            usdc: p.remaining_usdc,
             nock: None,
             low: Bound::Usd(range.low_usd),
             high: Bound::Usd(range.high_usd),
@@ -2986,6 +3347,15 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
         "computed"
     } else if plan.iter().filter(|p| p.role != "cap").all(|p| p.status == "passed") {
         "price_at_or_below_bottom"
+    } else if fit_status == "no_room" {
+        "no_room"
+    } else if plan.iter().any(|p| p.status == "held") {
+        "held"
+    } else if plan.iter().any(|p| p.no_room) {
+        "no_room"
+    } else if plan.iter().any(|p| p.status == "below_minimum") && !plan.iter().any(|p| matches!(p.status, "deployed" | "found")) {
+        // Nothing is deposited and nothing left is worth listing.
+        "no_room"
     } else {
         "deployed"
     };
@@ -2998,49 +3368,61 @@ fn simulate_shape(ctx: &LadderCtx, req: &LadderRequest, shape: &ShapeRequest, no
                 "share": p.share.map(|s| format!("{s}")),
                 "status": p.status,
                 "reason": p.reason,
+                "note": p.note,
                 "tick_lower": p.draw.map(|d| d.0),
                 "tick_upper": p.draw.map(|d| d.1),
                 "target_usdc": fx(p.target_usdc, 6),
                 "target_nock": (p.role == "cap").then(|| fx(p.target_nock, 4)),
+                "target_liquidity": p.target_l.map(|l| fx(l, 0)),
+                "tracked_liquidity": fx(p.tracked_l, 0),
                 "deployed_usdc": fx(p.deployed_usdc, 6),
                 "deployed_nock": (p.role == "cap").then(|| fx(p.deployed_nock, 4)),
                 "remaining_usdc": fx(p.remaining_usdc.max(0.0), 6),
-                "remaining_nock": (p.role == "cap").then(|| fx(p.remaining_nock.max(0.0), 4)),
-                "over_by_usdc": (p.status == "over").then(|| fx((p.deployed_usdc - p.target_usdc).max(0.0), 2)),
+                "remaining_usdc_at_top": (p.role != "cap").then(|| fx(p.remaining_v.max(0.0), 6)),
+                "remaining_nock": fx(p.remaining_nock.max(0.0), 4),
+                "remaining_liquidity": fx(p.remaining_l.max(0.0), 0),
+                "fit_factor": (p.fit_factor < 1.0).then(|| fx(p.fit_factor, 6)),
+                "over_by_usdc": (p.status == "over").then(|| fx((v_of(p) - p.target_usdc).max(0.0), 2)),
                 "counterparts": p.counterparts,
+                "found": p.found,
                 "cap": p.cap.as_ref().map(|c| json!({
                     "tick_lower": c.tick_lower,
                     "tick_upper": c.tick_upper,
                     "pool_tick": pool.template.tick,
                     "band_rule": c.band_rule,
-                    "lp_nock_budget": ctx.budget.map(|b| fx(b, 4)),
-                    "budget_counting_the_tracked_cap": budget_eff.map(|b| fx(b, 4)),
+                    "lp_nock_budget": fx(c.budget, 4),
                     "nock": fx(c.nock, 4),
                     "usdc": fx(c.usdc, 2),
                     "bound_by": c.bound_by,
-                    "limit_rule": "never more USDC than the first near rung's target",
+                    "usdc_limit": fx(c.limit, 2),
+                    "usdc_limit_is": c.bound_by_limit,
+                    "limit_rule": "never more USDC than the first near rung's target; once a near or deep rung is deposited, never more than the reserve leaves for it beside the other deposits listed",
                     "note": c.note,
                 })),
             })
         })
         .collect();
-    let has_cap = setting.first().map_or(false, |r| r.rung == "cap");
+    let total_usdc = rest + plan.iter().filter(|p| p.role == "cap").map(|p| p.target_usdc).sum::<f64>();
     let shape_json = json!({
         "source": "operator_profile.ladder_rungs",
         "note": "the operator's own shape, sized here; NockNock does not choose it",
         "status": status,
-        "total_usdc": fx(total, 2),
-        "total_rule": rule,
+        "total_usdc": fx(total_usdc, 2),
+        "total_rule": "the near and deep rungs' USDC at their tops plus the cap's USDC now",
         "gate_price_usd": fx(gate_usd, 8),
         "gate_price_rule": gate_rule,
-        "cap": if !has_cap { json!("not in the shape") } else if plan.iter().any(|p| p.role == "cap" && p.cap.is_some()) { json!("sized") } else { json!("none") },
+        "cap": if !has_cap { json!("not in the shape") } else if plan.iter().any(|p| p.role == "cap" && (p.cap.is_some() || !p.counterparts.is_empty() || !p.found.is_empty())) { json!("sized") } else { json!("none") },
         "cap_reason": cap_reason,
         "rest_usdc": fx(rest, 2),
-        "rest_note": "the near and deep shares divide the USDC left after the cap",
+        "rest_rule": rest_rule,
+        "rest_note": "the near and deep shares divide this USDC, measured at each rung's top",
+        "headroom_usdc": fx(headroom, 2),
+        "headroom_rule": headroom_rule,
+        "fit": fit_json,
         "tracked_note": LADDER_SHAPE_TRACKED_NOTE,
-        "tracked_usdc": fx(tracked_usdc, 2),
+        "tracked_usdc": fx(counted.iter().filter(|(_, t)| !t.found).map(|(_, t)| t.usdc_now).sum::<f64>(), 2),
         "unmatched": unmatched,
-        "dust": { "usdc": LADDER_SHAPE_DUST_USDC, "nock": LADDER_SHAPE_DUST_NOCK, "note": LADDER_DISPLAY_NOTE },
+        "dust": { "usdc": minimum, "liquidity_tolerance": LADDER_SHAPE_L_TOLERANCE, "note": LADDER_DISPLAY_NOTE },
         "plan": plan_json,
         "rungs": setting,
     });
@@ -3145,14 +3527,21 @@ pub(crate) fn ladder_shape_block(data: &SnapshotData, at: DateTime<Utc>) -> Opti
                 "share": p["share"],
                 "status": p["status"],
                 "reason": p["reason"],
+                "note": p["note"],
                 "target_usdc": p["target_usdc"],
                 "target_nock": p["target_nock"],
+                "target_liquidity": p["target_liquidity"],
+                "tracked_liquidity": p["tracked_liquidity"],
                 "deployed_usdc": p["deployed_usdc"],
                 "deployed_nock": p["deployed_nock"],
                 "remaining_usdc": p["remaining_usdc"],
+                "remaining_usdc_at_top": p["remaining_usdc_at_top"],
                 "remaining_nock": p["remaining_nock"],
+                "remaining_liquidity": p["remaining_liquidity"],
+                "fit_factor": p["fit_factor"],
                 "over_by_usdc": p["over_by_usdc"],
                 "counterparts": p["counterparts"],
+                "found": p["found"],
                 "tick_lower": p["tick_lower"],
                 "tick_upper": p["tick_upper"],
                 "low_usd": f(&r["bounds"]["low_usd"]),
@@ -3192,8 +3581,14 @@ pub(crate) fn ladder_shape_block(data: &SnapshotData, at: DateTime<Utc>) -> Opti
     Some(json!({
         "status": sh["status"],
         "reason": match sh["status"].as_str() {
-            Some("deployed") => json!("every configured rung is deployed (or passed or over, as each says): nothing is left to deposit"),
-            Some("price_at_or_below_bottom") => json!(format!("the price is at or below the ladder's bottom: {LADDER_SHAPE_PASSED_REASON}")),
+            Some("deployed") => json!("nothing is left to deposit: every configured rung is deployed by liquidity (or passed, found on-chain, under the minimum or with no cap, as each says)"),
+            Some("price_at_or_below_bottom") => json!(LADDER_SHAPE_PASSED_REASON),
+            Some("no_room") => json!(format!(
+                "the reserve gate allows ${} for what is left, under the ${} minimum: nothing is drawn",
+                sh["fit"]["allowed_usdc"].as_str().unwrap_or("?"),
+                sh["fit"]["minimum_usdc"].as_str().unwrap_or("?")
+            )),
+            Some("held") => json!("what is left needs NOCK the floor + tolerance budget does not allow: each held rung says how much"),
             _ => Value::Null,
         },
         "source": "operator_profile.ladder_rungs",
@@ -3209,6 +3604,10 @@ pub(crate) fn ladder_shape_block(data: &SnapshotData, at: DateTime<Utc>) -> Opti
         "total_usdc": sh["total_usdc"],
         "total_rule": sh["total_rule"],
         "rest_usdc": sh["rest_usdc"],
+        "rest_rule": sh["rest_rule"],
+        "headroom_usdc": sh["headroom_usdc"],
+        "headroom_rule": sh["headroom_rule"],
+        "fit": sh["fit"],
         "cap": sh["cap"],
         "cap_reason": sh["cap_reason"],
         "tracked_note": sh["tracked_note"],
@@ -3234,7 +3633,7 @@ pub(crate) fn ladder_shape_block(data: &SnapshotData, at: DateTime<Utc>) -> Opti
             "cash_reserve_usdc": g(&rc["cash_reserve_usdc"]),
             "stable_at_gate_usdc": g(&rc["stable_at_bottom_usdc"]),
             "margin_usdc": g(&rc["margin_usdc"]),
-            "max_usdc_total": sh["total_usdc"],
+            "max_usdc_total": sh["headroom_usdc"],
             "status": g(&rc["status"]),
         },
         "nock_budget": {

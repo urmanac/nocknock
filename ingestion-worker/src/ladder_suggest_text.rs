@@ -74,6 +74,9 @@ pub fn ladder_suggestion_lines(data: &Value, health: Option<&str>) -> String {
                 out.push_str(&format!("  {t}\n"));
             }
         }
+        if let Some(t) = s(l, "/found_note") {
+            out.push_str(&format!("  {t}\n"));
+        }
         return out;
     }
     if !ladder_fresh(health) {
@@ -91,6 +94,13 @@ pub fn ladder_suggestion_lines(data: &Value, health: Option<&str>) -> String {
         if let Some(t) = s(o, "/text") {
             out.push_str(&format!("  - {t}\n"));
         }
+    }
+    // A shape cut to what the reserve allows says by how much.
+    if let Some(t) = s(l, "/fit/text") {
+        out.push_str(&format!("  {t}\n"));
+    }
+    if let Some(t) = s(l, "/found_note") {
+        out.push_str(&format!("  {t}\n"));
     }
     let limit = if s(l, "/gates/reserve/binding") == Some("wallet") { "wallet USDC binds" } else { "the reserve binds" };
     out.push_str(&format!(
@@ -252,7 +262,13 @@ pub fn fee_estimate_line(fe: Option<&Value>) -> String {
                 (Some(days), Some(n)) => format!("over {days} days ({} intervals) on {}", grouped_int(n), s(fe, "/measured_label").unwrap_or("the measuring range")),
                 _ => "sample size not stated".to_string(),
             };
-            lines.push(format!("Fees while in range (an estimate): ${per_day}/day, measured {sample}"));
+            // Undiluted and diluted: a large rung would be a share of the pool's active
+            // liquidity and take that share of the fees, so both figures are stated.
+            let diluted = match (s(fe, "/per_day_in_range_diluted_usd"), s(fe, "/dilution/share_of_active_pct")) {
+                (Some(d), Some(sh)) => format!(" undiluted, ${d}/day diluted (it would be {sh}% of the pool's active liquidity)"),
+                _ => format!(" undiluted; diluted not stated ({})", reason("/dilution_reason")),
+            };
+            lines.push(format!("Fees while in range (an estimate): ${per_day}/day{diluted}, measured {sample}"));
             lines.push(match s(fe, "/in_range_share_stored_history/share_pct") {
                 Some(pct) => format!("In range {pct}% of the measured time"),
                 None => format!("In range over stored history: not stated ({})", reason("/in_range_share_reason")),

@@ -41,9 +41,12 @@ info:
       tracked ladder no longer hides it (ladder_tracked stays the status with no shape
       configured). New status ladder_deployed: nothing is left to deposit (shown false).
       shape.rungs[] lists every rung of the shape in order with its number (index of
-      `of`), its status (to_deposit | deployed | over | passed | none), what a deployed
-      one holds (holds_now) and one stated line (text); shape.of, left, deployed,
-      passed, over and none count them, and the headline counts only what is left.
+      `of`), its status (to_deposit | deployed | over | passed | none | found |
+      below_minimum | held), what a deployed one holds (holds_now) and one stated line
+      (text); shape.of, left, deployed, passed, over, none, found, below_minimum and held
+      count them, and the headline counts only what is left. The headline's "up to",
+      the outcomes, wallet_after.deposits_usdc and numbers.usdc_max are the sum of the
+      amounts the deposits state, cut to cents: one figure per deposit on the card.
       rungs[] holds one deposit per to_deposit rung, numbered as in the shape: summary,
       tick_lower and tick_upper, bounds_usd and bounds_nock_per_usdc from the ticks,
       usdc and nock (amount and raw are exact, from the shape's mint; to_enter is the
@@ -51,15 +54,27 @@ info:
       amount0_raw, amount1_raw; mint_note once on the suggestion), fee_estimate (the
       figure with its sample size, in-range share of stored history and replay bound,
       or the reason it is not measured; left out of the state hash and of stored rows)
-      and its own deep_link (pool and range, never an amount). A deposit that holds
-      NOCK (the cap) carries nock_limit: the NOCK side must not exceed lp_nock_budget,
-      and the NOCK field is the one named for typing, because the app works out the
-      other side from the price at that moment. wallet_after states what the deposits
+      (fee_estimate.per_day_in_range_diluted_usd and dilution.share_of_active_pct state
+      the diluted figure beside the undiluted one) and its own deep_link (pool and range,
+      never an amount). A deposit that holds NOCK (the cap) carries nock_limit: both
+      limits (nock: lp_nock_budget; usdc: cap.usdc_limit, cap.usdc_limit_is near_share |
+      near_usdc | reserve | total_usdc), which one binds now (binding nock | usdc), the
+      field that keeps it (field_to_type: the NOCK field when the budget binds, the USDC
+      field when the USDC limit binds, with holds_less_than_budget true), because the
+      app works out the other side from the price at that moment. wallet_after states what the deposits
       leave in the wallet and the USDC inside NOCK ranges the reserve counts, now and at
       the gate price. picture.bars[] has one bar per rung with its rung, status and
-      deployed. no_headroom also covers a shape whose remainder would read the stable
-      balance below the reserve (a tracked rung over its target, or one that matches no
-      rung). With no shape configured nothing changes: the bodies in
+      deployed. fit states how what is left fits the reserve gate (status fits |
+      reduced, allowed_usdc, needed_usdc, shortfall_usdc, rule, and text when reduced):
+      never all or nothing. no_headroom covers a shape whose remainder has nothing above
+      the $1.00 minimum that fits, with a headline that says so; nock_exceeds one whose
+      remainder needs NOCK the floor + tolerance budget does not give (each held rung
+      says how much). found_note names a position found on-chain in the pool that matches
+      no rung exactly and is not counted. With ladder_rungs set and
+      operator_profile.ladder_bottom_usd unset the card is needs_setting, naming it, with
+      the candidate bottoms. In a stored row the card keeps its rungs' ticks, pools and
+      mints and leaves the rest out (detail_note), and a ready card reads shown false
+      with the reason. With no shape configured nothing changes: the bodies in
       golden_ladder_suggest.json are byte-identical. The shape's bodies are in
       ingestion-worker/testdata/ladder_suggest/golden_ladder_bottle.json.
 
@@ -1130,16 +1145,19 @@ components:
       properties:
         status:
           type: string
-          enum: [computed, deployed, price_at_or_below_bottom, unavailable]
+          enum: [computed, deployed, price_at_or_below_bottom, no_room, held, unavailable]
           description: >
             computed: something is left to deposit. deployed: nothing is (every rung is
-            deployed, passed, over or has no cap, as each says). price_at_or_below_bottom:
-            the price is at or below the ladder's bottom, so every rung is passed.
+            deployed by liquidity, passed, over, found on-chain, under the minimum or has
+            no cap, as each says). price_at_or_below_bottom: the price is at or below the
+            ladder's bottom, so every rung is passed. no_room: something is left, and the
+            reserve gate allows nothing above the minimum for it. held: what is left needs
+            NOCK the budget does not give.
         reason: { type: string, nullable: true }
         source: { type: string }
         statement: { type: string }
         computed_at: { type: string }
-        tracked_note: { type: string, description: How tracked ladder rungs (role ladder) in the pool count toward the total and are matched to configured rungs }
+        tracked_note: { type: string, description: 'How each rung is measured (a liquidity on its own ticks), how tracked ladder rungs (role ladder) and positions found on-chain are matched to configured rungs, and how the plan is frozen' }
         tracked_usdc: { type: string }
         unmatched: { type: array, items: { type: object }, description: Tracked ladders that match no configured rung (no rung set, or no rung of that role left); they still count toward the total }
         dust: { type: object, description: 'The amounts below which a rung counts as deployed (and above which over); display constants, not settings' }
@@ -1147,7 +1165,13 @@ components:
         pool: { type: object, description: 'position_id, label, tick_spacing, pool_price_usd, pool_tick' }
         total_usdc: { type: string }
         total_rule: { type: string }
-        rest_usdc: { type: string, description: 'The USDC left after the cap, which the near and deep shares divide' }
+        rest_usdc: { type: string, description: 'The USDC, measured at each rung''s top, the near and deep shares divide' }
+        rest_rule: { type: string, description: 'Frozen by the first near or deep rung deposited (its USDC at its top over its share; the earliest by deposit block when every block is known, else the one implying the most), or, before one is, what the reserve gate allows less the cap' }
+        headroom_usdc: { type: string, description: 'What the reserve gate allows for what is left to deposit: wallet USDC plus every range''s USDC at the gate, less the reserve, at most the wallet' }
+        headroom_rule: { type: string }
+        fit:
+          type: object
+          description: 'How what is left fits headroom_usdc: status fits | reduced | no_room | nothing_left, allowed_usdc, needed_usdc, shortfall_usdc (reduced or no_room), factor (reduced), minimum_usdc and rule (once the plan is frozen the cap takes what the reserve leaves beside the near and deep rungs; when they alone need more, each is cut pro rata). A shortfall under a cent is absorbed.' 
         cap: { type: string, enum: [sized, none, not in the shape] }
         cap_reason: { type: string, nullable: true }
         rungs: { type: array, items: { $ref: '#/components/schemas/LadderShapeRung' } }
@@ -1165,14 +1189,26 @@ components:
         share: { type: string, nullable: true, description: 'The setting''s own share at this position; null for the cap' }
         status:
           type: string
-          enum: [to_deposit, deployed, over, passed, none]
+          enum: [to_deposit, deployed, over, passed, none, found, below_minimum, held]
           description: >
-            to_deposit: what is left is at or above dust. deployed: below dust. over: the
-            tracked rungs hold more than the target (reason says by how much). passed: the
-            price is below this rung's range, so a USDC-only deposit is not possible. none:
-            no cap (reason).
+            to_deposit: what is left is worth at least the $1.00 minimum. deployed: the
+            tracked liquidity is at least the target's (to 1e-6), or what is left is under
+            the minimum (note says how much). over: the tracked liquidity is above the
+            target by at least the minimum (reason says by how much). passed: the reason
+            says why in this rung's terms. none: no cap (reason). found: a position found
+            on-chain and not yet tracked has exactly this rung's pool and ticks, so it is
+            not offered again. below_minimum: what is left is under the minimum, or the
+            reserve leaves less than that for it. held: what is left needs NOCK the budget
+            does not give.
         reason: { type: string, nullable: true }
-        target_usdc: { type: string, description: Sized from the gated total (the cap rule, then the shares) }
+        target_usdc: { type: string, description: 'Near and deep: its share of rest_usdc, as USDC at its top. The cap: its USDC now' }
+        target_liquidity: { type: string, nullable: true, description: 'The target as a liquidity on the rung''s ticks: what deployed is measured against, whatever the price' }
+        tracked_liquidity: { type: string, description: 'What the matched tracked rungs (and positions found on-chain) hold, as a liquidity on the rung''s ticks' }
+        remaining_liquidity: { type: string }
+        remaining_usdc_at_top: { type: string, nullable: true, description: 'Near and deep: what is left as USDC at the top' }
+        fit_factor: { type: string, nullable: true, description: The fraction the reserve gate's cut left, when it cut }
+        found: { type: array, items: { type: string }, description: 'Positions found on-chain, not yet tracked, on exactly this rung''s pool and ticks' }
+        note: { type: string, nullable: true, description: 'A remainder under the minimum that is not offered' }
         target_nock: { type: string, nullable: true, description: The cap only }
         deployed_usdc: { type: string, description: What the matched tracked rungs count (tracked_note) }
         deployed_nock: { type: string, nullable: true }
@@ -1205,7 +1241,7 @@ components:
         nock_bought_at_bottom: { type: string }
         avg_buy_price_usd: { type: string, nullable: true }
         fee_estimate: { type: object, description: 'The simulator''s fee estimate (api.yaml LadderFeeEstimate); for the cap, in range at spot, the rate per day while in range applies now' }
-        cap: { type: object, nullable: true, description: 'The cap only: band, pool tick, band_rule, lp_nock_budget, nock, usdc, bound_by (lp_nock_budget | near_usdc | total_usdc) and note' }
+        cap: { type: object, nullable: true, description: 'An untracked cap only: band, pool tick, band_rule, lp_nock_budget, nock, usdc, bound_by (lp_nock_budget | near_usdc | reserve | total_usdc), usdc_limit and usdc_limit_is (near_share | near_usdc | reserve | total_usdc), limit_rule and note. A tracked cap is the cap: null' }
         round_trip: { type: object, nullable: true }
         if_pulled_at_fill: { type: object, nullable: true }
 

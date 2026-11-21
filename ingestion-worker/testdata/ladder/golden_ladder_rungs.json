@@ -580,45 +580,52 @@
           "cap": "sized",
           "cap_reason": null,
           "dust": {
-            "nock": 1.0,
+            "liquidity_tolerance": 1e-6,
             "note": "display constants, not settings",
-            "usdc": 0.5
+            "usdc": 1.0
+          },
+          "fit": {
+            "allowed_rule": "the shared reserve gate's most at $0.01000000: the wallet's USDC plus the USDC every range holds there, less the $950.00 reserve, and never more than the wallet holds",
+            "allowed_usdc": "0.00",
+            "factor": null,
+            "minimum_usdc": "1.00",
+            "needed_usdc": "0.00",
+            "rule": "once a near or deep rung is deposited the cap takes only what the reserve leaves beside the near and deep rungs still to deposit; when they alone need more than the reserve allows, each deposit left is cut pro rata (by the same fraction), so the shape keeps its proportions, and the shortfall is stated",
+            "shortfall_usdc": null,
+            "status": "nothing_left"
           },
           "gate_price_rule": "your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom",
           "gate_price_usd": "0.01000000",
+          "headroom_rule": "the shared reserve gate's most at $0.01000000: the wallet's USDC plus the USDC every range holds there, less the $950.00 reserve, and never more than the wallet holds",
+          "headroom_usdc": "0.00",
           "note": "the operator's own shape, sized here; NockNock does not choose it",
           "plan": [
             {
-              "cap": {
-                "band_rule": "the tracked cap's own band 273600..273900",
-                "bound_by": "lp_nock_budget",
-                "budget_counting_the_tracked_cap": "86.7891",
-                "limit_rule": "never more USDC than the first near rung's target",
-                "lp_nock_budget": "0.0000",
-                "nock": "86.7891",
-                "note": "the cap holds the whole LP NOCK budget, 86.7891 NOCK; the curve pairs it with $1.23 USDC",
-                "pool_tick": 273743,
-                "tick_lower": 273600,
-                "tick_upper": 273900,
-                "usdc": "1.23"
-              },
+              "cap": null,
               "counterparts": [
                 "uniswap-v4:base:9000002"
               ],
               "deployed_nock": "86.7891",
               "deployed_usdc": "1.225999",
+              "fit_factor": null,
+              "found": [],
               "index": 1,
+              "note": null,
               "over_by_usdc": null,
               "reason": null,
+              "remaining_liquidity": "0",
               "remaining_nock": "0.0000",
               "remaining_usdc": "0.000000",
+              "remaining_usdc_at_top": null,
               "rung": "cap",
               "share": null,
               "status": "deployed",
+              "target_liquidity": "138192109253769",
               "target_nock": "86.7891",
               "target_usdc": "1.225999",
               "tick_lower": 273600,
-              "tick_upper": 273900
+              "tick_upper": 273900,
+              "tracked_liquidity": "138192109253769"
             },
             {
               "cap": null,
@@ -627,18 +634,25 @@
               ],
               "deployed_nock": null,
               "deployed_usdc": "114.864600",
+              "fit_factor": null,
+              "found": [],
               "index": 2,
+              "note": null,
               "over_by_usdc": null,
               "reason": null,
-              "remaining_nock": null,
+              "remaining_liquidity": "0",
+              "remaining_nock": "0.0000",
               "remaining_usdc": "0.000000",
+              "remaining_usdc_at_top": "0.000000",
               "rung": "near",
               "share": "0.15",
               "status": "deployed",
+              "target_liquidity": "1408301615002245",
               "target_nock": null,
               "target_usdc": "114.864600",
               "tick_lower": 273900,
-              "tick_upper": 275400
+              "tick_upper": 275400,
+              "tracked_liquidity": "1408301615002237"
             },
             {
               "cap": null,
@@ -647,21 +661,29 @@
               ],
               "deployed_nock": null,
               "deployed_usdc": "650.899400",
+              "fit_factor": null,
+              "found": [],
               "index": 3,
+              "note": null,
               "over_by_usdc": null,
               "reason": null,
-              "remaining_nock": null,
-              "remaining_usdc": "0.000001",
+              "remaining_liquidity": "0",
+              "remaining_nock": "0.0000",
+              "remaining_usdc": "0.000000",
+              "remaining_usdc_at_top": "0.000000",
               "rung": "deep",
               "share": "0.85",
               "status": "deployed",
+              "target_liquidity": "14125167068081104",
               "target_nock": null,
-              "target_usdc": "650.899401",
+              "target_usdc": "650.899400",
               "tick_lower": 275400,
-              "tick_upper": 276300
+              "tick_upper": 276300,
+              "tracked_liquidity": "14125167068081104"
             }
           ],
-          "rest_note": "the near and deep shares divide the USDC left after the cap",
+          "rest_note": "the near and deep shares divide this USDC, measured at each rung's top",
+          "rest_rule": "frozen by the deep rung already deposited (the deposit order is not known for every rung, so the one implying the most): its $650.90 of USDC at its top is its share of $765.76, which the near and deep shares divide; it does not move with the price",
           "rest_usdc": "765.76",
           "rungs": [
             {
@@ -685,9 +707,9 @@
           ],
           "source": "operator_profile.ladder_rungs",
           "status": "deployed",
-          "total_rule": "the shared reserve gate's most (max_usdc_total) at $0.01000000, counting the tracked rungs' USDC",
+          "total_rule": "the near and deep rungs' USDC at their tops plus the cap's USDC now",
           "total_usdc": "766.99",
-          "tracked_note": "Tracked ladder rungs in this pool (role: ladder) are part of the shape, not existing ranges: the total counts their USDC as if it were still in the wallet. A near or deep rung counts what its range holds as all USDC at its top (vs_top.usdc_at_top); a cap counts the USDC it holds now, and its NOCK is counted back into the NOCK budget the cap is sized by. Each tracked rung is matched to a configured rung by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order). What is left to deposit is drawn on a matched rung's own ticks.",
+          "tracked_note": "Each configured rung's target is a liquidity on its own ticks; a liquidity does not change with the price, so a deployed rung stays deployed when the price moves, in range or out of it. Tracked ladder rungs in this pool (role: ladder) are matched to configured rungs by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order); a position found on-chain and not yet tracked counts for the rung whose pool and ticks it matches exactly. A near or deep rung is measured by what it holds as all USDC at its top (liquidity times the USDC one unit holds there). The plan is frozen by the first near or deep rung deposited: the shares divide what that rung's USDC at its top implies (the largest, when several are deposited), never the total again. Until then the shares divide what the reserve gate allows now, less the cap. A tracked cap is the cap: its liquidity is its target. What is left to deposit is drawn on a matched rung's own ticks.",
           "tracked_usdc": "766.99",
           "unmatched": []
         }
@@ -715,7 +737,7 @@
       },
       "statement": "A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts."
     },
-    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Shape: your operator_profile.ladder_rungs in v4 USDC/NOCK 3.00% #3163450, sized to $766.99 USDC (the shared reserve gate's most (max_usdc_total) at $0.01000000, counting the tracked rungs' USDC): nothing is left to deposit: every rung is deployed, passed, over or has no cap, as each says\n  – r1 cap: deployed; target $1.23, deployed $1.23, left to deposit $0.00, tracked: uniswap-v4:base:9000002\n  – r2 near: deployed; target $114.86, deployed $114.86, left to deposit $0.00, tracked: uniswap-v4:base:9000003\n  – r3 deep: deployed; target $650.90, deployed $650.90, left to deposit $0.00, tracked: uniswap-v4:base:9000001\n  – Tracked ladder rungs in this pool (role: ladder) are part of the shape, not existing ranges: the total counts their USDC as if it were still in the wallet. A near or deep rung counts what its range holds as all USDC at its top (vs_top.usdc_at_top); a cap counts the USDC it holds now, and its NOCK is counted back into the NOCK budget the cap is sized by. Each tracked rung is matched to a configured rung by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order). What is left to deposit is drawn on a matched rung's own ticks.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
+    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Shape: your operator_profile.ladder_rungs in v4 USDC/NOCK 3.00% #3163450, sized to $766.99 USDC (the near and deep rungs' USDC at their tops plus the cap's USDC now): nothing is left to deposit: every rung is deployed, passed, over or has no cap, as each says\n  – r1 cap: deployed; target $1.23, deployed $1.23, left to deposit $0.00, tracked: uniswap-v4:base:9000002\n  – r2 near: deployed; target $114.86, deployed $114.86, left to deposit $0.00, tracked: uniswap-v4:base:9000003\n  – r3 deep: deployed; target $650.90, deployed $650.90, left to deposit $0.00, tracked: uniswap-v4:base:9000001\n  – Each configured rung's target is a liquidity on its own ticks; a liquidity does not change with the price, so a deployed rung stays deployed when the price moves, in range or out of it. Tracked ladder rungs in this pool (role: ladder) are matched to configured rungs by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order); a position found on-chain and not yet tracked counts for the rung whose pool and ticks it matches exactly. A near or deep rung is measured by what it holds as all USDC at its top (liquidity times the USDC one unit holds there). The plan is frozen by the first near or deep rung deposited: the shares divide what that rung's USDC at its top implies (the largest, when several are deposited), never the total again. Until then the shares divide what the reserve gate allows now, less the cap. A tracked cap is the cap: its liquidity is its target. What is left to deposit is drawn on a matched rung's own ticks.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
     "status": 200
   },
   "the_bottle_configured": {
@@ -1441,82 +1463,117 @@
           "cap": "sized",
           "cap_reason": null,
           "dust": {
-            "nock": 1.0,
+            "liquidity_tolerance": 1e-6,
             "note": "display constants, not settings",
-            "usdc": 0.5
+            "usdc": 1.0
+          },
+          "fit": {
+            "allowed_rule": "the shared reserve gate's most at $0.01000000: the wallet's USDC plus the USDC every range holds there, less the $950.00 reserve, and never more than the wallet holds",
+            "allowed_usdc": "766.99",
+            "factor": null,
+            "minimum_usdc": "1.00",
+            "needed_usdc": "766.99",
+            "rule": "once a near or deep rung is deposited the cap takes only what the reserve leaves beside the near and deep rungs still to deposit; when they alone need more than the reserve allows, each deposit left is cut pro rata (by the same fraction), so the shape keeps its proportions, and the shortfall is stated",
+            "shortfall_usdc": null,
+            "status": "fits"
           },
           "gate_price_rule": "your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom",
           "gate_price_usd": "0.01000000",
+          "headroom_rule": "the shared reserve gate's most at $0.01000000: the wallet's USDC plus the USDC every range holds there, less the $950.00 reserve, and never more than the wallet holds",
+          "headroom_usdc": "766.99",
           "note": "the operator's own shape, sized here; NockNock does not choose it",
           "plan": [
             {
               "cap": {
                 "band_rule": "the band 273600..273900 of the 300-tick grid contains the pool's tick 273743",
                 "bound_by": "lp_nock_budget",
-                "budget_counting_the_tracked_cap": "86.7891",
-                "limit_rule": "never more USDC than the first near rung's target",
+                "limit_rule": "never more USDC than the first near rung's target; once a near or deep rung is deposited, never more than the reserve leaves for it beside the other deposits listed",
                 "lp_nock_budget": "86.7891",
                 "nock": "86.7891",
                 "note": "the cap holds the whole LP NOCK budget, 86.7891 NOCK; the curve pairs it with $1.23 USDC",
                 "pool_tick": 273743,
                 "tick_lower": 273600,
                 "tick_upper": 273900,
-                "usdc": "1.23"
+                "usdc": "1.23",
+                "usdc_limit": "100.04",
+                "usdc_limit_is": "near_share"
               },
               "counterparts": [],
               "deployed_nock": "0.0000",
               "deployed_usdc": "0.000000",
+              "fit_factor": null,
+              "found": [],
               "index": 1,
+              "note": null,
               "over_by_usdc": null,
               "reason": null,
+              "remaining_liquidity": "138192115820500",
               "remaining_nock": "86.7891",
               "remaining_usdc": "1.225999",
+              "remaining_usdc_at_top": null,
               "rung": "cap",
               "share": null,
               "status": "to_deposit",
+              "target_liquidity": "138192115820500",
               "target_nock": "86.7891",
               "target_usdc": "1.225999",
               "tick_lower": 273600,
-              "tick_upper": 273900
+              "tick_upper": 273900,
+              "tracked_liquidity": "0"
             },
             {
               "cap": null,
               "counterparts": [],
               "deployed_nock": null,
               "deployed_usdc": "0.000000",
+              "fit_factor": null,
+              "found": [],
               "index": 2,
+              "note": null,
               "over_by_usdc": null,
               "reason": null,
-              "remaining_nock": null,
+              "remaining_liquidity": "1408301616732632",
+              "remaining_nock": "0.0000",
               "remaining_usdc": "114.864600",
+              "remaining_usdc_at_top": "114.864600",
               "rung": "near",
               "share": "0.15",
               "status": "to_deposit",
+              "target_liquidity": "1408301616732632",
               "target_nock": null,
               "target_usdc": "114.864600",
               "tick_lower": 273900,
-              "tick_upper": 275400
+              "tick_upper": 275400,
+              "tracked_liquidity": "0"
             },
             {
               "cap": null,
               "counterparts": [],
               "deployed_nock": null,
               "deployed_usdc": "0.000000",
+              "fit_factor": null,
+              "found": [],
               "index": 3,
+              "note": null,
               "over_by_usdc": null,
               "reason": null,
-              "remaining_nock": null,
+              "remaining_liquidity": "14125167085436768",
+              "remaining_nock": "0.0000",
               "remaining_usdc": "650.899401",
+              "remaining_usdc_at_top": "650.899401",
               "rung": "deep",
               "share": "0.85",
               "status": "to_deposit",
+              "target_liquidity": "14125167085436768",
               "target_nock": null,
               "target_usdc": "650.899401",
               "tick_lower": 275400,
-              "tick_upper": 276300
+              "tick_upper": 276300,
+              "tracked_liquidity": "0"
             }
           ],
-          "rest_note": "the near and deep shares divide the USDC left after the cap",
+          "rest_note": "the near and deep shares divide this USDC, measured at each rung's top",
+          "rest_rule": "what the reserve gate allows now, less the cap's USDC: no near or deep rung is deposited yet, so this follows the gate until one is",
           "rest_usdc": "765.76",
           "rungs": [
             {
@@ -1540,9 +1597,9 @@
           ],
           "source": "operator_profile.ladder_rungs",
           "status": "computed",
-          "total_rule": "the shared reserve gate's most (max_usdc_total) at $0.01000000, counting the tracked rungs' USDC",
+          "total_rule": "the near and deep rungs' USDC at their tops plus the cap's USDC now",
           "total_usdc": "766.99",
-          "tracked_note": "Tracked ladder rungs in this pool (role: ladder) are part of the shape, not existing ranges: the total counts their USDC as if it were still in the wallet. A near or deep rung counts what its range holds as all USDC at its top (vs_top.usdc_at_top); a cap counts the USDC it holds now, and its NOCK is counted back into the NOCK budget the cap is sized by. Each tracked rung is matched to a configured rung by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order). What is left to deposit is drawn on a matched rung's own ticks.",
+          "tracked_note": "Each configured rung's target is a liquidity on its own ticks; a liquidity does not change with the price, so a deployed rung stays deployed when the price moves, in range or out of it. Tracked ladder rungs in this pool (role: ladder) are matched to configured rungs by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order); a position found on-chain and not yet tracked counts for the rung whose pool and ticks it matches exactly. A near or deep rung is measured by what it holds as all USDC at its top (liquidity times the USDC one unit holds there). The plan is frozen by the first near or deep rung deposited: the shares divide what that rung's USDC at its top implies (the largest, when several are deposited), never the total again. Until then the shares divide what the reserve gate allows now, less the cap. A tracked cap is the cap: its liquidity is its target. What is left to deposit is drawn on a matched rung's own ticks.",
           "tracked_usdc": "0.00",
           "unmatched": []
         },
@@ -1618,15 +1675,16 @@
           "cap": {
             "band_rule": "the band 273600..273900 of the 300-tick grid contains the pool's tick 273743",
             "bound_by": "lp_nock_budget",
-            "budget_counting_the_tracked_cap": "86.7891",
-            "limit_rule": "never more USDC than the first near rung's target",
+            "limit_rule": "never more USDC than the first near rung's target; once a near or deep rung is deposited, never more than the reserve leaves for it beside the other deposits listed",
             "lp_nock_budget": "86.7891",
             "nock": "86.7891",
             "note": "the cap holds the whole LP NOCK budget, 86.7891 NOCK; the curve pairs it with $1.23 USDC",
             "pool_tick": 273743,
             "tick_lower": 273600,
             "tick_upper": 273900,
-            "usdc": "1.23"
+            "usdc": "1.23",
+            "usdc_limit": "100.04",
+            "usdc_limit_is": "near_share"
           },
           "fee_estimate": {
             "assumptions": [
@@ -2341,7 +2399,7 @@
       },
       "tradeoff_reason": null
     },
-    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Ladder of 3 rungs at the pool price $0.01294400, snapped to v4 USDC/NOCK 3.00% #3163450 (tick spacing 300)\n• Shape: your operator_profile.ladder_rungs (cap: the tick band containing spot; near 0.15 from spot down to $0.01100000; deep 0.85 from $0.01100000 down to $0.01000000), sized to $766.99 USDC: the shared reserve gate's most (max_usdc_total) at $0.01000000, counting the tracked rungs' USDC\n  – r1 cap: to_deposit; target $1.23, deployed $0.00, left to deposit $1.23\n  – r2 near: to_deposit; target $114.86, deployed $0.00, left to deposit $114.86\n  – r3 deep: to_deposit; target $650.90, deployed $0.00, left to deposit $650.90\n• Pool: a ladder in this pool is a NEW position (a new NFT); add it to config.yaml to be tracked\n• r1 cap: $0.01274292 – $0.01313098 (-1.55% / +1.44%), $1.23 USDC and 87 NOCK at spot (liquidity 1381.9212; top: the tick band containing the pool's tick (the cap))\n  – Bottom: fully NOCK at $0.01274292: 182 NOCK held, 95 bought, average $0.01284307\n  – Fees while in range (an estimate): $0.84/day, $0.84 diluted (it would be 0.17% of the pool's active liquidity); $35.77 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – In range over stored history: 1.95% of the measured time (10,659 s of 547,205 s); replayed over it, at most $0.02 from intervals wholly inside and at most $0.15 more from intervals at its edges (900 s), undiluted, no lower bound\n  – Measured inside this range: at most $0.02 over 10,659 s; only 10659 s of stored intervals sat wholly inside: below the 72000 s a per-day figure needs, so only the dollars and seconds are stated\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $0.43, median $0.73, max $1.10 per day; every day: 2026-11-14 $0.53 (30,699 s, not counted), 2026-11-15 $0.69 (86,488 s), 2026-11-16 $0.99 (86,007 s), 2026-11-17 $1.35 (71,106 s, not counted), 2026-11-18 $0.43 (86,146 s), 2026-11-19 $1.10 (85,799 s), 2026-11-20 $0.73 (86,400 s), 2026-11-21 $0.53 (14,559 s, not counted)\n  – Round trip: A fall to $0.01274292 and a return to $0.01294400 (the pool price now) hands back $1.23 USDC and 86.7891 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $1.23 with the other rungs as given\n• r2 near: $0.01096801 – $0.01274292 (-15.27% / -1.55%), $114.86 USDC and 0 NOCK at spot (liquidity 14083.0162; top: the usable tick at or below the pool price (the first rung still drawable))\n  – Bottom: fully NOCK at $0.01096801: 9,716 NOCK held, 9,716 bought, average $0.01182220\n  – Fees while in range (an estimate): $8.56/day, $8.42 diluted (it would be 1.73% of the pool's active liquidity); $7.46 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – It earns nothing until the price falls to $0.01274292 (-1.55%)\n  – In range over stored history: 28.63% of the measured time (156,662 s of 547,205 s); replayed over it, at most $6.39 from intervals wholly inside and at most $5.16 more from intervals at its edges (2,101 s), undiluted, no lower bound\n  – Measured inside this range: $3.52/day over 1.81 days (at most $6.39 in all)\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $4.36, median $7.45, max $11.25 per day; every day: 2026-11-14 $5.41 (30,699 s, not counted), 2026-11-15 $7.06 (86,488 s), 2026-11-16 $10.13 (86,007 s), 2026-11-17 $13.71 (71,106 s, not counted), 2026-11-18 $4.36 (86,146 s), 2026-11-19 $11.25 (85,799 s), 2026-11-20 $7.45 (86,400 s), 2026-11-21 $5.44 (14,559 s, not counted)\n  – Round trip: A fall to $0.01096801 and a return to $0.01294400 (the pool price now) hands back $114.86 USDC and 0.0000 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $114.86 with the other rungs as given\n• r3 deep: $0.01002405 – $0.01096801 (-22.56% / -15.27%), $650.90 USDC and 0 NOCK at spot (liquidity 141251.6709; top: the nearest usable tick)\n  – Bottom: fully NOCK at $0.01002405: 62,077 NOCK held, 62,077 bought, average $0.01048542\n  – Fees while in range (an estimate): $85.90/day, $73.03 diluted (it would be 14.98% of the pool's active liquidity); $13.20 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – It earns nothing until the price falls to $0.01096801 (-15.27%)\n  – In range over stored history: 5.82% of the measured time (31,832 s of 547,205 s); replayed over it, at most $32.55 from intervals wholly inside and at most $50.00 more from intervals at its edges (1,801 s), undiluted, no lower bound\n  – Measured inside this range: at most $32.55 over 31,832 s; only 31832 s of stored intervals sat wholly inside: below the 72000 s a per-day figure needs, so only the dollars and seconds are stated\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $43.74, median $74.75, max $112.86 per day; every day: 2026-11-14 $54.23 (30,699 s, not counted), 2026-11-15 $70.76 (86,488 s), 2026-11-16 $101.59 (86,007 s), 2026-11-17 $137.52 (71,106 s, not counted), 2026-11-18 $43.74 (86,146 s), 2026-11-19 $112.86 (85,799 s), 2026-11-20 $74.75 (86,400 s), 2026-11-21 $54.52 (14,559 s, not counted)\n  – If pulled at fill (at $0.01002405): 62,077 NOCK kept, 62,077 bought at an average $0.01048542. Pulled when fully NOCK (at its bottom), the rung keeps this NOCK on a rebound; left in place, a rebound sells it back. Pulling is a withdrawal you sign; gas is not counted.\n  – The reserve gate allows this rung at most $650.90 with the other rungs as given\n• Overlaps: none\n• Combined: $766.99 USDC and 87 NOCK at spot; at the deepest bottom $0.01002405: 71,975 NOCK held, 71,888 bought, average $0.01066922; kept if the 1 deep rung(s) are pulled at fill: 62,077 NOCK, bought at an average $0.01048542\n• Price grid (NOCK bought by the ladder, USDC left in it; rungs in range and their estimated fees per day; stable balance and reserve headroom):\n  +1.44% $0.01313098: 87 NOCK sold, $768.12 USDC left; r1 in range, fees $0.84/day ($0.84 diluted); stable $1773.80 (reserve +$823.80) [r1 top]\n  0.00% $0.01294400: 0 NOCK bought, $766.99 USDC left; r1 in range, fees $0.84/day ($0.84 diluted); stable $1769.54 (reserve +$819.54) [spot]\n  -1.55% $0.01274292: 95 NOCK bought, $765.76 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1764.93 (reserve +$814.93) [r1 bottom, r2 top]\n  -5.00% $0.01229680: 2,338 NOCK bought, $737.69 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1729.25 (reserve +$779.25)\n  -10.00% $0.01164960: 5,818 NOCK bought, $696.04 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1676.31 (reserve +$726.31)\n  -15.00% $0.01100240: 9,601 NOCK bought, $653.21 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1621.88 (reserve +$671.88)\n  -15.27% $0.01096801: 9,811 NOCK bought, $650.90 USDC left; r3 in range, fees $85.90/day ($73.03 diluted); stable $1618.94 (reserve +$668.94) [r2 bottom, r3 top]\n  -20.00% $0.01035520: 49,147 NOCK bought, $231.70 USDC left; r3 in range, fees $85.90/day ($73.03 diluted); stable $1188.42 (reserve +$238.42)\n  -22.56% $0.01002405: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $950.46 (reserve +$0.46) [r3 bottom]\n  -22.74% $0.01000000: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $950.00 (reserve +$0.00) [gate]\n  -25.00% $0.00970800: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $944.39 (reserve -$5.61)\n  -30.00% $0.00906080: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $931.64 (reserve -$18.36)\n  -35.00% $0.00841360: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $918.43 (reserve -$31.57)\n  -40.00% $0.00776640: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $904.70 (reserve -$45.30)\n• Reserve (shared): stable $950.00 at the gate $0.01000000 (your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom) against the $950.00 reserve: holds by $0.00 (the rungs take at most $766.99 in all; the existing NOCK ranges hold $171.16 USDC there)\n• Below the gate: at $0.00776640 (-40.00%) stable $904.70 (reserve -$45.30). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• Floor budget (shared): needs 87 (r1 87, r2 0, r3 0) of the 87 NOCK that may go into LP: fits\n• Floor-crossing price: lowers: the ladder's NOCK leaves the wallet and sells as NOCK rises to the top (without the ladder $0.025404 (+96.3%), with it $0.025220 (+94.8%))\n• Trade-off: Rows are measurements at your depths; NockNock does not choose the split or the depths. Rows are in the order of the quantity varied and are not ranked. Fee per day in range is always shown with the in-range share of stored history and the replay upper bounds: a high rate while in range is not a rate per day.\n  Split: none (the split table is drawn for two rungs)\n  Near rung's bottom: none (the depth tables are drawn for one near and one deep rung)\n  Deep rung's top: none (the depth tables are drawn for one near and one deep rung)\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK. Each rung is its own position (its own NFT) in the same pool; overlapping rungs are allowed and their liquidity adds. The rungs share one reserve gate and one NOCK budget. A deep rung keeps its NOCK on a rebound only if it is pulled when it is fully NOCK; pulling is a withdrawal you sign, and its gas is not counted.\n• Fee estimate assumptions: Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one). Fees per unit of liquidity are shared by every range that contains the price (the same pool, the same fee tier). The pool's swap volume is taken as unchanged by the new liquidity: only its share dilutes. Dilution uses the pool's active liquidity at the current tick, read at 'latest' in the snapshot's cycle (not at the snapshot's block); the liquidity at the range's own ticks is not read and is taken as the same. The NOCK fee leg is valued at the current pool price, not at the price when it accrued. Intervals where the measuring range's liquidity changed or its fees fell (a collect, or a v4 add that collects) are skipped, so the measurement slightly undercounts; the seconds skipped are stated. Gas is not counted. Past fees are not a forecast. The stored market volume of another pool (market_price_history) is never used.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
+    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Ladder of 3 rungs at the pool price $0.01294400, snapped to v4 USDC/NOCK 3.00% #3163450 (tick spacing 300)\n• Shape: your operator_profile.ladder_rungs (cap: the tick band containing spot; near 0.15 from spot down to $0.01100000; deep 0.85 from $0.01100000 down to $0.01000000), sized to $766.99 USDC: the near and deep rungs' USDC at their tops plus the cap's USDC now\n  – r1 cap: to_deposit; target $1.23, deployed $0.00, left to deposit $1.23\n  – r2 near: to_deposit; target $114.86, deployed $0.00, left to deposit $114.86\n  – r3 deep: to_deposit; target $650.90, deployed $0.00, left to deposit $650.90\n• Pool: a ladder in this pool is a NEW position (a new NFT); add it to config.yaml to be tracked\n• r1 cap: $0.01274292 – $0.01313098 (-1.55% / +1.44%), $1.23 USDC and 87 NOCK at spot (liquidity 1381.9212; top: the tick band containing the pool's tick (the cap))\n  – Bottom: fully NOCK at $0.01274292: 182 NOCK held, 95 bought, average $0.01284307\n  – Fees while in range (an estimate): $0.84/day, $0.84 diluted (it would be 0.17% of the pool's active liquidity); $35.77 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – In range over stored history: 1.95% of the measured time (10,659 s of 547,205 s); replayed over it, at most $0.02 from intervals wholly inside and at most $0.15 more from intervals at its edges (900 s), undiluted, no lower bound\n  – Measured inside this range: at most $0.02 over 10,659 s; only 10659 s of stored intervals sat wholly inside: below the 72000 s a per-day figure needs, so only the dollars and seconds are stated\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $0.43, median $0.73, max $1.10 per day; every day: 2026-11-14 $0.53 (30,699 s, not counted), 2026-11-15 $0.69 (86,488 s), 2026-11-16 $0.99 (86,007 s), 2026-11-17 $1.35 (71,106 s, not counted), 2026-11-18 $0.43 (86,146 s), 2026-11-19 $1.10 (85,799 s), 2026-11-20 $0.73 (86,400 s), 2026-11-21 $0.53 (14,559 s, not counted)\n  – Round trip: A fall to $0.01274292 and a return to $0.01294400 (the pool price now) hands back $1.23 USDC and 86.7891 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $1.23 with the other rungs as given\n• r2 near: $0.01096801 – $0.01274292 (-15.27% / -1.55%), $114.86 USDC and 0 NOCK at spot (liquidity 14083.0162; top: the usable tick at or below the pool price (the first rung still drawable))\n  – Bottom: fully NOCK at $0.01096801: 9,716 NOCK held, 9,716 bought, average $0.01182220\n  – Fees while in range (an estimate): $8.56/day, $8.42 diluted (it would be 1.73% of the pool's active liquidity); $7.46 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – It earns nothing until the price falls to $0.01274292 (-1.55%)\n  – In range over stored history: 28.63% of the measured time (156,662 s of 547,205 s); replayed over it, at most $6.39 from intervals wholly inside and at most $5.16 more from intervals at its edges (2,101 s), undiluted, no lower bound\n  – Measured inside this range: $3.52/day over 1.81 days (at most $6.39 in all)\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $4.36, median $7.45, max $11.25 per day; every day: 2026-11-14 $5.41 (30,699 s, not counted), 2026-11-15 $7.06 (86,488 s), 2026-11-16 $10.13 (86,007 s), 2026-11-17 $13.71 (71,106 s, not counted), 2026-11-18 $4.36 (86,146 s), 2026-11-19 $11.25 (85,799 s), 2026-11-20 $7.45 (86,400 s), 2026-11-21 $5.44 (14,559 s, not counted)\n  – Round trip: A fall to $0.01096801 and a return to $0.01294400 (the pool price now) hands back $114.86 USDC and 0.0000 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $114.86 with the other rungs as given\n• r3 deep: $0.01002405 – $0.01096801 (-22.56% / -15.27%), $650.90 USDC and 0 NOCK at spot (liquidity 141251.6709; top: the nearest usable tick)\n  – Bottom: fully NOCK at $0.01002405: 62,077 NOCK held, 62,077 bought, average $0.01048542\n  – Fees while in range (an estimate): $85.90/day, $73.03 diluted (it would be 14.98% of the pool's active liquidity); $13.20 per $100 of its value at spot per day; measured on v4 USDC/NOCK 3.00% #3163450 over 6.33 days (1,836 intervals, measured 15 min ago) at $6.0811 per 1e15 liquidity per day, the NOCK leg valued at the pool price $0.01294400: the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it\n  – It earns nothing until the price falls to $0.01096801 (-15.27%)\n  – In range over stored history: 5.82% of the measured time (31,832 s of 547,205 s); replayed over it, at most $32.55 from intervals wholly inside and at most $50.00 more from intervals at its edges (1,801 s), undiluted, no lower bound\n  – Measured inside this range: at most $32.55 over 31,832 s; only 31832 s of stored intervals sat wholly inside: below the 72000 s a per-day figure needs, so only the dollars and seconds are stated\n  – Daily spread (5 UTC days with at least 72,000 s measured): min $43.74, median $74.75, max $112.86 per day; every day: 2026-11-14 $54.23 (30,699 s, not counted), 2026-11-15 $70.76 (86,488 s), 2026-11-16 $101.59 (86,007 s), 2026-11-17 $137.52 (71,106 s, not counted), 2026-11-18 $43.74 (86,146 s), 2026-11-19 $112.86 (85,799 s), 2026-11-20 $74.75 (86,400 s), 2026-11-21 $54.52 (14,559 s, not counted)\n  – If pulled at fill (at $0.01002405): 62,077 NOCK kept, 62,077 bought at an average $0.01048542. Pulled when fully NOCK (at its bottom), the rung keeps this NOCK on a rebound; left in place, a rebound sells it back. Pulling is a withdrawal you sign; gas is not counted.\n  – The reserve gate allows this rung at most $650.90 with the other rungs as given\n• Overlaps: none\n• Combined: $766.99 USDC and 87 NOCK at spot; at the deepest bottom $0.01002405: 71,975 NOCK held, 71,888 bought, average $0.01066922; kept if the 1 deep rung(s) are pulled at fill: 62,077 NOCK, bought at an average $0.01048542\n• Price grid (NOCK bought by the ladder, USDC left in it; rungs in range and their estimated fees per day; stable balance and reserve headroom):\n  +1.44% $0.01313098: 87 NOCK sold, $768.12 USDC left; r1 in range, fees $0.84/day ($0.84 diluted); stable $1773.80 (reserve +$823.80) [r1 top]\n  0.00% $0.01294400: 0 NOCK bought, $766.99 USDC left; r1 in range, fees $0.84/day ($0.84 diluted); stable $1769.54 (reserve +$819.54) [spot]\n  -1.55% $0.01274292: 95 NOCK bought, $765.76 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1764.93 (reserve +$814.93) [r1 bottom, r2 top]\n  -5.00% $0.01229680: 2,338 NOCK bought, $737.69 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1729.25 (reserve +$779.25)\n  -10.00% $0.01164960: 5,818 NOCK bought, $696.04 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1676.31 (reserve +$726.31)\n  -15.00% $0.01100240: 9,601 NOCK bought, $653.21 USDC left; r2 in range, fees $8.56/day ($8.42 diluted); stable $1621.88 (reserve +$671.88)\n  -15.27% $0.01096801: 9,811 NOCK bought, $650.90 USDC left; r3 in range, fees $85.90/day ($73.03 diluted); stable $1618.94 (reserve +$668.94) [r2 bottom, r3 top]\n  -20.00% $0.01035520: 49,147 NOCK bought, $231.70 USDC left; r3 in range, fees $85.90/day ($73.03 diluted); stable $1188.42 (reserve +$238.42)\n  -22.56% $0.01002405: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $950.46 (reserve +$0.46) [r3 bottom]\n  -22.74% $0.01000000: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $950.00 (reserve +$0.00) [gate]\n  -25.00% $0.00970800: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $944.39 (reserve -$5.61)\n  -30.00% $0.00906080: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $931.64 (reserve -$18.36)\n  -35.00% $0.00841360: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $918.43 (reserve -$31.57)\n  -40.00% $0.00776640: 71,888 NOCK bought, $0.00 USDC left; no rung in range; stable $904.70 (reserve -$45.30)\n• Reserve (shared): stable $950.00 at the gate $0.01000000 (your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom) against the $950.00 reserve: holds by $0.00 (the rungs take at most $766.99 in all; the existing NOCK ranges hold $171.16 USDC there)\n• Below the gate: at $0.00776640 (-40.00%) stable $904.70 (reserve -$45.30). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• Floor budget (shared): needs 87 (r1 87, r2 0, r3 0) of the 87 NOCK that may go into LP: fits\n• Floor-crossing price: lowers: the ladder's NOCK leaves the wallet and sells as NOCK rises to the top (without the ladder $0.025404 (+96.3%), with it $0.025220 (+94.8%))\n• Trade-off: Rows are measurements at your depths; NockNock does not choose the split or the depths. Rows are in the order of the quantity varied and are not ranked. Fee per day in range is always shown with the in-range share of stored history and the replay upper bounds: a high rate while in range is not a rate per day.\n  Split: none (the split table is drawn for two rungs)\n  Near rung's bottom: none (the depth tables are drawn for one near and one deep rung)\n  Deep rung's top: none (the depth tables are drawn for one near and one deep rung)\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK. Each rung is its own position (its own NFT) in the same pool; overlapping rungs are allowed and their liquidity adds. The rungs share one reserve gate and one NOCK budget. A deep rung keeps its NOCK on a rebound only if it is pulled when it is fully NOCK; pulling is a withdrawal you sign, and its gas is not counted.\n• Fee estimate assumptions: Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one). Fees per unit of liquidity are shared by every range that contains the price (the same pool, the same fee tier). The pool's swap volume is taken as unchanged by the new liquidity: only its share dilutes. Dilution uses the pool's active liquidity at the current tick, read at 'latest' in the snapshot's cycle (not at the snapshot's block); the liquidity at the range's own ticks is not read and is taken as the same. The NOCK fee leg is valued at the current pool price, not at the price when it accrued. Intervals where the measuring range's liquidity changed or its fees fell (a collect, or a v4 add that collects) are skipped, so the measurement slightly undercounts; the seconds skipped are stated. Gas is not counted. Past fees are not a forecast. The stored market volume of another pool (market_price_history) is never used.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
     "status": 200
   },
   "the_bottle_deep_deployed": {
@@ -2932,61 +2990,88 @@
           "cap": "sized",
           "cap_reason": null,
           "dust": {
-            "nock": 1.0,
+            "liquidity_tolerance": 1e-6,
             "note": "display constants, not settings",
-            "usdc": 0.5
+            "usdc": 1.0
+          },
+          "fit": {
+            "allowed_rule": "the shared reserve gate's most at $0.01000000: the wallet's USDC plus the USDC every range holds there, less the $950.00 reserve, and never more than the wallet holds",
+            "allowed_usdc": "116.09",
+            "factor": null,
+            "minimum_usdc": "1.00",
+            "needed_usdc": "116.09",
+            "rule": "once a near or deep rung is deposited the cap takes only what the reserve leaves beside the near and deep rungs still to deposit; when they alone need more than the reserve allows, each deposit left is cut pro rata (by the same fraction), so the shape keeps its proportions, and the shortfall is stated",
+            "shortfall_usdc": null,
+            "status": "fits"
           },
           "gate_price_rule": "your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom",
           "gate_price_usd": "0.01000000",
+          "headroom_rule": "the shared reserve gate's most at $0.01000000: the wallet's USDC plus the USDC every range holds there, less the $950.00 reserve, and never more than the wallet holds",
+          "headroom_usdc": "116.09",
           "note": "the operator's own shape, sized here; NockNock does not choose it",
           "plan": [
             {
               "cap": {
                 "band_rule": "the band 273600..273900 of the 300-tick grid contains the pool's tick 273743",
                 "bound_by": "lp_nock_budget",
-                "budget_counting_the_tracked_cap": "86.7891",
-                "limit_rule": "never more USDC than the first near rung's target",
+                "limit_rule": "never more USDC than the first near rung's target; once a near or deep rung is deposited, never more than the reserve leaves for it beside the other deposits listed",
                 "lp_nock_budget": "86.7891",
                 "nock": "86.7891",
                 "note": "the cap holds the whole LP NOCK budget, 86.7891 NOCK; the curve pairs it with $1.23 USDC",
                 "pool_tick": 273743,
                 "tick_lower": 273600,
                 "tick_upper": 273900,
-                "usdc": "1.23"
+                "usdc": "1.23",
+                "usdc_limit": "1.23",
+                "usdc_limit_is": "reserve"
               },
               "counterparts": [],
               "deployed_nock": "0.0000",
               "deployed_usdc": "0.000000",
+              "fit_factor": null,
+              "found": [],
               "index": 1,
+              "note": null,
               "over_by_usdc": null,
               "reason": null,
+              "remaining_liquidity": "138192115820500",
               "remaining_nock": "86.7891",
               "remaining_usdc": "1.225999",
+              "remaining_usdc_at_top": null,
               "rung": "cap",
               "share": null,
               "status": "to_deposit",
+              "target_liquidity": "138192115820500",
               "target_nock": "86.7891",
               "target_usdc": "1.225999",
               "tick_lower": 273600,
-              "tick_upper": 273900
+              "tick_upper": 273900,
+              "tracked_liquidity": "0"
             },
             {
               "cap": null,
               "counterparts": [],
               "deployed_nock": null,
               "deployed_usdc": "0.000000",
+              "fit_factor": null,
+              "found": [],
               "index": 2,
+              "note": null,
               "over_by_usdc": null,
               "reason": null,
-              "remaining_nock": null,
+              "remaining_liquidity": "1408301615002245",
+              "remaining_nock": "0.0000",
               "remaining_usdc": "114.864600",
+              "remaining_usdc_at_top": "114.864600",
               "rung": "near",
               "share": "0.15",
               "status": "to_deposit",
+              "target_liquidity": "1408301615002245",
               "target_nock": null,
               "target_usdc": "114.864600",
               "tick_lower": 273900,
-              "tick_upper": 275400
+              "tick_upper": 275400,
+              "tracked_liquidity": "0"
             },
             {
               "cap": null,
@@ -2995,21 +3080,29 @@
               ],
               "deployed_nock": null,
               "deployed_usdc": "650.899400",
+              "fit_factor": null,
+              "found": [],
               "index": 3,
+              "note": null,
               "over_by_usdc": null,
               "reason": null,
-              "remaining_nock": null,
-              "remaining_usdc": "0.000001",
+              "remaining_liquidity": "0",
+              "remaining_nock": "0.0000",
+              "remaining_usdc": "0.000000",
+              "remaining_usdc_at_top": "0.000000",
               "rung": "deep",
               "share": "0.85",
               "status": "deployed",
+              "target_liquidity": "14125167068081104",
               "target_nock": null,
-              "target_usdc": "650.899401",
+              "target_usdc": "650.899400",
               "tick_lower": 275400,
-              "tick_upper": 276300
+              "tick_upper": 276300,
+              "tracked_liquidity": "14125167068081104"
             }
           ],
-          "rest_note": "the near and deep shares divide the USDC left after the cap",
+          "rest_note": "the near and deep shares divide this USDC, measured at each rung's top",
+          "rest_rule": "frozen by the deep rung already deposited (the deposit order is not known for every rung, so the one implying the most): its $650.90 of USDC at its top is its share of $765.76, which the near and deep shares divide; it does not move with the price",
           "rest_usdc": "765.76",
           "rungs": [
             {
@@ -3033,9 +3126,9 @@
           ],
           "source": "operator_profile.ladder_rungs",
           "status": "computed",
-          "total_rule": "the shared reserve gate's most (max_usdc_total) at $0.01000000, counting the tracked rungs' USDC",
+          "total_rule": "the near and deep rungs' USDC at their tops plus the cap's USDC now",
           "total_usdc": "766.99",
-          "tracked_note": "Tracked ladder rungs in this pool (role: ladder) are part of the shape, not existing ranges: the total counts their USDC as if it were still in the wallet. A near or deep rung counts what its range holds as all USDC at its top (vs_top.usdc_at_top); a cap counts the USDC it holds now, and its NOCK is counted back into the NOCK budget the cap is sized by. Each tracked rung is matched to a configured rung by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order). What is left to deposit is drawn on a matched rung's own ticks.",
+          "tracked_note": "Each configured rung's target is a liquidity on its own ticks; a liquidity does not change with the price, so a deployed rung stays deployed when the price moves, in range or out of it. Tracked ladder rungs in this pool (role: ladder) are matched to configured rungs by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order); a position found on-chain and not yet tracked counts for the rung whose pool and ticks it matches exactly. A near or deep rung is measured by what it holds as all USDC at its top (liquidity times the USDC one unit holds there). The plan is frozen by the first near or deep rung deposited: the shares divide what that rung's USDC at its top implies (the largest, when several are deposited), never the total again. Until then the shares divide what the reserve gate allows now, less the cap. A tracked cap is the cap: its liquidity is its target. What is left to deposit is drawn on a matched rung's own ticks.",
           "tracked_usdc": "650.90",
           "unmatched": []
         },
@@ -3114,15 +3207,16 @@
           "cap": {
             "band_rule": "the band 273600..273900 of the 300-tick grid contains the pool's tick 273743",
             "bound_by": "lp_nock_budget",
-            "budget_counting_the_tracked_cap": "86.7891",
-            "limit_rule": "never more USDC than the first near rung's target",
+            "limit_rule": "never more USDC than the first near rung's target; once a near or deep rung is deposited, never more than the reserve leaves for it beside the other deposits listed",
             "lp_nock_budget": "86.7891",
             "nock": "86.7891",
             "note": "the cap holds the whole LP NOCK budget, 86.7891 NOCK; the curve pairs it with $1.23 USDC",
             "pool_tick": 273743,
             "tick_lower": 273600,
             "tick_upper": 273900,
-            "usdc": "1.23"
+            "usdc": "1.23",
+            "usdc_limit": "1.23",
+            "usdc_limit_is": "reserve"
           },
           "fee_estimate": {
             "assumptions": [
@@ -3333,7 +3427,7 @@
           "rung": "near",
           "sizing": {
             "liquidity_human": "14083.0162",
-            "liquidity_raw": "1408301616732632",
+            "liquidity_raw": "1408301615002245",
             "nock_check": "not_given",
             "nock_given": null,
             "nock_needed_at_spot": "0.0000",
@@ -3743,7 +3837,7 @@
               "budget_status": "exceeds",
               "first_rung_share_pct": "50.00",
               "gate_price_usd": "0.01000000",
-              "nock_at_deepest_bottom": "13538.4943",
+              "nock_at_deepest_bottom": "13538.4942",
               "nock_by_depth": [
                 {
                   "nock_held": "8628.6395",
@@ -3751,7 +3845,7 @@
                   "price_usd": "0.01274292"
                 },
                 {
-                  "nock_held": "13538.4943",
+                  "nock_held": "13538.4942",
                   "pct_of_spot": "-15.27",
                   "price_usd": "0.01096801"
                 }
@@ -3923,7 +4017,7 @@
               "nock_at_deepest_bottom": "15769.7651",
               "nock_by_depth": [
                 {
-                  "nock_held": "13805.8232",
+                  "nock_held": "13805.8231",
                   "pct_of_spot": "-1.55",
                   "price_usd": "0.01274292"
                 },
@@ -3982,7 +4076,7 @@
               "nock_at_deepest_bottom": "16513.5220",
               "nock_by_depth": [
                 {
-                  "nock_held": "15531.5511",
+                  "nock_held": "15531.5510",
                   "pct_of_spot": "-1.55",
                   "price_usd": "0.01274292"
                 },
@@ -4038,16 +4132,16 @@
               "budget_status": "exceeds",
               "first_rung_share_pct": "100.00",
               "gate_price_usd": "0.01000000",
-              "nock_at_deepest_bottom": "17257.2790",
+              "nock_at_deepest_bottom": "17257.2789",
               "nock_by_depth": [
                 {
-                  "nock_held": "17257.2790",
+                  "nock_held": "17257.2789",
                   "pct_of_spot": "-1.55",
                   "price_usd": "0.01274292"
                 }
               ],
               "nock_kept_if_deep_rungs_pulled": "0.0000",
-              "nock_needed": "8218.1129",
+              "nock_needed": "8218.1128",
               "per_rung": [
                 {
                   "band_usd_per_day": null,
@@ -4096,7 +4190,7 @@
       },
       "tradeoff_reason": null
     },
-    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Ladder of 2 rungs at the pool price $0.01294400, snapped to v4 USDC/NOCK 3.00% #3163450 (tick spacing 300)\n• Shape: your operator_profile.ladder_rungs (cap: the tick band containing spot; near 0.15 from spot down to $0.01100000; deep 0.85 from $0.01100000 down to $0.01000000), sized to $766.99 USDC: the shared reserve gate's most (max_usdc_total) at $0.01000000, counting the tracked rungs' USDC\n  – r1 cap: to_deposit; target $1.23, deployed $0.00, left to deposit $1.23\n  – r2 near: to_deposit; target $114.86, deployed $0.00, left to deposit $114.86\n  – r3 deep: deployed; target $650.90, deployed $650.90, left to deposit $0.00, tracked: uniswap-v4:base:9000001\n  – Tracked ladder rungs in this pool (role: ladder) are part of the shape, not existing ranges: the total counts their USDC as if it were still in the wallet. A near or deep rung counts what its range holds as all USDC at its top (vs_top.usdc_at_top); a cap counts the USDC it holds now, and its NOCK is counted back into the NOCK budget the cap is sized by. Each tracked rung is matched to a configured rung by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order). What is left to deposit is drawn on a matched rung's own ticks.\n• Pool: a ladder in this pool is a NEW position (a new NFT); add it to config.yaml to be tracked\n• r1 cap: $0.01274292 – $0.01313098 (-1.55% / +1.44%), $1.23 USDC and 87 NOCK at spot (liquidity 1381.9212; top: the tick band containing the pool's tick (the cap))\n  – Bottom: fully NOCK at $0.01274292: 182 NOCK held, 95 bought, average $0.01284307\n  – Fees while in range: not estimated: this snapshot has no fee_yield (2.10.0): fees are not measured in it\n  – Round trip: A fall to $0.01274292 and a return to $0.01294400 (the pool price now) hands back $1.23 USDC and 86.7891 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $1.23 with the other rungs as given\n• r2 near: $0.01096801 – $0.01274292 (-15.27% / -1.55%), $114.86 USDC and 0 NOCK at spot (liquidity 14083.0162; top: the usable tick at or below the pool price (the first rung still drawable))\n  – Bottom: fully NOCK at $0.01096801: 9,716 NOCK held, 9,716 bought, average $0.01182220\n  – Fees while in range: not estimated: this snapshot has no fee_yield (2.10.0): fees are not measured in it\n  – Round trip: A fall to $0.01096801 and a return to $0.01294400 (the pool price now) hands back $114.86 USDC and 0.0000 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $114.86 with the other rungs as given\n• Overlaps: none\n• Combined: $116.09 USDC and 87 NOCK at spot; at the deepest bottom $0.01096801: 9,898 NOCK held, 9,811 bought, average $0.01183214; kept if the 0 deep rung(s) are pulled at fill: 0 NOCK, bought at an average $unknown\n• Price grid (NOCK bought by the ladder, USDC left in it; rungs in range and their estimated fees per day; stable balance and reserve headroom):\n  +1.44% $0.01313098: 87 NOCK sold, $117.22 USDC left; r1 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1773.80 (reserve +$823.80) [r1 top]\n  0.00% $0.01294400: 0 NOCK bought, $116.09 USDC left; r1 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1769.54 (reserve +$819.54) [spot]\n  -1.55% $0.01274292: 95 NOCK bought, $114.86 USDC left; r2 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1764.93 (reserve +$814.93) [r1 bottom, r2 top]\n  -5.00% $0.01229680: 2,338 NOCK bought, $86.79 USDC left; r2 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1729.25 (reserve +$779.25)\n  -10.00% $0.01164960: 5,818 NOCK bought, $45.14 USDC left; r2 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1676.31 (reserve +$726.31)\n  -15.00% $0.01100240: 9,601 NOCK bought, $2.31 USDC left; r2 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1621.88 (reserve +$671.88)\n  -15.27% $0.01096801: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $1618.94 (reserve +$668.94) [r2 bottom]\n  -20.00% $0.01035520: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $1188.42 (reserve +$238.42)\n  -22.74% $0.01000000: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $950.00 (reserve +$0.00) [gate]\n  -25.00% $0.00970800: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $944.39 (reserve -$5.61)\n  -30.00% $0.00906080: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $931.64 (reserve -$18.36)\n  -35.00% $0.00841360: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $918.43 (reserve -$31.57)\n  -40.00% $0.00776640: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $904.70 (reserve -$45.30)\n• Reserve (shared): stable $950.00 at the gate $0.01000000 (your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom) against the $950.00 reserve: holds by $0.00 (the rungs take at most $116.09 in all; the existing NOCK ranges hold $171.16 USDC there)\n• Below the gate: at $0.00776640 (-40.00%) stable $904.70 (reserve -$45.30). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• Floor budget (shared): needs 87 (r1 87, r2 0) of the 87 NOCK that may go into LP: fits\n• Floor-crossing price: lowers: the ladder's NOCK leaves the wallet and sells as NOCK rises to the top (without the ladder $0.025404 (+96.3%), with it $0.025220 (+94.8%))\n• Trade-off: Rows are measurements at your depths; NockNock does not choose the split or the depths. Rows are in the order of the quantity varied and are not ranked. Fee per day in range is always shown with the in-range share of stored history and the replay upper bounds: a high rate while in range is not a rate per day.\n  Split (the share of the $116.09 total in r1; r2 holds the rest; step 10.0%, display constants, not settings):\n    r1 0.00%: r1 $0.00: no fee figure, in range ? of stored history, no replay; r2 $116.09: no fee figure, in range ? of stored history, no replay; 9,820 NOCK at the deepest bottom, average $0.01182220; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 0 (fits)\n    r1 1.06%: r1 $1.23: no fee figure, in range ? of stored history, no replay; r2 $114.86: no fee figure, in range ? of stored history, no replay; 9,898 NOCK at the deepest bottom, average $0.01183214; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 87 (fits)\n    r1 10.00%: r1 $11.61: no fee figure, in range ? of stored history, no replay; r2 $104.48: no fee figure, in range ? of stored history, no replay; 10,563 NOCK at the deepest bottom, average $0.01191693; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 822 (exceeds)\n    r1 20.00%: r1 $23.22: no fee figure, in range ? of stored history, no replay; r2 $92.87: no fee figure, in range ? of stored history, no replay; 11,307 NOCK at the deepest bottom, average $0.01201318; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 1,644 (exceeds)\n    r1 30.00%: r1 $34.83: no fee figure, in range ? of stored history, no replay; r2 $81.26: no fee figure, in range ? of stored history, no replay; 12,051 NOCK at the deepest bottom, average $0.01211100; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 2,465 (exceeds)\n    r1 40.00%: r1 $46.44: no fee figure, in range ? of stored history, no replay; r2 $69.65: no fee figure, in range ? of stored history, no replay; 12,795 NOCK at the deepest bottom, average $0.01221043; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 3,287 (exceeds)\n    r1 50.00%: r1 $58.05: no fee figure, in range ? of stored history, no replay; r2 $58.05: no fee figure, in range ? of stored history, no replay; 13,538 NOCK at the deepest bottom, average $0.01231151; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 4,109 (exceeds)\n    r1 60.00%: r1 $69.65: no fee figure, in range ? of stored history, no replay; r2 $46.44: no fee figure, in range ? of stored history, no replay; 14,282 NOCK at the deepest bottom, average $0.01241427; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 4,931 (exceeds)\n    r1 70.00%: r1 $81.26: no fee figure, in range ? of stored history, no replay; r2 $34.83: no fee figure, in range ? of stored history, no replay; 15,026 NOCK at the deepest bottom, average $0.01251876; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 5,753 (exceeds)\n    r1 80.00%: r1 $92.87: no fee figure, in range ? of stored history, no replay; r2 $23.22: no fee figure, in range ? of stored history, no replay; 15,770 NOCK at the deepest bottom, average $0.01262503; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 6,574 (exceeds)\n    r1 90.00%: r1 $104.48: no fee figure, in range ? of stored history, no replay; r2 $11.61: no fee figure, in range ? of stored history, no replay; 16,514 NOCK at the deepest bottom, average $0.01273311; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 7,396 (exceeds)\n    r1 100.00%: r1 $116.09: no fee figure, in range ? of stored history, no replay; r2 $0.00: no fee figure, in range ? of stored history, no replay; 17,257 NOCK at the deepest bottom, average $0.01284307; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 8,218 (exceeds)\n  Near rung's bottom: none (the depth tables are drawn for one near and one deep rung)\n  Deep rung's top: none (the depth tables are drawn for one near and one deep rung)\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK. Each rung is its own position (its own NFT) in the same pool; overlapping rungs are allowed and their liquidity adds. The rungs share one reserve gate and one NOCK budget. A deep rung keeps its NOCK on a rebound only if it is pulled when it is fully NOCK; pulling is a withdrawal you sign, and its gas is not counted.\n• Fee estimate assumptions: Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one). Fees per unit of liquidity are shared by every range that contains the price (the same pool, the same fee tier). The pool's swap volume is taken as unchanged by the new liquidity: only its share dilutes. Dilution uses the pool's active liquidity at the current tick, read at 'latest' in the snapshot's cycle (not at the snapshot's block); the liquidity at the range's own ticks is not read and is taken as the same. The NOCK fee leg is valued at the current pool price, not at the price when it accrued. Intervals where the measuring range's liquidity changed or its fees fell (a collect, or a v4 add that collects) are skipped, so the measurement slightly undercounts; the seconds skipped are stated. Gas is not counted. Past fees are not a forecast. The stored market volume of another pool (market_price_history) is never used.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
+    "mcp_text": "🧮 Ladder Simulation (what-if, read-only)\n=========================================\n• Ladder of 2 rungs at the pool price $0.01294400, snapped to v4 USDC/NOCK 3.00% #3163450 (tick spacing 300)\n• Shape: your operator_profile.ladder_rungs (cap: the tick band containing spot; near 0.15 from spot down to $0.01100000; deep 0.85 from $0.01100000 down to $0.01000000), sized to $766.99 USDC: the near and deep rungs' USDC at their tops plus the cap's USDC now\n  – r1 cap: to_deposit; target $1.23, deployed $0.00, left to deposit $1.23\n  – r2 near: to_deposit; target $114.86, deployed $0.00, left to deposit $114.86\n  – r3 deep: deployed; target $650.90, deployed $650.90, left to deposit $0.00, tracked: uniswap-v4:base:9000001\n  – Each configured rung's target is a liquidity on its own ticks; a liquidity does not change with the price, so a deployed rung stays deployed when the price moves, in range or out of it. Tracked ladder rungs in this pool (role: ladder) are matched to configured rungs by role, then by ticks (exact ticks first, otherwise the configured rung of that role in order); a position found on-chain and not yet tracked counts for the rung whose pool and ticks it matches exactly. A near or deep rung is measured by what it holds as all USDC at its top (liquidity times the USDC one unit holds there). The plan is frozen by the first near or deep rung deposited: the shares divide what that rung's USDC at its top implies (the largest, when several are deposited), never the total again. Until then the shares divide what the reserve gate allows now, less the cap. A tracked cap is the cap: its liquidity is its target. What is left to deposit is drawn on a matched rung's own ticks.\n• Pool: a ladder in this pool is a NEW position (a new NFT); add it to config.yaml to be tracked\n• r1 cap: $0.01274292 – $0.01313098 (-1.55% / +1.44%), $1.23 USDC and 87 NOCK at spot (liquidity 1381.9212; top: the tick band containing the pool's tick (the cap))\n  – Bottom: fully NOCK at $0.01274292: 182 NOCK held, 95 bought, average $0.01284307\n  – Fees while in range: not estimated: this snapshot has no fee_yield (2.10.0): fees are not measured in it\n  – Round trip: A fall to $0.01274292 and a return to $0.01294400 (the pool price now) hands back $1.23 USDC and 86.7891 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $1.23 with the other rungs as given\n• r2 near: $0.01096801 – $0.01274292 (-15.27% / -1.55%), $114.86 USDC and 0 NOCK at spot (liquidity 14083.0162; top: the usable tick at or below the pool price (the first rung still drawable))\n  – Bottom: fully NOCK at $0.01096801: 9,716 NOCK held, 9,716 bought, average $0.01182220\n  – Fees while in range: not estimated: this snapshot has no fee_yield (2.10.0): fees are not measured in it\n  – Round trip: A fall to $0.01096801 and a return to $0.01294400 (the pool price now) hands back $114.86 USDC and 0.0000 NOCK, what this rung started with: the round trip's gain is the fees it earned in range (fee_estimate), and gas is not counted.\n  – The reserve gate allows this rung at most $114.86 with the other rungs as given\n• Overlaps: none\n• Combined: $116.09 USDC and 87 NOCK at spot; at the deepest bottom $0.01096801: 9,898 NOCK held, 9,811 bought, average $0.01183214; kept if the 0 deep rung(s) are pulled at fill: 0 NOCK, bought at an average $unknown\n• Price grid (NOCK bought by the ladder, USDC left in it; rungs in range and their estimated fees per day; stable balance and reserve headroom):\n  +1.44% $0.01313098: 87 NOCK sold, $117.22 USDC left; r1 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1773.80 (reserve +$823.80) [r1 top]\n  0.00% $0.01294400: 0 NOCK bought, $116.09 USDC left; r1 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1769.54 (reserve +$819.54) [spot]\n  -1.55% $0.01274292: 95 NOCK bought, $114.86 USDC left; r2 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1764.93 (reserve +$814.93) [r1 bottom, r2 top]\n  -5.00% $0.01229680: 2,338 NOCK bought, $86.79 USDC left; r2 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1729.25 (reserve +$779.25)\n  -10.00% $0.01164960: 5,818 NOCK bought, $45.14 USDC left; r2 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1676.31 (reserve +$726.31)\n  -15.00% $0.01100240: 9,601 NOCK bought, $2.31 USDC left; r2 in range, fees not estimated (this snapshot has no fee_yield (2.10.0): fees are not measured in it); stable $1621.88 (reserve +$671.88)\n  -15.27% $0.01096801: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $1618.94 (reserve +$668.94) [r2 bottom]\n  -20.00% $0.01035520: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $1188.42 (reserve +$238.42)\n  -22.74% $0.01000000: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $950.00 (reserve +$0.00) [gate]\n  -25.00% $0.00970800: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $944.39 (reserve -$5.61)\n  -30.00% $0.00906080: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $931.64 (reserve -$18.36)\n  -35.00% $0.00841360: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $918.43 (reserve -$31.57)\n  -40.00% $0.00776640: 9,811 NOCK bought, $0.00 USDC left; no rung in range; stable $904.70 (reserve -$45.30)\n• Reserve (shared): stable $950.00 at the gate $0.01000000 (your ladder bottom (operator_profile.ladder_bottom_usd $0.01000000), below the deepest rung's bottom) against the $950.00 reserve: holds by $0.00 (the rungs take at most $116.09 in all; the existing NOCK ranges hold $171.16 USDC there)\n• Below the gate: at $0.00776640 (-40.00%) stable $904.70 (reserve -$45.30). The existing NOCK ranges keep converting below the ladder's bottom: a measurement, not the gate.\n• Floor budget (shared): needs 87 (r1 87, r2 0) of the 87 NOCK that may go into LP: fits\n• Floor-crossing price: lowers: the ladder's NOCK leaves the wallet and sells as NOCK rises to the top (without the ladder $0.025404 (+96.3%), with it $0.025220 (+94.8%))\n• Trade-off: Rows are measurements at your depths; NockNock does not choose the split or the depths. Rows are in the order of the quantity varied and are not ranked. Fee per day in range is always shown with the in-range share of stored history and the replay upper bounds: a high rate while in range is not a rate per day.\n  Split (the share of the $116.09 total in r1; r2 holds the rest; step 10.0%, display constants, not settings):\n    r1 0.00%: r1 $0.00: no fee figure, in range ? of stored history, no replay; r2 $116.09: no fee figure, in range ? of stored history, no replay; 9,820 NOCK at the deepest bottom, average $0.01182220; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 0 (fits)\n    r1 1.06%: r1 $1.23: no fee figure, in range ? of stored history, no replay; r2 $114.86: no fee figure, in range ? of stored history, no replay; 9,898 NOCK at the deepest bottom, average $0.01183214; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 87 (fits)\n    r1 10.00%: r1 $11.61: no fee figure, in range ? of stored history, no replay; r2 $104.48: no fee figure, in range ? of stored history, no replay; 10,563 NOCK at the deepest bottom, average $0.01191693; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 822 (exceeds)\n    r1 20.00%: r1 $23.22: no fee figure, in range ? of stored history, no replay; r2 $92.87: no fee figure, in range ? of stored history, no replay; 11,307 NOCK at the deepest bottom, average $0.01201318; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 1,644 (exceeds)\n    r1 30.00%: r1 $34.83: no fee figure, in range ? of stored history, no replay; r2 $81.26: no fee figure, in range ? of stored history, no replay; 12,051 NOCK at the deepest bottom, average $0.01211100; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 2,465 (exceeds)\n    r1 40.00%: r1 $46.44: no fee figure, in range ? of stored history, no replay; r2 $69.65: no fee figure, in range ? of stored history, no replay; 12,795 NOCK at the deepest bottom, average $0.01221043; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 3,287 (exceeds)\n    r1 50.00%: r1 $58.05: no fee figure, in range ? of stored history, no replay; r2 $58.05: no fee figure, in range ? of stored history, no replay; 13,538 NOCK at the deepest bottom, average $0.01231151; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 4,109 (exceeds)\n    r1 60.00%: r1 $69.65: no fee figure, in range ? of stored history, no replay; r2 $46.44: no fee figure, in range ? of stored history, no replay; 14,282 NOCK at the deepest bottom, average $0.01241427; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 4,931 (exceeds)\n    r1 70.00%: r1 $81.26: no fee figure, in range ? of stored history, no replay; r2 $34.83: no fee figure, in range ? of stored history, no replay; 15,026 NOCK at the deepest bottom, average $0.01251876; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 5,753 (exceeds)\n    r1 80.00%: r1 $92.87: no fee figure, in range ? of stored history, no replay; r2 $23.22: no fee figure, in range ? of stored history, no replay; 15,770 NOCK at the deepest bottom, average $0.01262503; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 6,574 (exceeds)\n    r1 90.00%: r1 $104.48: no fee figure, in range ? of stored history, no replay; r2 $11.61: no fee figure, in range ? of stored history, no replay; 16,514 NOCK at the deepest bottom, average $0.01273311; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 7,396 (exceeds)\n    r1 100.00%: r1 $116.09: no fee figure, in range ? of stored history, no replay; r2 $0.00: no fee figure, in range ? of stored history, no replay; 17,257 NOCK at the deepest bottom, average $0.01284307; 0 kept if deep rungs are pulled; reserve holds (+$0.00); NOCK 8,218 (exceeds)\n  Near rung's bottom: none (the depth tables are drawn for one near and one deep rung)\n  Deep rung's top: none (the depth tables are drawn for one near and one deep rung)\n• Assumptions: Every NOCK pool moves by the same percentage as spot, each from its own current price; row 0 of the grid is the snapshot. Fees and gas are not counted. WETH/NOCK ranges hold ETH/USD constant and add no USDC. Gas-side ranges with no NOCK leg (ETH/USDC, #151) are left out of the stable balance and the NOCK totals. The ladder's USDC comes from the wallet and its NOCK from wallet NOCK. Each rung is its own position (its own NFT) in the same pool; overlapping rungs are allowed and their liquidity adds. The rungs share one reserve gate and one NOCK budget. A deep rung keeps its NOCK on a rebound only if it is pulled when it is fully NOCK; pulling is a withdrawal you sign, and its gas is not counted.\n• Fee estimate assumptions: Fee intensity per unit of liquidity is taken as uniform across ticks within the measuring range: the estimate is the measuring range's average fee per unit of liquidity times this range's liquidity, not a measurement inside it (band_measured is the measurement inside it, where there is one). Fees per unit of liquidity are shared by every range that contains the price (the same pool, the same fee tier). The pool's swap volume is taken as unchanged by the new liquidity: only its share dilutes. Dilution uses the pool's active liquidity at the current tick, read at 'latest' in the snapshot's cycle (not at the snapshot's block); the liquidity at the range's own ticks is not read and is taken as the same. The NOCK fee leg is valued at the current pool price, not at the price when it accrued. Intervals where the measuring range's liquidity changed or its fees fell (a collect, or a v4 add that collects) are skipped, so the measurement slightly undercounts; the seconds skipped are stated. Gas is not counted. Past fees are not a forecast. The stored market volume of another pool (market_price_history) is never used.\n• A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.\nSnapshot generated 2026-11-20T12:00:00Z (5 min ago) · worker health: ok",
     "status": 200
   },
   "two_rungs_measured": {

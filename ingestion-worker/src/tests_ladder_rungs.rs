@@ -589,7 +589,8 @@ fn test_the_bottle_with_its_cap_on_the_fixture() {
     let b = sim(&env, &[("shape", "configured"), ("position_id", V4_ID)]);
     let sh = &b["inputs"]["shape"];
     assert_eq!((st(sh, "/total_usdc"), st(sh, "/cap")), ("766.99", "sized"));
-    assert!(st(sh, "/total_rule").starts_with("the shared reserve gate's most (max_usdc_total) at $0.01000000"));
+    assert!(st(sh, "/headroom_rule").starts_with("the shared reserve gate's most at $0.01000000"), "{}", st(sh, "/headroom_rule"));
+    assert_eq!((st(sh, "/headroom_usdc"), st(sh, "/fit/status")), ("766.99", "fits"));
     // The cap: the band 273600..273900 containing tick 273743, holding the whole budget.
     let cap = &b["rungs"][0];
     assert_eq!((st(cap, "/rung"), cap["index"].as_u64()), ("cap", Some(1)));
@@ -638,7 +639,7 @@ fn test_the_cap_near_the_band_top_is_bound_by_the_near_rungs_usdc() {
     assert_eq!(st(&b, "/inputs/shape/total_usdc"), "766.30");
     let cap = &b["rungs"][0];
     assert_eq!(st(cap, "/cap/bound_by"), "near_usdc");
-    assert!(st(cap, "/cap/note").contains("the budget's 86.7891 NOCK would pair with $225.08 USDC, more than the near rung's $99.95"), "{}", cap["cap"]["note"]);
+    assert!(st(cap, "/cap/note").contains("the budget's 86.7891 NOCK would pair with $225.08 USDC, more than the most that keeps it at or below the near rung's USDC, $99.95"), "{}", cap["cap"]["note"]);
     assert_eq!(st(cap, "/cap/nock"), "38.5414");
     assert!((f(cap, "/sizing/usdc_at_spot") - 99.952174).abs() < 0.006);
     let near = &b["rungs"][1];
@@ -690,7 +691,7 @@ fn test_the_shape_without_a_cap_and_with_a_given_total() {
     assert_eq!(st(&b, "/rungs/0/fee_estimate/band_measured/usd_per_day"), "3.53");
     // A total the caller gives.
     let b = sim(&env, &[("shape", "configured"), ("shape_usdc", "766.84"), ("position_id", V4_ID)]);
-    assert_eq!(st(&b, "/inputs/shape/total_rule"), "given (shape_usdc)");
+    assert!(st(&b, "/inputs/shape/headroom_rule").starts_with("given (shape_usdc)"));
     assert_eq!(st(&b, "/combined/nock_held_at_deepest_bottom"), "71893.5235");
     assert_eq!(st(&b, "/reserve_check/margin_usdc"), "0.15");
     // No reserve, no default total.
@@ -940,7 +941,7 @@ fn test_depositing_the_deep_rung_as_stated_leaves_near_and_cap_unchanged() {
     let d = shape_rung(&after, "deep");
     assert_eq!(st(d, "/status"), "deployed");
     assert_eq!(d["counterparts"], json!(["uniswap-v4:base:9000001"]));
-    assert!(f(d, "/remaining_usdc") < LADDER_SHAPE_DUST_USDC);
+    assert!(f(d, "/remaining_usdc") < LADDER_SHAPE_MIN_USDC);
     assert!(d["liquidity_raw"].is_null(), "nothing is minted for a deployed rung");
     for role in ["near", "cap"] {
         let (a, b) = (shape_rung(&after, role), shape_rung(&before, role));
@@ -964,8 +965,10 @@ fn test_depositing_cap_and_near_first_leaves_deep_unchanged() {
     for role in ["cap", "near"] {
         assert_eq!(st(shape_rung(&after, role), "/status"), "deployed", "{role}: {}", shape_rung(&after, role));
     }
-    // The cap's NOCK left the wallet, and is counted back into the budget it is sized by.
-    assert_eq!(st(shape_rung(&after, "cap"), "/cap/bound_by"), "lp_nock_budget");
+    // A tracked cap is the cap: its liquidity is its target, and it is not sized again.
+    let cap = shape_rung(&after, "cap");
+    assert!(cap["cap"].is_null());
+    assert_eq!(cap["tracked_liquidity"], cap["target_liquidity"]);
     let (a, b) = (shape_rung(&after, "deep"), shape_rung(&before, "deep"));
     assert_eq!(st(a, "/status"), "to_deposit");
     assert_eq!(fx(f(a, "/target_usdc"), 2), fx(f(b, "/target_usdc"), 2));
@@ -994,10 +997,12 @@ fn test_with_every_rung_deposited_nothing_is_left_to_deposit() {
 
 #[test]
 fn test_a_tracked_rung_at_other_ticks_keeps_its_ticks_for_the_remainder() {
-    // A deep rung deposited on 275700..276300 with half the deep target's liquidity there.
+    // The near rung as stated, and a deep rung deposited on 275700..276300 with a third of
+    // the deep target's liquidity there: the near rung froze the plan, so the deep rung has
+    // a remainder.
     let env0 = with_shape(fixture(), &bottle());
-    let deep0 = shape_rung(&block_of(&env0), "deep").clone();
-    let env = with_shape(fixture_with_rungs(&[(9000004, Some("deep"), 275700, 276300, liq(&deep0) / 3)]), &bottle());
+    let (near0, deep0) = (shape_rung(&block_of(&env0), "near").clone(), shape_rung(&block_of(&env0), "deep").clone());
+    let env = with_shape(fixture_with_rungs(&[(9000003, Some("near"), 273900, 275400, liq(&near0)), (9000004, Some("deep"), 275700, 276300, liq(&deep0) / 3)]), &bottle());
     let after = block_of(&env);
     let d = shape_rung(&after, "deep");
     assert_eq!(d["counterparts"], json!(["uniswap-v4:base:9000004"]));
@@ -1010,29 +1015,29 @@ fn test_a_tracked_rung_at_other_ticks_keeps_its_ticks_for_the_remainder() {
 }
 
 #[test]
-fn test_an_unmatched_tracked_ladder_is_listed_and_counts_toward_the_total() {
+fn test_an_unmatched_tracked_ladder_is_listed_and_the_gate_counts_it_like_any_range() {
     let before = block_of(&with_shape(fixture(), &bottle()));
     let env = with_shape(fixture_with_rungs(&[(9000005, None, 275400, 276300, 1_000_000_000_000_000)]), &bottle());
     let after = block_of(&env);
     let u = &after["unmatched"][0];
     assert_eq!(st(u, "/position_id"), "uniswap-v4:base:9000005");
     assert!(st(u, "/reason").contains("its rung is not set"));
-    assert!(st(u, "/note").contains("still counts toward the total"));
-    // Its USDC counts toward the total as if it were in the wallet...
-    assert_eq!(st(&after, "/total_usdc"), st(&before, "/total_usdc"));
-    assert!(f(&after, "/tracked_usdc") > 0.0);
-    // ...and fills no rung, so depositing every remainder reads the gate below the
-    // reserve by its USDC: stated, not hidden.
+    assert_eq!(st(u, "/note"), "it fills no configured rung; the reserve gate counts what it holds like any other range");
+    // Its USDC left the wallet and fills no rung: the reserve gate allows that much less
+    // for the shape, and what is left of it still fits (review of the bottle, finding 8).
+    assert!(f(&after, "/headroom_usdc") < f(&before, "/headroom_usdc") - 40.0);
     assert_eq!(st(shape_rung(&after, "deep"), "/status"), "to_deposit");
-    assert!((f(&after, "/gate/margin_usdc") + f(u, "/deployed_usdc")).abs() < 0.02, "{}", after["gate"]);
-    assert!(st(&after, "/tracked_note").contains("matched to a configured rung by role, then by ticks"));
+    assert_eq!(st(&after, "/gate/status"), "holds");
+    assert!(st(&after, "/tracked_note").contains("matched to configured rungs by role, then by ticks"));
 }
 
 #[test]
 fn test_rungs_above_the_price_are_passed_and_the_shape_is_still_drawn() {
     for (tick, near, deep, cap) in [
         (275100.5, "passed", "to_deposit", "to_deposit"),
-        (275399.0, "passed", "to_deposit", "to_deposit"),
+        // One tick above the band's bottom the budget's NOCK is worth $0.95: under the
+        // $1.00 minimum, so the cap is not offered (review of the bottle, finding 16).
+        (275399.0, "passed", "to_deposit", "below_minimum"),
         // Exactly on a band edge: the band at the pool's tick holds one token at this
         // price, so there is no cap, with the reason.
         (275700.0, "passed", "to_deposit", "none"),
@@ -1043,7 +1048,8 @@ fn test_rungs_above_the_price_are_passed_and_the_shape_is_still_drawn() {
         let b = sim_on(&env, &[("shape", "configured"), ("position_id", V4_ID)]).unwrap_or_else(|e| panic!("{tick}: {e:?}"));
         let block = block_of(&env);
         assert_eq!(st(shape_rung(&block, "near"), "/status"), near, "{tick}");
-        assert_eq!(st(shape_rung(&block, "near"), "/reason"), LADDER_SHAPE_PASSED_REASON, "{tick}");
+        // Each passed rung says why in its own terms (review of the bottle, finding 9).
+        assert!(st(shape_rung(&block, "near"), "/reason").contains("this rung's bottom $0.01096801"), "{tick}: {}", shape_rung(&block, "near"));
         assert_eq!(st(shape_rung(&block, "deep"), "/status"), deep, "{tick}");
         assert_eq!(st(shape_rung(&block, "cap"), "/status"), cap, "{tick}");
         if cap == "none" {
@@ -1078,7 +1084,10 @@ fn test_two_rungs_of_one_role_state_their_own_shares() {
     assert!((f(&block["rungs"][3], "/target_usdc") - 0.5 * rest).abs() < 0.01);
     assert!((f(&block["rungs"][2], "/target_usdc") - 0.35 * rest).abs() < 0.01);
     // The cap's limit is the first near rung's target, stated.
-    assert_eq!(st(&block["rungs"][0], "/cap/limit_rule"), "never more USDC than the first near rung's target");
+    assert_eq!(
+        st(&block["rungs"][0], "/cap/limit_rule"),
+        "never more USDC than the first near rung's target; once a near or deep rung is deposited, never more than the reserve leaves for it beside the other deposits listed"
+    );
 }
 
 #[test]

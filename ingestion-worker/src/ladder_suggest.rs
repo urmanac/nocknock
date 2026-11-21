@@ -954,15 +954,17 @@ fn candidates(env: &SnapshotEnvelope, target: &Position, wallet_usdc: f64) -> Va
 pub(crate) const LADDER_SHAPE_KEY: &str = "operator_profile.ladder_rungs";
 pub(crate) const LADDER_SHAPE_SUGGEST_STATEMENT: &str = "A measurement from this cycle's reads of what your ladder shape would do. NockNock does not choose the shape, the bottom or the amounts, builds no transaction, and signs and sends nothing.";
 pub(crate) const LADDER_SHAPE_SUGGEST_ASSUMPTIONS: [&str; 5] = [
-    "The amounts are your own shape (operator_profile.ladder_rungs) sized to the most the standing reserve allows at the gate price; fees and gas are not counted in them.",
+    "The amounts are your own shape (operator_profile.ladder_rungs): until a near or deep rung is deposited it is sized to what the standing reserve allows at the gate price; from then on that rung fixes the plan. When the reserve allows less than what is left, every deposit is cut in proportion and the shortfall is stated. Fees and gas are not counted in them.",
     "A cap is in range now and holds NOCK; every other rung holds only USDC now and earns no fees until NOCK falls to its top.",
-    "Rungs already tracked are part of the shape: their USDC counts toward its total, and only what is left is listed.",
+    "Each rung is measured by its liquidity, which does not change with the price: a deposited rung stays deposited when the price moves, and only what is left is listed. A remainder under $1.00 is not offered.",
     "The ladder's USDC is outside the NOCK LP target and the rebuild: the two are separate figures.",
     "Each fee line is a past measurement on our own tracked range scaled to the rung's liquidity: an estimate, not a forecast.",
 ];
 /// Why a deposit that holds NOCK states which field is typed: the app works out the other
 /// side from the price at that moment (critique of the deploy design, "ux" lens).
 pub(crate) const LADDER_NOCK_LIMIT_WHY: &str = "When the USDC field is typed instead, the app works out the NOCK side from the price at that moment, and it can come out above the limit; neither the link nor the app applies a NOCK limit of its own.";
+/// The same for a cap whose USDC limit binds: the NOCK field would pull more USDC.
+pub(crate) const LADDER_USDC_LIMIT_WHY: &str = "When the NOCK field is typed instead, the app works out the USDC side from the price at that moment, and it can come out above the limit; neither the link nor the app applies a USDC limit of its own.";
 
 /// A decimal string cut (never rounded up) to `dp` decimals: "86.7890958577" -> "86.7890".
 /// An amount to type must not exceed the exact one. Pure.
@@ -1031,8 +1033,9 @@ impl Leg {
 }
 
 /// The fields of a rung's fee estimate the card prints, so a stored row stays small: the
-/// figure, its sample size, the in-range share of stored history and the replay bound, or
-/// the reason it is not measured. Pure.
+/// figure undiluted and diluted (with the share of the pool's active liquidity the rung
+/// would be), its sample size, the in-range share of stored history and the replay bound,
+/// or the reason each is not stated. Pure.
 fn fee_estimate_summary(fe: &Value) -> Value {
     if !fe.is_object() {
         return json!({ "status": "unavailable", "reason": "no fee estimate is stated for this rung" });
@@ -1048,6 +1051,8 @@ fn fee_estimate_summary(fe: &Value) -> Value {
         "reason": fe["reason"],
         "per_day_in_range_usd": fe["per_day_in_range_usd"],
         "per_day_in_range_diluted_usd": fe["per_day_in_range_diluted_usd"],
+        "dilution": pick(&fe["dilution"], &["share_of_active_pct"]),
+        "dilution_reason": fe["dilution_reason"],
         "measured_by": fe["measured_by"],
         "measured_label": fe["measured_label"],
         "measured_at": fe["measured_at"],
@@ -1061,12 +1066,18 @@ fn fee_estimate_summary(fe: &Value) -> Value {
     })
 }
 
+/// Whole cents, cut (never rounded up): what is typed and what is summed. Pure.
+fn cents_down(v: f64) -> f64 {
+    ((v.max(0.0) * 100.0 + 1e-7).floor() / 100.0) + 0.0
+}
+
 /// Every rung of the shape as one stated row: its number, its state against the tracked
-/// rungs and one plain line. A deployed rung says what it holds; a passed, over or absent
-/// one says why. Pure.
+/// rungs and one plain line. A deployed rung says what it holds; a passed, over, found,
+/// held or absent one says why. Amounts left are cut to cents, like the deposits. Pure.
 fn shape_rows(data: &SnapshotData, shape: &Value, target: Option<&Position>) -> Vec<Value> {
     let rungs = shape["rungs"].as_array().cloned().unwrap_or_default();
     let of = rungs.len();
+    let fit_reduced = s(shape, "/fit/status") == Some("reduced");
     rungs
         .iter()
         .enumerate()
@@ -1093,23 +1104,28 @@ fn shape_rows(data: &SnapshotData, shape: &Value, target: Option<&Position>) -> 
             let remaining_usdc = n(r, "/remaining_usdc").unwrap_or(0.0);
             let remaining_nock = n(r, "/remaining_nock").unwrap_or(0.0);
             let reason = s(r, "/reason").unwrap_or("no reason given");
+            let note = s(r, "/note").map(|t| format!(" {}.", sentence_case(t))).unwrap_or_default();
             let text = match status {
                 "to_deposit" => {
                     let amount = if remaining_nock > 0.0 {
-                        format!("about {} NOCK + ${} USDC", fx(remaining_nock, 2), fx(n(r, "/usdc").unwrap_or(remaining_usdc), 2))
+                        format!("about {} NOCK + ${} USDC", fx(remaining_nock, 2), fx(cents_down(remaining_usdc), 2))
                     } else {
-                        format!("${} USDC", fx(remaining_usdc, 2))
+                        format!("${} USDC", fx(cents_down(remaining_usdc), 2))
                     };
-                    let part = if deployed_usdc > 0.0 { format!(" (${} of its ${} target is already deployed)", fx(deployed_usdc, 2), fx(target_usdc, 2)) } else { String::new() };
-                    format!("{label}: left to deposit, {amount}{part}.")
+                    let part = if deployed_usdc > 0.0 && role != "cap" { format!(" (${} of its ${} target is already deployed)", fx(deployed_usdc, 2), fx(target_usdc, 2)) } else { String::new() };
+                    let cut = if fit_reduced { " after the reserve gate's cut" } else { "" };
+                    format!("{label}: left to deposit, {amount}{part}{cut}.")
                 }
                 "deployed" => match holds {
-                    Some((u, k)) => format!("{label}: done. It is deployed in {}, which holds ${} USDC and {} NOCK now.", names.join(" and "), fx(u, 2), grouped(k)),
-                    None => format!("{label}: done. ${} USDC of its ${} target counts as deployed.", fx(deployed_usdc, 2), fx(target_usdc, 2)),
+                    Some((u, k)) => format!("{label}: done. It is deployed in {}, which holds ${} USDC and {} NOCK now.{note}", names.join(" and "), fx(u, 2), grouped(k)),
+                    None => format!("{label}: done. Its tracked liquidity is at least its target's.{note}"),
                 },
-                "over" => format!("{label}: over its target, so nothing more is listed for it. {}.", sentence_case(reason)),
+                "found" => format!("{label}: found on-chain, being tracked. {}.", sentence_case(reason)),
+                "over" => format!("{label}: over its target; it is stated and changes nothing else. {}.", sentence_case(reason)),
                 "passed" => format!("{label}: passed. {}.", sentence_case(reason)),
                 "none" => format!("{label}: no cap this cycle. {}.", sentence_case(reason)),
+                "below_minimum" => format!("{label}: not offered. {}.", sentence_case(reason)),
+                "held" => format!("{label}: held back. {}.", sentence_case(reason)),
                 other => format!("{label}: {other}. {}.", sentence_case(reason)),
             };
             json!({
@@ -1118,14 +1134,18 @@ fn shape_rows(data: &SnapshotData, shape: &Value, target: Option<&Position>) -> 
                 "rung": role,
                 "status": status,
                 "reason": r["reason"],
+                "note": r["note"],
                 "target_usdc": fx(target_usdc, 2),
                 "target_nock": r["target_nock"],
+                "target_liquidity": r["target_liquidity"],
+                "tracked_liquidity": r["tracked_liquidity"],
                 "deployed_usdc": fx(deployed_usdc, 2),
                 "deployed_nock": r["deployed_nock"],
-                "remaining_usdc": fx(remaining_usdc, 2),
+                "remaining_usdc": fx(cents_down(remaining_usdc), 2),
                 "remaining_nock": r["remaining_nock"],
                 "over_by_usdc": r["over_by_usdc"],
                 "counterparts": counterparts,
+                "found": r["found"],
                 "holds_now": holds.map(|(u, k)| json!({ "usdc": fx(u, 2), "nock": fx(k, 4) })),
                 "tick_lower": r["tick_lower"],
                 "tick_upper": r["tick_upper"],
@@ -1137,9 +1157,28 @@ fn shape_rows(data: &SnapshotData, shape: &Value, target: Option<&Position>) -> 
         .collect()
 }
 
+/// The positions found on-chain this cycle in the ladder's pool that could be a rung and
+/// match none exactly: they are not counted until one tap, and the amounts do not count
+/// them. Pure.
+fn found_elsewhere(data: &SnapshotData, target: &Position, shape: &Value) -> Vec<Value> {
+    let matched: Vec<&str> = shape["rungs"].as_array().into_iter().flatten().flat_map(|r| r["found"].as_array().into_iter().flatten().filter_map(|v| v.as_str())).collect();
+    data.derived_metrics
+        .position_detection
+        .as_ref()
+        .and_then(|d| d.pointer("/found_not_counted/positions"))
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|p| p.get("pool_id").and_then(|v| v.as_str()).map(|v| v.to_lowercase()) == Some(target.pool_id.to_lowercase()))
+        .filter(|p| p.get("choices").and_then(|c| c.as_array()).is_some_and(|c| c.iter().any(|x| x.as_str().is_some_and(|x| x.starts_with("ladder:")))))
+        .filter(|p| !p.get("position_id").and_then(|v| v.as_str()).is_some_and(|id| matched.contains(&id)))
+        .cloned()
+        .collect()
+}
+
 /// The suggestion when the operator configured a shape: built from
-/// `derived_metrics.ladder_shape`, plan-stable as rungs are deposited. `out` is the empty
-/// body `ladder_suggestion` starts from. Pure.
+/// `derived_metrics.ladder_shape`, frozen by the first rung deposited and measured by
+/// liquidity (ladder.rs). `out` is the empty body `ladder_suggestion` starts from. Pure.
 fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f64>, &'static str>, mut out: Value) -> Value {
     let data = &env.data;
     let gs = &data.derived_metrics.global_status;
@@ -1148,6 +1187,8 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
     out["shape"] = Value::Null;
     out["wallet_after"] = Value::Null;
     out["mint_note"] = Value::Null;
+    out["fit"] = Value::Null;
+    out["found_note"] = Value::Null;
     // Tracked ladders are listed, never a reason to hide the card: the shape counts them.
     out["tracked"] = json!(tracked_ladders(data));
     let set = |o: &mut Value, status: &str, reason: String| {
@@ -1156,7 +1197,7 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         o["headline"] = json!(headline_for(status));
     };
 
-    // 1. The settings: the shape itself, the bottom when present, and the reserve.
+    // 1. The settings: the shape itself, the bottom and the reserve. None has a default.
     if let Some(note) = &gs.ladder_rungs_note {
         set(&mut out, "invalid", note.clone());
         return out;
@@ -1168,18 +1209,38 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         }
         Ok(b) => b,
     };
-    match (&gs.cash_reserve_usdc, &gs.reserve_note) {
-        (Some(_), _) => {}
-        (None, Some(_)) => {
-            set(&mut out, "invalid", RESERVE_INVALID_NOTE.to_string());
-            return out;
+    if gs.cash_reserve_usdc.is_none() && gs.reserve_note.is_some() {
+        set(&mut out, "invalid", RESERVE_INVALID_NOTE.to_string());
+        return out;
+    }
+    let mut missing: Vec<&str> = Vec::new();
+    let mut why: Vec<String> = Vec::new();
+    if bottom.is_none() {
+        missing.push(LADDER_BOTTOM_KEY);
+        why.push(format!("{LADDER_BOTTOM_KEY} (the price the reserve gate is read at; it has no default)"));
+    }
+    if gs.cash_reserve_usdc.is_none() {
+        missing.push(LADDER_RESERVE_KEY);
+        why.push(format!("{LADDER_RESERVE_KEY} (the reserve that sizes it)"));
+    }
+    if !missing.is_empty() {
+        out["missing"] = json!(missing);
+        set(&mut out, "needs_setting", format!("Your ladder shape ({LADDER_SHAPE_KEY}) is set. Sizing it needs {}.", why.join(" and ")));
+        out["headline"] = json!(if missing.len() == 1 && missing[0] == LADDER_RESERVE_KEY {
+            "Ladder: needs your protected reserve (operator_profile.cash_reserve_usdc) before one is measured.".to_string()
+        } else if missing.len() == 1 {
+            "Ladder: needs your ladder bottom (operator_profile.ladder_bottom_usd) before your shape is measured.".to_string()
+        } else {
+            headline_for("needs_setting").to_string()
+        });
+        // Without a bottom, the candidate bottoms as a measurement table, none picked.
+        if bottom.is_none() {
+            if let Some(src) = data.positions.iter().find(|p| p.is_price_source) {
+                let wallet_usdc: f64 = data.wallet_balances.iter().find(|w| w.token_symbol == "USDC").and_then(|w| w.amount.parse().ok()).unwrap_or(0.0);
+                out["candidates"] = candidates(env, src, wallet_usdc);
+            }
         }
-        (None, None) => {
-            out["missing"] = json!([LADDER_RESERVE_KEY]);
-            set(&mut out, "needs_setting", format!("Your ladder shape ({LADDER_SHAPE_KEY}) is set. Sizing it needs {LADDER_RESERVE_KEY} (the reserve that sizes it)."));
-            out["headline"] = json!("Ladder: needs your protected reserve (operator_profile.cash_reserve_usdc) before one is measured.");
-            return out;
-        }
+        return out;
     }
 
     // 2. The shape as the cycle worked it out (ladder.rs), or why it could not be drawn.
@@ -1188,10 +1249,9 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         return out;
     };
     let shape_status = s(&shape, "/status").unwrap_or("unavailable");
-    if !matches!(shape_status, "computed" | "deployed" | "price_at_or_below_bottom") {
+    if !matches!(shape_status, "computed" | "deployed" | "price_at_or_below_bottom" | "no_room" | "held") {
         let why = s(&shape, "/reason").unwrap_or("no reason given");
-        let status = if why.starts_with("SHAPE_NO_ROOM") { "no_headroom" } else { "unavailable" };
-        set(&mut out, status, format!("Your ladder shape ({LADDER_SHAPE_KEY}) could not be drawn this cycle: {why}"));
+        set(&mut out, "unavailable", format!("Your ladder shape ({LADDER_SHAPE_KEY}) could not be drawn this cycle: {why}"));
         return out;
     }
     let target = s(&shape, "/pool/position_id").and_then(|id| data.positions.iter().find(|p| p.position_id == id));
@@ -1208,19 +1268,45 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         "passed": count("passed"),
         "over": count("over"),
         "none": count("none"),
+        "found": count("found"),
+        "below_minimum": count("below_minimum"),
+        "held": count("held"),
         "total_usdc": shape["total_usdc"],
+        "rest_usdc": shape["rest_usdc"],
+        "rest_rule": shape["rest_rule"],
         "tracked_usdc": shape["tracked_usdc"],
         "unmatched": shape["unmatched"],
         "rungs": rows.clone(),
     });
     let tally = || {
-        let parts: Vec<String> = [("deployed", "deployed"), ("passed", "passed"), ("over", "over target"), ("none", "with no cap this cycle")]
-            .iter()
-            .filter(|(st, _)| count(st) > 0)
-            .map(|(st, words)| format!("{} {words}", count(st)))
-            .collect();
+        let parts: Vec<String> = [
+            ("deployed", "deployed"),
+            ("found", "found on-chain, being tracked"),
+            ("passed", "passed"),
+            ("over", "over target"),
+            ("below_minimum", "under the minimum"),
+            ("held", "held back"),
+            ("none", "with no cap this cycle"),
+        ]
+        .iter()
+        .filter(|(st, _)| count(st) > 0)
+        .map(|(st, words)| format!("{} {words}", count(st)))
+        .collect();
         parts.join(", ")
     };
+    if let Some(t) = target {
+        let others = found_elsewhere(data, t, &shape);
+        if !others.is_empty() {
+            let names: Vec<String> = others
+                .iter()
+                .map(|p| format!("NFT #{} on ticks {}..{}", p["nft_id"], p["tick_lower"], p["tick_upper"]))
+                .collect();
+            out["found_note"] = json!(format!(
+                "Found on-chain in this pool and not counted yet: {}. It matches no rung's ticks exactly, so it is not tracked by itself; one tap under Found on-chain tracks it or sets it aside. The amounts here do not count it.",
+                names.join("; ")
+            ));
+        }
+    }
 
     // 3. Nothing is left to deposit: the ladder is deployed, or the price is below it.
     if shape_status == "deployed" {
@@ -1234,8 +1320,13 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         return out;
     }
     if shape_status == "price_at_or_below_bottom" {
+        let passed: Vec<String> = rows.iter().filter(|r| r["status"] == "passed").map(|r| rung_words(s(r, "/rung").unwrap_or("?"))).collect();
         out["status"] = json!("price_at_or_below_bottom");
-        out["reason"] = json!(format!("NOCK is at or below the bottom of your ladder shape: {}.", LADDER_SHAPE_PASSED_REASON));
+        out["reason"] = json!(format!(
+            "NOCK at ${} is at or below the bottom of your ladder shape: every rung is passed ({}), so no USDC-only deposit is possible in any of them.",
+            s(&shape, "/pool/pool_price_usd").map(|p| p.to_string()).unwrap_or_else(|| "?".to_string()),
+            passed.join(", ")
+        ));
         out["headline"] = json!("Ladder: NOCK is at or below the bottom of your ladder shape, so no deposit is measured above it.");
         return out;
     }
@@ -1252,10 +1343,8 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         return out;
     }
 
-    // 5. The gates the shape was sized by, read back: the reserve and the NOCK budget.
-    let reserve = n(&shape, "/gate/cash_reserve_usdc");
-    let gate_usd = n(&shape, "/gate/price_usd");
-    let (Some(reserve), Some(gate_usd), Some(pool_price)) = (reserve, gate_usd, n(&shape, "/pool/pool_price_usd")) else {
+    // 5. The reserve gate and what it allows for what is left.
+    let (Some(reserve), Some(gate_usd), Some(pool_price)) = (n(&shape, "/gate/cash_reserve_usdc").or_else(|| gs.cash_reserve_usdc.as_deref().and_then(|v| v.parse().ok())), n(&shape, "/gate/price_usd"), n(&shape, "/pool/pool_price_usd")) else {
         set(&mut out, "unavailable", "the reserve gate of your ladder shape could not be read this cycle".to_string());
         return out;
     };
@@ -1264,35 +1353,44 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         Some(b) if (b - gate_usd).abs() < 1e-9 => format!("{b}"),
         _ => price4(gate_usd),
     };
-    match s(&shape, "/gate/status") {
-        Some("holds") => {}
-        Some("breached") => {
-            // Why what is left no longer fits: the tracked rungs hold more than the shape
-            // gives them, or one of them fills no rung.
-            let mut why: Vec<&str> = Vec::new();
-            if count("over") > 0 {
-                why.push(" A tracked rung holds more than its target, and the excess is not taken from the other rungs.");
-            }
-            if shape["unmatched"].as_array().map_or(false, |u| !u.is_empty()) {
-                why.push(" A tracked ladder that matches no rung of the shape counts toward its total and fills no rung.");
-            }
-            set(
-                &mut out,
-                "no_headroom",
-                format!(
-                    "With what is left of your shape deposited, the stable balance at ${gate_words} would read ${}, below your ${} reserve by ${}: no deposit is listed.{}",
-                    s(&shape, "/gate/stable_at_gate_usdc").unwrap_or("?"),
-                    dollars_short(reserve),
-                    fx(n(&shape, "/gate/margin_usdc").map(|m| -m).unwrap_or(0.0), 2),
-                    why.concat(),
-                ),
-            );
-            return out;
-        }
-        other => {
-            set(&mut out, "unavailable", format!("the reserve gate of your ladder shape reads {}: no deposit is listed", other.unwrap_or("nothing")));
-            return out;
-        }
+    let allowed = n(&shape, "/fit/allowed_usdc").unwrap_or(0.0);
+    let needed = n(&shape, "/fit/needed_usdc").unwrap_or(0.0);
+    let minimum = n(&shape, "/fit/minimum_usdc").unwrap_or(LADDER_SUGGEST_MIN_USDC);
+    if shape_status == "no_room" {
+        let left_words = count("to_deposit") + count("below_minimum");
+        out["status"] = json!("no_headroom");
+        out["headline"] = json!(format!(
+            "Ladder: {left_words} of {of} deposits left, but your reserve leaves under ${} for them.",
+            fx(minimum, 2)
+        ));
+        let would_take = if needed > allowed + 0.005 { format!(", which would take ${}", fx(cents_down(needed), 2)) } else { String::new() };
+        let done = rows.iter().any(|r| !matches!(r["status"].as_str(), Some("to_deposit") | Some("below_minimum")));
+        out["reason"] = json!(format!(
+            "With your ${} reserve kept for below ${gate_words}, the reserve gate allows ${} for what is left of your shape{would_take}: nothing above the ${} minimum fits, so no deposit is listed{}.",
+            dollars_short(reserve),
+            fx(allowed, 2),
+            fx(minimum, 2),
+            if done { format!(" ({})", tally()) } else { String::new() },
+        ));
+        return out;
+    }
+    if shape_status == "held" {
+        let held: Vec<String> = rows.iter().filter(|r| r["status"] == "held").map(|r| format!("Deposit {} ({}): {}", r["index"], rung_words(s(r, "/rung").unwrap_or("?")), s(r, "/reason").unwrap_or("no reason given"))).collect();
+        set(&mut out, "nock_exceeds", format!("{}. Nothing else is left to deposit.", held.join("; ")));
+        return out;
+    }
+    if s(&shape, "/gate/status") == Some("breached") && n(&shape, "/gate/margin_usdc").unwrap_or(0.0) < -0.01 {
+        // The deposits are sized to fit; a breach here is a defect, stated, never hidden.
+        set(
+            &mut out,
+            "unavailable",
+            format!(
+                "the deposits left were sized to the reserve gate, yet it reads ${} at ${gate_words}, below your ${} reserve: no deposit is listed until this is resolved",
+                s(&shape, "/gate/stable_at_gate_usdc").unwrap_or("?"),
+                dollars_short(reserve)
+            ),
+        );
+        return out;
     }
     let book = stored_book(data);
     if !book.problems.is_empty() {
@@ -1300,7 +1398,6 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         return out;
     }
     let wallet_usdc: f64 = data.wallet_balances.iter().find(|w| w.token_symbol == "USDC").and_then(|w| w.amount.parse().ok()).unwrap_or(0.0);
-    let nock_status = s(&shape, "/nock_budget/status").unwrap_or("unknown");
     let lp_nock_budget = s(&shape, "/nock_budget/lp_nock_budget").map(|b| b.to_string());
 
     // 6. One deposit per rung left to deposit, with the exact mint of the remainder.
@@ -1310,10 +1407,11 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
     let app = if target.protocol == "aerodrome-cl" { "the Aero app" } else { "the Uniswap web app" };
     let shape_rungs = shape["rungs"].as_array().cloned().unwrap_or_default();
     let to_deposit: Vec<&Value> = shape_rungs.iter().filter(|r| r["status"] == "to_deposit").collect();
-    let holders = to_deposit.iter().filter(|r| n(r, "/nock").unwrap_or(0.0) > 0.0).count();
     let mut rungs: Vec<Value> = Vec::new();
     let mut legs: Vec<(String, Leg)> = Vec::new();
     let mut bars: Vec<Value> = Vec::new();
+    // What the card tells the operator to deposit, cut to cents: the headline, the
+    // outcomes and the wallet line add these, so the card states one figure per deposit.
     let (mut usdc_sum, mut nock_sum) = (0.0, 0.0);
     for r in &to_deposit {
         let index = r["index"].as_u64().unwrap_or(0) as usize;
@@ -1338,29 +1436,23 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         let (bottom_exact, bottom_npu) = tick_prices(target, bottom_tick);
         let (usdc_f, nock_f) = (usdc_exact.parse::<f64>().unwrap_or(0.0), nock_exact.parse::<f64>().unwrap_or(0.0));
         let holds_nock = nock_f > 0.0;
-        if holds_nock && nock_status != "fits" {
-            let (status, why) = if nock_status == "exceeds" {
-                ("nock_exceeds", format!("Deposit {index} ({}) would need {} NOCK now; the floor + tolerance budget allows {}.", rung_words(&role), fx(nock_f, 4), lp_nock_budget.as_deref().unwrap_or("none")))
-            } else {
-                ("unavailable", "the floor + tolerance budget is not reported, so a deposit that holds NOCK cannot be checked against it".to_string())
-            };
-            set(&mut out, status, why);
-            return out;
-        }
         let in_range = r["in_range_now"].as_bool();
         let usdc_enter = cut_dp(usdc_exact, 2);
+        // Every figure of this deposit's USDC is the same cut cents, typed or "about".
+        let usdc_about = fx(cents_down(usdc_f), 2);
         let nock_enter = cut_dp(nock_exact, 4);
         let deployed_usdc = n(r, "/deployed_usdc").unwrap_or(0.0);
-        let part = if deployed_usdc > 0.0 {
+        let part = if deployed_usdc > 0.0 && role != "cap" {
             format!("; the rest of this rung (${} of its ${} target is already deployed)", fx(deployed_usdc, 2), fx(n(r, "/target_usdc").unwrap_or(0.0), 2))
         } else {
             String::new()
         };
+        let cut = if r["fit_factor"].is_string() { ", after the reserve gate's cut" } else { "" };
         let summary = if holds_nock {
             format!(
-                "about {} NOCK + ${} USDC, {}{part}",
+                "about {} NOCK + ${} USDC, {}{part}{cut}",
                 fx(nock_f, 2),
-                fx(usdc_f, 2),
+                fx(cents_down(usdc_f), 2),
                 match in_range {
                     Some(true) => "in range now",
                     Some(false) => "not in range now",
@@ -1368,37 +1460,83 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
                 }
             )
         } else {
-            format!("${usdc_enter} USDC, no NOCK, below the price now{part}")
+            format!("${usdc_enter} USDC, no NOCK, below the price now{part}{cut}")
         };
         // The app derives the other side from whichever field is typed. A deposit that
-        // holds NOCK states both amounts, the limit, and the field that keeps the limit.
-        let nock_limit = holds_nock.then(|| {
-            let (limit, is, words) = match (&lp_nock_budget, holders) {
-                (Some(b), 1) => (b.clone(), "lp_nock_budget", "your LP NOCK budget"),
-                _ => (nock_enter.clone(), "this deposit's NOCK", "this deposit's own NOCK"),
-            };
-            json!({
-                "nock": limit,
-                "is": is,
+        // holds NOCK states both limits, which one binds now, and the field that keeps it.
+        let cap = r["cap"].is_object().then(|| &r["cap"]);
+        let usdc_limit = cap.and_then(|c| n(c, "/usdc_limit"));
+        let bound_by = cap.and_then(|c| s(c, "/bound_by"));
+        let limit_owner = match cap.and_then(|c| s(c, "/usdc_limit_is")) {
+            Some("near_share") => "the most that keeps it at or below the near rung's USDC",
+            Some("reserve") => "what your reserve leaves for it beside the other deposits listed",
+            Some("total_usdc") => "the ladder's USDC",
+            _ => "the near rung's USDC",
+        };
+        let usdc_bound = matches!(bound_by, Some("near_usdc") | Some("total_usdc") | Some("reserve"));
+        let nock_limit = holds_nock.then(|| match (cap, &lp_nock_budget, usdc_limit) {
+            (Some(_), Some(b), Some(ul)) if usdc_bound => json!({
+                "nock": b,
+                "usdc": fx(ul, 2),
+                "is": "near_usdc",
+                "binding": "usdc",
+                "field_to_type": "USDC",
+                "usdc_to_enter": usdc_enter,
+                "nock_then_about": fx(nock_f, 4),
+                "holds_less_than_budget": true,
+                "text": format!(
+                    "The USDC side must not exceed ${}, {limit_owner}, which binds now, so the cap holds about {} NOCK, less than your {b} NOCK LP budget. The limit holds when the USDC field is the one typed, at ${usdc_enter} or less. {LADDER_USDC_LIMIT_WHY}",
+                    fx(ul, 2),
+                    fx(nock_f, 4),
+                ),
+            }),
+            (Some(_), Some(b), ul) => json!({
+                "nock": b,
+                "usdc": ul.map(|u| fx(u, 2)),
+                "is": "lp_nock_budget",
+                "binding": "nock",
                 "field_to_type": "NOCK",
                 "nock_to_enter": nock_enter,
-                "usdc_then_about": fx(usdc_f, 2),
+                "usdc_then_about": usdc_about.clone(),
+                "holds_less_than_budget": false,
+                "text": match ul {
+                    Some(ul) => format!(
+                        "The NOCK side must not exceed {b} NOCK, your LP NOCK budget, which binds now; the USDC side must not exceed ${}, {limit_owner}. The limits hold when the NOCK field is the one typed, at {nock_enter} NOCK or less, and the app shows at most ${} of USDC: about ${} at this reading, more if the price rises inside the band before you deposit. {LADDER_NOCK_LIMIT_WHY}",
+                        fx(ul, 2),
+                        fx(ul, 2),
+                        usdc_about.clone(),
+                    ),
+                    None => format!(
+                        "The NOCK side must not exceed {b} NOCK, your LP NOCK budget. The limit holds when the NOCK field is the one typed, at {nock_enter} NOCK or less. {LADDER_NOCK_LIMIT_WHY}"
+                    ),
+                },
+            }),
+            _ => json!({
+                "nock": nock_enter,
+                "usdc": Value::Null,
+                "is": "this deposit's NOCK",
+                "binding": "nock",
+                "field_to_type": "NOCK",
+                "nock_to_enter": nock_enter,
+                "usdc_then_about": usdc_about.clone(),
+                "holds_less_than_budget": Value::Null,
                 "text": format!(
-                    "The NOCK side must not exceed {limit} NOCK, {words}. The limit holds when the NOCK field is the one typed, at {nock_enter} NOCK or less. {LADDER_NOCK_LIMIT_WHY}"
+                    "The NOCK side must not exceed {nock_enter} NOCK, this deposit's own share of your LP NOCK budget. The limit holds when the NOCK field is the one typed, at {nock_enter} NOCK or less. {LADDER_NOCK_LIMIT_WHY}"
                 ),
-            })
+            }),
         });
         let mut link = deep_link(target, tl, tu, &usdc_enter);
         if holds_nock {
-            link["amount_to_enter"] = json!(format!(
-                "Amount to enter in the app: {nock_enter} NOCK, in the NOCK field; the app then works out the USDC side, about ${} at this reading.",
-                fx(usdc_f, 2)
-            ));
+            link["amount_to_enter"] = json!(if usdc_bound && cap.is_some() {
+                format!("Amount to enter in the app: ${usdc_enter} USDC, in the USDC field; the app then works out the NOCK side, about {} NOCK at this reading.", fx(nock_f, 4))
+            } else {
+                format!("Amount to enter in the app: {nock_enter} NOCK, in the NOCK field; the app then works out the USDC side, about ${} at this reading.", usdc_about.clone())
+            });
         }
         let would_sign = if holds_nock {
             format!(
                 "In {app}, with your own wallet: one new position in {name}, ticks {tl} to {tu}, holding up to {nock_enter} NOCK and about ${} USDC (the app may first ask for USDC and NOCK approvals). NockNock builds no transaction and signs nothing.",
-                fx(usdc_f, 2)
+                usdc_about.clone()
             )
         } else {
             format!(
@@ -1443,10 +1581,17 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
             "usdc": { "amount": usdc_exact, "raw": usdc_raw, "decimals": usdc_tok.decimals, "address": usdc_tok.address, "to_enter": usdc_enter },
             "nock": { "amount": nock_exact, "raw": nock_raw, "decimals": nock_tok.decimals, "address": nock_tok.address, "to_enter": nock_enter },
             "mint": { "liquidity_raw": liquidity_raw, "amount0_raw": r["amount0_raw"], "amount1_raw": r["amount1_raw"] },
-            "target": { "usdc": fx(n(r, "/target_usdc").unwrap_or(0.0), 2), "deployed_usdc": fx(deployed_usdc, 2), "counterparts": r["counterparts"] },
+            "target": {
+                "usdc": fx(n(r, "/target_usdc").unwrap_or(0.0), 2),
+                "liquidity": r["target_liquidity"],
+                "tracked_liquidity": r["tracked_liquidity"],
+                "deployed_usdc": fx(deployed_usdc, 2),
+                "counterparts": r["counterparts"],
+            },
+            "fit_factor": r["fit_factor"],
             "at_bottom": { "nock_held": r["nock_held_at_bottom"], "nock_bought": r["nock_bought_at_bottom"], "avg_buy_price_usd": r["avg_buy_price_usd"] },
             // A cap: which limit sized it (lp_nock_budget, or the near rung's USDC), in words.
-            "cap": if r["cap"].is_object() { json!({ "bound_by": r["cap"]["bound_by"], "note": r["cap"]["note"] }) } else { Value::Null },
+            "cap": if r["cap"].is_object() { json!({ "bound_by": r["cap"]["bound_by"], "usdc_limit": r["cap"]["usdc_limit"], "usdc_limit_is": r["cap"]["usdc_limit_is"], "note": r["cap"]["note"] }) } else { Value::Null },
             "nock_limit": nock_limit,
             "fee_estimate": fee_estimate_summary(&r["fee_estimate"]),
             "deep_link": link,
@@ -1455,28 +1600,32 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         if let Some(leg) = Leg::new(top_exact, bottom_exact, pool_price, usdc_f, nock_f) {
             legs.push((role.clone(), leg));
         }
-        usdc_sum += usdc_f;
+        usdc_sum += cents_down(usdc_f);
         nock_sum += nock_f;
     }
     if rungs.is_empty() {
         set(&mut out, "unavailable", "your ladder shape reads computed, yet no rung is left to deposit".to_string());
         return out;
     }
+    let usdc_sum = (usdc_sum * 100.0).round() / 100.0;
 
     // 7. The picture: one bar per rung with ticks, deployed ones marked.
     for row in out["shape"]["rungs"].as_array().cloned().unwrap_or_default() {
         let Some(b) = row.get("bounds_usd").filter(|b| b.is_object()) else { continue };
         let status = s(&row, "/status").unwrap_or("");
-        if !matches!(status, "to_deposit" | "deployed" | "over") {
+        if !matches!(status, "to_deposit" | "deployed" | "over" | "found") {
             continue;
         }
         let dep = rungs.iter().find(|r| r["index"] == row["index"]);
         let (usdc, nock) = match dep {
             Some(d) => (n(d, "/usdc/amount").unwrap_or(0.0), n(d, "/nock/amount").unwrap_or(0.0)),
-            None => (n(&row, "/deployed_usdc").unwrap_or(0.0), n(&row, "/deployed_nock").unwrap_or(0.0)),
+            None => match row.get("holds_now").filter(|h| h.is_object()) {
+                Some(h) => (n(h, "/usdc").unwrap_or(0.0), n(h, "/nock").unwrap_or(0.0)),
+                None => (n(&row, "/deployed_usdc").unwrap_or(0.0), n(&row, "/deployed_nock").unwrap_or(0.0)),
+            },
         };
         let label = match (dep, nock >= 0.5) {
-            (_, true) => format!("${} + {} NOCK", fx(usdc, 2), grouped(nock)),
+            (_, true) => format!("${} + {} NOCK", fx(cents_down(usdc), 2), grouped(nock)),
             (Some(d), false) => format!("${}", s(d, "/usdc/to_enter").unwrap_or("?")),
             (None, false) => format!("${}", fx(usdc, 2)),
         };
@@ -1489,7 +1638,7 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
             "high_usd": b["high"],
             "usdc": match dep.and_then(|d| s(d, "/usdc/to_enter")).filter(|_| nock < 0.5) {
                 Some(cut) => cut.to_string(),
-                None => fx(usdc, 2),
+                None => fx(cents_down(usdc), 2),
             },
             "label": label,
         }));
@@ -1541,8 +1690,26 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         "text": wallet_after_text,
     });
 
-    // 9. The numbers, the gates and the stated lines.
-    let remaining_usdc = s(&shape, "/combined/remaining_usdc").map(|v| v.to_string()).unwrap_or_else(|| fx(usdc_sum, 2));
+    // 9. The fit: when the reserve gate allows less than what is left, every deposit is
+    //    cut in proportion and the shortfall is stated in dollars.
+    let fit_status = s(&shape, "/fit/status").unwrap_or("fits");
+    out["fit"] = json!({
+        "status": fit_status,
+        "allowed_usdc": shape["fit"]["allowed_usdc"],
+        "needed_usdc": shape["fit"]["needed_usdc"],
+        "shortfall_usdc": shape["fit"]["shortfall_usdc"],
+        "rule": shape["fit"]["rule"],
+        "text": (fit_status == "reduced").then(|| format!(
+            "Your ${} reserve, kept for below ${gate_words}, allows ${} for what is left of your shape, ${} short of the ${} it would take: each deposit is cut by the same fraction, so the shape keeps its proportions.",
+            dollars_short(reserve),
+            fx(allowed, 2),
+            s(&shape, "/fit/shortfall_usdc").unwrap_or("?"),
+            fx(cents_down(needed), 2),
+        )),
+    });
+
+    // 10. The numbers, the gates and the stated lines.
+    let remaining_usdc = fx(usdc_sum, 2);
     let binding = if usdc_sum >= wallet_usdc - 0.01 { "wallet" } else { "reserve" };
     let nock_at_bottom = n(&shape, "/combined/nock_held_at_deepest_bottom");
     let nock_bought = n(&shape, "/combined/nock_bought_at_deepest_bottom");
@@ -1551,6 +1718,7 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
     out["rungs"] = json!(rungs);
     // How every rung's `mint` was worked out, once.
     out["mint_note"] = to_deposit.iter().find_map(|r| r.get("mint_note").filter(|v| v.is_string()).cloned()).unwrap_or(Value::Null);
+    let nock_status = s(&shape, "/nock_budget/status").unwrap_or("unknown");
     out["numbers"] = json!({
         "usdc_max": remaining_usdc,
         "binding": binding,
@@ -1568,7 +1736,9 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
         "stable_at_gate_usdc": fx(stable_at_gate, 2),
         "lp_nock_budget": lp_nock_budget,
         "shape_total_usdc": shape["total_usdc"],
+        "shape_rest_usdc": shape["rest_usdc"],
         "shape_tracked_usdc": shape["tracked_usdc"],
+        "headroom_usdc": shape["headroom_usdc"],
     });
     out["gates"] = json!({
         "ladder_tracked": {
@@ -1581,15 +1751,15 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
             None => json!({ "status": "not_set", "key": LADDER_BOTTOM_KEY, "value": Value::Null }),
         },
         "reserve": {
-            "status": "allows",
+            "status": if fit_status == "reduced" { "reduces" } else { "allows" },
             "key": LADDER_RESERVE_KEY,
             "binding": binding,
             "cash_reserve_usdc": fx(reserve, 2),
             "read_at_usd": fx(gate_usd, 8),
             "read_at_rule": shape["gate"]["rule"],
-            "max_usdc": remaining_usdc,
+            "max_usdc": shape["headroom_usdc"],
             "shape_total_usdc": shape["total_usdc"],
-            "minimum_usdc": fx(LADDER_SUGGEST_MIN_USDC, 2),
+            "minimum_usdc": fx(minimum, 2),
             "stable_at_gate_usdc": shape["gate"]["stable_at_gate_usdc"],
             "margin_usdc": shape["gate"]["margin_usdc"],
             "rule": "the stable balance at the gate price stays at or above the reserve",
@@ -1610,7 +1780,7 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
     };
     out["after_deposit"] = after_deposit(data.derived_metrics.position_detection.as_ref());
 
-    // 10. The headline counts only what is left.
+    // 11. The headline counts only what is left, and adds the amounts the card states.
     let nock_words = if nock_sum > 0.0 { format!(" and about {} NOCK", grouped(nock_sum)) } else { String::new() };
     out["headline"] = json!(format!("Ladder: {left} of {of} deposits left, up to ${remaining_usdc} USDC{nock_words}."));
     out["outcomes"] = json!(shape_outcomes(&legs, pool_price, deepest, usdc_sum, nock_bought, avg, left < of));
@@ -1627,6 +1797,8 @@ fn shape_suggestion(env: &SnapshotEnvelope, bottom: std::result::Result<Option<f
     };
     let limit_text = if binding == "wallet" {
         "all the wallet's USDC".to_string()
+    } else if fit_status == "reduced" {
+        format!("cut to what your ${} reserve at ${gate_words} allows", dollars_short(reserve))
     } else {
         format!("sized to leave the stable balance at or above your ${} reserve at ${gate_words}", dollars_short(reserve))
     };

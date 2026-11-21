@@ -13,19 +13,19 @@ use crate::tests_ladder::{fixture, fixture_at_sqrt, fixture_with_rungs, sqrt_x96
 use crate::tests_ladder_suggest::{assert_measurement_wording, text, with_pool_key};
 use serde_json::Value;
 
-fn now() -> DateTime<Utc> {
+pub(crate) fn now() -> DateTime<Utc> {
     DateTime::parse_from_rfc3339("2026-11-20T12:05:00Z").unwrap().with_timezone(&Utc)
 }
 
-fn st<'a>(v: &'a Value, ptr: &str) -> &'a str {
+pub(crate) fn st<'a>(v: &'a Value, ptr: &str) -> &'a str {
     v.pointer(ptr).and_then(|x| x.as_str()).unwrap_or_else(|| panic!("{ptr} missing in {v:#}"))
 }
 
-fn f(v: &Value, ptr: &str) -> f64 {
+pub(crate) fn f(v: &Value, ptr: &str) -> f64 {
     st(v, ptr).parse().unwrap()
 }
 
-fn bottle() -> Vec<LadderRungConfig> {
+pub(crate) fn bottle() -> Vec<LadderRungConfig> {
     vec![
         LadderRungConfig { rung: "cap".into(), share: None, low_usd: None },
         LadderRungConfig { rung: "near".into(), share: Some(0.15), low_usd: Some(0.0110) },
@@ -34,14 +34,14 @@ fn bottle() -> Vec<LadderRungConfig> {
 }
 
 /// The operator's profile for these fixtures, as config.yaml would state it.
-fn profile() -> OperatorProfile {
+pub(crate) fn profile() -> OperatorProfile {
     OperatorProfile { ladder_bottom_usd: Some(0.01), cash_reserve_usdc: Some(950.0), ladder_rungs: Some(bottle()), ..OperatorProfile::default() }
 }
 
 /// An envelope as a cycle leaves it before the suggestion is attached: the operator's
 /// settings in global_status, the v4 pool key, the recorded fee measurement, the tracked
 /// ladders' readings and `derived_metrics.ladder_shape`.
-fn prepared(env: SnapshotEnvelope) -> SnapshotEnvelope {
+pub(crate) fn prepared(env: SnapshotEnvelope) -> SnapshotEnvelope {
     assert_eq!(validate_ladder_rungs(&bottle(), Some(0.01)), Ok(()));
     let mut env = with_pool_key(env);
     let gs = &mut env.data.derived_metrics.global_status;
@@ -53,60 +53,60 @@ fn prepared(env: SnapshotEnvelope) -> SnapshotEnvelope {
     env
 }
 
-fn card(env: &SnapshotEnvelope) -> Value {
+pub(crate) fn card(env: &SnapshotEnvelope) -> Value {
     ladder_suggestion(env, Ok(Some(0.01)))
 }
 
 /// The bottle with nothing deposited.
-fn fresh() -> SnapshotEnvelope {
+pub(crate) fn fresh() -> SnapshotEnvelope {
     prepared(fixture())
 }
 
 /// The liquidity of each rung of the fresh bottle: what a deposit "as stated" mints.
-fn stated_liquidity() -> (u128, u128, u128) {
+pub(crate) fn stated_liquidity() -> (u128, u128, u128) {
     let l = card(&fresh());
     let liq = |i: usize| -> u128 { st(&l["rungs"][i], "/mint/liquidity_raw").parse().unwrap() };
     (liq(0), liq(1), liq(2))
 }
 
-const CAP: (u64, Option<&str>, i32, i32) = (9000002, Some("cap"), 273600, 273900);
-const NEAR: (u64, Option<&str>, i32, i32) = (9000003, Some("near"), 273900, 275400);
-const DEEP: (u64, Option<&str>, i32, i32) = (9000001, Some("deep"), 275400, 276300);
+pub(crate) const CAP: (u64, Option<&str>, i32, i32) = (9000002, Some("cap"), 273600, 273900);
+pub(crate) const NEAR: (u64, Option<&str>, i32, i32) = (9000003, Some("near"), 273900, 275400);
+pub(crate) const DEEP: (u64, Option<&str>, i32, i32) = (9000001, Some("deep"), 275400, 276300);
 
-fn deposited(rungs: &[((u64, Option<&'static str>, i32, i32), u128)]) -> SnapshotEnvelope {
+pub(crate) fn deposited(rungs: &[((u64, Option<&'static str>, i32, i32), u128)]) -> SnapshotEnvelope {
     let rows: Vec<(u64, Option<&str>, i32, i32, u128)> = rungs.iter().map(|((id, role, tl, tu), l)| (*id, *role, *tl, *tu, *l)).collect();
     prepared(fixture_with_rungs(&rows))
 }
 
-fn deep_deployed() -> SnapshotEnvelope {
+pub(crate) fn deep_deployed() -> SnapshotEnvelope {
     deposited(&[(DEEP, stated_liquidity().2)])
 }
 
-fn cap_and_near_deployed() -> SnapshotEnvelope {
+pub(crate) fn cap_and_near_deployed() -> SnapshotEnvelope {
     let (c, n, _) = stated_liquidity();
     deposited(&[(CAP, c), (NEAR, n)])
 }
 
-fn all_deployed() -> SnapshotEnvelope {
+pub(crate) fn all_deployed() -> SnapshotEnvelope {
     let (c, n, d) = stated_liquidity();
     deposited(&[(CAP, c), (NEAR, n), (DEEP, d)])
 }
 
 /// The pool half a tick into the band 275100..275400: below the near rung's range.
-fn near_passed() -> SnapshotEnvelope {
+pub(crate) fn near_passed() -> SnapshotEnvelope {
     prepared(fixture_at_sqrt(sqrt_x96_of_raw(1.0001f64.powf(275100.5))))
 }
 
 /// The pool at the ladder's bottom tick: every rung is passed.
-fn all_passed() -> SnapshotEnvelope {
+pub(crate) fn all_passed() -> SnapshotEnvelope {
     prepared(fixture_at_sqrt(sqrt_x96_of_raw(1.0001f64.powf(276300.0))))
 }
 
-fn deposit<'a>(l: &'a Value, role: &str) -> &'a Value {
+pub(crate) fn deposit<'a>(l: &'a Value, role: &str) -> &'a Value {
     l["rungs"].as_array().unwrap().iter().find(|r| r["rung"] == role).unwrap_or_else(|| panic!("no {role} deposit in {:#}", l["rungs"]))
 }
 
-fn row<'a>(l: &'a Value, role: &str) -> &'a Value {
+pub(crate) fn row<'a>(l: &'a Value, role: &str) -> &'a Value {
     l["shape"]["rungs"].as_array().unwrap().iter().find(|r| r["rung"] == role).unwrap_or_else(|| panic!("no {role} row in {:#}", l["shape"]))
 }
 
@@ -119,7 +119,8 @@ fn test_the_bottle_is_three_numbered_deposits_with_the_pinned_mints() {
     let env = fresh();
     let l = card(&env);
     assert_eq!((st(&l, "/status"), &l["shown"]), ("ready", &json!(true)), "{l:#}");
-    assert_eq!(st(&l, "/headline"), "Ladder: 3 of 3 deposits left, up to $766.99 USDC and about 87 NOCK.");
+    // The headline adds what the deposits state, cut to cents: $1.22 + $114.86 + $650.89.
+    assert_eq!(st(&l, "/headline"), "Ladder: 3 of 3 deposits left, up to $766.97 USDC and about 87 NOCK.");
     assert_eq!((l["shape"]["of"].as_u64(), l["shape"]["left"].as_u64()), (Some(3), Some(3)));
     let rungs = l["rungs"].as_array().unwrap();
     assert_eq!(rungs.len(), 3);
@@ -161,18 +162,19 @@ fn test_the_bottle_is_three_numbered_deposits_with_the_pinned_mints() {
         assert!((f(r, "/bounds_nock_per_usdc/high") - 1.0 / lo).abs() < 1e-4);
     }
     // The summaries: the cap in range with both tokens, the others USDC only.
-    assert_eq!(st(cap, "/summary"), "about 86.79 NOCK + $1.23 USDC, in range now");
+    assert_eq!(st(cap, "/summary"), "about 86.79 NOCK + $1.22 USDC, in range now");
     assert_eq!(st(near, "/summary"), "$114.86 USDC, no NOCK, below the price now");
     assert_eq!(st(deep, "/summary"), "$650.89 USDC, no NOCK, below the price now");
     assert_eq!((&cap["in_range_now"], &near["in_range_now"]), (&json!(true), &json!(false)));
-    // What is typed never adds up to more than the gated total.
-    let typed: f64 = f(near, "/usdc/to_enter") + f(deep, "/usdc/to_enter") + f(cap, "/usdc/amount");
-    assert!(typed <= f(&l, "/numbers/usdc_max") + 1e-9, "{typed}");
-    assert_eq!((st(&l, "/numbers/usdc_max"), st(&l, "/numbers/nock_now")), ("766.99", "86.7891"));
+    // What is stated adds up to the headline, and never to more than the gate allows.
+    let typed: f64 = f(near, "/usdc/to_enter") + f(deep, "/usdc/to_enter") + f(cap, "/usdc/to_enter");
+    assert!((typed - f(&l, "/numbers/usdc_max")).abs() < 1e-9, "{typed}");
+    assert!(f(near, "/usdc/amount") + f(deep, "/usdc/amount") + f(cap, "/usdc/amount") <= f(&l, "/numbers/headroom_usdc") + 1e-9);
+    assert_eq!((st(&l, "/numbers/usdc_max"), st(&l, "/numbers/nock_now"), st(&l, "/numbers/headroom_usdc")), ("766.97", "86.7891", "766.99"));
     assert_eq!((st(&l, "/gates/reserve/status"), st(&l, "/gates/reserve/read_at_usd"), st(&l, "/gates/nock_budget/status")), ("allows", "0.01000000", "fits"));
     // The text both transports print.
     let t = text(&env, &l, Some("ok"));
-    assert!(t.contains("  Deposit 1 of 3 (cap): about 86.79 NOCK + $1.23 USDC, in range now. A new position in the USDC/NOCK 3% v4 pool, ticks 273600 to 273900 ($0.01274292 to $0.01313098; 76.1558 to 78.4750 NOCK per USDC).\n"), "{t}");
+    assert!(t.contains("  Deposit 1 of 3 (cap): about 86.79 NOCK + $1.22 USDC, in range now. A new position in the USDC/NOCK 3% v4 pool, ticks 273600 to 273900 ($0.01274292 to $0.01313098; 76.1558 to 78.4750 NOCK per USDC).\n"), "{t}");
     assert!(t.contains("    Exact mint: liquidity 138192109253769, 1225999 raw USDC and 867890958577132038 raw NOCK.\n"), "{t}");
     assert!(t.contains("  Deposit 2 of 3 (near rung): $114.86 USDC, no NOCK, below the price now. A new position in the USDC/NOCK 3% v4 pool, ticks 273900 to 275400 ($0.01096801 to $0.01274292; 78.4750 to 91.1742 NOCK per USDC).\n"), "{t}");
     assert!(t.contains("  Deposit 3 of 3 (deep rung): $650.89 USDC, no NOCK, below the price now. A new position in the USDC/NOCK 3% v4 pool, ticks 275400 to 276300 ($0.01002405 to $0.01096801; 91.1742 to 99.7600 NOCK per USDC).\n"), "{t}");
@@ -213,11 +215,13 @@ fn test_the_cap_states_both_amounts_the_nock_limit_and_the_field_that_keeps_it()
     // exceed the budget (critique of the deploy design), so the NOCK field is the one named.
     assert_eq!(
         st(cap, "/deep_link/amount_to_enter"),
-        "Amount to enter in the app: 86.7890 NOCK, in the NOCK field; the app then works out the USDC side, about $1.23 at this reading."
+        "Amount to enter in the app: 86.7890 NOCK, in the NOCK field; the app then works out the USDC side, about $1.22 at this reading."
     );
+    // Both limits, the one that binds now, and the field that keeps it (review of the
+    // bottle, findings 6 and 15): typing NOCK leaves the USDC side to the price.
     assert_eq!(
         st(cap, "/nock_limit/text"),
-        "The NOCK side must not exceed 86.7891 NOCK, your LP NOCK budget. The limit holds when the NOCK field is the one typed, at 86.7890 NOCK or less. When the USDC field is typed instead, the app works out the NOCK side from the price at that moment, and it can come out above the limit; neither the link nor the app applies a NOCK limit of its own."
+        "The NOCK side must not exceed 86.7891 NOCK, your LP NOCK budget, which binds now; the USDC side must not exceed $100.04, the most that keeps it at or below the near rung's USDC. The limits hold when the NOCK field is the one typed, at 86.7890 NOCK or less, and the app shows at most $100.04 of USDC: about $1.22 at this reading, more if the price rises inside the band before you deposit. When the USDC field is typed instead, the app works out the NOCK side from the price at that moment, and it can come out above the limit; neither the link nor the app applies a NOCK limit of its own."
     );
     assert_eq!((st(cap, "/nock_limit/nock"), st(cap, "/nock_limit/is"), st(cap, "/nock_limit/field_to_type")), ("86.7891", "lp_nock_budget", "NOCK"));
     // What is typed is at most the exact mint, which is at most the budget.
@@ -225,15 +229,15 @@ fn test_the_cap_states_both_amounts_the_nock_limit_and_the_field_that_keeps_it()
     assert!(typed <= exact && exact <= budget, "{typed} {exact} {budget}");
     assert_eq!(st(&l, "/numbers/lp_nock_budget"), "86.7891");
     assert_eq!(st(cap, "/cap/bound_by"), "lp_nock_budget");
-    assert!(st(cap, "/would_sign").contains("holding up to 86.7890 NOCK and about $1.23 USDC"));
+    assert!(st(cap, "/would_sign").contains("holding up to 86.7890 NOCK and about $1.22 USDC"));
     // A USDC-only rung has no NOCK limit to state.
     for role in ["near", "deep"] {
         assert!(deposit(&l, role)["nock_limit"].is_null(), "{role}");
         assert!(deposit(&l, role)["cap"].is_null(), "{role}");
     }
     let t = text(&env, &l, Some("ok"));
-    assert!(t.contains("    The NOCK side must not exceed 86.7891 NOCK, your LP NOCK budget."), "{t}");
-    assert_eq!(t.matches("must not exceed").count(), 1);
+    assert!(t.contains("    The NOCK side must not exceed 86.7891 NOCK, your LP NOCK budget, which binds now;"), "{t}");
+    assert_eq!(t.matches("must not exceed").count(), 2, "both sides of the one deposit that holds NOCK");
     assert_eq!(cut_dp("86.7890958577132038", 4), "86.7890");
     assert_eq!(cut_dp("650.899400", 2), "650.89");
     assert_eq!(cut_dp("7", 2), "7.00");
@@ -247,16 +251,17 @@ fn test_the_card_states_what_the_deposits_leave_in_the_wallet() {
     let w = &l["wallet_after"];
     assert_eq!(
         st(w, "/text"),
-        "After these deposits your wallet holds about $779 USDC; the $950 reserve counts the $224 of USDC inside your existing NOCK ranges. At $0.01 with every rung converted, the stable balance reads $950.00: the wallet's $778.85 plus $171.15 still inside those ranges."
+        "After these deposits your wallet holds about $779 USDC; the $950 reserve counts the $224 of USDC inside your existing NOCK ranges. At $0.01 with every rung converted, the stable balance reads $950.02: the wallet's $778.87 plus $171.15 still inside those ranges."
     );
-    // Wallet 1545.8357 less the three exact mints.
-    let deposits: f64 = l["rungs"].as_array().unwrap().iter().map(|r| f(r, "/usdc/amount")).sum();
+    // Wallet 1545.8357 less the three deposits as the card states them.
+    let deposits: f64 = l["rungs"].as_array().unwrap().iter().map(|r| f(r, "/usdc/to_enter")).sum();
     assert!((f(w, "/wallet_usdc_after") - (1545.8357 - deposits)).abs() < 0.006, "{w:#}");
-    assert_eq!((st(w, "/wallet_usdc_now"), st(w, "/deposits_usdc"), st(w, "/wallet_usdc_after")), ("1545.84", "766.99", "778.85"));
-    // The two parts add up to the total as printed, and the total is the shape's own gate.
+    assert_eq!((st(w, "/wallet_usdc_now"), st(w, "/deposits_usdc"), st(w, "/wallet_usdc_after")), ("1545.84", "766.97", "778.87"));
+    // The two parts add up to the total as printed; the shape's own gate reads the exact
+    // mints, which take the two cents the cut amounts leave in the wallet.
     assert!((f(w, "/wallet_usdc_after") + f(w, "/existing_ranges_usdc_at_gate") - f(w, "/stable_at_gate_usdc")).abs() < 1e-9);
     let shape = env.data.derived_metrics.ladder_shape.as_ref().unwrap();
-    assert_eq!(st(w, "/stable_at_gate_usdc"), st(shape, "/gate/stable_at_gate_usdc"));
+    assert_eq!(st(shape, "/gate/stable_at_gate_usdc"), "950.00");
     assert_eq!((st(w, "/gate_price_usd"), st(w, "/cash_reserve_usdc")), ("0.01000000", "950.00"));
     // The USDC inside the existing NOCK ranges now is the snapshot's own reserve reading
     // less the wallet's USDC.
@@ -265,7 +270,7 @@ fn test_the_card_states_what_the_deposits_leave_in_the_wallet() {
     assert!((f(w, "/existing_ranges_usdc_now") - (stable_now - 1545.8357)).abs() < 0.011, "{} vs {stable_now}", st(w, "/existing_ranges_usdc_now"));
     // The wallet alone ends below the reserve: stated, not hidden.
     assert_eq!(w["wallet_alone_below_reserve"], json!(true));
-    assert_eq!(st(&l, "/numbers/wallet_usdc_after"), "778.85");
+    assert_eq!(st(&l, "/numbers/wallet_usdc_after"), "778.87");
     let t = text(&env, &l, Some("ok"));
     assert!(t.contains(&format!("  {}\n", st(w, "/text"))), "{t}");
 }
@@ -278,7 +283,7 @@ fn test_the_bottle_outcomes_in_plain_words() {
     let kinds: Vec<&str> = o.iter().map(|x| x["kind"].as_str().unwrap()).collect();
     assert_eq!(kinds, ["fall_inside", "fall_to_bottom", "rise"]);
     assert_eq!(st(&o[0], "/text"), "A fall to $0.01097 (-15%), the near rung's bottom, would buy about 9,811 NOCK for $116.09 of the USDC, an average of $0.01183.");
-    assert_eq!(st(&o[1], "/text"), "A fall to the ladder bottom $0.01002 (-23%) would buy about 71,888 NOCK in total with all $766.99, an average of $0.01067.");
+    assert_eq!(st(&o[1], "/text"), "A fall to the ladder bottom $0.01002 (-23%) would buy about 71,888 NOCK in total with all $766.97, an average of $0.01067.");
     assert_eq!(
         st(&o[2], "/text"),
         "A rise to $0.01313 (+1.4%) or above sells the cap's NOCK, about 87, for about $1.13 of USDC, and sells nothing else: every other rung holds 0 NOCK."
@@ -295,7 +300,7 @@ fn test_the_bottle_outcomes_in_plain_words() {
     let (p0, top) = (0.012944f64, 1e10 / 1.0001f64.powi(273600));
     assert!((f(&o[2], "/usdc_received") - 86.7891 * (p0 * top).sqrt()).abs() < 0.006, "{}", o[2]);
     assert_eq!(st(&o[2], "/nock_sold"), "87");
-    assert!(st(&l, "/sentence").contains("3 of 3 deposits are left, holding up to $766.99 USDC and 86.79 NOCK now"), "{}", st(&l, "/sentence"));
+    assert!(st(&l, "/sentence").contains("3 of 3 deposits are left, holding up to $766.97 USDC and 86.79 NOCK now"), "{}", st(&l, "/sentence"));
     assert!(st(&l, "/sentence").contains("about 71,975 NOCK, about 71,888 of it bought, at an average of $0.01067"), "{}", st(&l, "/sentence"));
 }
 
@@ -306,7 +311,7 @@ fn test_the_picture_has_one_bar_per_rung_and_the_cap_straddles_spot() {
     let bars = p["bars"].as_array().unwrap();
     assert_eq!(bars.len(), 3);
     let labels: Vec<&str> = bars.iter().map(|b| b["label"].as_str().unwrap()).collect();
-    assert_eq!(labels, ["$1.23 + 87 NOCK", "$114.86", "$650.89"]);
+    assert_eq!(labels, ["$1.22 + 87 NOCK", "$114.86", "$650.89"]);
     assert!(bars.iter().all(|b| b["deployed"] == json!(false)));
     let spot = f(p, "/spot_usd");
     assert!(f(&bars[0], "/low_usd") < spot && spot < f(&bars[0], "/high_usd"), "the cap straddles spot");
@@ -322,7 +327,7 @@ fn test_the_picture_has_one_bar_per_rung_and_the_cap_straddles_spot() {
     assert_eq!((st(&bars[2], "/label"), st(&bars[2], "/status")), ("$650.90", "deployed"));
     // A deployed cap's label carries its NOCK too.
     let l = card(&cap_and_near_deployed());
-    assert_eq!(st(&l["picture"]["bars"][0], "/label"), "$1.23 + 87 NOCK");
+    assert_eq!(st(&l["picture"]["bars"][0], "/label"), "$1.23 + 87 NOCK", "a deployed rung's bar is its reading now");
     assert_eq!(l["picture"]["bars"][0]["deployed"], json!(true));
 }
 
@@ -332,9 +337,9 @@ fn test_each_rung_states_its_fee_estimate_with_its_sample_share_and_replay_bound
     let l = card(&env);
     let t = text(&env, &l, Some("ok"));
     for line in [
-        "    Fees while in range (an estimate): $0.84/day, measured over 6.33 days (1,836 intervals) on v4 USDC/NOCK 3.00% #3163450. In range 1.95% of the measured time. Replayed over it: at most $0.02 inside and $0.15 more at its edges (no lower bound).\n",
-        "    Fees while in range (an estimate): $8.56/day, measured over 6.33 days (1,836 intervals) on v4 USDC/NOCK 3.00% #3163450. In range 28.63% of the measured time. Replayed over it: at most $6.39 inside and $5.16 more at its edges (no lower bound).\n",
-        "    Fees while in range (an estimate): $85.90/day, measured over 6.33 days (1,836 intervals) on v4 USDC/NOCK 3.00% #3163450. In range 5.82% of the measured time. Replayed over it: at most $32.55 inside and $50.00 more at its edges (no lower bound).\n",
+        "    Fees while in range (an estimate): $0.84/day undiluted, $0.84/day diluted (it would be 0.17% of the pool's active liquidity), measured over 6.33 days (1,836 intervals) on v4 USDC/NOCK 3.00% #3163450. In range 1.95% of the measured time. Replayed over it: at most $0.02 inside and $0.15 more at its edges (no lower bound).\n",
+        "    Fees while in range (an estimate): $8.56/day undiluted, $8.42/day diluted (it would be 1.73% of the pool's active liquidity), measured over 6.33 days (1,836 intervals) on v4 USDC/NOCK 3.00% #3163450. In range 28.63% of the measured time. Replayed over it: at most $6.39 inside and $5.16 more at its edges (no lower bound).\n",
+        "    Fees while in range (an estimate): $85.90/day undiluted, $73.03/day diluted (it would be 14.98% of the pool's active liquidity), measured over 6.33 days (1,836 intervals) on v4 USDC/NOCK 3.00% #3163450. In range 5.82% of the measured time. Replayed over it: at most $32.55 inside and $50.00 more at its edges (no lower bound).\n",
     ] {
         assert!(t.contains(line), "{line} missing in {t}");
     }
@@ -357,7 +362,7 @@ fn test_each_rung_states_its_fee_estimate_with_its_sample_share_and_replay_bound
     let line = crate::ladder_suggest_text::fee_estimate_line;
     assert_eq!(
         line(Some(&json!({ "status": "measured", "per_day_in_range_usd": "1.00", "in_range_share_reason": "no stored history", "replay_reason": "no stored history" }))),
-        "Fees while in range (an estimate): $1.00/day, measured sample size not stated. In range over stored history: not stated (no stored history). Replay: not stated (no stored history)."
+        "Fees while in range (an estimate): $1.00/day undiluted; diluted not stated (no reason given), measured sample size not stated. In range over stored history: not stated (no stored history). Replay: not stated (no stored history)."
     );
     // Not measured: null with the reason, never a zero.
     let mut env = prepared(fixture());
@@ -386,10 +391,10 @@ fn test_the_bottle_on_the_live_snapshot_of_2026_11_21() {
     env.data.derived_metrics.ladder_shape = ladder_shape_block(&env.data, env.meta.generated_at);
     let l = card(&env);
     assert_eq!(st(&l, "/status"), "ready", "{l:#}");
-    assert_eq!(st(&l, "/headline"), "Ladder: 3 of 3 deposits left, up to $765.86 USDC and about 87 NOCK.");
+    assert_eq!(st(&l, "/headline"), "Ladder: 3 of 3 deposits left, up to $765.85 USDC and about 87 NOCK.");
     assert_eq!(
         st(&l, "/wallet_after/text"),
-        "After these deposits your wallet holds about $780 USDC; the $950 reserve counts the $222 of USDC inside your existing NOCK ranges. At $0.01 with every rung converted, the stable balance reads $950.01: the wallet's $779.98 plus $170.03 still inside those ranges."
+        "After these deposits your wallet holds about $780 USDC; the $950 reserve counts the $222 of USDC inside your existing NOCK ranges. At $0.01 with every rung converted, the stable balance reads $950.02: the wallet's $779.99 plus $170.03 still inside those ranges."
     );
     let summaries: Vec<&str> = l["rungs"].as_array().unwrap().iter().map(|r| r["summary"].as_str().unwrap()).collect();
     assert_eq!(summaries, ["about 86.79 NOCK + $1.23 USDC, in range now", "$114.69 USDC, no NOCK, below the price now", "$649.93 USDC, no NOCK, below the price now"]);
@@ -414,7 +419,7 @@ fn test_a_deployed_deep_rung_is_done_and_the_other_two_are_unchanged() {
     assert_eq!((st(&l, "/status"), &l["shown"]), ("ready", &json!(true)), "{l:#}");
     assert_eq!(st(&l, "/tracked/0/position_id"), "uniswap-v4:base:9000001");
     assert_eq!(st(&l, "/gates/ladder_tracked/status"), "counted");
-    assert_eq!(st(&l, "/headline"), "Ladder: 2 of 3 deposits left, up to $116.09 USDC and about 87 NOCK.");
+    assert_eq!(st(&l, "/headline"), "Ladder: 2 of 3 deposits left, up to $116.08 USDC and about 87 NOCK.");
     assert_eq!((l["shape"]["left"].as_u64(), l["shape"]["deployed"].as_u64()), (Some(2), Some(1)));
     // The deep rung is done, says what it holds, and is not offered again.
     let rungs = l["rungs"].as_array().unwrap();
@@ -437,11 +442,11 @@ fn test_a_deployed_deep_rung_is_done_and_the_other_two_are_unchanged() {
     // The outcomes are for what is left, and say so.
     assert_eq!(
         st(&l, "/outcomes/0/text"),
-        "A fall to $0.01097 (-15%), the bottom of what is left to deposit, would buy about 9,811 NOCK in total with all $116.09, an average of $0.01183."
+        "A fall to $0.01097 (-15%), the bottom of what is left to deposit, would buy about 9,811 NOCK in total with all $116.08, an average of $0.01183."
     );
     assert_eq!(l["outcomes"].as_array().unwrap().len(), 2);
     // The wallet line counts the deployed rung's USDC as inside a NOCK range now.
-    assert_eq!((st(&l, "/wallet_after/wallet_usdc_after"), st(&l, "/wallet_after/stable_at_gate_usdc")), ("778.85", "950.00"));
+    assert_eq!((st(&l, "/wallet_after/wallet_usdc_after"), st(&l, "/wallet_after/stable_at_gate_usdc")), ("778.86", "950.01"));
     assert!(f(&l, "/wallet_after/existing_ranges_usdc_now") > 650.0);
 }
 
@@ -451,7 +456,7 @@ fn test_with_the_cap_and_near_deployed_only_the_deep_rung_is_left() {
     let env = cap_and_near_deployed();
     let l = card(&env);
     assert_eq!(st(&l, "/status"), "ready", "{l:#}");
-    assert_eq!(st(&l, "/headline"), "Ladder: 1 of 3 deposits left, up to $650.90 USDC.");
+    assert_eq!(st(&l, "/headline"), "Ladder: 1 of 3 deposits left, up to $650.89 USDC.");
     let rungs = l["rungs"].as_array().unwrap();
     assert_eq!(rungs.len(), 1);
     let (a, b) = (&rungs[0], deposit(&before, "deep"));
@@ -496,19 +501,21 @@ fn test_a_passed_rung_states_its_plain_reason_and_the_rest_is_still_listed() {
     assert!(st(&l, "/headline").starts_with("Ladder: 2 of 3 deposits left, up to $"), "{}", st(&l, "/headline"));
     assert_eq!(l["shape"]["passed"].as_u64(), Some(1));
     assert_eq!(st(row(&l, "near"), "/status"), "passed");
-    assert_eq!(st(row(&l, "near"), "/text"), "Deposit 2 of 3 (near rung): passed. The price is below this rung's range; a USDC-only deposit there is not possible.");
+    // The price is above the rung's bottom: the cap's band covers what is left of it.
+    assert_eq!(st(row(&l, "near"), "/text"), "Deposit 2 of 3 (near rung): passed. The price $0.01130146 is less than one tick spacing above this rung's bottom $0.01096801: the cap's band, the one containing the price, covers all that is left of it, so it has no range of its own.");
     assert_eq!(l["rungs"].as_array().unwrap().iter().map(|r| (r["index"].as_u64().unwrap(), r["rung"].as_str().unwrap())).collect::<Vec<_>>(), [(1, "cap"), (3, "deep")]);
     assert_eq!(l["picture"]["bars"].as_array().unwrap().len(), 2, "a passed rung has no bar");
     // The cap is in the band that holds the price now, and its limit is still the budget.
     let cap = deposit(&l, "cap");
     assert_eq!((cap["tick_lower"].as_i64(), cap["tick_upper"].as_i64()), (Some(275100), Some(275400)));
-    assert!(f(cap, "/nock/amount") <= 86.7891 && st(cap, "/nock_limit/text").starts_with("The NOCK side must not exceed 86.7891 NOCK"));
+    // Half a tick under the band's top the near rung's USDC binds: type the USDC field.
+    assert!(f(cap, "/nock/amount") <= 86.7891 && st(cap, "/nock_limit/text").starts_with("The USDC side must not exceed $100.94, the most that keeps it at or below the near rung's USDC, which binds now"), "{}", st(cap, "/nock_limit/text"));
     // The outcomes follow the shape's own totals for what is left.
     let shape = env.data.derived_metrics.ladder_shape.as_ref().unwrap();
     let fall = l["outcomes"].as_array().unwrap().iter().find(|o| o["kind"] == "fall_to_bottom").unwrap();
     assert!((f(fall, "/nock_bought") - f(shape, "/combined/nock_bought_at_deepest_bottom")).abs() < 0.51);
     let t = text(&env, &l, Some("ok"));
-    assert!(t.contains("  Deposit 2 of 3 (near rung): passed. The price is below this rung's range"), "{t}");
+    assert!(t.contains("  Deposit 2 of 3 (near rung): passed. The price $0.01130146 is less than one tick spacing above"), "{t}");
     // Every rung passed: its own status, with each rung's reason.
     let env = all_passed();
     let l = card(&env);
@@ -516,21 +523,26 @@ fn test_a_passed_rung_states_its_plain_reason_and_the_rest_is_still_listed() {
     assert_eq!(st(&l, "/headline"), "Ladder: NOCK is at or below the bottom of your ladder shape, so no deposit is measured above it.");
     assert!(l["rungs"].as_array().unwrap().is_empty());
     let t = text(&env, &l, Some("ok"));
-    assert_eq!(t.matches("passed. The price is below this rung's range").count(), 3, "{t}");
+    assert_eq!(t.matches("is at or below this rung's bottom").count(), 2, "{t}");
+    assert!(t.contains("  Deposit 1 of 3 (cap): passed. Every rung below the cap is passed"), "{t}");
 }
 
 #[test]
-fn test_an_over_rung_is_stated_and_nothing_more_is_listed_for_it() {
+fn test_a_first_rung_deposited_larger_than_stated_sets_the_plan_and_the_reserve_is_stated() {
+    // The deep rung alone, a fifth more than stated: it is the first rung deposited, so it
+    // is its own target (deployed, never "over"), and the plan follows it. The reserve then
+    // leaves no room for the rest: a true headline, each rung still stated.
     let (_, _, d) = stated_liquidity();
     let env = deposited(&[(DEEP, d + d / 5)]);
     let l = card(&env);
-    let over = row(&l, "deep");
-    assert_eq!(st(over, "/status"), "over");
-    assert!(st(over, "/text").starts_with("Deposit 3 of 3 (deep rung): over its target, so nothing more is listed for it. The tracked rung holds $"), "{}", st(over, "/text"));
-    assert!(f(over, "/over_by_usdc") > 100.0);
-    assert!(l["rungs"].as_array().unwrap().iter().all(|r| r["rung"] != "deep"));
-    assert_eq!(l["shape"]["over"].as_u64(), Some(1));
-    assert!(text(&env, &l, Some("ok")).contains("(deep rung): over its target"));
+    assert_eq!(st(row(&l, "deep"), "/status"), "deployed");
+    assert_eq!((st(&l, "/status"), st(&l, "/headline")), ("no_headroom", "Ladder: 2 of 3 deposits left, but your reserve leaves under $1.00 for them."));
+    assert_eq!(st(row(&l, "near"), "/text"), "Deposit 2 of 3 (near rung): left to deposit, $137.83 USDC.");
+    assert!(text(&env, &l, Some("ok")).contains("(deep rung): done."));
+    // An over rung needs the deposit order: tests_ladder_liquidity.rs.
+    let l = card(&crate::tests_ladder_liquidity::near_over());
+    assert_eq!((st(row(&l, "near"), "/status"), l["shape"]["over"].as_u64()), ("over", Some(1)));
+    assert!(l["rungs"].as_array().unwrap().iter().all(|r| r["rung"] != "near"));
 }
 
 #[test]
@@ -552,8 +564,9 @@ fn test_a_shape_that_cannot_be_drawn_says_why() {
     assert_eq!(st(&l, "/status"), "no_headroom", "{l:#}");
     assert_eq!(
         st(&l, "/reason"),
-        "Your ladder shape (operator_profile.ladder_rungs) could not be drawn this cycle: SHAPE_NO_ROOM: at the gate $0.01000000 the stable balance leaves no USDC above the $5000.00 reserve for a ladder"
+        "With your $5000 reserve kept for below $0.01, the reserve gate allows $0.00 for what is left of your shape: nothing above the $1.00 minimum fits, so no deposit is listed."
     );
+    assert_eq!(st(&l, "/headline"), "Ladder: 3 of 3 deposits left, but your reserve leaves under $1.00 for them.");
     // No price-source pool: unavailable, with the reason.
     let mut blind = prepared(fixture());
     blind.data.positions.iter_mut().for_each(|p| p.is_price_source = false);
@@ -566,9 +579,12 @@ fn test_a_shape_that_cannot_be_drawn_says_why() {
     let mut noreserve = fixture();
     noreserve.data.derived_metrics.global_status.cash_reserve_usdc = None;
     let env = prepared(noreserve);
-    let l = ladder_suggestion(&env, Ok(None));
+    let l = ladder_suggestion(&env, Ok(Some(0.01)));
     assert_eq!((st(&l, "/status"), l["missing"].clone()), ("needs_setting", json!([LADDER_RESERVE_KEY])));
-    assert!(l["candidates"].is_null(), "no candidate bottoms: the shape has its own");
+    assert!(l["candidates"].is_null(), "with the bottom set, no candidate bottoms");
+    // Neither set: both are named (no default for either), with the candidate bottoms.
+    let l = ladder_suggestion(&env, Ok(None));
+    assert_eq!((st(&l, "/status"), l["missing"].clone()), ("needs_setting", json!([LADDER_BOTTOM_KEY, LADDER_RESERVE_KEY])));
     // An invalid ladder_bottom_usd.
     let l = ladder_suggestion(&fresh(), Err(LADDER_SUGGEST_BOTTOM_INVALID_NOTE));
     assert_eq!((st(&l, "/status"), st(&l, "/reason")), ("invalid", LADDER_SUGGEST_BOTTOM_INVALID_NOTE));
@@ -579,21 +595,21 @@ fn test_a_shape_that_cannot_be_drawn_says_why() {
     assert_eq!(st(&l, "/status"), "no_target_pool");
     assert_eq!(st(&l, "/excluded/0/reason"), "this pool has no in-range liquidity, so its price is frozen");
     assert!(l["rungs"].as_array().unwrap().is_empty());
-    // A tracked ladder that matches no rung would take the reserve below its level: no
-    // deposit is listed, and the card says why.
+    // A tracked ladder that matches no rung fills none: the reserve gate counts what it
+    // holds like any other range, and the rest of the shape is listed in what is left
+    // (review of the bottle, finding 8: never "no USDC is free" beside $720 of deposits).
     let env = prepared(fixture_with_rungs(&[(9000005, None, 275400, 276300, 1_000_000_000_000_000)]));
     let l = card(&env);
-    assert_eq!(st(&l, "/status"), "no_headroom", "{l:#}");
-    assert!(st(&l, "/reason").starts_with("With what is left of your shape deposited, the stable balance at $0.01 would read $"), "{}", st(&l, "/reason"));
-    assert!(st(&l, "/reason").contains("below your $950 reserve by $"));
-    assert!(l["rungs"].as_array().unwrap().is_empty());
+    assert_eq!(st(&l, "/status"), "ready", "{l:#}");
+    assert_eq!(st(&l, "/headline"), "Ladder: 3 of 3 deposits left, up to $720.90 USDC and about 87 NOCK.");
     assert_eq!(st(&l["shape"]["unmatched"][0], "/position_id"), "uniswap-v4:base:9000005");
+    assert_eq!(st(&l["shape"]["unmatched"][0], "/reason"), "its rung is not set, so it matches no configured rung");
     // A block sized for more USDC than the wallet now holds: nothing is listed.
     let mut spent = fresh();
     spent.data.wallet_balances.iter_mut().filter(|w| w.token_symbol == "USDC").for_each(|w| w.amount = "100.000000".to_string());
     let l = card(&spent);
     assert_eq!(st(&l, "/status"), "no_headroom");
-    assert_eq!(st(&l, "/reason"), "The wallet holds $100.00 USDC, less than the $766.99 what is left of your shape would take: no deposit is listed.");
+    assert_eq!(st(&l, "/reason"), "The wallet holds $100.00 USDC, less than the $766.97 what is left of your shape would take: no deposit is listed.");
     assert!(l["rungs"].as_array().unwrap().is_empty() && l["picture"].is_null() && l["wallet_after"].is_null());
     // A block without its exact mints (a stored row's): nothing is listed, rather than a
     // deposit without its exact amounts.
@@ -647,10 +663,11 @@ fn test_without_a_shape_the_card_is_the_single_rung_of_168() {
 // It measures: wording, the directive, the state hash, freshness
 // ------------------------------------------------------------------
 
-fn every_bottle_state() -> Vec<(&'static str, SnapshotEnvelope, Value)> {
+pub(crate) fn every_bottle_state() -> Vec<(&'static str, SnapshotEnvelope, Value)> {
+    use crate::tests_ladder_liquidity::{deep_held, moved, moved_with, near_found, near_over};
     let mut rich = fixture();
     rich.data.derived_metrics.global_status.cash_reserve_usdc = Some("5000.00".to_string());
-    let (_, _, d) = stated_liquidity();
+    let (c, n, d) = stated_liquidity();
     let mut out = Vec::new();
     for (name, env) in [
         ("bottle", fresh()),
@@ -659,9 +676,20 @@ fn every_bottle_state() -> Vec<(&'static str, SnapshotEnvelope, Value)> {
         ("all_deployed", all_deployed()),
         ("near_passed", near_passed()),
         ("all_passed", all_passed()),
-        ("deep_over", deposited(&[(DEEP, d + d / 5)])),
+        ("near_over", near_over()),
         ("no_room", prepared(rich)),
         ("unmatched", prepared(fixture_with_rungs(&[(9000005, None, 275400, 276300, 1_000_000_000_000_000)]))),
+        // Deposit by deposit while the price moves (review of the bottle, 2026-11-21).
+        ("deep_deployed_up_8_ticks", moved(&[(DEEP, d)], 8.0)),
+        ("cap_deployed_above_its_band", moved(&[(CAP, c)], 160.0)),
+        ("cap_deployed_below_its_band", moved(&[(CAP, c)], -200.0)),
+        ("cap_and_near_deployed_down_200_ticks", moved(&[(CAP, c), (NEAR, n)], -200.0)),
+        ("all_deployed_up_300_ticks", moved(&[(CAP, c), (NEAR, n), (DEEP, d)], 300.0)),
+        ("all_deployed_down_1000_ticks", moved(&[(CAP, c), (NEAR, n), (DEEP, d)], -1000.0)),
+        ("near_found_untracked", near_found(273900, 275400)),
+        ("near_cut_by_the_reserve", moved_with(&[(CAP, c), (DEEP, d)], 0.0, -0.50)),
+        ("cap_bound_by_the_reserve", moved_with(&[(DEEP, d)], 0.0, -0.50)),
+        ("deep_held_for_nock", deep_held()),
     ] {
         let l = card(&env);
         out.push((name, env, l));
@@ -673,12 +701,12 @@ fn every_bottle_state() -> Vec<(&'static str, SnapshotEnvelope, Value)> {
 fn test_the_bottle_wording_is_a_measurement_in_every_state() {
     let states = every_bottle_state();
     let seen: std::collections::BTreeSet<&str> = states.iter().map(|(_, _, l)| st(l, "/status")).collect();
-    for want in ["ready", "ladder_deployed", "price_at_or_below_bottom", "no_headroom"] {
+    for want in ["ready", "ladder_deployed", "price_at_or_below_bottom", "no_headroom", "nock_exceeds"] {
         assert!(seen.contains(want), "{want} not covered: {seen:?}");
     }
     let rows: std::collections::BTreeSet<String> =
         states.iter().flat_map(|(_, _, l)| l["shape"]["rungs"].as_array().cloned().unwrap_or_default()).map(|r| r["status"].as_str().unwrap().to_string()).collect();
-    for want in ["to_deposit", "deployed", "passed", "over"] {
+    for want in ["to_deposit", "deployed", "passed", "over", "found", "held", "below_minimum"] {
         assert!(rows.contains(want), "{want} row not covered: {rows:?}");
     }
     for (_, env, l) in &states {
@@ -788,3 +816,4 @@ fn test_golden_ladder_bottle_text() {
     let expected = std::fs::read_to_string(path).expect("testdata/ladder_suggest/golden_ladder_bottle.json is checked in");
     assert!(actual == expected, "the bottle's card changed; re-bless and review {path}");
 }
+

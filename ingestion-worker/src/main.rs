@@ -1,3 +1,6 @@
+// The ladder shape's rung rows are one json! literal each, past the default limit.
+#![recursion_limit = "256"]
+
 use anyhow::Result;
 use axum::{
     extract::Extension,
@@ -2517,6 +2520,8 @@ mod tests_ladder_rungs;
 mod tests_ladder_suggest;
 #[cfg(test)]
 mod tests_ladder_bottle;
+#[cfg(test)]
+mod tests_ladder_liquidity;
 #[cfg(test)]
 mod tests_tracked;
 #[cfg(test)]

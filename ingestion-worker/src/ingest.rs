@@ -625,4 +625,58 @@ pub(crate) fn slim_stored_data(data: &mut serde_json::Value) {
             }
         }
     }
+    slim_stored_ladder_suggestion(data);
+}
+
+/// Why a stored ladder card is not shown (it is read back after a restart).
+pub(crate) const STORED_LADDER_NOTE: &str = "This is the stored row of the ladder card: its links, amounts to enter, limits, picture and outcomes are left out of it. The next cycle shows the whole card again.";
+
+/// The ladder card in a stored row (review of the bottle, finding 1): what it said and
+/// what each deposit was (its rung, ticks, pool and exact mint, which position detection
+/// matches a new NFT against after a restart), without the links, texts, picture, gates
+/// and outcomes, which the worker's memory carries. A stored ready card is not shown: it
+/// says so, and the next cycle shows the whole card again. Pure.
+pub(crate) fn slim_stored_ladder_suggestion(data: &mut serde_json::Value) {
+    let Some(l) = data.pointer_mut("/derived_metrics/ladder_suggestion").and_then(|v| v.as_object_mut()) else {
+        return;
+    };
+    for k in ["assumptions", "stated", "picture", "outcomes", "after_deposit", "gates", "wallet_after", "mint_note", "candidates", "fit"] {
+        if l.contains_key(k) {
+            l.insert(k.to_string(), serde_json::Value::Null);
+        }
+    }
+    let keep = |v: &serde_json::Value, keys: &[&str]| -> serde_json::Value {
+        match v.as_object() {
+            Some(o) => serde_json::Value::Object(keys.iter().filter_map(|k| o.get(*k).map(|x| (k.to_string(), x.clone()))).collect()),
+            None => serde_json::Value::Null,
+        }
+    };
+    if let Some(rungs) = l.get_mut("rungs").and_then(|r| r.as_array_mut()) {
+        for r in rungs.iter_mut() {
+            *r = serde_json::json!({
+                "index": r["index"],
+                "of": r["of"],
+                "rung": r["rung"],
+                "status": r["status"],
+                "summary": r["summary"],
+                "tick_lower": r["tick_lower"],
+                "tick_upper": r["tick_upper"],
+                "pool": keep(&r["pool"], &["position_id", "protocol", "network", "pool_id", "label"]),
+                "usdc": keep(&r["usdc"], &["amount", "raw", "to_enter"]),
+                "nock": keep(&r["nock"], &["amount", "raw", "to_enter"]),
+                "mint": r["mint"],
+                "fee_estimate": r["fee_estimate"],
+            });
+        }
+    }
+    if let Some(rows) = l.get_mut("shape").and_then(|s| s.get_mut("rungs")).and_then(|r| r.as_array_mut()) {
+        for r in rows.iter_mut() {
+            *r = keep(r, &["index", "of", "rung", "status", "text", "tick_lower", "tick_upper", "remaining_usdc", "counterparts", "found"]);
+        }
+    }
+    if l.get("shown").and_then(|v| v.as_bool()) == Some(true) {
+        l.insert("shown".to_string(), serde_json::json!(false));
+        l.insert("reason".to_string(), serde_json::json!(STORED_LADDER_NOTE));
+    }
+    l.insert("detail_note".to_string(), serde_json::json!(format!("the deposit links, texts, limits, picture, gates and outcomes are {STORED_DETAIL_NOTE}")));
 }
