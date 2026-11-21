@@ -11,25 +11,25 @@ const ETH_USD: f64 = 1800.0;
 /// USDC inside the two WETH/USDC ranges.
 const GAS_LP_USDC: f64 = 76.893265 + 80.549340;
 
-fn weth() -> PositionTokenInfo {
+pub(crate) fn weth() -> PositionTokenInfo {
     PositionTokenInfo { address: WETH_BASE.to_string(), symbol: "WETH".to_string(), decimals: 18 }
 }
-fn usdc() -> PositionTokenInfo {
+pub(crate) fn usdc() -> PositionTokenInfo {
     PositionTokenInfo { address: USDC_BASE.to_string(), symbol: "USDC".to_string(), decimals: 6 }
 }
-fn nock() -> PositionTokenInfo {
+pub(crate) fn nock() -> PositionTokenInfo {
     PositionTokenInfo { address: NOCK_BASE.to_string(), symbol: "NOCK".to_string(), decimals: 16 }
 }
 
 /// sqrtPriceX96 at a tick (synthetic positions only).
-fn sqrt_x96_at_tick(tick: i32) -> U256 {
+pub(crate) fn sqrt_x96_at_tick(tick: i32) -> U256 {
     let v = tick_sqrt_price(tick) * 79228162514264337593543950336.0;
     let two128 = 340282366920938463463374607431768211456.0f64;
     let hi = (v / two128).floor();
     U256(hi as u128, (v - hi * two128) as u128)
 }
 
-fn with_amounts(mut p: RawPosition) -> RawPosition {
+pub(crate) fn with_amounts(mut p: RawPosition) -> RawPosition {
     let (a0, a1) = concentrated_amounts_raw(p.liquidity, p.sqrt_price_x96, p.tick_lower, p.tick_upper);
     p.amount0 = a0 / 10f64.powi(p.token0.decimals);
     p.amount1 = a1 / 10f64.powi(p.token1.decimals);
@@ -37,7 +37,7 @@ fn with_amounts(mut p: RawPosition) -> RawPosition {
 }
 
 /// USDC/NOCK v4 3.00% wide range (#3163450), the price source.
-fn nock_usdc_wide() -> RawPosition {
+pub(crate) fn nock_usdc_wide() -> RawPosition {
     with_amounts(RawPosition {
         position_id: "uniswap-v4:base:3163450".to_string(),
         network: "base".to_string(),
@@ -64,7 +64,7 @@ fn nock_usdc_wide() -> RawPosition {
 }
 
 /// WETH/NOCK v3 1.00% (#6336662).
-fn weth_nock_v3() -> RawPosition {
+pub(crate) fn weth_nock_v3() -> RawPosition {
     with_amounts(RawPosition {
         position_id: "uniswap-v3:base:6336662".to_string(),
         network: "base".to_string(),
@@ -91,7 +91,7 @@ fn weth_nock_v3() -> RawPosition {
 }
 
 /// Uniswap v3 WETH/USDC 0.05% #6607225, in range; amounts as read on 2026-11-17.
-fn gas_range_v3() -> RawPosition {
+pub(crate) fn gas_range_v3() -> RawPosition {
     let tick = -201250;
     RawPosition {
         position_id: "uniswap-v3:base:6607225".to_string(),

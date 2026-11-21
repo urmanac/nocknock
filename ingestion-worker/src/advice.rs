@@ -916,6 +916,8 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         // Filled in by the ingestion cycle from the accumulation ledger (cost_basis.rs);
         // this function reads no ledger rows.
         cost_basis: None,
+        // The floor-crossing price (#165): a measurement of the deployed ranges.
+        floor_breach: Some(floor_breach(raw, profile)),
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: fee_entries
                 .iter()

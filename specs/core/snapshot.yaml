@@ -1,9 +1,23 @@
 openapi: 3.0.3
 info:
   title: NockNock Snapshot Data Model
-  version: 2.8.3
+  version: 2.9.0
   description: |
     Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
+
+    2.9.0 (the floor-crossing price, issue #165), additive:
+    - DerivedMetrics.floor_breach (new, nullable): the lowest NOCK price at or above
+      spot at which total tracked NOCK (wallet NOCK + uncollected NOCK fees + every
+      NOCK-pair range at that price) drops below treasury_floor_nock (`crossing`), and
+      the same for the tolerated level, the floor less lp_floor_tolerance_bps
+      (`tolerated`). It gives the multiple of spot, the NOCK left if every range sells
+      out (split into wallet NOCK and uncollected NOCK fees), the range that sells the
+      most NOCK by the crossing, the range that sells out first, and each NOCK range's
+      NOCK now, at the crossing and its sell-out multiple. Each pool moves by the same
+      multiple from its own price, and WETH/NOCK ranges hold ETH/USD constant (stated
+      in `assumption`). status crosses | already_below | never | no_floor |
+      unavailable; unavailable carries `reason` and no figures. Null in snapshots
+      stored before 2.9.0. A measurement, never advice.
 
     2.8.3 (the standing protected cash reserve, issue #162), additive:
     - GlobalStatus.cash_reserve_usdc, reserve_stable_usdc, reserve_headroom_usdc
@@ -779,6 +793,169 @@ components:
           description: |
             NOCK cost basis (v0.6.0, issue #98). Null or absent in a snapshot stored
             before the field existed: unknown, never a zero basis.
+        floor_breach:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/FloorBreach'
+          nullable: true
+          description: |
+            The floor-crossing price (2.9.0, issue #165). Always emitted by a 2.9.0
+            worker; null or absent in a snapshot stored before 2.9.0: not reported,
+            never "safe".
+
+    FloorBreach:
+      type: object
+      description: |
+        How far NOCK can rise before the deployed ranges sell the stack below the floor
+        (2.9.0, issue #165). Tracked NOCK at a multiple m >= 1 of spot is wallet NOCK +
+        uncollected NOCK fees + each NOCK-pair position's NOCK at that price, so at
+        m = 1 it equals GlobalStatus.total_nock_amount. Concentrated ranges are
+        evaluated from their own liquidity and ticks at the moved price; full-range
+        pools follow x*y=k on the wallet's share (NOCK / sqrt(m)) and never sell out.
+        Ranges with no NOCK leg are not listed. A measurement of the deployed ranges,
+        never advice. Unknown is unavailable with a reason, never a default.
+      required: [status, floor_nock, positions, assumption]
+      properties:
+        status:
+          type: string
+          enum: [crosses, already_below, never, no_floor, unavailable]
+          description: |
+            The hard floor's status (crossing.status). no_floor: treasury_floor_nock
+            is 0, and every figure is null. unavailable: a position or the spot could
+            not be evaluated (`reason` says which), and every figure is null: no NOCK/USD
+            spot, a NOCK range whose sqrtPrice is zero, a full-range NOCK amount that is
+            not a number, or a NOCK-holding range on a pool reading zero in-range
+            liquidity (its price is frozen, so where its NOCK sells is unknown).
+        floor_nock:
+          type: string
+          description: treasury_floor_nock, whole NOCK.
+        spot_price_usd:
+          type: string
+          nullable: true
+          description: NOCK/USD spot the multiples apply to, 6 decimals.
+        crossing:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/FloorCrossing'
+          nullable: true
+          description: The hard floor (treasury_floor_nock).
+        tolerated:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/FloorCrossing'
+          nullable: true
+          description: |
+            The tolerated level: the floor less lp_floor_tolerance_bps of it, the same
+            tolerance the LP rebuild uses. Null when the tolerance is 0.
+        nock_now:
+          type: string
+          nullable: true
+          description: Tracked NOCK at spot, whole NOCK; equals GlobalStatus.total_nock_amount.
+        wallet_nock:
+          type: string
+          nullable: true
+          description: Wallet NOCK, whole NOCK. No price move sells it.
+        fees_nock:
+          type: string
+          nullable: true
+          description: Uncollected NOCK fees, whole NOCK, counted as held.
+        nock_if_all_sold:
+          type: string
+          nullable: true
+          description: |
+            NOCK left if every range sold all its NOCK: wallet_nock + fees_nock. Unlike
+            LpRebuild.worst_case_nock it counts uncollected fees and no suggested deposit.
+        largest_seller:
+          type: string
+          nullable: true
+          description: |
+            Label of the range that sells the most NOCK between spot and the hard-floor
+            crossing. Null unless status is crosses.
+        first_to_sell_out:
+          type: string
+          nullable: true
+          description: |
+            Label of the NOCK range with the lowest sell-out multiple. Null when only
+            full-range pools (or no ranges) hold NOCK.
+        positions:
+          type: array
+          items:
+            $ref: '#/components/schemas/FloorBreachPosition'
+          description: Every NOCK-pair position, in positions order; empty when no_floor or unavailable.
+        assumption:
+          type: string
+          description: The assumptions the figure rests on, stated.
+        reason:
+          type: string
+          nullable: true
+          description: Why the figure is unavailable, naming the position; null otherwise.
+
+    FloorCrossing:
+      type: object
+      description: Where one level is crossed (2.9.0, issue #165).
+      required: [level_nock, status]
+      properties:
+        level_nock:
+          type: string
+          description: The level, whole NOCK.
+        status:
+          type: string
+          enum: [crosses, already_below, never]
+          description: |
+            already_below: tracked NOCK is below the level at spot. never: wallet NOCK
+            and uncollected NOCK fees alone are at or above it, so no rise crosses it.
+        multiple:
+          type: string
+          nullable: true
+          description: |
+            The first multiple of spot at which tracked NOCK is below the level, 4
+            decimals; "1.0000" when already_below; null when never.
+        price_usd:
+          type: string
+          nullable: true
+          description: spot × multiple, USD per NOCK, 6 decimals.
+        pct_above_spot:
+          type: string
+          nullable: true
+          description: (multiple − 1) × 100, 1 decimal.
+
+    FloorBreachPosition:
+      type: object
+      description: One NOCK-pair position in the floor-crossing figure (2.9.0, issue #165).
+      required: [position_id, label, full_range, nock_now]
+      properties:
+        position_id:
+          type: string
+        label:
+          type: string
+        full_range:
+          type: boolean
+        nock_now:
+          type: string
+          description: The position's NOCK at spot, whole NOCK.
+        nock_at_crossing:
+          type: string
+          nullable: true
+          description: Its NOCK at the hard-floor crossing; null unless status is crosses.
+        sold_out_at_multiple:
+          type: string
+          nullable: true
+          description: |
+            The multiple of spot at which the range holds no NOCK, 1.0001^(ticks to its
+            NOCK edge) as LpSuggestion.nock_sold_out_at_multiple computes it, here to 4
+            decimals (the suggestion shows 2). Null for a full-range pool, an empty range,
+            or a range already past its edge.
+        sold_out_at_price_usd:
+          type: string
+          nullable: true
+          description: spot × sold_out_at_multiple, USD per NOCK, 6 decimals.
+        note:
+          type: string
+          nullable: true
+          description: |
+            empty | holds no NOCK at this price | pool activity not read this cycle |
+            full range: sells gradually as price rises and never empties | hypothetical
+            range: no pool activity read for its pool.
 
     CostBasis:
       type: object

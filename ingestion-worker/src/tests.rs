@@ -48,7 +48,7 @@
     /// An operator's own profile, every number set explicitly (floor 100,000, tax ratio
     /// 0.40, weights 8000/1500/500, the values these tests were written against). The
     /// code defaults choose nothing: no floor, no tax ratio, no target weights.
-    fn operator_profile_2026_11() -> OperatorProfile {
+    pub(crate) fn operator_profile_2026_11() -> OperatorProfile {
         OperatorProfile {
             treasury_floor_nock: 100_000.0,
             lp_floor_tolerance_bps: 0,
@@ -1198,7 +1198,7 @@ database_url: "postgresql://localhost/test"
 
     /// Liquid wallet with every tracked pool live except the v4 0.75% pool (#3163431),
     /// which is dead exactly as on 2026-11-14. ETH balance read; no WETH.
-    fn rebuild_fixture() -> RawOnChainData {
+    pub(crate) fn rebuild_fixture() -> RawOnChainData {
         let mut raw = liquid_wallet_fixture();
         for p in &raw.positions {
             let live = if p.nft_id == 3163431 { "0" } else { "80173935548453779" };
@@ -1810,6 +1810,7 @@ database_url: "postgresql://localhost/test"
                 accumulation_plan: None,
                 lp_rebuild: LpRebuild::default(),
                 cost_basis: None,
+                floor_breach: None,
                 asset_aggregation_series: AssetAggregationSeries {
                     time_points: vec!["2026-10-11T00:00:00Z".to_string()],
                     safe_haven_series: vec!["48.00".to_string()],
@@ -2516,7 +2517,7 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
     /// live pipeline. Magnitude anchors from the operator screenshots (± drift):
     /// B ≈ $71, C ≈ $18–47, A ≈ $156 (compounded +75% since the $89.48 screenshot),
     /// D ≈ $208 (largest holding; minted 2026-10-24 morning).
-    fn four_position_fixture() -> RawOnChainData {
+    pub(crate) fn four_position_fixture() -> RawOnChainData {
         let mut a = fixture_position_v4_nock_eth();
         let mut b = fixture_position_v4_usdc();
         let mut c = fixture_position_v3_weth_nock();
@@ -2773,7 +2774,7 @@ eth_price_pool: "0xd0b53d9277642d899df5c87a3966a349a798f224"
     }
 
     /// A newcomer's wallet: no LP, gas read as zero, every amount a test input.
-    fn from_zero_raw(usdc: f64, nock: f64) -> RawOnChainData {
+    pub(crate) fn from_zero_raw(usdc: f64, nock: f64) -> RawOnChainData {
         let mut raw = RawOnChainData::default();
         raw.spot_price_nock_usd = 0.01153;
         raw.live_eth_price_usd = 3000.0;

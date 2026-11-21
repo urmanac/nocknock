@@ -86,6 +86,22 @@
           ]
         },
         "cost_basis": null,
+        "floor_breach": {
+          "assumption": "Each pool is moved by the same multiple from its own current price. WETH/NOCK ranges hold ETH/USD constant (a NOCK/USD multiple is the same NOCK/ETH multiple). Full-range pools follow x*y=k on the wallet's share and never sell out. Uncollected NOCK fees count as held. Gas-side ranges with no NOCK leg hold no NOCK.",
+          "crossing": null,
+          "fees_nock": null,
+          "first_to_sell_out": null,
+          "floor_nock": "0",
+          "largest_seller": null,
+          "nock_if_all_sold": null,
+          "nock_now": null,
+          "positions": [],
+          "reason": null,
+          "spot_price_usd": null,
+          "status": "no_floor",
+          "tolerated": null,
+          "wallet_nock": null
+        },
         "global_status": {
           "aero_note": null,
           "aero_price_usd": null,
@@ -532,7 +548,7 @@
         }
       ]
     },
-    "state_hash": "c485b3b6d747d800f0a96068d928fdd8c0421420c3931e8ae9b2104708bd4a20"
+    "state_hash": "de02468e1682b52c90fa1dfa330cb99b564b2b7d569c516cf03058d9dfd89993"
   },
   "from_zero": {
     "mcp_text": {
@@ -559,6 +575,22 @@
           ]
         },
         "cost_basis": null,
+        "floor_breach": {
+          "assumption": "Each pool is moved by the same multiple from its own current price. WETH/NOCK ranges hold ETH/USD constant (a NOCK/USD multiple is the same NOCK/ETH multiple). Full-range pools follow x*y=k on the wallet's share and never sell out. Uncollected NOCK fees count as held. Gas-side ranges with no NOCK leg hold no NOCK.",
+          "crossing": null,
+          "fees_nock": null,
+          "first_to_sell_out": null,
+          "floor_nock": "0",
+          "largest_seller": null,
+          "nock_if_all_sold": null,
+          "nock_now": null,
+          "positions": [],
+          "reason": null,
+          "spot_price_usd": null,
+          "status": "no_floor",
+          "tolerated": null,
+          "wallet_nock": null
+        },
         "global_status": {
           "aero_note": null,
           "aero_price_usd": null,
@@ -700,12 +732,12 @@
         }
       ]
     },
-    "state_hash": "dc47cf32db3d7e2422b5bc83e619b5e82b7ee473a24bb38af4c3b2fb7ca2f7a0"
+    "state_hash": "b09610159e4573a30a11d11776889f8637bdc8cd8075fb56dbba66ee58565f5e"
   },
   "whole_book_plan_due": {
     "mcp_text": {
       "get_accumulation_plan": "🪜 Accumulation Plan \"test-plan\" (your venue label: Aero)\n====================\n• Status: tranche_due\n• Next tranche: 1 of 5 — $100.00 due now (nominal $100.00)\n• Next due at: n/a\n• Progress: $0.00 of $500.00 spent over 0 verified buy(s); $500.00 remaining\n• Acquired: 0.0000 NOCK at average $n/a\n• Lump-sum counterfactual (whole budget at first fill price): n/a NOCK\n• Constraint: n/a\n• Protected cash reserve: $n/a\n• NOCK LP rebuild bias: under_target (holds $76.06 of a $423.40 target, $347.34 short). Rebuilding ranges is a reposition: no net cash change.\n   → add 156.01 USDC + 4532 NOCK ($211.70) to v4 USDC/NOCK 3.00% #3163450\n     https://app.uniswap.org/positions/v4/base/3163450\n   → add 65.86 USDC + 5678 NOCK ($135.64) to Aero USDC/NOCK 0.30% (full range)\n     https://app.aero.xyz/deposit/8453-0x85f1aa3a70fedd1c52705c15baed143e675cd626\n   ✗ v4 ETH/NOCK 2.00% #3163432: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions\n   ✗ v4 USDC/NOCK 0.75% #3163431: pool has no in-range liquidity, so its price is frozen; a deposit would sit alone at a stale price\n   ✗ v3 WETH/NOCK 1.00% #6336662: needs ETH/WETH, which is gas, not investable capital: NockNock never funds an ETH leg from wallet gas, so this position's share goes to the other eligible positions",
-      "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $2822.68 USD\n• Pillars: NOCK $1461.67 · USDC $1089.93 · ETH $271.07 · AERO not reported\n• Sovereign NOCK Stack: 118957 NOCK (+18957 above the 100000 NOCK floor)\n• Stable Stack: 1089.93 USDC\n• Gas held (wallet ETH+WETH): 0.114226 ETH ($271.07), counted in the total; not cash, not deployable\n• AERO held (wallet): not reported\n• Unclaimed AERO: not reported\n• AERO/USD: not reported\n• High-Water Mark: $2822.68 USD\n• Cost basis: not reported by this snapshot\n• Tactical Directive: DCA TRANCHE DUE (1 of 5)",
+      "get_portfolio_state": "📈 NockNock Sovereign Portfolio State\n=========================================\n• Total Value: $2822.68 USD\n• Pillars: NOCK $1461.67 · USDC $1089.93 · ETH $271.07 · AERO not reported\n• Sovereign NOCK Stack: 118957 NOCK (+18957 above the 100000 NOCK floor)\n• Floor crossing: none. If every range sold out, 115773 NOCK would remain (115748 wallet + 25 uncollected fees), at or above the 100000 NOCK floor. No range sells out: only full-range pools hold NOCK, and they sell gradually and never empty. Each pool moves with spot; WETH/NOCK ranges hold ETH/USD constant. A measurement, not an instruction.\n• Stable Stack: 1089.93 USDC\n• Gas held (wallet ETH+WETH): 0.114226 ETH ($271.07), counted in the total; not cash, not deployable\n• AERO held (wallet): not reported\n• Unclaimed AERO: not reported\n• AERO/USD: not reported\n• High-Water Mark: $2822.68 USD\n• Cost basis: not reported by this snapshot\n• Tactical Directive: DCA TRANCHE DUE (1 of 5)",
       "get_shot_advice": "🎯 Tactical Shot Advice Engine\n===============================\n• Recommended Action: DCA TRANCHE DUE (1 of 5)\n• Decision Matrix Details: Buy $100.00 of NOCK (spot $0.01229; your plan's venue label: Aero). Plan \"test-plan\": $0.00 of $500.00 deployed over 0 verified buy(s). After buying, record the transaction hash so the plan advances. Standing bias: NOCK LP holds $76.06 against a $423.40 target (15% of portfolio), $347.34 short. Re-establishing ranges from NOCK and USDC already held is a reposition, not a purchase: the stable total is unchanged, only its location moves. Suggested: add 156.01 USDC + 4532 NOCK ($211.70) to v4 USDC/NOCK 3.00% #3163450 (sells all its NOCK by a 1.99x rise); add 65.86 USDC + 5678 NOCK ($135.64) to Aero USDC/NOCK 0.30% (full range). If every range sold out, 105538 NOCK would remain.\n• Uncollected Claimable Fees: $0.75 USD\n• Net of two claims' gas: +$0.74 USD\n• Harvest rule: BATCH HARVEST is advised once the uncollected LP fees worth claiming (positions whose fees cover their own claim's gas) reach the fixed $5.00 threshold, and only when no DCA tranche is due (a floor DEFENSIVE LOCK, a due tranche and a range exit all outrank it).",
       "simulate_claim_fees": "⚡ Fee Claim Simulation\n=======================\n• Collectible LP fees: $0.0000 USD\n• Estimated Gas: ~$0.0050 USD\n• Net Accretion if Harvested: $0.0000 USD\nPool Breakdown:\n  - ETH+NOCK (Uniswap V4 #3163432): 0.00000000 ETH + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0050)\n  - USDC+NOCK (Uniswap V4 #3163431): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0050)\n  - WETH+NOCK (Uniswap V3 #6336662): 0.00000000 WETH + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0050)\n  - USDC+NOCK (Uniswap V4 #3163450): 0.000000 USDC + 0.00000000 NOCK (~$0.000000 USD | Gas Est: $0.0050)\n  - USDC+NOCK (Aerodrome): not LP-claimable (claimFees() reverts)\n"
     },
@@ -825,6 +857,79 @@
           ]
         },
         "cost_basis": null,
+        "floor_breach": {
+          "assumption": "Each pool is moved by the same multiple from its own current price. WETH/NOCK ranges hold ETH/USD constant (a NOCK/USD multiple is the same NOCK/ETH multiple). Full-range pools follow x*y=k on the wallet's share and never sell out. Uncollected NOCK fees count as held. Gas-side ranges with no NOCK leg hold no NOCK.",
+          "crossing": {
+            "level_nock": "100000",
+            "multiple": null,
+            "pct_above_spot": null,
+            "price_usd": null,
+            "status": "never"
+          },
+          "fees_nock": "25",
+          "first_to_sell_out": null,
+          "floor_nock": "100000",
+          "largest_seller": null,
+          "nock_if_all_sold": "115773",
+          "nock_now": "118957",
+          "positions": [
+            {
+              "full_range": false,
+              "label": "v4 ETH/NOCK 2.00% #3163432",
+              "nock_at_crossing": null,
+              "nock_now": "0",
+              "note": "empty",
+              "position_id": "uniswap-v4:base:3163432",
+              "sold_out_at_multiple": null,
+              "sold_out_at_price_usd": null
+            },
+            {
+              "full_range": false,
+              "label": "v4 USDC/NOCK 0.75% #3163431",
+              "nock_at_crossing": null,
+              "nock_now": "0",
+              "note": "empty",
+              "position_id": "uniswap-v4:base:3163431",
+              "sold_out_at_multiple": null,
+              "sold_out_at_price_usd": null
+            },
+            {
+              "full_range": false,
+              "label": "v3 WETH/NOCK 1.00% #6336662",
+              "nock_at_crossing": null,
+              "nock_now": "0",
+              "note": "empty",
+              "position_id": "uniswap-v3:base:6336662",
+              "sold_out_at_multiple": null,
+              "sold_out_at_price_usd": null
+            },
+            {
+              "full_range": false,
+              "label": "v4 USDC/NOCK 3.00% #3163450",
+              "nock_at_crossing": null,
+              "nock_now": "0",
+              "note": "empty",
+              "position_id": "uniswap-v4:base:3163450",
+              "sold_out_at_multiple": null,
+              "sold_out_at_price_usd": null
+            },
+            {
+              "full_range": true,
+              "label": "Aero USDC/NOCK 0.30% (full range)",
+              "nock_at_crossing": null,
+              "nock_now": "3184",
+              "note": "full range: sells gradually as price rises and never empties",
+              "position_id": "aerodrome:base:0x85f1aa3a70fedd1c52705c15baed143e675cd626",
+              "sold_out_at_multiple": null,
+              "sold_out_at_price_usd": null
+            }
+          ],
+          "reason": null,
+          "spot_price_usd": "0.012290",
+          "status": "never",
+          "tolerated": null,
+          "wallet_nock": "115748"
+        },
         "global_status": {
           "aero_note": null,
           "aero_price_usd": null,
@@ -1462,6 +1567,6 @@
         }
       ]
     },
-    "state_hash": "3b251ee438e6c2ba15f2d94f6712f931ef91ce271142a965c432b94e615efa5f"
+    "state_hash": "7854055c682fa2f07a716661c9c5ed66f1e0411a92cf7de3ae4f4504474e2b66"
   }
 }
