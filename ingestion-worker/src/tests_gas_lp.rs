@@ -151,7 +151,7 @@ fn gas_ids() -> [String; 2] {
 }
 
 /// The NOCK positions alone: the reference every NOCK-strategy figure must match.
-fn nock_only() -> RawOnChainData {
+pub(crate) fn nock_only() -> RawOnChainData {
     let positions = vec![nock_usdc_wide(), weth_nock_v3()];
     let mut raw = RawOnChainData {
         spot_price_nock_usd: nock_spot_from_positions(&positions).expect("price source"),
@@ -188,7 +188,7 @@ fn nock_only() -> RawOnChainData {
 }
 
 /// The NOCK positions plus both WETH/USDC ranges, the Aero one staked and earning AERO.
-fn with_gas_ranges() -> RawOnChainData {
+pub(crate) fn with_gas_ranges() -> RawOnChainData {
     let mut raw = nock_only();
     let (v3, cl) = (gas_range_v3(), gas_range_aero_cl());
     for p in [&v3, &cl] {
@@ -218,12 +218,13 @@ fn with_gas_ranges() -> RawOnChainData {
     raw
 }
 
-fn profile() -> OperatorProfile {
+pub(crate) fn profile() -> OperatorProfile {
     OperatorProfile {
         treasury_floor_nock: 100_000.0,
         lp_floor_tolerance_bps: 0,
         tax_reserve_ratio: 0.0,
         target_weights_bps: TargetWeightsBps { treasury: 8000, uniswap_lp: 1500, cash: 500 },
+        cash_reserve_usdc: None,
     }
 }
 

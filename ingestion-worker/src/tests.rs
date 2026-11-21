@@ -54,6 +54,7 @@
             lp_floor_tolerance_bps: 0,
             tax_reserve_ratio: 0.40,
             target_weights_bps: TargetWeightsBps { treasury: 8000, uniswap_lp: 1500, cash: 500 },
+            cash_reserve_usdc: None,
         }
     }
 
@@ -508,7 +509,7 @@ database_url: "postgresql://localhost/test"
     }
 
     fn roomy_guards() -> PlanGuards {
-        PlanGuards { overextended: false, spot_price: 0.0123, wallet_usdc: 1053.0, lp_usdc: 0.0, tax_reserve_usd: 0.0, cash_target_usd: 124.0 }
+        PlanGuards { overextended: false, spot_price: 0.0123, wallet_usdc: 1053.0, lp_usdc: 0.0, tax_reserve_usd: 0.0, cash_target_usd: 124.0, standing_reserve_usdc: None }
     }
 
     fn t(s: &str) -> DateTime<Utc> {

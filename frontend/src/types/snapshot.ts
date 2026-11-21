@@ -286,6 +286,16 @@ export interface GlobalStatus {
   /** One statement naming the closed positions, that they are in no total and that
    *  their config entries can be removed. Absent when none is closed (2.8.0, #144) */
   closed_positions_note?: string;
+  /** operator_profile.cash_reserve_usdc (2.8.3, #162); absent when none is set. */
+  cash_reserve_usdc?: string;
+  /** Wallet USDC + USDC in NOCK-pair LP, the balance the reserve is measured on (2.8.3). */
+  reserve_stable_usdc?: string;
+  /** reserve_stable_usdc minus cash_reserve_usdc, signed (2.8.3). */
+  reserve_headroom_usdc?: string;
+  /** Liquid dry powder, never above the headroom (2.8.3). */
+  dry_powder_usdc?: string;
+  /** Why a configured standing reserve is not applied (2.8.3). */
+  reserve_note?: string;
 }
 
 /** A gauge reward stated as collectible earnings (#142): what is there and where it is

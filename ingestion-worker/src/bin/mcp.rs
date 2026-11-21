@@ -14,6 +14,9 @@ mod quote_text;
 use quote_text::route_quote_lines;
 /// Shared with the worker (src/cost_basis_text.rs) so both transports print the same
 /// cost-basis lines. This binary cannot import from main.rs, so it compiles the file.
+#[path = "../reserve_text.rs"]
+mod reserve_text;
+
 #[path = "../cost_basis_text.rs"]
 mod cost_basis_text;
 
@@ -375,6 +378,8 @@ fn format_portfolio_state(data: &Value) -> String {
     let cost_basis = cost_basis_text::cost_basis_lines(data);
     // Closed positions (issue #144): the worker's own lines, from the same source file.
     let closed = closed_positions_lines(data);
+    // The standing protected cash reserve (issue #162), the same line as the HTTP transport.
+    let reserve = reserve_text::reserve_line(global);
 
     format!(
         "📈 NockNock Sovereign Portfolio State\n\
@@ -383,6 +388,7 @@ fn format_portfolio_state(data: &Value) -> String {
          • Pillars: {pillars}\n\
          • Sovereign NOCK Stack: {total_nock} ({floor})\n\
          • Stable Stack: {total_usdc}\n\
+         {reserve}\
          • Gas held (wallet ETH+WETH): {gas}\n\
          {aero}\n\
          {collectible}\
@@ -514,6 +520,23 @@ mod tests {
         let old = format_portfolio_state(&from_zero_snapshot());
         assert!(old.contains("Gas held (wallet ETH+WETH): not reported (snapshot predates 2.3.0)"), "{old}");
         assert!(old.contains("ETH not reported (snapshot predates 2.3.0)"), "{old}");
+    }
+
+    #[test]
+    fn test_stdio_states_the_standing_reserve_like_http() {
+        // #162 review: the stdio transport has its own formatter; it prints the same line.
+        let mut data = from_zero_snapshot();
+        let g = &mut data["derived_metrics"]["global_status"];
+        g["cash_reserve_usdc"] = json!("950.00");
+        g["reserve_stable_usdc"] = json!("1768.18");
+        g["reserve_headroom_usdc"] = json!("818.18");
+        g["dry_powder_usdc"] = json!("818.18");
+        let text = format_portfolio_state(&data);
+        assert!(text.contains("• Stable Stack: 500.00 USDC\n• Protected cash reserve: $950.00 (wallet + NOCK LP USDC $1768.18, $818.18 above it; liquid dry powder $818.18); kept for buying lower, never drawn by a plan buy\n• Gas held"), "{text}");
+        let mut bad = from_zero_snapshot();
+        bad["derived_metrics"]["global_status"]["reserve_note"] = json!("operator_profile.cash_reserve_usdc must be zero or positive");
+        assert!(format_portfolio_state(&bad).contains("• Protected cash reserve: not applied: operator_profile.cash_reserve_usdc must be zero or positive\n"));
+        assert!(!format_portfolio_state(&from_zero_snapshot()).contains("Protected cash reserve"));
     }
 
     #[test]

@@ -70,6 +70,8 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
     let cost_basis = cost_basis_lines(data);
     // Closed positions (issue #144): stated, never counted. Empty when there are none.
     let closed = closed_positions_lines(data);
+    // The standing protected cash reserve (issue #162): stated only when one is set.
+    let reserve = crate::reserve_text::reserve_line(global);
 
     format!(
         "📈 NockNock Sovereign Portfolio State\n\
@@ -78,6 +80,7 @@ pub fn format_portfolio_state_text(data: &serde_json::Value) -> String {
          • Pillars: {pillars}\n\
          • Sovereign NOCK Stack: {total_nock} ({floor})\n\
          • Stable Stack: {total_usdc}\n\
+         {reserve}\
          • Gas held (wallet ETH+WETH): {gas}\n\
          {aero}\n\
          {collectible}\
@@ -254,3 +257,4 @@ pub fn format_accumulation_plan_text(data: &serde_json::Value) -> String {
 pub fn format_claim_simulation_text(data: &serde_json::Value) -> String {
     claim_simulation_text(data, &[])
 }
+

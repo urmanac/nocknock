@@ -38,6 +38,7 @@ import { POSITION_COLORS, ethBracketRows, fullRangeEthUsdcCount, hasNockLeg, noc
 import { isAeroProtocol, positionFeesText } from './aeroCl.ts';
 import { PositionStakingLine, RangeSideList } from './components/PositionRangeNotes.tsx';
 import { EthBracketChart } from './components/EthBracketChart.tsx';
+import { reserveText } from './reserve.ts';
 import { floorState, floorDeltaText, floorSummaryText, regimeLabel, regimeTone } from './floor.ts';
 import { buildChartRows, compositionReadout, syncWindowOrDefault, type ChartSeries, type GapRow } from './timeline.ts';
 import { ethUsdPrice, gasLine, hwmSubtitle, pillarLine } from './pillars.ts';
@@ -258,7 +259,7 @@ function Dashboard() {
             value={global?.total_usdc_amount}
             prefix="$"
             suffix=" USDC"
-            subtitle={`${statValueText(global?.total_fees_accrued_usd, '$')} of LP fees uncollected`}
+            subtitle={[`${statValueText(global?.total_fees_accrued_usd, '$')} of LP fees uncollected`, reserveText(global)].filter(Boolean).join(' · ')}
             highlightColor="#00d2d3"
           />
           <StatCard

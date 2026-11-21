@@ -318,7 +318,17 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     let tax_guardrail_blocked = tax_reserve_usd > 0.0 && wallet_usdc < tax_reserve_usd;
     // Cash target (issue #79) and tax reserve overlap: the larger one stays in the wallet.
     let cash_target_usd = total_portfolio_usd * (profile.target_weights_bps.cash as f64 / 10000.0);
-    let deployable_usdc = (wallet_usdc - tax_reserve_usd.max(cash_target_usd)).max(0.0);
+    let wallet_deployable_usdc = (wallet_usdc - tax_reserve_usd.max(cash_target_usd)).max(0.0);
+    // The standing protected cash reserve (#162): measured on wallet USDC plus USDC inside
+    // NOCK-pair LP, the stable balance a NOCK dip can draw on (gas-side ETH/USDC ranges
+    // are left out, #151). Dry powder is never more than the headroom above it. An
+    // invalid reserve is named and leaves no dry powder: never "safe" by default.
+    let reserve = standing_reserve(profile.cash_reserve_usdc, wallet_usdc, nock_lp_usdc);
+    let deployable_usdc = match &reserve {
+        StandingReserve::Unset => wallet_deployable_usdc,
+        StandingReserve::Invalid => 0.0,
+        StandingReserve::Set { headroom, .. } => wallet_deployable_usdc.min(headroom.max(0.0)),
+    };
     // NOCK-pair USDC only (#151): the USDC in a gas-side ETH range is counted in
     // total_stable_usd but is not NOCK working capital.
     let lp_usdc_note = if nock_lp_usdc >= 0.005 {
@@ -331,7 +341,7 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     let cash_target_set = profile.target_weights_bps.cash > 0;
     let tax_ratio_set = profile.tax_reserve_ratio > 0.0;
     let dry_powder_amount = if deployable_usdc >= PLAN_DUST_USDC { format!("${:.2}", deployable_usdc) } else { "none".to_string() };
-    let dry_powder_sentence = match (cash_target_set, tax_ratio_set) {
+    let dry_powder_base = match (cash_target_set, tax_ratio_set) {
         (true, true) => format!(
             "Liquid dry powder: {} (wallet USDC ${:.2} less the larger of the ${:.2} cash target and the ${:.2} virtual tax reserve).",
             dry_powder_amount, wallet_usdc, cash_target_usd, tax_reserve_usd
@@ -349,6 +359,7 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             dry_powder_amount
         ),
     };
+    let dry_powder_sentence = reserve_dry_powder_sentence(dry_powder_base, &reserve, wallet_deployable_usdc);
     // ETH is gas: stated as a fact when the wallet has none, never sized.
     let gas_note = match (raw.wallet_eth, raw.wallet_weth) {
         (Some(e), Some(w)) if e <= 0.0 && w <= 0.0 => " The wallet holds no ETH; every action on Base pays its gas in ETH.",
@@ -366,9 +377,20 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             lp_usdc: nock_lp_usdc,
             tax_reserve_usd,
             cash_target_usd,
+            standing_reserve_usdc: profile.cash_reserve_usdc,
         };
         let directive = plan_directive(cfg, &plan.fills, &guards, plan.ledger_unavailable, plan.now);
         let mut status = build_plan_status(cfg, &plan.fills, &directive);
+        // The reserve the plan honours is the larger of its own and the standing one
+        // (#162), so the plan panel and its advice name the one that binds.
+        if let Some(standing) = reserve.amount() {
+            // An invalid plan reserve stays named by the plan's Invalid status; the
+            // standing amount never stands in for it.
+            let own_valid = cfg.cash_reserve_usdc.map_or(true, |own| own >= 0.0 && own.is_finite());
+            if own_valid && cfg.cash_reserve_usdc.map_or(true, |own| standing > own) {
+                status.cash_reserve_usdc = Some(format!("{:.2}", standing));
+            }
+        }
         status.fill_detection = fill_detection.cloned();
         status
     });
@@ -710,6 +732,11 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             // are not in raw.positions, which every figure of this function is built from.
             closed_positions_count: (!raw.closed_positions.is_empty()).then_some(raw.closed_positions.len() as u32),
             closed_positions_note: closed_positions_note(&raw.closed_positions),
+            cash_reserve_usdc: reserve.amount().map(|r| format!("{:.2}", r)),
+            reserve_stable_usdc: reserve.stable().map(|v| format!("{:.2}", v)),
+            reserve_headroom_usdc: reserve.headroom().map(|v| format!("{:.2}", v)),
+            dry_powder_usdc: (reserve != StandingReserve::Invalid).then(|| format!("{:.2}", deployable_usdc)),
+            reserve_note: (reserve == StandingReserve::Invalid).then(|| RESERVE_INVALID_NOTE.to_string()),
         },
         asset_aggregation_series: AssetAggregationSeries {
             time_points: vec![now_str.clone()],
@@ -918,5 +945,82 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
                 })
                 .collect(),
         },
+    }
+}
+
+/// Why an invalid standing reserve is not applied (#162).
+pub(crate) const RESERVE_INVALID_NOTE: &str = "operator_profile.cash_reserve_usdc must be zero or positive";
+
+/// The standing protected cash reserve of one cycle (#162).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum StandingReserve {
+    /// `operator_profile.cash_reserve_usdc` is not set: no rule.
+    Unset,
+    /// Set, but negative or not a number: named, and no dry powder is reported.
+    Invalid,
+    /// `stable` is wallet USDC plus USDC inside NOCK-pair LP; `headroom` = stable − amount.
+    Set { amount: f64, nock_lp_usdc: f64, stable: f64, headroom: f64 },
+}
+
+impl StandingReserve {
+    pub(crate) fn amount(&self) -> Option<f64> {
+        match self { StandingReserve::Set { amount, .. } => Some(*amount), _ => None }
+    }
+    pub(crate) fn stable(&self) -> Option<f64> {
+        match self { StandingReserve::Set { stable, .. } => Some(*stable), _ => None }
+    }
+    pub(crate) fn headroom(&self) -> Option<f64> {
+        match self { StandingReserve::Set { headroom, .. } => Some(*headroom), _ => None }
+    }
+}
+
+/// Reads `operator_profile.cash_reserve_usdc` against this cycle's balances (#162).
+pub(crate) fn standing_reserve(configured: Option<f64>, wallet_usdc: f64, nock_lp_usdc: f64) -> StandingReserve {
+    match configured {
+        None => StandingReserve::Unset,
+        Some(r) if !(r >= 0.0) || !r.is_finite() => StandingReserve::Invalid,
+        Some(amount) => {
+            let stable = wallet_usdc + nock_lp_usdc;
+            // Whole cents, and never -0.00: every surface rounds the headroom the same way
+            // and agrees which side of the reserve the balance is on.
+            let headroom = ((stable - amount) * 100.0).round() / 100.0 + 0.0;
+            StandingReserve::Set { amount, nock_lp_usdc, stable, headroom }
+        }
+    }
+}
+
+/// The dry-powder sentence with the standing reserve stated (#162). `base` is the
+/// wallet-side sentence ("Liquid dry powder: $X (wallet USDC ... less ...)."), already
+/// carrying the final amount; `wallet_deployable` is what the wallet side alone allows.
+pub(crate) fn reserve_dry_powder_sentence(base: String, reserve: &StandingReserve, wallet_deployable: f64) -> String {
+    match reserve {
+        StandingReserve::Unset => base,
+        StandingReserve::Invalid => format!("Liquid dry powder: not reported: {}.", RESERVE_INVALID_NOTE),
+        StandingReserve::Set { amount, nock_lp_usdc, stable, headroom } => {
+            let measured = format!(
+                "The ${:.2} protected cash reserve is measured on wallet USDC plus the ${:.2} of USDC in NOCK LP: ${:.2},",
+                amount, nock_lp_usdc, stable
+            );
+            if *headroom < 0.0 {
+                let capped = cap_parenthetical(&base, "and nothing while the stable balance is below the reserve");
+                format!("{} {} ${:.2} below it.", capped, measured, -headroom)
+            } else if *headroom < wallet_deployable {
+                let capped = cap_parenthetical(
+                    &base,
+                    &format!("and no more than the ${:.2} the stable balance holds above the reserve", headroom),
+                );
+                format!("{} {} ${:.2} above it.", capped, measured, headroom)
+            } else {
+                format!("{} {} ${:.2} above it.", base, measured, headroom)
+            }
+        }
+    }
+}
+
+/// "…(a less b)." → "…(a less b, <clause>)." Falls back to appending the clause.
+fn cap_parenthetical(base: &str, clause: &str) -> String {
+    match base.strip_suffix(").") {
+        Some(head) => format!("{}, {}).", head, clause),
+        None => format!("{} ({})", base, clause),
     }
 }

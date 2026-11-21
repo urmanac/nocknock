@@ -122,6 +122,7 @@
           "closed_positions_note": "1 configured position is closed and is not counted in any total: Aero CL #2914490 (aero-cl200-weth-nock) (NFT #2914490 no longer exists: withdrawn and burned, or a mistyped nft_id). Its entry can be removed from config.yaml.",
           "collectible_rewards_note": null,
           "collectible_rewards_usd": "0.10",
+          "dry_powder_usdc": "663.51",
           "eth_price_usd": "1820.59",
           "gas_to_fee_delta_usd": "1.97",
           "high_water_mark_usd": "2991.44",
@@ -554,7 +555,7 @@
         }
       ]
     },
-    "state_hash": "ada3e15ae0d429d4f917091252e82ed0125cf4bbcb4ea3aad501e49c6e7b2f9f"
+    "state_hash": "2e5ddb27250f7704e36ff30b728b24c1bad7eff72ec729f515cb1bfc13906f2b"
   },
   "v4_price_source_closed_block_58646285": {
     "mcp_text": {
@@ -665,6 +666,7 @@
           "closed_positions_note": "1 configured position is closed and is not counted in any total: v4 USDC/NOCK #3229273 (uniswap-v4-nock-usdc-gone) (NFT #3229273 no longer exists: withdrawn and burned, or a mistyped nft_id). The pool of v4 USDC/NOCK #3229273 (uniswap-v4-nock-usdc-gone) still supplies the NOCK/USD spot: flag another position as is_price_source before removing that entry.",
           "collectible_rewards_note": null,
           "collectible_rewards_usd": "0.10",
+          "dry_powder_usdc": "675.57",
           "eth_price_usd": "1820.59",
           "gas_to_fee_delta_usd": "1.97",
           "high_water_mark_usd": "2750.23",
@@ -1016,6 +1018,6 @@
         }
       ]
     },
-    "state_hash": "aed8c58488d790d65e4edabaf21435f8bd50c8ad464ac2430968a38ecc8552e8"
+    "state_hash": "ae3d5d7cc138349ef1168ba93adea8e88c36baa9b2608eda49bdc652f899a64e"
   }
 }

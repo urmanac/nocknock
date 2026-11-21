@@ -43,6 +43,11 @@ pub(crate) fn plan_directive(
             reason: "accumulation_plan.cash_reserve_usdc must be zero or positive".to_string(),
         };
     }
+    if guards.standing_reserve_usdc.map_or(false, |r| !(r >= 0.0) || !r.is_finite()) {
+        return PlanDirective::Invalid {
+            reason: "operator_profile.cash_reserve_usdc must be zero or positive".to_string(),
+        };
+    }
     if ledger_unavailable {
         return PlanDirective::Blocked {
             reason: PLAN_LEDGER_UNREADABLE_REASON.to_string(),
@@ -105,7 +110,13 @@ pub(crate) fn plan_directive(
             ),
         );
     }
-    if let Some(reserve) = cfg.cash_reserve_usdc {
+    // Two reserves may apply (#162): the plan's own and the operator's standing one. The
+    // plan never draws the stable balance below either.
+    let reserves = [
+        cfg.cash_reserve_usdc.map(|r| (r, "the")),
+        guards.standing_reserve_usdc.map(|r| (r, "the standing")),
+    ];
+    for (reserve, whose) in reserves.into_iter().flatten() {
         // The reserve is measured on the whole stable balance: wallet USDC plus USDC
         // inside NOCK LP. Moving USDC into a range therefore does not consume headroom;
         // buying NOCK with it does. USDC in a gas-side ETH/USDC range is not counted
@@ -114,8 +125,8 @@ pub(crate) fn plan_directive(
         cap(
             stable - reserve,
             format!(
-                "stable balance ${:.2} (wallet ${:.2} + NOCK LP ${:.2}) less the ${:.2} protected cash reserve",
-                stable, guards.wallet_usdc, guards.lp_usdc, reserve
+                "stable balance ${:.2} (wallet ${:.2} + NOCK LP ${:.2}) less {} ${:.2} protected cash reserve",
+                stable, guards.wallet_usdc, guards.lp_usdc, whose, reserve
             ),
         );
     }

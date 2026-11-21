@@ -47,6 +47,7 @@
           "aero_price_usd": null,
           "collectible_rewards_note": null,
           "collectible_rewards_usd": null,
+          "dry_powder_usdc": "783.66",
           "eth_price_usd": "1820.91",
           "gas_to_fee_delta_usd": "-0.01",
           "high_water_mark_usd": "2154.54",
@@ -288,6 +289,6 @@
         }
       ]
     },
-    "state_hash": "7c82a9d7087e3eb907e4a3898af4d68185523da4de6ed44c765c4f75b41952c8"
+    "state_hash": "75a46206cfd2ffc301ac442e08a0a7b5612ce25b44f881aa0457fd286dbb6e63"
   }
 }

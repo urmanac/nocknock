@@ -87,6 +87,7 @@
           "aero_price_usd": "0.417608",
           "collectible_rewards_note": null,
           "collectible_rewards_usd": "5.03",
+          "dry_powder_usdc": "780.51",
           "eth_price_usd": "1811.33",
           "gas_to_fee_delta_usd": "-0.01",
           "high_water_mark_usd": "2217.50",
@@ -468,7 +469,7 @@
         }
       ]
     },
-    "state_hash": "6e990f23c5c5155dadd1e1fb6d5f5a4764e932d94441f915bc11abd414041ad3"
+    "state_hash": "b284d1462ab895b246090cde7cc17b169f2f1170f6f2ee0e044269db441c6e2d"
   },
   "aero_unclaimed_block_58077673": {
     "mcp_text": {
@@ -558,6 +559,7 @@
           "aero_price_usd": "0.417608",
           "collectible_rewards_note": null,
           "collectible_rewards_usd": "5.03",
+          "dry_powder_usdc": "780.54",
           "eth_price_usd": "1811.33",
           "gas_to_fee_delta_usd": "-0.01",
           "high_water_mark_usd": "2216.93",
@@ -939,6 +941,6 @@
         }
       ]
     },
-    "state_hash": "d935d4fef2db8d65833c0ee5d7360043a93d1325fd9e21c6e70faf7efc5dd1c3"
+    "state_hash": "d6009701f7a8a23b51a63e1ab7a130c5c42910b4cbb27bf986ad3bef5d58a19d"
   }
 }

@@ -23,6 +23,7 @@ use calldata::*;
 mod contracts;
 use contracts::*;
 mod mcp_text;
+mod reserve_text;
 use mcp_text::*;
 mod plan;
 use plan::*;
@@ -99,6 +100,14 @@ pub struct OperatorProfile {
     pub tax_reserve_ratio: f64,
     #[serde(default = "default_target_weights")]
     pub target_weights_bps: TargetWeightsBps,
+    /// The standing protected cash reserve in USDC (#162, operator decision 2026-11-20):
+    /// dry powder kept for buying lower after a drawdown. Measured on the stable balance
+    /// a NOCK dip can draw on: wallet USDC plus USDC inside NOCK-pair LP (moving USDC into
+    /// a NOCK range does not consume it; buying NOCK outright does). Gas-side ETH/USDC
+    /// ranges are left out (#151). No dry powder is reported above it and no plan buy
+    /// draws below it. Unset = no rule, never a default.
+    #[serde(default)]
+    pub cash_reserve_usdc: Option<f64>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -139,6 +148,7 @@ impl Default for OperatorProfile {
             lp_floor_tolerance_bps: 0,
             tax_reserve_ratio: default_tax_reserve_ratio(),
             target_weights_bps: default_target_weights(),
+            cash_reserve_usdc: None,
         }
     }
 }
@@ -1305,6 +1315,9 @@ struct PlanGuards {
     lp_usdc: f64,
     tax_reserve_usd: f64,
     cash_target_usd: f64,
+    /// The standing reserve, `operator_profile.cash_reserve_usdc` (#162). A plan never
+    /// draws below it or below its own `cash_reserve_usdc`, whichever binds first.
+    standing_reserve_usdc: Option<f64>,
 }
 
 /// Everything `compute_derived_metrics` needs about the plan for one cycle.
@@ -1453,10 +1466,32 @@ struct GlobalStatus {
     /// their config entries can be removed (2.8.0, #144). Absent when none is closed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     closed_positions_note: Option<String>,
+    /// The standing protected cash reserve, `operator_profile.cash_reserve_usdc` (2.8.3,
+    /// #162). Absent when the operator set none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cash_reserve_usdc: Option<String>,
+    /// The stable balance the reserve is measured on (2.8.3, #162): wallet USDC plus USDC
+    /// inside NOCK-pair LP; gas-side ETH/USDC ranges are left out. Absent with no reserve.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reserve_stable_usdc: Option<String>,
+    /// `reserve_stable_usdc` less the reserve (2.8.3, #162), signed: negative when the
+    /// stable balance is below it. Absent with no reserve or an invalid one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reserve_headroom_usdc: Option<String>,
+    /// Liquid dry powder in USDC (2.8.3, #162): wallet USDC less the larger of the cash
+    /// target and the virtual tax reserve, and never more than `reserve_headroom_usdc`.
+    /// The same figure the advice names. "0.00" when there is none; absent when the
+    /// standing reserve is invalid (`reserve_note` says so): unknown, never a made-up 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dry_powder_usdc: Option<String>,
+    /// Why the configured standing reserve is not applied (2.8.3, #162): it is not zero
+    /// or positive. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reserve_note: Option<String>,
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
-const SNAPSHOT_SPEC_VERSION: &str = "2.8.2";
+const SNAPSHOT_SPEC_VERSION: &str = "2.8.3";
 
 /// The gas (wallet ETH + WETH) and ETH pillar figures, each None when it cannot be
 /// measured: unread wallet balances or an unpriced ETH. Never a zero stand-in.
@@ -2026,3 +2061,5 @@ mod tests_burndown;
 mod tests_gas_lp;
 #[cfg(test)]
 mod tests_harvest_principal;
+#[cfg(test)]
+mod tests_reserve;
