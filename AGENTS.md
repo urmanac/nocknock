@@ -187,8 +187,8 @@ This guide captures the operational rules, environment quirks, toolchain configu
 Before pushing any PR or tag:
 ```bash
 make test-brain       # 3 tests (WASM invariants)
-make test-worker      # 784 tests as of #181: 737 worker + 47 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger, collectible rewards, closed positions, burn-down #130-#137, gas-side ranges #151-#153, harvest principal #156-#157, standing reserve #162, floor crossing #165, ladders #166-#169, position detection, WETH/NOCK bets #181)
-make test-frontend    # 534 tests as of #181 (staleness, contract, display helpers, charts, surfaces, ledger, collectible rewards, closed positions, burn-down, NOCK-leg brackets, ETH/USDC brackets, reserve, ladders, events, ladder shape, bets)
+make test-worker      # 791 tests as of #181: 744 worker + 47 MCP (decoding, advice, plan, LP sizing, Aero pools, surfaces, harvest ledger, collectible rewards, closed positions, burn-down #130-#137, gas-side ranges #151-#153, harvest principal #156-#157, standing reserve #162, floor crossing #165, ladders #166-#169, position detection, WETH/NOCK bets #181)
+make test-frontend    # 537 tests as of #181 (staleness, contract, display helpers, charts, surfaces, ledger, collectible rewards, closed positions, burn-down, NOCK-leg brackets, ETH/USDC brackets, reserve, ladders, events, ladder shape, bets)
 make dist             # Verifies packaging of dist/ binaries and tarballs
 NOCKNOCK_API_URL=http://chudmax:8081 make test-mcp   # both MCP transports against the deployment
 ```

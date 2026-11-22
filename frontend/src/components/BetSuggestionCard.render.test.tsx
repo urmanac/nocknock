@@ -28,6 +28,13 @@ describe('BetSuggestionCard (#181)', () => {
     expect(html).not.toContain('href=');
   });
 
+  it('review of #181: a stale snapshot shows no deposit link anywhere, phone or top of page', async () => {
+    expect(renderToStaticMarkup(<BetLiteCard bet={BET_READY} syncStatus="stale" />)).not.toContain('href=');
+    const { TopOfPageEvents } = await import('./TopOfPage');
+    const e = { id: 'bet_suggestion:WETH/NOCK:ready', kind: 'bet_suggestion', tier: 'top', title: 'WETH/NOCK BET', what_changed: null, text: BET_READY.headline, numbers: {}, since: null, deep_link: '#event-bet-suggestion-weth-nock-ready', links: [], would_sign: null, card: 'bet_suggestion' };
+    expect(renderToStaticMarkup(<TopOfPageEvents data={{ derived_metrics: { events: [e] } }} syncStatus="stale" />)).toBe('');
+  });
+
   it('every row wraps and every child may shrink, so nothing leaks out', () => {
     const html = renderToStaticMarkup(<BetSuggestionCard bet={BET_READY} syncStatus="fresh" compact />);
     expect(html).toContain('overflow-wrap:anywhere');

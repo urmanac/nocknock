@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the bet pool's gauge and minted the range in the bet pool. Anything else staked there
     is offered with one tap (TRACK AS A BET, NOT NOW). Rows live in `tracked_positions`
     with protocol `aerodrome-cl`: **no migration**.
+  - No bet is suggested while the gauge's stakes for the wallet were not all read this
+    cycle, so a second bet is never suggested on top of one not yet seen. A thin pool with
+    no in-range liquidity still finds and counts bets; it only sizes no new one. Enough ETH
+    above the floor only as WETH and ETH together is stated as such, with no instruction.
   - OPERATOR_GUIDANCE §12 is amended for bets only: ETH above the gas floor may fund a bet.
 - Snapshot spec 2.12.0 (additive): `derived_metrics.bet_suggestion` (left out of the state
   hash) and `Position.role: "bet"`. With `nock_bets` unset no byte of the snapshot changes.

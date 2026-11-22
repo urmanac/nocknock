@@ -22,9 +22,11 @@ export const BET_READY: BetSuggestion = {
     "checked_at_block": 60578707,
     "deferred": 0,
     "reason": null,
+    "refresh_deferred": 0,
     "staked_in_gauge": 0,
     "statement": "NockNock reads the bet pool's gauge for the NFTs your wallet staked there. It tracks one by itself only when your wallet sent the deposit, the NFT was minted to the Aero router and moved to the gauge in that same transaction, and the pool is the bet pool; anything else waits for one tap and is not counted until then. It never signs or sends.",
-    "status": "ok"
+    "status": "ok",
+    "unread": 0
   },
   "floor_crossing": {
     "after": {
@@ -50,6 +52,7 @@ export const BET_READY: BetSuggestion = {
     "gas_floor_eth": "0.005",
     "needed_eth": "0.011061",
     "short_by_eth": null,
+    "state": "covered",
     "text": "Gas floor: the wallet holds 0.0164 ETH and 0.0022 WETH; 0.0136 ETH is above your 0.005 ETH gas floor, and the bet's ETH side is 0.0111 WETH. The wallet's WETH does not cover it and its ETH does, so the link deposits native ETH.",
     "wallet_eth": "0.016378",
     "wallet_weth": "0.002177"
@@ -74,6 +77,11 @@ export const BET_READY: BetSuggestion = {
       "gate": "no_bet_in_range",
       "status": "pass",
       "text": "No bet in range: none is tracked."
+    },
+    {
+      "gate": "gauge_read",
+      "status": "pass",
+      "text": "Gauge: every stake of your wallet in the bet gauge was read this cycle."
     }
   ],
   "headline": "Bet: $40 of WETH/NOCK from $0.01389 to $0.01505 per NOCK, staked for AERO.",
@@ -184,9 +192,11 @@ export const BET_GAS_SHORT: BetSuggestion = {
     "checked_at_block": 60578707,
     "deferred": 0,
     "reason": null,
+    "refresh_deferred": 0,
     "staked_in_gauge": 0,
     "statement": "NockNock reads the bet pool's gauge for the NFTs your wallet staked there. It tracks one by itself only when your wallet sent the deposit, the NFT was minted to the Aero router and moved to the gauge in that same transaction, and the pool is the bet pool; anything else waits for one tap and is not counted until then. It never signs or sends.",
-    "status": "ok"
+    "status": "ok",
+    "unread": 0
   },
   "floor_crossing": {
     "after": {
@@ -212,6 +222,7 @@ export const BET_GAS_SHORT: BetSuggestion = {
     "gas_floor_eth": "0.005",
     "needed_eth": "0.011061",
     "short_by_eth": "0.003884",
+    "state": "short",
     "text": "Gas floor: the wallet holds 0.0100 ETH and 0.0022 WETH; 0.0072 ETH is above your 0.005 ETH gas floor, and the bet's ETH side is 0.0111 WETH. Short by 0.0039 ETH. The 2 ETH/USDC ranges hold 0.2766 WETH; 0.0039 WETH would have to come out of them first. A measurement, not an instruction.",
     "wallet_eth": "0.010000",
     "wallet_weth": "0.002177"
@@ -384,9 +395,11 @@ export const BET_IN_RANGE: BetSuggestion = {
     "checked_at_block": 60578707,
     "deferred": 0,
     "reason": null,
+    "refresh_deferred": 0,
     "staked_in_gauge": 0,
     "statement": "NockNock reads the bet pool's gauge for the NFTs your wallet staked there. It tracks one by itself only when your wallet sent the deposit, the NFT was minted to the Aero router and moved to the gauge in that same transaction, and the pool is the bet pool; anything else waits for one tap and is not counted until then. It never signs or sends.",
-    "status": "ok"
+    "status": "ok",
+    "unread": 0
   },
   "floor_crossing": null,
   "found_not_counted": [],
@@ -398,6 +411,7 @@ export const BET_IN_RANGE: BetSuggestion = {
     "gas_floor_eth": "0.005",
     "needed_eth": "0.011061",
     "short_by_eth": null,
+    "state": "covered",
     "text": "Gas floor: the wallet holds 0.0164 ETH and 0.0022 WETH; 0.0136 ETH is above your 0.005 ETH gas floor, and the bet's ETH side is 0.0111 WETH. The wallet's WETH does not cover it and its ETH does, so the link deposits native ETH.",
     "wallet_eth": "0.016378",
     "wallet_weth": "0.002177"
@@ -531,9 +545,11 @@ export const BET_NEEDS_SETTING: BetSuggestion = {
     "checked_at_block": 60578707,
     "deferred": 0,
     "reason": null,
+    "refresh_deferred": 0,
     "staked_in_gauge": 0,
     "statement": "NockNock reads the bet pool's gauge for the NFTs your wallet staked there. It tracks one by itself only when your wallet sent the deposit, the NFT was minted to the Aero router and moved to the gauge in that same transaction, and the pool is the bet pool; anything else waits for one tap and is not counted until then. It never signs or sends.",
-    "status": "ok"
+    "status": "ok",
+    "unread": 0
   },
   "floor_crossing": null,
   "found_not_counted": [],
@@ -581,5 +597,338 @@ export const BET_NEEDS_SETTING: BetSuggestion = {
   "statement": "A measurement from this cycle's reads of what a bet would be. NockNock does not choose its size, width or pool, builds no transaction, and signs and sends nothing.",
   "status": "needs_setting",
   "suggestion": null,
+  "tier": "quiet"
+};
+
+/** gas_split: derived_metrics.bet_suggestion */
+export const BET_GAS_SPLIT: BetSuggestion = {
+  "after_deposit": "After you deposit there is nothing to copy or configure. The Aero app stakes the bet in the pool's gauge (its default, rewards=aero), and NockNock reads that gauge for your wallet's stakes at the start of every cycle (CHECK NOW runs one at once). A bet your wallet deposited itself into this pool is tracked by itself; anything else it finds staked there waits for one tap.",
+  "assumptions": [
+    "Both sides are valued at the pool's price: WETH at this cycle's ETH/USD, NOCK at the pool's own NOCK per WETH.",
+    "The amounts are exact for the pool's price this cycle; the app recomputes the other side from whichever amount is typed.",
+    "Staked in the gauge, a bet earns AERO instead of swap fees: it has no LP-claimable fee figure.",
+    "A bet that leaves its range holds one token only and earns nothing more; it counts as cashed out and does not stop a new one.",
+    "The outcomes hold ETH/USD constant: a NOCK/USD move is the same NOCK/ETH move."
+  ],
+  "bets": [],
+  "detection": {
+    "checked_at_block": 60578707,
+    "deferred": 0,
+    "reason": null,
+    "refresh_deferred": 0,
+    "staked_in_gauge": 0,
+    "statement": "NockNock reads the bet pool's gauge for the NFTs your wallet staked there. It tracks one by itself only when your wallet sent the deposit, the NFT was minted to the Aero router and moved to the gauge in that same transaction, and the pool is the bet pool; anything else waits for one tap and is not counted until then. It never signs or sends.",
+    "status": "ok",
+    "unread": 0
+  },
+  "floor_crossing": {
+    "after": {
+      "pct_above_spot": "74.9",
+      "price_usd": "0.022644",
+      "status": "crosses"
+    },
+    "before": {
+      "pct_above_spot": "97.4",
+      "price_usd": "0.025553",
+      "status": "crosses"
+    },
+    "reason": null,
+    "status": "crosses",
+    "text": "With this bet, NOCK could rise to $0.02264 (+74.9%) before the ranges would sell the stack below the 100,000 NOCK floor ($0.02555 (+97.4%) without it)."
+  },
+  "found_not_counted": [],
+  "gas": {
+    "above_floor_eth": "0.013000",
+    "deposit_token": "WETH",
+    "eth_usdc_ranges": 2,
+    "eth_usdc_ranges_weth": "0.276587",
+    "gas_floor_eth": "0.005",
+    "needed_eth": "0.011061",
+    "short_by_eth": null,
+    "state": "split",
+    "text": "Gas floor: the wallet holds 0.0100 ETH and 0.0080 WETH; 0.0130 ETH is above your 0.005 ETH gas floor, and the bet's ETH side is 0.0111 WETH. Together they cover it, but the Aero app deposits WETH or native ETH, not both: the wallet's 0.0080 WETH and its 0.0100 ETH are each below the 0.0111 WETH side.",
+    "wallet_eth": "0.010000",
+    "wallet_weth": "0.008000"
+  },
+  "gates": [
+    {
+      "gate": "settings",
+      "status": "pass",
+      "text": "Settings: all set."
+    },
+    {
+      "gate": "gas_floor",
+      "status": "fail",
+      "text": "Gas floor: the wallet holds 0.0100 ETH and 0.0080 WETH; 0.0130 ETH is above your 0.005 ETH gas floor, and the bet's ETH side is 0.0111 WETH. Together they cover it, but the Aero app deposits WETH or native ETH, not both: the wallet's 0.0080 WETH and its 0.0100 ETH are each below the 0.0111 WETH side."
+    },
+    {
+      "gate": "nock_floor",
+      "status": "pass",
+      "text": "NOCK floor: total NOCK held is 109,640, at or above your 100,000 NOCK floor; NOCK moved into a bet is still held."
+    },
+    {
+      "gate": "no_bet_in_range",
+      "status": "pass",
+      "text": "No bet in range: none is tracked."
+    }
+  ],
+  "headline": "Bets: the ETH above your gas floor covers a new bet's ETH side only as WETH and ETH together.",
+  "id": "bet_suggestion:WETH/NOCK",
+  "invalid": [],
+  "missing": [],
+  "nock": {
+    "floor": "100000",
+    "needed_nock": "1483.0020",
+    "text": "NOCK floor: total NOCK held is 109,640, at or above your 100,000 NOCK floor; NOCK moved into a bet is still held.",
+    "total_held": "109640",
+    "wallet_nock": "90086.7891"
+  },
+  "pool": {
+    "address": "0x957256c98d61a714081de2ee70ae3a96c9b40874",
+    "block": 60578707,
+    "fee_pct": "0.97",
+    "fee_pips": 9700,
+    "gauge": "0x3bf70c880adc8370917994ab0df68e763b7a60fd",
+    "label": "the Aero CL200 WETH/NOCK 0.97% pool",
+    "liquidity": "273693898720236409447",
+    "nock_per_weth": "116718",
+    "sqrt_price_x96": "00000000000000000000000000000000000000222a669e8625737801a7dbdf1e",
+    "tick": 70627,
+    "tick_spacing": 200,
+    "token0": "0x4200000000000000000000000000000000000006",
+    "token1": "0x9b5e262cf9bb04869ab40b19af91d2dc85761722",
+    "usd_per_nock": "0.01441995"
+  },
+  "reason": "Gas floor: the wallet holds 0.0100 ETH and 0.0080 WETH; 0.0130 ETH is above your 0.005 ETH gas floor, and the bet's ETH side is 0.0111 WETH. Together they cover it, but the Aero app deposits WETH or native ETH, not both: the wallet's 0.0080 WETH and its 0.0100 ETH are each below the 0.0111 WETH side.",
+  "settings": {
+    "bet_usd": "40.00",
+    "gas_floor_eth": "0.005",
+    "pool": "0x957256c98d61A714081DE2EE70ae3A96c9b40874",
+    "width_pct": null,
+    "width_ticks": 400,
+    "width_ticks_used": 400
+  },
+  "shown": false,
+  "statement": "A measurement from this cycle's reads of what a bet would be. NockNock does not choose its size, width or pool, builds no transaction, and signs and sends nothing.",
+  "status": "gas_split",
+  "suggestion": {
+    "amount0_raw": "11061438144747672",
+    "amount1_raw": "14830019887206149061",
+    "bet_usd": "40.00",
+    "deposit_token": "WETH",
+    "high_pct": "+4.4%",
+    "high_usd": "0.01504899",
+    "link": {
+      "amounts_to_enter": "Amounts to enter in the Aero app: 0.011061 WETH and 1483.00 NOCK",
+      "format_note": "The link opens the bet pool's deposit page with the range filled in. The Aero app has no amount in its link: type the amounts shown here. Check the pool and the range in the app against the figures here.",
+      "host": "app.aero.xyz",
+      "native": false,
+      "not_prefilled": [
+        "amounts"
+      ],
+      "prefilled": [
+        "pool",
+        "range ticks"
+      ],
+      "url": "https://app.aero.xyz/deposit/8453-0x957256c98d61A714081DE2EE70ae3A96c9b40874?range=custom&tickLow=70200&tickHigh=71000"
+    },
+    "liquidity": "20505265898205567646",
+    "low_pct": "-3.7%",
+    "low_usd": "0.01389202",
+    "nock": "1483.00",
+    "nock_usd": "21.38",
+    "outcomes": [
+      {
+        "kind": "fall",
+        "text": "If NOCK falls to $0.01389 (-3.7%) or below, the bet holds only NOCK: about 2,798 NOCK, its WETH spent buying NOCK."
+      },
+      {
+        "kind": "rise",
+        "text": "If NOCK rises to $0.01505 (+4.4%) or above, the bet holds only WETH: about 0.0240 WETH, its NOCK sold."
+      },
+      {
+        "kind": "staked",
+        "text": "Staked in the gauge it earns AERO while in range; its swap fees go to the gauge, so it has no LP-claimable fee."
+      }
+    ],
+    "pool_usd_per_nock": "0.01441861",
+    "range_text": "$0.01389\u2013$0.01505 per NOCK (-3.7% to +4.4% of the pool's $0.01442), ticks 70200..71000, \u00b1400 ticks rounded to the pool's 200-tick spacing.",
+    "staked": true,
+    "tick_lower": 70200,
+    "tick_upper": 71000,
+    "value_usd": "40.00",
+    "weth": "0.011061",
+    "weth_usd": "18.62",
+    "width": "\u00b1400 ticks"
+  },
+  "tier": "quiet"
+};
+
+/** gauge_unread: derived_metrics.bet_suggestion */
+export const BET_GAUGE_UNREAD: BetSuggestion = {
+  "after_deposit": "After you deposit there is nothing to copy or configure. The Aero app stakes the bet in the pool's gauge (its default, rewards=aero), and NockNock reads that gauge for your wallet's stakes at the start of every cycle (CHECK NOW runs one at once). A bet your wallet deposited itself into this pool is tracked by itself; anything else it finds staked there waits for one tap.",
+  "assumptions": [
+    "Both sides are valued at the pool's price: WETH at this cycle's ETH/USD, NOCK at the pool's own NOCK per WETH.",
+    "The amounts are exact for the pool's price this cycle; the app recomputes the other side from whichever amount is typed.",
+    "Staked in the gauge, a bet earns AERO instead of swap fees: it has no LP-claimable fee figure.",
+    "A bet that leaves its range holds one token only and earns nothing more; it counts as cashed out and does not stop a new one.",
+    "The outcomes hold ETH/USD constant: a NOCK/USD move is the same NOCK/ETH move."
+  ],
+  "bets": [],
+  "detection": {
+    "checked_at_block": 60578707,
+    "deferred": 1,
+    "reason": "1 staked NFT not read yet waits for a later cycle",
+    "refresh_deferred": 0,
+    "staked_in_gauge": 0,
+    "statement": "NockNock reads the bet pool's gauge for the NFTs your wallet staked there. It tracks one by itself only when your wallet sent the deposit, the NFT was minted to the Aero router and moved to the gauge in that same transaction, and the pool is the bet pool; anything else waits for one tap and is not counted until then. It never signs or sends.",
+    "status": "partial",
+    "unread": 0
+  },
+  "floor_crossing": {
+    "after": {
+      "pct_above_spot": "74.9",
+      "price_usd": "0.022644",
+      "status": "crosses"
+    },
+    "before": {
+      "pct_above_spot": "97.4",
+      "price_usd": "0.025553",
+      "status": "crosses"
+    },
+    "reason": null,
+    "status": "crosses",
+    "text": "With this bet, NOCK could rise to $0.02264 (+74.9%) before the ranges would sell the stack below the 100,000 NOCK floor ($0.02555 (+97.4%) without it)."
+  },
+  "found_not_counted": [],
+  "gas": {
+    "above_floor_eth": "0.013555",
+    "deposit_token": "ETH",
+    "eth_usdc_ranges": 2,
+    "eth_usdc_ranges_weth": "0.276587",
+    "gas_floor_eth": "0.005",
+    "needed_eth": "0.011061",
+    "short_by_eth": null,
+    "state": "covered",
+    "text": "Gas floor: the wallet holds 0.0164 ETH and 0.0022 WETH; 0.0136 ETH is above your 0.005 ETH gas floor, and the bet's ETH side is 0.0111 WETH. The wallet's WETH does not cover it and its ETH does, so the link deposits native ETH.",
+    "wallet_eth": "0.016378",
+    "wallet_weth": "0.002177"
+  },
+  "gates": [
+    {
+      "gate": "settings",
+      "status": "pass",
+      "text": "Settings: all set."
+    },
+    {
+      "gate": "gas_floor",
+      "status": "pass",
+      "text": "Gas floor: the wallet holds 0.0164 ETH and 0.0022 WETH; 0.0136 ETH is above your 0.005 ETH gas floor, and the bet's ETH side is 0.0111 WETH. The wallet's WETH does not cover it and its ETH does, so the link deposits native ETH."
+    },
+    {
+      "gate": "nock_floor",
+      "status": "pass",
+      "text": "NOCK floor: total NOCK held is 109,640, at or above your 100,000 NOCK floor; NOCK moved into a bet is still held."
+    },
+    {
+      "gate": "no_bet_in_range",
+      "status": "pass",
+      "text": "No bet in range: none is tracked."
+    },
+    {
+      "gate": "gauge_read",
+      "status": "fail",
+      "text": "Gauge: your wallet's stakes in the bet gauge were not all read this cycle."
+    }
+  ],
+  "headline": "Bets: the gauge's stakes were not fully read this cycle, so no new bet is suggested.",
+  "id": "bet_suggestion:WETH/NOCK",
+  "invalid": [],
+  "missing": [],
+  "nock": {
+    "floor": "100000",
+    "needed_nock": "1483.0020",
+    "text": "NOCK floor: total NOCK held is 109,640, at or above your 100,000 NOCK floor; NOCK moved into a bet is still held.",
+    "total_held": "109640",
+    "wallet_nock": "90086.7891"
+  },
+  "pool": {
+    "address": "0x957256c98d61a714081de2ee70ae3a96c9b40874",
+    "block": 60578707,
+    "fee_pct": "0.97",
+    "fee_pips": 9700,
+    "gauge": "0x3bf70c880adc8370917994ab0df68e763b7a60fd",
+    "label": "the Aero CL200 WETH/NOCK 0.97% pool",
+    "liquidity": "273693898720236409447",
+    "nock_per_weth": "116718",
+    "sqrt_price_x96": "00000000000000000000000000000000000000222a669e8625737801a7dbdf1e",
+    "tick": 70627,
+    "tick_spacing": 200,
+    "token0": "0x4200000000000000000000000000000000000006",
+    "token1": "0x9b5e262cf9bb04869ab40b19af91d2dc85761722",
+    "usd_per_nock": "0.01441995"
+  },
+  "reason": "The bet gauge's stakes for your wallet were not fully read this cycle (1 staked NFT not read yet waits for a later cycle); a bet may already be deposited. It is read again next cycle.",
+  "settings": {
+    "bet_usd": "40.00",
+    "gas_floor_eth": "0.005",
+    "pool": "0x957256c98d61A714081DE2EE70ae3A96c9b40874",
+    "width_pct": null,
+    "width_ticks": 400,
+    "width_ticks_used": 400
+  },
+  "shown": false,
+  "statement": "A measurement from this cycle's reads of what a bet would be. NockNock does not choose its size, width or pool, builds no transaction, and signs and sends nothing.",
+  "status": "gauge_unread",
+  "suggestion": {
+    "amount0_raw": "11061438144747672",
+    "amount1_raw": "14830019887206149061",
+    "bet_usd": "40.00",
+    "deposit_token": "ETH",
+    "high_pct": "+4.4%",
+    "high_usd": "0.01504899",
+    "link": {
+      "amounts_to_enter": "Amounts to enter in the Aero app: 0.011061 ETH and 1483.00 NOCK",
+      "format_note": "The link opens the bet pool's deposit page with the range filled in. The Aero app has no amount in its link: type the amounts shown here. Check the pool and the range in the app against the figures here.",
+      "host": "app.aero.xyz",
+      "native": true,
+      "not_prefilled": [
+        "amounts"
+      ],
+      "prefilled": [
+        "pool",
+        "range ticks"
+      ],
+      "url": "https://app.aero.xyz/deposit/8453-0x957256c98d61A714081DE2EE70ae3A96c9b40874?range=custom&tickLow=70200&tickHigh=71000&native=true"
+    },
+    "liquidity": "20505265898205567646",
+    "low_pct": "-3.7%",
+    "low_usd": "0.01389202",
+    "nock": "1483.00",
+    "nock_usd": "21.38",
+    "outcomes": [
+      {
+        "kind": "fall",
+        "text": "If NOCK falls to $0.01389 (-3.7%) or below, the bet holds only NOCK: about 2,798 NOCK, its WETH spent buying NOCK."
+      },
+      {
+        "kind": "rise",
+        "text": "If NOCK rises to $0.01505 (+4.4%) or above, the bet holds only WETH: about 0.0240 WETH, its NOCK sold."
+      },
+      {
+        "kind": "staked",
+        "text": "Staked in the gauge it earns AERO while in range; its swap fees go to the gauge, so it has no LP-claimable fee."
+      }
+    ],
+    "pool_usd_per_nock": "0.01441861",
+    "range_text": "$0.01389\u2013$0.01505 per NOCK (-3.7% to +4.4% of the pool's $0.01442), ticks 70200..71000, \u00b1400 ticks rounded to the pool's 200-tick spacing.",
+    "staked": true,
+    "tick_lower": 70200,
+    "tick_upper": 71000,
+    "value_usd": "40.00",
+    "weth": "0.011061",
+    "weth_usd": "18.62",
+    "width": "\u00b1400 ticks"
+  },
   "tier": "quiet"
 };

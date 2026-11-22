@@ -1670,9 +1670,13 @@ topic0 `0x0f8712c4…a5a513` (five words: liquidity, amounts and ticks), not the
    `stakedContains(wallet, id)` is true; otherwise its row is not merged. A burned NFT goes
    through the #144 closed proof like any Aero CL position.
 
-At most 40 NFTs are read a cycle, inside the 40 s soft budget of position detection; the rest
-wait and the status says so. No block range is scanned: `depositBlock` names the one block, so
-the cursor of §15 is not needed.
+At most 40 NFTs are read a cycle, inside the 40 s soft budget of position detection: every
+staked NFT not decided yet first, then the decided ones (offered, set aside, proof refused) in
+turn from a stored refresh cursor (`position_detection_state.refresh_cursor` of protocol
+`aerodrome-cl`), as §15 rotates its re-reads. An undecided NFT left unread makes the check
+`partial`, and a partial or unread gauge never yields a new bet (`gauge_unread`). No block
+range is scanned: `depositBlock` names the one block. A pool with no in-range liquidity is
+still read as the bet pool: bets are found and counted, and only a new bet is not sized.
 
 ### Not verified
 

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { BET_GAS_SHORT, BET_IN_RANGE, BET_NEEDS_SETTING, BET_READY } from './betSuggestion.fixture';
+import { BET_GAS_SHORT, BET_GAS_SPLIT, BET_GAUGE_UNREAD, BET_IN_RANGE, BET_NEEDS_SETTING, BET_READY } from './betSuggestion.fixture';
 import {
   betAmountsLine,
   betAtTop,
@@ -14,8 +14,8 @@ import {
   tapBet,
   type BetClient,
 } from './betSuggestion';
-import { isNockLp } from './ladderTrack';
-import { rangeStatus } from './positions';
+import { isNockLp, ladderCountClause } from './ladderTrack';
+import { positionsSummary, rangeStatus } from './positions';
 import { OWN_CARD_KINDS, stripRenders } from './events';
 
 describe('betSuggestion (#181)', () => {
@@ -27,6 +27,8 @@ describe('betSuggestion (#181)', () => {
     expect(BET_GAS_SHORT).toEqual(doc.gas_short.bet_suggestion);
     expect(BET_IN_RANGE).toEqual(doc.bet_in_range.bet_suggestion);
     expect(BET_NEEDS_SETTING).toEqual(doc.needs_setting.bet_suggestion);
+    expect(BET_GAS_SPLIT).toEqual(doc.gas_split.bet_suggestion);
+    expect(BET_GAUGE_UNREAD).toEqual(doc.gauge_unread.bet_suggestion);
   });
 
   it('reads the card from a snapshot, and nothing from one without it', () => {
@@ -62,7 +64,7 @@ describe('betSuggestion (#181)', () => {
   });
 
   it('gates read in the issue order, and a short wallet is a measurement', () => {
-    expect(betGateLines(BET_READY).map((g) => g.ok)).toEqual([true, true, true, true]);
+    expect(betGateLines(BET_READY).map((g) => g.ok)).toEqual([true, true, true, true, true]);
     const gas = betGateLines(BET_GAS_SHORT)[1];
     expect(gas.ok).toBe(false);
     expect(gas.text).toContain('A measurement, not an instruction.');
@@ -97,5 +99,23 @@ describe('betSuggestion (#181)', () => {
     expect(await tapBet(7, 'bet', broken)).toEqual({ ok: false, text: 'NOT_OWNED' });
     expect(betChoiceLabel('bet')).toBe('TRACK AS A BET');
     expect(betChoiceLabel('dismiss')).toBe('NOT NOW');
+  });
+
+  it('review of #181: a gauge not fully read and a split ETH side are quiet, honest lines', () => {
+    expect(betAtTop(BET_GAUGE_UNREAD)).toBe(false);
+    expect(BET_GAUGE_UNREAD.status).toBe('gauge_unread');
+    expect(betQuietLine(BET_GAUGE_UNREAD)).toBe("Bets: the gauge's stakes were not fully read this cycle, so no new bet is suggested.");
+    expect(betAtTop(BET_GAS_SPLIT)).toBe(false);
+    expect((BET_GAS_SPLIT.gas as any).state).toBe('split');
+    expect(BET_GAS_SPLIT.gas!.short_by_eth).toBeNull();
+    expect(BET_GAS_SPLIT.gas!.text).toContain('Together they cover it');
+  });
+
+  it('review of #181: bets have their own clause in the summaries, out of range is cashed out', () => {
+    const bet = { role: 'bet', in_range: false, liquidity_amount: '1', position_id: 'aerodrome-cl:base:1', token0: { symbol: 'WETH' }, token1: { symbol: 'NOCK' } };
+    expect(positionsSummary([bet])).toBe('No NOCK LP positions tracked. +1 WETH/NOCK bet, measured only (0 in range, 1 cashed out).');
+    const lp = { in_range: true, position_id: 'uniswap-v4:base:2' };
+    expect(positionsSummary([lp, { ...bet, in_range: true }])).toBe('1 LP position tracked live: 1 ranged (1 in range). +1 WETH/NOCK bet, measured only (1 in range, 0 cashed out).');
+    expect(ladderCountClause([bet, { role: 'ladder' }])).toBe(' and 1 ladder and 1 bet');
   });
 });
