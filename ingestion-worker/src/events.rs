@@ -415,6 +415,76 @@ fn ladder_suggestion_event(data: &SnapshotData) -> Option<Value> {
     }))
 }
 
+/// The bet card's events (#181): a top event while a bet is suggested (or a found bet waits
+/// for a tap), one quiet line for any other status, and one quiet line per tracked bet (in
+/// range; out of range, cashed out). Pure.
+fn bet_events(data: &SnapshotData) -> Vec<Value> {
+    let Some(b) = data.derived_metrics.bet_suggestion.as_ref() else { return Vec::new() };
+    let mut out = Vec::new();
+    let status = b.get("status").and_then(|v| v.as_str()).unwrap_or("unavailable");
+    let tier = b.get("tier").and_then(|v| v.as_str()).unwrap_or("quiet");
+    let headline = b.get("headline").cloned().unwrap_or(Value::Null);
+    // One id per status (review of #181, finding 8): `since` is when this status was first
+    // stated, so a fresh "ready" never inherits the time of an older quiet status.
+    let id = format!("{BET_SUGGEST_ID}:{status}");
+    if status == "ready" {
+        // No deposit link and no "would sign" in the event (review of #181, finding 2), as
+        // for the ladder suggestion: the card and the MCP bet section carry the link, and
+        // both withhold it from a snapshot that is not fresh.
+        out.push(json!({
+            "id": id,
+            "kind": "bet_suggestion",
+            "tier": "top",
+            "title": "WETH/NOCK BET",
+            "what_changed": b.get("what_changed").cloned().unwrap_or(json!("No bet is in range, and one fits your settings.")),
+            "text": headline,
+            "numbers": {
+                "weth": b.pointer("/suggestion/weth").cloned().unwrap_or(Value::Null),
+                "nock": b.pointer("/suggestion/nock").cloned().unwrap_or(Value::Null),
+                "value_usd": b.pointer("/suggestion/value_usd").cloned().unwrap_or(Value::Null),
+                "tick_lower": b.pointer("/suggestion/tick_lower").cloned().unwrap_or(Value::Null),
+                "tick_upper": b.pointer("/suggestion/tick_upper").cloned().unwrap_or(Value::Null),
+            },
+            "links": [],
+            "would_sign": Value::Null,
+            "card": "bet_suggestion",
+            "source": "derived_metrics.bet_suggestion",
+        }));
+    } else {
+        out.push(json!({
+            "id": id,
+            "kind": "bet_suggestion",
+            "tier": if tier == "top" { "top" } else { "quiet" },
+            "title": "WETH/NOCK BET",
+            "what_changed": b.get("reason").cloned().unwrap_or(Value::Null),
+            "text": headline,
+            "numbers": {},
+            "links": [],
+            "would_sign": Value::Null,
+            "card": "bet_suggestion",
+            "source": "derived_metrics.bet_suggestion",
+        }));
+    }
+    for line in b.get("bets").and_then(|v| v.as_array()).into_iter().flatten() {
+        let pid = line.get("position_id").and_then(|v| v.as_str()).unwrap_or("");
+        let in_range = line.get("status").and_then(|v| v.as_str()) == Some("in_range");
+        out.push(json!({
+            "id": format!("bet:{pid}"),
+            "kind": "bet",
+            "tier": "quiet",
+            "title": if in_range { "BET IN RANGE" } else { "BET CASHED OUT" },
+            "what_changed": if in_range { "A bet is in range." } else { "A bet is out of range: it counts as cashed out." },
+            "text": line.get("line").cloned().unwrap_or(Value::Null),
+            "numbers": { "value_usd": line.get("value_usd").cloned().unwrap_or(Value::Null) },
+            "links": [],
+            "would_sign": Value::Null,
+            "card": "bet_suggestion",
+            "source": "derived_metrics.bet_suggestion.bets",
+        }));
+    }
+    out
+}
+
 fn quiet_events(data: &SnapshotData) -> Vec<Value> {
     let mut out = Vec::new();
     let g = &data.derived_metrics.global_status;
@@ -516,6 +586,7 @@ pub(crate) fn events_block(data: &SnapshotData, prev_events: Option<&Value>, con
     if let Some(e) = ladder_suggestion_event(data) {
         all.push(e);
     }
+    all.extend(bet_events(data));
     if let Some(rungs) = data.derived_metrics.ladder_maintenance.as_ref().and_then(|m| m.get("rungs")).and_then(|r| r.as_array()) {
         for r in rungs {
             // A rung's own event, and the event of a setting that cannot work for it.

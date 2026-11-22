@@ -1010,6 +1010,8 @@ async fn test_route_quote_sql_against_a_scratch_database() {
     let db = PgPool::connect(&url).await.expect("scratch database reachable");
     let name: String = sqlx::query("SELECT current_database() AS n").fetch_one(&db).await.unwrap().get("n");
     assert!(name.ends_with("_scratch"), "refusing to run against database {name:?}: its name must end in _scratch");
+    // Each test migrates its own database, so it passes alone and on an empty one.
+    sqlx::migrate!("./migrations").run(&db).await.expect("every migration applies");
 
     let plan_id = "scratch-route-quotes";
     // A wallet of this test's own, so no other test's candidates are touched.

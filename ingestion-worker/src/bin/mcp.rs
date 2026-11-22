@@ -35,6 +35,10 @@ mod ladder_suggest_text;
 // Positions found on-chain (v0.9.0): the worker's own lines, from the same source file.
 #[path = "../position_detect_text.rs"]
 mod position_detect_text;
+
+// The WETH/NOCK bet card (#181), shared with the worker's HTTP transport.
+#[path = "../bet_suggest_text.rs"]
+mod bet_suggest_text;
 // Calls to action by tier and the ladder maintenance (#169): the same lines as the worker's.
 #[path = "../events_text.rs"]
 mod events_text;
@@ -289,9 +293,14 @@ async fn handle_tool_call(client: &Client, tool_name: &str, args: Option<&Value>
                         // The ladder suggestion (#168), shown only on a fresh snapshot.
                         // A position found on-chain and not counted (v0.9.0) is stated after it.
                         "get_shot_advice" => position_detect_text::with_position_notice(
-                            &ladder_suggest_text::with_ladder_suggestion(
-                                // Calls to action by tier and the ladder maintenance (#169).
-                                &events_text::with_events(&format_shot_advice(data), data, health.as_deref()),
+                            // The WETH/NOCK bet card (#181), after the ladder suggestion.
+                            &bet_suggest_text::with_bet_suggestion(
+                                &ladder_suggest_text::with_ladder_suggestion(
+                                    // Calls to action by tier and the ladder maintenance (#169).
+                                    &events_text::with_events(&format_shot_advice(data), data, health.as_deref()),
+                                    data,
+                                    health.as_deref(),
+                                ),
                                 data,
                                 health.as_deref(),
                             ),
@@ -829,3 +838,8 @@ mod tests_position_detect;
 #[cfg(test)]
 #[path = "../mcp_bin_tests_events.rs"]
 mod tests_events;
+
+// The WETH/NOCK bet card (#181): stdio parity with the worker's golden text.
+#[cfg(test)]
+#[path = "../mcp_bin_tests_bets.rs"]
+mod tests_bets;

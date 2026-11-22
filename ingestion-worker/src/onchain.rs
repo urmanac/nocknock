@@ -267,6 +267,10 @@ pub(crate) async fn fetch_raw_data_merged(
     let ladders: HashMap<String, LadderTag> =
         live_configs.iter().filter(|c| is_ladder_config(c)).map(|c| (position_key(c), ladder_tag(c))).collect();
     check_ladder_pairs(&raw_positions, &ladders, &position_facts)?;
+    // 2c. Bets (#181): live entries configured `role: bet`; each must be a WETH/NOCK range.
+    let bets: std::collections::HashSet<String> =
+        live_configs.iter().filter(|c| is_bet_config(c)).map(position_key).collect();
+    check_bet_pairs(&raw_positions, &bets, &live_configs)?;
 
     // 3. NOCK/USD spot from the designated price-source position pool (zero-mock:
     //    fail the cycle when missing or unparseable).
@@ -483,6 +487,7 @@ pub(crate) async fn fetch_raw_data_merged(
         aero,
         closed_positions,
         ladders,
+        bets,
         ladder_baselines,
         position_sources: merged.sources.clone(),
         tracked_report: merged.report.clone(),

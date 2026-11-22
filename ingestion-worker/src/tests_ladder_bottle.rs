@@ -782,10 +782,11 @@ fn test_the_bottle_never_changes_the_directive_and_its_fees_stay_out_of_the_stat
 #[test]
 fn test_the_spec_documents_the_shape_on_the_card() {
     // The shape shipped in 2.10.0; #169's additions moved the spec to 2.11.0.
-    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.11.0");
+    // The bets (#181) moved it to 2.12.0.
+    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.12.0");
     let text = include_str!("../../specs/core/snapshot.yaml");
     let spec: serde_yaml::Value = serde_yaml::from_str(text).unwrap();
-    assert_eq!(spec["info"]["version"].as_str(), Some("2.11.0"));
+    assert_eq!(spec["info"]["version"].as_str(), Some("2.12.0"));
     for needle in ["ladder_deployed", "shape.rungs", "wallet_after", "nock_limit", "golden_ladder_bottle.json"] {
         assert!(text.contains(needle), "snapshot.yaml does not mention {needle}");
     }

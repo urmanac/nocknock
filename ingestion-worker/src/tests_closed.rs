@@ -547,6 +547,7 @@ fn test_profile() -> OperatorProfile {
         ladder_bottom_usd: None,
         ladder_rungs: None,
         ladder_maintenance: None,
+        nock_bets: None,
     }
 }
 
@@ -1603,9 +1604,10 @@ fn test_closed_positions_need_no_new_config_key_and_are_in_the_spec() {
     // the floor-crossing price (#165) to 2.9.0, and the fee yield and the operator's
     // ladder shape (#166 rungs) to 2.10.0, and the ladder maintenance and the events
     // (#169) to 2.11.0.
-    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.11.0");
+    // The bets (#181) moved it to 2.12.0.
+    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.12.0");
     let spec = include_str!("../../specs/core/snapshot.yaml");
-    assert!(spec.contains("  version: 2.11.0"));
+    assert!(spec.contains("  version: 2.12.0"));
     for field in [
         "closed_positions:", "ClosedPosition:", "ClosedEvidence:", "config_id:", "position_manager:", "first_seen_closed_at:",
         "supplies_spot_price:", "closed_positions_count:", "closed_positions_note:",

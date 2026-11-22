@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **WETH/NOCK bets (#181).** A standing card that suggests a small two-sided WETH/NOCK
+  range in the Aero CL200 pool around the price, staked for AERO, only while no bet is in
+  range. Every number is the operator's own setting, `operator_profile.nock_bets`
+  (`pool`, `bet_usd`, `width_ticks` or `width_pct`, `gas_floor_eth`), with no defaults:
+  the card names each one that is missing.
+  - The bet pool is read every cycle with no position in it (tokens, spacing, fee, gauge,
+    position manager, factory and the factory's own `getPool`, price, liquidity).
+  - The range is the pool's tick plus and minus the width, rounded to the pool's spacing;
+    the WETH and NOCK amounts are the exact mint for `bet_usd` at the pool's price, printed
+    beside the deposit link (`https://app.aero.xyz/deposit/8453-<pool>?range=custom&tickLow=A&tickHigh=B`,
+    with `native=true` when wallet WETH is short and ETH covers it). The Aero app takes no
+    amount in a link.
+  - Gates, in order: the settings; the gas floor (wallet ETH and WETH above it must cover
+    the ETH side; short of it, the card measures how much WETH would have to come out of
+    the ETH/USDC ranges first); total NOCK held at or above the floor; no bet in range.
+  - The floor-crossing price with the hypothetical bet; the AERO each bet has earned.
+  - A top-of-page event while a bet is suggested; quiet lines for bets in range and bets
+    out of range (cashed out). Dashboard card, phone card and the `get_shot_advice`
+    section in both MCP transports.
+  - **`role: bet`**: counted in every total, the NOCK floor and the floor-crossing price;
+    left out of NOCK LP, the LP target and the rebuild; its own measured deviation row.
+  - **Bets are found through the gauge.** A staked deposit mints the NFT to the Aero
+    router and moves it to the gauge in one transaction, so it never reaches the wallet.
+    Each cycle reads `gauge.stakedValues(wallet)`; a new NFT is tracked by itself only when
+    its deposit transaction was sent by the wallet, minted it to the router, moved it to
+    the bet pool's gauge and minted the range in the bet pool. Anything else staked there
+    is offered with one tap (TRACK AS A BET, NOT NOW). Rows live in `tracked_positions`
+    with protocol `aerodrome-cl`: **no migration**.
+  - No bet is suggested while the gauge's stakes for the wallet were not all read this
+    cycle, so a second bet is never suggested on top of one not yet seen. A thin pool with
+    no in-range liquidity still finds and counts bets; it only sizes no new one. Enough ETH
+    above the floor only as WETH and ETH together is stated as such, with no instruction.
+  - OPERATOR_GUIDANCE §12 is amended for bets only: ETH above the gas floor may fund a bet.
+- Snapshot spec 2.12.0 (additive): `derived_metrics.bet_suggestion` (left out of the state
+  hash) and `Position.role: "bet"`. With `nock_bets` unset no byte of the snapshot changes.
+
 ## [0.9.1] - 2026-11-21
 
 A display patch for v0.9.0's ladder cards and the ladder shape chart.

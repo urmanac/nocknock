@@ -9,7 +9,7 @@
  */
 
 /** Series colors for the per-position stacked chart. */
-import { isLadder, ladderStatus, ladderSummaryClause } from './ladderTrack';
+import { betSummaryClause, isBet, isLadder, ladderStatus, ladderSummaryClause } from './ladderTrack';
 import type { LadderReading } from './types/snapshot';
 
 export const POSITION_COLORS = ['#38bdf8', '#a855f7', '#f59e0b', '#ec4899', '#14b8a6', '#f97316'];
@@ -35,12 +35,13 @@ export function positionLabel(p: any): string {
  * "concentrated Uniswap position", counting a dead pool as in range.
  */
 export function positionsSummary(
-  allPositions: Array<{ in_range: boolean; full_range?: boolean; pool_active?: boolean | null; role?: string | null; position_id?: string }>,
+  allPositions: Array<{ in_range: boolean; full_range?: boolean; pool_active?: boolean | null; role?: string | null; position_id?: string; liquidity_amount?: string }>,
   ladders: LadderReading[] = [],
 ): string {
-  // Tracked ladders (#167) are measured by what they hold, never "out of range".
-  const ladderClause = ladderSummaryClause(allPositions, ladders);
-  const positions = allPositions.filter((p) => !isLadder(p));
+  // Tracked ladders (#167) are measured by what they hold, never "out of range"; bets
+  // (#181) have their own clause, and out of range is cashed out.
+  const ladderClause = ladderSummaryClause(allPositions, ladders) + betSummaryClause(allPositions);
+  const positions = allPositions.filter((p) => !isLadder(p) && !isBet(p));
   const n = positions.length;
   if (n === 0) return ladderClause ? `No NOCK LP positions tracked.${ladderClause}` : 'No LP positions tracked.';
   const full = positions.filter((p) => p.full_range).length;
@@ -115,6 +116,8 @@ export function rangeStatus(
   // A ladder (#167) is badged by what it holds: above its range is normal, never "OUT OF RANGE".
   if (isLadder(p)) return ladderStatus(ladder);
   if (p.pool_active === false) return { label: '● STALE POOL', tone: 'stale' };
+  // A bet (#181) out of range counts as cashed out: a fact, not a warning.
+  if (isBet(p)) return p.in_range ? { label: '● BET IN RANGE', tone: 'good' } : { label: '● BET CASHED OUT', tone: 'neutral' };
   if (p.full_range) return { label: '● FULL RANGE', tone: 'good' };
   return p.in_range ? { label: '● IN RANGE', tone: 'good' } : { label: '● OUT OF RANGE', tone: 'warn' };
 }

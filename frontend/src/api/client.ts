@@ -363,6 +363,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ nft_id: nftId }),
     }),
+
+  // A WETH/NOCK bet found staked in the bet gauge (#181): the same writes, named by its
+  // protocol (an Aero CL NFT id is not a Uniswap v4 id). Tracking it is `as: "bet"`.
+  dismissFoundBet: (nftId: number) =>
+    request<PositionTapResponse>('/positions/dismiss', {
+      method: 'POST',
+      body: JSON.stringify({ nft_id: nftId, protocol: 'aerodrome-cl' }),
+    }),
+
+  restoreFoundBet: (nftId: number) =>
+    request<PositionTapResponse>('/positions/restore', {
+      method: 'POST',
+      body: JSON.stringify({ nft_id: nftId, protocol: 'aerodrome-cl' }),
+    }),
 };
 
 /** A one-tap write on a found or tracked position (POST /v1/positions/*). */

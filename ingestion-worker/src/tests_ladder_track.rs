@@ -222,7 +222,7 @@ fn test_an_unknown_role_is_a_configuration_error_with_the_exact_message() {
         let e = config_error(&format!("role: \"{bad}\"\n"));
         assert_eq!(
             e,
-            format!("Configuration error: position 'ladder-near' has unknown role '{bad}'. Supported: ladder (or leave role unset). Nothing was read; correct `positions:` in config.yaml"),
+            format!("Configuration error: position 'ladder-near' has unknown role '{bad}'. Supported: ladder, bet (or leave role unset). Nothing was read; correct `positions:` in config.yaml"),
         );
     }
 }
@@ -1089,7 +1089,8 @@ fn test_the_example_config_documents_role_rung_and_deposit_tx_and_sets_none() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/config.yaml.example");
     let text = std::fs::read_to_string(path).unwrap();
     for k in [
-        "#   role        unset (the default meaning since #151: classified by its pair) or",
+        "#   role        unset (the default meaning since #151: classified by its pair),",
+        "\"bet\" (#181: an aerodrome-cl WETH/NOCK bet",
         "#   rung        optional, ladder only: \"cap\" (the tick band containing spot, holding the",
         "#   deposit_tx  optional, ladder only: the transaction that minted this NFT",
         "#   role: \"ladder\"",
@@ -1100,6 +1101,8 @@ fn test_the_example_config_documents_role_rung_and_deposit_tx_and_sets_none() {
     // The example is commented out: the loaded example sets no role, rung or deposit_tx.
     let example = load_app_config(path, Some("/nonexistent/config.yaml"), false).unwrap();
     assert!(example.positions.iter().all(|c| c.role.is_none() && c.rung.is_none() && c.deposit_tx.is_none()));
+    // The bets (#181) are commented out too: no bet settings are loaded.
+    assert!(example.operator_profile.nock_bets.is_none());
     assert!(validate_positions_config(&example.positions).is_ok());
 }
 

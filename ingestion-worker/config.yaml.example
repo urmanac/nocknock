@@ -130,9 +130,12 @@ positions:
   # steers it: it counts in every total, in the floor-crossing price and in the
   # protected cash reserve (its USDC is part of the stable balance), but it is not NOCK LP:
   # no LP target, no rebuild suggestion, no "Dual Growth Engine Active" label.
-  #   role        unset (the default meaning since #151: classified by its pair) or
-  #               "ladder". Nothing else is accepted: any other value fails every cycle
-  #               with a configuration error, exactly like an unknown protocol.
+  #   role        unset (the default meaning since #151: classified by its pair),
+  #               "ladder", or "bet" (#181: an aerodrome-cl WETH/NOCK bet, counted in every
+  #               total and the floor-crossing price, never NOCK LP; normally tracked from
+  #               the gauge by itself, see operator_profile.nock_bets). Nothing else is
+  #               accepted: any other value fails every cycle with a configuration error,
+  #               exactly like an unknown protocol.
   #   rung        optional, ladder only: "cap" (the tick band containing spot, holding the
   #               NOCK that may go into LP), "near" (trades both ways near spot, for fees)
   #               or "deep" (waits near the bottom to accumulate). No default: unset is
@@ -295,6 +298,30 @@ operator_profile:
   #   max_gas_payback_days:
   #   deep_pull_fill_fraction:
   #   deep_pull_recovery_pct:
+
+  # --- WETH/NOCK bets (#181) ----------------------------------------------------------
+  # A bet is a small two-sided WETH/NOCK range in one Aero CL pool around the price,
+  # staked for AERO (the Aero app's default). A new bet is suggested only while no bet is
+  # in range; a bet out of range counts as cashed out. Every key is YOUR number: none has a
+  # default, the bet card names each one that is missing, and nothing is sized until all
+  # are set. NockNock measures; it builds no transaction and signs and sends nothing.
+  #   pool           the Aero CL WETH/NOCK pool, by address. Checked every cycle: its
+  #                  factory, position manager, tokens and gauge must be Aero's.
+  #   bet_usd        the total value of one bet in USD, both sides at the pool's price.
+  #   width_ticks    how far each side reaches from the pool's tick, in ticks (the ends are
+  #                  rounded to the pool's tick spacing). Or width_pct, a percent (the app's
+  #                  own preset is 4). Set one of the two, not both.
+  #   gas_floor_eth  ETH (wallet ETH plus WETH) kept for gas: only what is above it may
+  #                  fund a bet's ETH side. Short of it, the card measures how much WETH
+  #                  would have to come out of your ETH/USDC ranges first; it never says to.
+  # A bet you deposit in the Aero app is found through the pool's gauge and tracked by
+  # itself when your wallet sent the deposit; anything else staked there waits for a tap.
+  # The values below are the operator's own of 2026-11-21, shown as an example only:
+  # nock_bets:
+  #   pool: "0x957256c98d61A714081DE2EE70ae3A96c9b40874"   # WETH/NOCK 0.97% CL200
+  #   bet_usd: 40
+  #   width_ticks: 400                                     # two 200-tick steps each side
+  #   gas_floor_eth: 0.005
 
   # Target allocation weights in Portfolio Deviation Matrix (basis points, sum = 10000).
   # v2.0.0: Aerodrome tranche liquidated — the LP bucket is the aggregate across the

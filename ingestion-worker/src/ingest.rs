@@ -112,6 +112,10 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // deposit that landed before this cycle is counted in it. It never fails the cycle;
     // when it cannot check, the snapshot says why and how far it had read.
     let detection = detect_positions_for_cycle(state).await;
+    // WETH/NOCK bets (#181): the bet pool and the wallet's stakes in its gauge, read before
+    // the position reads so a bet deposited before this cycle is counted in it. Never fails
+    // the cycle; it does nothing while operator_profile.nock_bets is not set.
+    let bet_detection = detect_bets_for_cycle(state).await;
 
     // Fetch raw data from Alchemy (parallelized on-chain calls)
     let raw_data = fetch_raw_data(state).await?;
@@ -347,6 +351,9 @@ pub(crate) async fn run_ingestion_cycle(state: &Arc<AppState>) -> Result<()> {
     // directive strings were captured: it never changes the directive or a push. It reads
     // this cycle's position detection, attached above.
     attach_ladder_suggestion(&mut snapshot_data, &profile, Utc::now());
+    // The bet card (#181), on the assembled snapshot, like the ladder card: it never changes
+    // the directive or a push. Left out of the state hash.
+    attach_bet_suggestion(&mut snapshot_data, &profile, &bet_detection);
     // Ladder maintenance and the calls to action as events (#169), after everything they
     // read is attached. Their clocks come from the previous snapshot (in memory; the
     // latest stored one after a restart); a gap past the /health window restarts them.
@@ -488,7 +495,10 @@ pub(crate) fn canonical_state_json(data: &SnapshotData) -> serde_json::Value {
 }
 
 pub(crate) fn strip_volatile_time_fields(value: &mut serde_json::Value) {
-    const VOLATILE_KEYS: [&str; 17] = [
+    const VOLATILE_KEYS: [&str; 18] = [
+        // The bet card (#181): worked out from the hashed positions and the bet pool's
+        // price, which moves with every swap; it adds nothing to the wallet's state.
+        "bet_suggestion",
         // The ladder shape (#169): worked out from the hashed positions and ladders.
         "ladder_profile",
         // Ladder maintenance and the calls-to-action events (#169): worked out from the

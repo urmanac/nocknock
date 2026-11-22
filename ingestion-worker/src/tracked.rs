@@ -621,8 +621,18 @@ pub(crate) fn v4_position_key(network: &str, nft_id: u64) -> String {
     format!("{TRACKED_PROTOCOL_V4}:{network}:{nft_id}")
 }
 
+/// The key an Aero CL NFT has in `positions[]` and in `tracked_positions` (#181): the
+/// same key adapters::position_key gives an `aerodrome-cl` config entry, so a config entry
+/// for the same NFT shadows the row.
+pub(crate) fn aero_cl_position_key(network: &str, nft_id: u64) -> String {
+    format!("{AERO_CL_PROTOCOL}:{network}:{nft_id}")
+}
+
 /// The `id` a database row carries where a config entry carries its own.
 pub(crate) fn tracked_config_id(row: &TrackedRow) -> String {
+    if row.protocol == AERO_CL_PROTOCOL {
+        return format!("tracked-bet-{}", row.nft_id);
+    }
     format!("tracked-v4-{}", row.nft_id)
 }
 
@@ -630,6 +640,32 @@ pub(crate) fn tracked_config_id(row: &TrackedRow) -> String {
 /// source and never with a deposit link. A ladder is left out of NOCK LP by its role; any
 /// other row is never a rebuild target (`rebuild_weight_bps: 0`). Pure.
 pub(crate) fn tracked_position_config(row: &TrackedRow) -> PositionConfig {
+    // A bet (#181): an Aero CL NFT, read like an `aerodrome-cl` config entry (its pool,
+    // tokens, ticks and staking are read and checked every cycle by the adapter).
+    if row.protocol == AERO_CL_PROTOCOL {
+        return PositionConfig {
+            id: tracked_config_id(row),
+            protocol: row.protocol.clone(),
+            network: row.network.clone(),
+            nft_id: row.nft_id,
+            fee_bps: None,
+            gauge_address: None,
+            deposit_url: None,
+            pool_id: None,
+            npm_address: Some(AERO_CL_POSITION_MANAGER_BASE.to_string()),
+            pool_address: Some(row.pool_id.clone()),
+            currency0: None,
+            currency1: None,
+            tick_lower: None,
+            tick_upper: None,
+            is_price_source: false,
+            rebuild_weight_bps: None,
+            rebuild_when_out_of_range: false,
+            role: row.role.clone(),
+            rung: None,
+            deposit_tx: None,
+        };
+    }
     let ladder = row.role.as_deref() == Some(LADDER_ROLE);
     PositionConfig {
         id: tracked_config_id(row),
@@ -660,6 +696,9 @@ pub(crate) fn tracked_position_config(row: &TrackedRow) -> PositionConfig {
 /// it is quarantined. Every check here is one a config entry would fail the cycle on;
 /// a row is the worker's own writing, so it is set aside and named instead. Pure.
 pub(crate) fn validate_tracked_row(row: &TrackedRow) -> std::result::Result<(), String> {
+    if row.protocol == AERO_CL_PROTOCOL && row.network == TRACKED_NETWORK_BASE {
+        return validate_bet_row(row);
+    }
     if row.protocol != TRACKED_PROTOCOL_V4 || row.network != TRACKED_NETWORK_BASE {
         return Err(format!("protocol {} on {} is not one NockNock tracks from the chain (Uniswap v4 on Base only)", row.protocol, row.network));
     }
@@ -691,6 +730,38 @@ pub(crate) fn validate_tracked_row(row: &TrackedRow) -> std::result::Result<(), 
     } else if row.role.is_some() {
         return Err(format!("its role '{}' is not one NockNock knows", row.role.clone().unwrap_or_default()));
     }
+    if !matches!(row.source.as_str(), TRACKED_SOURCE_DETECTED | TRACKED_SOURCE_CONFIRMED) {
+        return Err(format!("its source '{}' is not one NockNock knows", row.source));
+    }
+    Ok(())
+}
+
+/// The checks of a bet row (#181): an Aero CL WETH/NOCK range tracked as `role: bet`. Pure.
+fn validate_bet_row(row: &TrackedRow) -> std::result::Result<(), String> {
+    if row.role.as_deref() != Some(BET_ROLE) {
+        return Err(format!("an Aero CL row must be a bet; its role is {}", row.role.clone().unwrap_or_else(|| "unset".to_string())));
+    }
+    if row.position_key != aero_cl_position_key(&row.network, row.nft_id) {
+        return Err(format!("its key {} does not name NFT #{}", row.position_key, row.nft_id));
+    }
+    if !is_address(&row.pool_id) {
+        return Err("its pool is not a contract address".to_string());
+    }
+    let (t0, t1) = match (token_info(&row.currency0), token_info(&row.currency1)) {
+        (Ok(a), Ok(b)) => (a, b),
+        _ => return Err(format!("its pool's tokens ({}, {}) are not both in the token registry", row.currency0, row.currency1)),
+    };
+    let weth_nock = (t0.symbol == "WETH" && is_nock_token(&t1)) || (is_nock_token(&t0) && t1.symbol == "WETH");
+    if !weth_nock {
+        return Err(format!("it is tracked as a bet but is a {}/{} pair: a bet is a WETH/NOCK range", t0.symbol, t1.symbol));
+    }
+    if row.tick_lower >= row.tick_upper {
+        return Err(format!("its ticks {}..{} are not a range", row.tick_lower, row.tick_upper));
+    }
+    if row.rung.is_some() {
+        return Err("a bet has no rung".to_string());
+    }
+    validate_positions_config(std::slice::from_ref(&tracked_position_config(row))).map_err(|e| e.to_string())?;
     if !matches!(row.source.as_str(), TRACKED_SOURCE_DETECTED | TRACKED_SOURCE_CONFIRMED) {
         return Err(format!("its source '{}' is not one NockNock knows", row.source));
     }
@@ -782,7 +853,7 @@ pub(crate) fn owner_from_word(hex: &str) -> Option<String> {
 ///   through the #144 proof; anything else fails the cycle there);
 /// - no answer: an error, which fails the cycle. Whether to count it is not known.
 pub(crate) async fn tracked_owners(http: &Client, rpc_url: &str, wallet: &str, rows: &[TrackedRow]) -> Result<HashMap<String, String>> {
-    let mut not_owned = HashMap::new();
+    let mut not_owned = tracked_bet_owners(http, rpc_url, wallet, rows).await?;
     for row in rows.iter().filter(|r| r.protocol == TRACKED_PROTOCOL_V4) {
         let payload = json!({
             "jsonrpc": "2.0", "method": "eth_call", "id": 145,
@@ -810,6 +881,50 @@ pub(crate) async fn tracked_owners(http: &Client, rpc_url: &str, wallet: &str, r
                 }
             }
         }
+    }
+    Ok(not_owned)
+}
+
+/// Who holds each bet row's NFT now (#181), read at `latest`. A bet is counted while the
+/// wallet holds the NFT, or the pool's gauge holds it and `stakedContains(wallet, id)` is
+/// true. Anything else is reported, so the merge leaves the row out (the Aero CL adapter
+/// would fail the cycle on it). A revert is left to the adapter's closed proof (#144). No
+/// answer fails the cycle, as for a v4 row.
+async fn tracked_bet_owners(http: &Client, rpc_url: &str, wallet: &str, rows: &[TrackedRow]) -> Result<HashMap<String, String>> {
+    let mut not_owned = HashMap::new();
+    for row in rows.iter().filter(|r| r.protocol == AERO_CL_PROTOCOL) {
+        let call = |to: String, data: String, what: &'static str| {
+            let payload = json!({ "jsonrpc": "2.0", "method": "eth_call", "id": 181, "params": [{ "to": to, "data": data }, "latest"] });
+            let (key, nft) = (row.position_key.clone(), row.nft_id);
+            async move {
+                eth_call_outcome(http, rpc_url, &payload).await.map_err(|e| {
+                    anyhow::anyhow!("tracked bet {key} (NFT #{nft}): its {what} could not be read ({e}); the cycle stops rather than count or drop it unread")
+                })
+            }
+        };
+        let unreadable = |what: &str| {
+            anyhow::anyhow!("tracked bet {} (NFT #{}): {what} answered something that is not an address; the cycle stops rather than count or drop it unread", row.position_key, row.nft_id)
+        };
+        let owner = match call(AERO_CL_POSITION_MANAGER_BASE.to_string(), format!("{}{:064x}", ERC721_OWNER_OF, row.nft_id), "owner").await? {
+            CallOutcome::Returned(hex) => owner_from_word(&hex).ok_or_else(|| unreadable("ownerOf()"))?,
+            CallOutcome::Reverted(_) => continue,
+        };
+        if owner == lc(wallet) {
+            continue;
+        }
+        let gauge = match call(row.pool_id.clone(), CL_POOL_GAUGE.to_string(), "pool's gauge").await? {
+            CallOutcome::Returned(hex) => owner_from_word(&hex).ok_or_else(|| unreadable("the pool's gauge()"))?,
+            CallOutcome::Reverted(_) => String::new(),
+        };
+        if !gauge.is_empty() && owner == gauge {
+            let data = format!("{CL_GAUGE_STAKED_CONTAINS}{:0>64}{:064x}", lc(wallet).trim_start_matches("0x"), row.nft_id);
+            if let CallOutcome::Returned(hex) = call(gauge.clone(), data, "stake").await? {
+                if hex.len() == 64 && hex.trim_start_matches('0') == "1" {
+                    continue;
+                }
+            }
+        }
+        not_owned.insert(row.position_key.clone(), owner);
     }
     Ok(not_owned)
 }
@@ -898,6 +1013,18 @@ pub(crate) fn claim_position_configs(config_positions: &[PositionConfig], rows: 
 /// rollback to a release that knows no database rows: without the entry that release
 /// would publish a total without this position. Pure.
 pub(crate) fn tracked_row_config_entry(row: &TrackedRow) -> String {
+    if row.protocol == AERO_CL_PROTOCOL {
+        return [
+            format!("- id: \"{}\"", tracked_config_id(row)),
+            format!("  protocol: \"{AERO_CL_PROTOCOL}\""),
+            format!("  network: \"{}\"", row.network),
+            format!("  nft_id: {}", row.nft_id),
+            format!("  npm_address: \"{AERO_CL_POSITION_MANAGER_BASE}\""),
+            format!("  pool_address: \"{}\"", row.pool_id),
+            format!("  role: \"{BET_ROLE}\""),
+        ]
+        .join("\n");
+    }
     let mut lines = vec![
         format!("- id: \"{}\"", tracked_config_id(row)),
         format!("  protocol: \"{}\"", row.protocol),

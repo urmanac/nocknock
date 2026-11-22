@@ -16,10 +16,15 @@ export function isLadder(pos: { role?: string | null } | null | undefined): bool
   return pos?.role === 'ladder';
 }
 
-/** NOCK LP: a position with a NOCK leg that is not a ladder (the worker's `is_nock_lp`). */
+/** True for a WETH/NOCK bet (`role: bet`, #181). */
+export function isBet(pos: { role?: string | null } | null | undefined): boolean {
+  return pos?.role === 'bet';
+}
+
+/** NOCK LP: a position with a NOCK leg that is not a ladder or a bet (the worker's `is_nock_lp`). */
 export function isNockLp(pos: { role?: string | null; token0?: { symbol?: string } | null; token1?: { symbol?: string } | null } | null | undefined): boolean {
   const nockLeg = pos?.token0?.symbol === 'NOCK' || pos?.token1?.symbol === 'NOCK';
-  return nockLeg && !isLadder(pos);
+  return nockLeg && !isLadder(pos) && !isBet(pos);
 }
 
 /** The snapshot's ladder readings; empty for a snapshot that lists none. */
@@ -170,10 +175,23 @@ export function ladderLiteLine(r: LadderReading): string {
   return `${r.label}: ${ladderStateWords(r.state)} · $${cents(r.usdc_now)} USDC + ${wholeNock(r.nock_now)} NOCK`;
 }
 
-/** " and 2 ladders" for the Goal 1 line; "" with none. */
+/** " and 2 ladders" for the Goal 1 line, with " and 1 bet" for WETH/NOCK bets (#181),
+ *  whose NOCK the total holds too; "" with none. */
 export function ladderCountClause(positions: Array<{ role?: string | null }> | null | undefined): string {
   const m = (positions ?? []).filter(isLadder).length;
-  return m === 0 ? '' : ` and ${m} ladder${m === 1 ? '' : 's'}`;
+  const b = (positions ?? []).filter(isBet).length;
+  return (m === 0 ? '' : ` and ${m} ladder${m === 1 ? '' : 's'}`) + (b === 0 ? '' : ` and ${b} bet${b === 1 ? '' : 's'}`);
+}
+
+/**
+ * " +1 WETH/NOCK bet, measured only (0 in range, 1 cashed out)." for the positions
+ * summary, the worker's own clause (#181); "" with none. Out of range is cashed out.
+ */
+export function betSummaryClause(positions: Array<{ role?: string | null; in_range?: boolean; liquidity_amount?: string }> | null | undefined): string {
+  const bets = (positions ?? []).filter(isBet);
+  if (bets.length === 0) return '';
+  const open = bets.filter((p) => p.in_range && p.liquidity_amount !== '0').length;
+  return ` +${bets.length} WETH/NOCK bet${bets.length === 1 ? '' : 's'}, measured only (${open} in range, ${bets.length - open} cashed out).`;
 }
 
 /**

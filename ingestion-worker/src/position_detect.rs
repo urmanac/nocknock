@@ -935,6 +935,15 @@ pub(crate) struct DetectionInputs<'a> {
     pub(crate) read_budget: Option<usize>,
 }
 
+/// The v4 scan's own rows: Aero CL bets (#181) are found through their gauge
+/// (bet_detect.rs) and never enter the v4 decision. Pure.
+fn v4_only_candidates(rows: Vec<CandidateRow>) -> Vec<CandidateRow> {
+    rows.into_iter().filter(|c| c.protocol == TRACKED_PROTOCOL_V4).collect()
+}
+fn v4_only_tracked(rows: Vec<TrackedRow>) -> Vec<TrackedRow> {
+    rows.into_iter().filter(|t| t.protocol == TRACKED_PROTOCOL_V4).collect()
+}
+
 /// The v4 NFT ids config.yaml lists on Base. They are read and counted through config.
 pub(crate) fn config_v4_ids(config_positions: &[PositionConfig]) -> HashSet<u64> {
     config_positions.iter().filter(|c| c.protocol == TRACKED_PROTOCOL_V4 && c.network == TRACKED_NETWORK_BASE).map(|c| c.nft_id).collect()
@@ -1241,7 +1250,7 @@ async fn scan(inp: &DetectionInputs<'_>, wallet: &str, url: &str) -> ScanRun {
         inp.store.candidates(wallet).await,
         inp.store.tracked(wallet).await,
     ) {
-        (Ok(s), Ok(c), Ok(t)) => (s, c, t),
+        (Ok(s), Ok(c), Ok(t)) => (s, v4_only_candidates(c), v4_only_tracked(t)),
         (a, b, c) => {
             for e in [a.err(), b.err(), c.err()].into_iter().flatten() {
                 tracing::warn!("Position detection: tables unreadable: {e}");
@@ -1618,7 +1627,7 @@ pub(crate) async fn detect_positions(inp: &DetectionInputs<'_>) -> DetectionOutc
 
     // The lists come from the store, so what an earlier check found stays listed.
     let (candidates, tracked) = match (inp.store.candidates(&wallet).await, inp.store.tracked(&wallet).await) {
-        (Ok(c), Ok(t)) => (c, t),
+        (Ok(c), Ok(t)) => (v4_only_candidates(c), v4_only_tracked(t)),
         (a, b) => {
             for e in [a.err(), b.err()].into_iter().flatten() {
                 tracing::warn!("Position detection: lists unreadable: {e}");
@@ -2010,9 +2019,16 @@ pub(crate) async fn untrack_position(store: &PositionStore, wallet: &str, config
 
 /// NOT NOW / RESTORE: set a found position aside, or put it back on offer. Neither counts
 /// it or stops counting it: a tracked position is refused (untrack it instead).
+#[cfg(test)]
 pub(crate) async fn set_found_choice(store: &PositionStore, wallet: &str, nft_id: u64, dismiss: bool) -> std::result::Result<Value, TapRefusal> {
+    set_found_choice_for(store, wallet, TRACKED_PROTOCOL_V4, nft_id, dismiss).await
+}
+
+/// `set_found_choice` for a found position of `protocol`: Uniswap v4 (position_detect) or
+/// an Aero CL bet found in the bet gauge (bet_detect, #181).
+pub(crate) async fn set_found_choice_for(store: &PositionStore, wallet: &str, protocol: &str, nft_id: u64, dismiss: bool) -> std::result::Result<Value, TapRefusal> {
     let candidates = store.candidates(wallet).await.map_err(tap_db_error)?;
-    let Some(c) = candidates.iter().find(|c| c.protocol == TRACKED_PROTOCOL_V4 && c.nft_id == nft_id) else {
+    let Some(c) = candidates.iter().find(|c| c.protocol == protocol && c.nft_id == nft_id) else {
         return Err((StatusCode::NOT_FOUND, "NOT_FOUND", format!("NockNock has not found NFT #{nft_id} arriving in the tracked wallet. Nothing changed.")));
     };
     if store.tracked(wallet).await.map_err(tap_db_error)?.iter().any(|t| t.nft_id == nft_id && t.protocol == c.protocol) {
@@ -2051,6 +2067,15 @@ pub(crate) struct TrackRequest {
 #[derive(Deserialize)]
 pub(crate) struct NftRequest {
     nft_id: u64,
+    /// `aerodrome-cl` for a bet found in the bet gauge (#181); unset for Uniswap v4.
+    #[serde(default)]
+    protocol: Option<String>,
+}
+
+impl NftRequest {
+    fn protocol(&self) -> &str {
+        self.protocol.as_deref().unwrap_or(TRACKED_PROTOCOL_V4)
+    }
 }
 
 #[derive(Deserialize)]
@@ -2095,7 +2120,12 @@ fn no_wallet() -> Response {
 pub(crate) async fn track_position_handler(Extension(state): Extension<Arc<AppState>>, Json(req): Json<TrackRequest>) -> Response {
     let Some(wallet) = state.config.tracked_wallets.first().cloned() else { return no_wallet() };
     let url = state_rpc_url(&state);
-    let result = track_position(&PositionStore::of(&state), &state.http_client, url.as_deref(), &wallet, &state.config.positions, req.nft_id, &req.track_as).await;
+    // A bet found staked in the bet gauge (#181) is tracked through its own reads.
+    let result = if req.track_as == BET_TRACK_CHOICE {
+        track_bet(&PositionStore::of(&state), &state.http_client, url.as_deref(), &wallet, &state.config.positions, req.nft_id).await
+    } else {
+        track_position(&PositionStore::of(&state), &state.http_client, url.as_deref(), &wallet, &state.config.positions, req.nft_id, &req.track_as).await
+    };
     with_cycle(state, result).await
 }
 
@@ -2109,13 +2139,13 @@ pub(crate) async fn untrack_position_handler(Extension(state): Extension<Arc<App
 /// POST /v1/positions/dismiss {nft_id}: set a found position aside (NOT NOW).
 pub(crate) async fn dismiss_position_handler(Extension(state): Extension<Arc<AppState>>, Json(req): Json<NftRequest>) -> Response {
     let Some(wallet) = state.config.tracked_wallets.first().cloned() else { return no_wallet() };
-    tap_response(set_found_choice(&PositionStore::of(&state), &wallet, req.nft_id, true).await)
+    tap_response(set_found_choice_for(&PositionStore::of(&state), &wallet, req.protocol(), req.nft_id, true).await)
 }
 
 /// POST /v1/positions/restore {nft_id}: put a set-aside position back on offer.
 pub(crate) async fn restore_position_handler(Extension(state): Extension<Arc<AppState>>, Json(req): Json<NftRequest>) -> Response {
     let Some(wallet) = state.config.tracked_wallets.first().cloned() else { return no_wallet() };
-    tap_response(set_found_choice(&PositionStore::of(&state), &wallet, req.nft_id, false).await)
+    tap_response(set_found_choice_for(&PositionStore::of(&state), &wallet, req.protocol(), req.nft_id, false).await)
 }
 
 /// The body of GET /v1/positions/found: the latest snapshot's detection block as it is,

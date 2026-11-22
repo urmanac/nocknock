@@ -1,9 +1,57 @@
 openapi: 3.0.3
 info:
   title: NockNock Snapshot Data Model
-  version: 2.11.0
+  version: 2.12.0
   description: |
     Canonical schemas for portfolio snapshots, derived metrics, and API envelopes. Single source of truth for backend ↔ frontend contract.
+
+    2.12.0 (WETH/NOCK bets, issue #181), additive. With operator_profile.nock_bets unset
+    and no position of `role: bet`, no byte of the snapshot changes:
+    - Position.role "bet": an Aero CL WETH/NOCK range, configured `role: bet` or tracked
+      from the bet pool's gauge (a database row, source "tracked"). Counted in every
+      total, the NOCK floor and the floor-crossing price; not NOCK LP (no LP target, no
+      rebuild template or exclusion, no engine label); its own deviation row "NOCK bets
+      (measured)" with no target, appended last and only while a bet holds value.
+    - DerivedMetrics.bet_suggestion (absent when operator_profile.nock_bets is not set):
+      id "bet_suggestion:WETH/NOCK", tier (top | quiet), status (needs_setting | invalid
+      | pool_unavailable | pool_inactive (no in-range liquidity: nothing is sized, bets
+      are still found and counted) | unavailable | found_untracked | gas_short | gas_split
+      (enough above the floor only as WETH and ETH together; short_by_eth null) |
+      nock_below_floor | bet_in_range | gauge_unread (the wallet's stakes in the gauge were
+      not all read this cycle: never ready then) | nock_short | ready), shown (true only for
+      ready), headline,
+      reason, missing[] and invalid[] (the settings named), settings (as written), pool
+      {address, block, token0, token1, tick_spacing, fee_pips, fee_pct, gauge, tick,
+      sqrt_price_x96, liquidity, nock_per_weth, usd_per_nock, label}: the bet pool read
+      this cycle with no position needed; bets[] {position_id, source, status
+      (in_range | out_of_range: cashed out), ticks, low_usd, high_usd, weth, nock,
+      value_usd, unclaimed_aero, unclaimed_aero_usd, aero_note, fees_note, staked,
+      in_bet_pool, line}; found_not_counted[] {nft_id, protocol, dismissed, ticks,
+      liquidity, why_not_automatic[], choices [bet, dismiss], line}: NFTs the wallet
+      staked in the bet gauge that are not counted; suggestion {tick_lower, tick_upper
+      (the pool tick minus and plus the width, rounded to the spacing), width, low_usd,
+      high_usd, pool_usd_per_nock, low_pct, high_pct, liquidity, amount0_raw, amount1_raw
+      (mint_math::exact_mint), weth, nock, weth_usd, nock_usd, value_usd, bet_usd,
+      deposit_token (WETH | ETH), staked, link {url
+      (https://app.aero.xyz/deposit/8453-<pool>?range=custom&tickLow=A&tickHigh=B, with
+      &native=true when the ETH side is paid in native ETH), host, native, prefilled,
+      not_prefilled [amounts], amounts_to_enter, format_note}, range_text, outcomes[]};
+      gates[] {gate (settings | gas_floor | nock_floor | no_bet_in_range | gauge_read),
+      status (pass | fail), text}, in that order; gas {state (covered | short | split |
+      unread), wallet_eth, wallet_weth, gas_floor_eth,
+      above_floor_eth, needed_eth, short_by_eth, eth_usdc_ranges, eth_usdc_ranges_weth,
+      deposit_token, text}: short of gas, the WETH that would have to come out of the
+      ETH/USDC ranges first, as a measurement; nock {total_held, floor, wallet_nock,
+      needed_nock, text}; floor_crossing {status, before, after, text} with the
+      hypothetical bet (null while a bet is in range); detection {status, reason,
+      checked_at_block, staked_in_gauge, deferred, unread, refresh_deferred, statement};
+      after_deposit,
+      assumptions[], statement. Left out of the state hash.
+    - Events: "bet_suggestion:WETH/NOCK:<status>" (one id per status, so `since` is when
+      that status was first stated) is top while status is ready or found_untracked, else
+      one quiet line; it carries no link and no would_sign (the card and the MCP bet
+      section carry the link and withhold it from a stale snapshot). Each tracked bet adds
+      a quiet line "bet:<id>" (BET IN RANGE | BET CASHED OUT).
 
     2.11.0 (ladder maintenance and calls to action as events, issue #169), additive:
     - DerivedMetrics.ladder_maintenance (absent without a tracked ladder): per tracked
@@ -730,11 +778,12 @@ components:
             and the value is never published as 0. (v0.6.0, #93)
         role:
           type: string
-          enum: [ladder]
+          enum: [ladder, bet]
           description: >
-            "ladder" for a position configured `role: ladder` (2.9.0, #167): measured
-            and counted in every total, but not NOCK LP. Absent for every other
-            position, which is classified by its pair as before (#151).
+            "ladder" for a position configured `role: ladder` (2.9.0, #167), "bet" for a
+            WETH/NOCK bet (2.12.0, #181): measured and counted in every total, but not
+            NOCK LP. Absent for every other position, which is classified by its pair as
+            before (#151).
         rung:
           type: string
           enum: [cap, near, deep]
@@ -1126,6 +1175,13 @@ components:
             their capital, the stacked depth, the view window and the markers; see the
             2.11.0 notes at the top of this file. Absent without a tracked ladder. Left out
             of the state hash.
+        bet_suggestion:
+          type: object
+          additionalProperties: true
+          description: |
+            The WETH/NOCK bet card (2.12.0, issue #181); see the 2.12.0 notes at the top
+            of this file. Absent when operator_profile.nock_bets is not set. Left out of
+            the state hash.
         position_detection:
           type: object
           nullable: true
