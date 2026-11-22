@@ -1591,3 +1591,96 @@ one page, each with `hash`, `blockNum`, `from` and `tokenId` as a 32-byte hex wo
 - **A position whose NFT was received by transfer** from another address has no mint to
   the wallet, so it gets no baseline; this was reasoned from the receipt shape, not
   observed (the wallet has received none).
+
+---
+
+## 16. WETH/NOCK Bets: the CL200 Pool, the Deposit Link and the Gauge Path (issue #181) — Verified Record
+
+Read with `eth_call`, `eth_getLogs` and `eth_getTransactionReceipt` through
+`https://base-rpc.publicnode.com` on 2026-11-21. The answers the worker asks for are recorded
+in `ingestion-worker/testdata/bets/chain_fixture.json` (block 57671680, when NFT #2914490 was
+staked, and block 60578707, today with no bet) and replayed by `tests_bets.rs`.
+
+### The pool
+
+| | |
+|---|---|
+| Pool | `0x957256c98d61a714081de2ee70ae3a96c9b40874`, the only Aero WETH/NOCK CL pool (`getPool` returns zero for every other spacing on both factories) |
+| Factory | `0x9cb220581b91b0c83223012fe69688b92ad07a76`; `factory.getPool(WETH, NOCK, 200)` returns the pool |
+| Tokens | token0 WETH, token1 NOCK (16 decimals) |
+| Spacing, fee | 200; `fee()` 9700 pips (0.97%, dynamic: lower than the factory's 20000 default) |
+| Gauge | `0x3bf70c880adc8370917994ab0df68e763b7a60fd` (`pool.gauge()`; `gauge.pool()` returns the pool) |
+| Today | tick 70627 (about 116,729 NOCK per WETH), in-range liquidity 2.737e20, about $2.2k TVL, about 6 swaps and $240 a day |
+
+The worker reads all of these every cycle once `operator_profile.nock_bets.pool` is set, and
+refuses the pool (the card says why) unless `nft()` is the Aero CL position manager,
+`factory()` is the factory above, the factory's own `getPool` for its tokens and spacing is
+this address, its tokens are WETH and NOCK, it has a gauge whose `pool()` is it, and it has
+in-range liquidity. The pool-key URL form `8453-<spacing>-<tokenA>-<tokenB>` opens "Create new
+pool" even for this existing pool: NockNock links the pool by address only.
+
+### The deposit link
+
+`https://app.aero.xyz/deposit/8453-<pool>?range=custom&tickLow=A&tickHigh=B`. The route keeps
+`tickLow`/`tickHigh` only when both parse and `tickLow < tickHigh`, and the app resets both to
+its first preset (±4%) unless both are multiples of the pool's spacing: the worker always
+rounds to the spacing. `native=true` deposits native ETH (a "Use Wrapped" toggle) instead of
+WETH; the worker adds it only when wallet WETH does not cover the ETH side and wallet ETH
+does. `rewards` defaults to `aero` (staked); `rewards=fees` mints to the wallet unstaked and is
+not used. There is **no amount parameter** (unknown keys such as `amount0` are ignored and
+the amount fields start at 0), so the card prints both amounts beside the link. Read from the
+app bundle `assets/index-6DXkxvUQ.js` (`validateSearch` of `/deposit/$pool`) and observed in
+the browser with no wallet connected: the page opened on the price-range step with ticks
+70400/70800 as 114,098.59 and 118,754.81 NOCK per WETH.
+
+### The staked mint never reaches the wallet
+
+NFT #2914490's deposit, tx `0x80277e2bc5f351b66051967b44a47d22edd2704ad690cc5dc1f47e878cc93ddb`
+(block 57425824), sent by the wallet to the Aero router `0x0fef9e88a7b76bcdbf451780c6774fe32965ee98`
+(`execute`, selector `0x3593564c`, with 0.081995 ETH of value):
+
+| log | contract | event |
+|---:|---|---|
+| 0x31 | pool | `Mint(sender, owner = position manager, tickLower 73400, tickUpper 74800, amount = 0x322f4dd43fbc87e73, 0.0819946 WETH, 2,755 NOCK)` |
+| 0x32 | position manager | `Transfer(0x0 → router, 2914490)` |
+| 0x3c | position manager | `Transfer(router → gauge, 2914490)` |
+| 0x40 | gauge | `Deposit(address indexed from = router, address indexed to = wallet, uint256 indexed tokenId, uint128 liquidity)`, topic0 `0xc9817c7b5bf7b2417ea338292b8681857834d37427fbb1899f98e6897f3fe426` = keccak(`Deposit(address,address,uint256,uint128)`) |
+
+The wallet's address never appears in the NFT's Transfer logs, so position_detect's
+Transfer-to-wallet scan cannot find a bet. `IncreaseLiquidity` on this position manager has
+topic0 `0x0f8712c4…a5a513` (five words: liquidity, amounts and ticks), not the Uniswap v3
+`0x3067048b…`: the proof does not use it.
+
+### How a bet is found (bet_detect.rs)
+
+1. `gauge.stakedValues(wallet)` (`0x4b937763`): the ids the wallet has staked now (an ABI
+   `uint256[]`). Read at block 57671680 it is `[2914490]`; today it is empty.
+2. For an id not decided yet: `positions(id)` (tokens, spacing, ticks, liquidity);
+   `gauge.depositBlock(id)` (`0x32590654`, the block of its stake; 0 once withdrawn, so it is
+   read while staked); `eth_getLogs` on the gauge in that one block with topics
+   [Deposit, any, wallet, id] (a one-block range, which every RPC serves); the receipt.
+3. The proof, never loosened: status 1; the receipt's `from` is the wallet; the position
+   manager's `Transfer(0x0 → router, id)` and `Transfer(router → bet gauge, id)`; the gauge's
+   Deposit for the wallet and id; exactly one `Mint` by the bet pool to the position manager
+   with the liquidity the gauge recorded and the NFT's own ticks. Then the NFT is tracked as
+   `role: bet` (source `detected`, deposit_tx the mint). Anything else the wallet has staked
+   in that gauge (a transfer, an unstaked mint staked later, a deposit another address sent)
+   is offered with one tap and not counted until then.
+4. A tracked bet is counted while the wallet holds the NFT, or the pool's gauge holds it and
+   `stakedContains(wallet, id)` is true; otherwise its row is not merged. A burned NFT goes
+   through the #144 closed proof like any Aero CL position.
+
+At most 40 NFTs are read a cycle, inside the 40 s soft budget of position detection; the rest
+wait and the status says so. No block range is scanned: `depositBlock` names the one block, so
+the cursor of §15 is not needed.
+
+### Not verified
+
+- **Adding to an existing bet NFT.** `/deposits/8453-<pool>/increase?id=<nft>` exists in the
+  app, but with no wallet it showed no form, and an increase on a staked NFT was never tried.
+  It stays barred (§8).
+- **The gauge's AERO emission rate.** `rewardRate()`, `rewardRateByEpoch()`, `left()` and
+  `rewardToken()` revert on this gauge; the card states the AERO each bet has earned
+  (`earned`, §9), not a rate.
+- **An unstaked bet** (`rewards=fees`, minted to the wallet) is not detected through the gauge;
+  it would reach the wallet as a Transfer and is outside this path.
