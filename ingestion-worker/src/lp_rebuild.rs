@@ -404,6 +404,21 @@ pub(crate) fn lp_positions_summary(raw: &RawOnChainData) -> (String, bool) {
             detail.join(", ")
         )
     };
+    // Bets (#181): their own closing clause, measured only. Out of range is cashed out.
+    let bets: Vec<&RawPosition> = raw.positions.iter().filter(|p| is_bet(raw, p)).collect();
+    let bet_clause = if bets.is_empty() {
+        String::new()
+    } else {
+        let open = bets.iter().filter(|p| p.in_range && p.liquidity > 0).count();
+        format!(
+            " +{} WETH/NOCK bet{}, measured only ({} in range, {} cashed out).",
+            bets.len(),
+            if bets.len() == 1 { "" } else { "s" },
+            open,
+            bets.len() - open
+        )
+    };
+    let ladder_clause = format!("{ladder_clause}{bet_clause}");
     let other_clause = if other.is_empty() {
         String::new()
     } else {
@@ -422,7 +437,7 @@ pub(crate) fn lp_positions_summary(raw: &RawOnChainData) -> (String, bool) {
     };
     let n = nock.len();
     if n == 0 {
-        if other.is_empty() && ladders.is_empty() {
+        if other.is_empty() && ladders.is_empty() && bets.is_empty() {
             return ("No LP positions tracked.".to_string(), false);
         }
         return (format!("No NOCK LP positions tracked.{}{}", other_clause, ladder_clause), false);
@@ -461,7 +476,7 @@ pub(crate) fn lp_positions_summary(raw: &RawOnChainData) -> (String, bool) {
         format!(
             "{} {}LP position{} tracked: {}.{}{}",
             n,
-            if other.is_empty() && ladders.is_empty() { "" } else { "NOCK " },
+            if other.is_empty() && ladders.is_empty() && bets.is_empty() { "" } else { "NOCK " },
             if n == 1 { "" } else { "s" },
             parts.join(", "),
             other_clause,

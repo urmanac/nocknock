@@ -365,6 +365,9 @@ pub(crate) fn bet_headline(status: &str) -> &'static str {
         "pool_unavailable" => "Bets: the bet pool could not be read as one this cycle.",
         "found_untracked" => "Bets: a bet found staked in the gauge is waiting for one tap.",
         "gas_short" => "Bets: the ETH above your gas floor does not cover a new bet's ETH side.",
+        "gas_split" => "Bets: the ETH above your gas floor covers a new bet's ETH side only as WETH and ETH together.",
+        "pool_inactive" => "Bets: the bet pool has no in-range liquidity, so its price is frozen and no new bet is sized.",
+        "gauge_unread" => "Bets: the gauge's stakes were not fully read this cycle, so no new bet is suggested.",
         "nock_below_floor" => "Bets: total NOCK held is below your floor, so no bet is suggested.",
         "nock_short" => "Bets: the wallet's NOCK does not cover a new bet's NOCK side.",
         "bet_in_range" => "Bets: a bet is in range. No new one is suggested.",
@@ -585,6 +588,8 @@ pub(crate) fn bet_suggestion(data: &SnapshotData, profile: &OperatorProfile, cfg
             "checked_at_block": detection.block,
             "staked_in_gauge": detection.staked.as_ref().map(|s| s.len()),
             "deferred": detection.deferred,
+            "unread": detection.unread,
+            "refresh_deferred": detection.refresh_deferred,
             "statement": BET_DETECTION_STATEMENT,
         },
         "after_deposit": BET_AFTER_DEPOSIT_TEXT,
@@ -654,6 +659,11 @@ pub(crate) fn bet_suggestion(data: &SnapshotData, profile: &OperatorProfile, cfg
         set(&mut out, "pool_unavailable", Some("the pool read is not the configured pool".to_string()));
         return out;
     }
+    if pool.liquidity == 0 {
+        out["gates"] = Value::Array(gates);
+        set(&mut out, "pool_inactive", Some("The bet pool has no in-range liquidity this cycle: its price does not move with the market, so a bet is not sized on it. Bets already deposited are still found and counted.".to_string()));
+        return out;
+    }
     let Some(eth_usd) = eth_usd else {
         out["gates"] = Value::Array(gates);
         set(&mut out, "unavailable", Some("ETH/USD was not read this cycle, so a bet cannot be sized.".to_string()));
@@ -681,7 +691,9 @@ pub(crate) fn bet_suggestion(data: &SnapshotData, profile: &OperatorProfile, cfg
         .sum();
     let eth_ranges = data.positions.iter().filter(|p| !is_nock_token(&p.token0) && !is_nock_token(&p.token1) && (is_eth_token(&p.token0) || is_eth_token(&p.token1))).count();
     let need = size.weth;
-    let (gas_ok, native, gas_text, short_by) = match (eth, weth) {
+    // gas_state: covered | short | split (enough above the floor, but only as WETH and ETH
+    // together, and the app deposits one or the other) | unread.
+    let (gas_ok, native, gas_text, short_by, gas_state) = match (eth, weth) {
         (Some(e), Some(w)) => {
             let above = e + w - params.gas_floor_eth;
             let head = format!(
@@ -698,21 +710,26 @@ pub(crate) fn bet_suggestion(data: &SnapshotData, profile: &OperatorProfile, cfg
                         eth_ranges, if eth_ranges == 1 { "" } else { "s" }, if eth_ranges == 1 { "s" } else { "" }, eth4(eth_ranges_weth), eth4(short), if eth_ranges == 1 { "it" } else { "them" }
                     )
                 };
-                (false, false, format!("{head} Short by {} ETH. {ranges}", eth4(short)), Some(short))
+                (false, false, format!("{head} Short by {} ETH. {ranges}", eth4(short)), Some(short), "short")
             } else if w + 1e-12 >= need {
-                (true, false, format!("{head} The wallet's WETH covers it."), None)
+                (true, false, format!("{head} The wallet's WETH covers it."), None, "covered")
             } else if e + 1e-12 >= need {
-                (true, true, format!("{head} The wallet's WETH does not cover it and its ETH does, so the link deposits native ETH."), None)
+                (true, true, format!("{head} The wallet's WETH does not cover it and its ETH does, so the link deposits native ETH."), None, "covered")
             } else {
+                // Enough above the floor, but split across the two: a measurement, no instruction.
                 (
                     false,
                     false,
-                    format!("{head} Neither the wallet's WETH nor its ETH alone covers it, and the Aero app deposits one or the other."),
-                    Some(0.0),
+                    format!(
+                        "{head} Together they cover it, but the Aero app deposits WETH or native ETH, not both: the wallet's {} WETH and its {} ETH are each below the {} WETH side.",
+                        eth4(w), eth4(e), eth4(need)
+                    ),
+                    None,
+                    "split",
                 )
             }
         }
-        _ => (false, false, "Gas floor: the wallet's ETH and WETH were not read this cycle.".to_string(), None),
+        _ => (false, false, "Gas floor: the wallet's ETH and WETH were not read this cycle.".to_string(), None, "unread"),
     };
     out["gas"] = json!({
         "wallet_eth": eth.map(|v| fx(v, 6)),
@@ -724,6 +741,7 @@ pub(crate) fn bet_suggestion(data: &SnapshotData, profile: &OperatorProfile, cfg
         "eth_usdc_ranges": eth_ranges,
         "eth_usdc_ranges_weth": fx(eth_ranges_weth, 6),
         "deposit_token": if native { "ETH" } else { "WETH" },
+        "state": gas_state,
         "text": gas_text,
     });
     gates.push(json!({ "gate": "gas_floor", "status": if gas_ok { "pass" } else { "fail" }, "text": gas_text }));
@@ -822,7 +840,7 @@ pub(crate) fn bet_suggestion(data: &SnapshotData, profile: &OperatorProfile, cfg
         return out;
     }
     if !gas_ok {
-        set(&mut out, "gas_short", Some(gas_text));
+        set(&mut out, if gas_state == "split" { "gas_split" } else { "gas_short" }, Some(gas_text));
         return out;
     }
     if !nock_ok {
@@ -831,6 +849,21 @@ pub(crate) fn bet_suggestion(data: &SnapshotData, profile: &OperatorProfile, cfg
     }
     if !in_range.is_empty() {
         set(&mut out, "bet_in_range", Some(range_text));
+        return out;
+    }
+    // The gauge (review of #181, finding 1): a new bet only when this cycle read every stake
+    // of the wallet in it, so a second bet is never suggested on top of one not yet seen.
+    let gauge_complete = detection.status == "ok" && detection.staked.is_some() && detection.deferred == 0 && detection.unread == 0;
+    if let Some(g) = out["gates"].as_array_mut() {
+        g.push(json!({
+            "gate": "gauge_read",
+            "status": if gauge_complete { "pass" } else { "fail" },
+            "text": if gauge_complete { "Gauge: every stake of your wallet in the bet gauge was read this cycle." } else { "Gauge: your wallet's stakes in the bet gauge were not all read this cycle." },
+        }));
+    }
+    if !gauge_complete {
+        let why = detection.reason.clone().unwrap_or_else(|| format!("the check's status is {}", detection.status));
+        set(&mut out, "gauge_unread", Some(format!("The bet gauge's stakes for your wallet were not fully read this cycle ({why}); a bet may already be deposited. It is read again next cycle.")));
         return out;
     }
     if !nock_covered {

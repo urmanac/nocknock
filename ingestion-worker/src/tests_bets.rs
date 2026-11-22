@@ -234,7 +234,6 @@ fn test_a_pool_that_is_not_the_aero_weth_nock_pool_is_refused_with_its_reason() 
         (BetPoolAnswers { factory_pool: Some(word("0x71a4a6f6ea5c26ce486b7ed0d8723a897ef5ad9a")), ..base.clone() }, "getPool"),
         (BetPoolAnswers { gauge: Some(word(NATIVE_ETH)), ..base.clone() }, "no gauge"),
         (BetPoolAnswers { gauge_pool: Some(word(USDC_BASE)), ..base.clone() }, "names another pool"),
-        (BetPoolAnswers { liquidity: Some(word("0")), ..base.clone() }, "price is frozen"),
     ];
     for (a, want) in cases {
         let e = bet_pool_from_answers(POOL, 1, &a).unwrap_err();
@@ -522,7 +521,7 @@ fn test_the_operators_bet_today_is_ready_with_exact_amounts_and_the_link() {
     assert!(s(&v, "/suggestion/link/amounts_to_enter").contains(" ETH and "));
     // Gates, in the issue's order, all passing.
     let gates: Vec<(&str, &str)> = v["gates"].as_array().unwrap().iter().map(|g| (g["gate"].as_str().unwrap(), g["status"].as_str().unwrap())).collect();
-    assert_eq!(gates, vec![("settings", "pass"), ("gas_floor", "pass"), ("nock_floor", "pass"), ("no_bet_in_range", "pass")]);
+    assert_eq!(gates, vec![("settings", "pass"), ("gas_floor", "pass"), ("nock_floor", "pass"), ("no_bet_in_range", "pass"), ("gauge_read", "pass")]);
     // The floor-crossing price includes the hypothetical bet.
     assert!(s(&v, "/floor_crossing/text").starts_with("With this bet, NOCK could rise to $"), "{}", v["floor_crossing"]);
 }
@@ -601,7 +600,9 @@ fn test_bet_events_are_top_only_while_a_bet_is_suggested() {
     let bets: Vec<&Value> = ev.as_array().unwrap().iter().filter(|e| e["card"] == json!("bet_suggestion")).collect();
     assert_eq!(bets.len(), 2, "{bets:#?}");
     assert_eq!(bets[0]["tier"], json!("top"));
-    assert_eq!(bets[0]["links"][0]["url"].as_str().unwrap(), s(data.derived_metrics.bet_suggestion.as_ref().unwrap(), "/suggestion/link/url"));
+    // No link and no "would sign" in the event: the card and the MCP section carry the link.
+    assert_eq!(bets[0]["links"], json!([]));
+    assert_eq!(bets[0]["would_sign"], Value::Null);
     assert_eq!(bets[1]["tier"], json!("quiet"));
     assert_eq!(bets[1]["title"], json!("BET CASHED OUT"));
     // Gas short: the card's event is a quiet line.
@@ -637,6 +638,17 @@ fn test_golden_bet_suggestion() {
     open.positions.push(bet_position(3500001, 70200, 71000, true, "0.011500", "1385.20", "39.82"));
     open.positions.push(bet_position(3400001, 73400, 74800, false, "0.000000", "2940.10", "42.37"));
     cases.push(("bet_in_range", card(&open, &ops, &detection_live()), Some("ok")));
+    let mut split = live_data();
+    for w in split.wallet_balances.iter_mut() {
+        match w.token_symbol.as_str() {
+            "ETH" => w.amount = "0.010000".to_string(),
+            "WETH" => w.amount = "0.008000".to_string(),
+            _ => {}
+        }
+    }
+    cases.push(("gas_split", card(&split, &ops, &detection_live()), Some("ok")));
+    let partial = BetDetection { status: "partial".to_string(), reason: Some("1 staked NFT not read yet waits for a later cycle".to_string()), deferred: 1, ..detection_live() };
+    cases.push(("gauge_unread", card(&live_data(), &ops, &partial), Some("ok")));
     let needs = profile_with(Some(NockBetsConfig { gas_floor_eth: None, ..operator_bets() }));
     cases.push(("needs_setting", card(&live_data(), &needs, &detection_live()), Some("ok")));
     let mut out = serde_json::Map::new();
@@ -652,4 +664,183 @@ fn test_golden_bet_suggestion() {
     }
     let expected = std::fs::read_to_string(path).expect("testdata/bets/golden_bet_suggestion.json is checked in");
     assert!(actual == expected, "bet card bytes changed; compare {path} with a fresh NOCKNOCK_BLESS_GOLDEN=1 run and `git diff` it");
+}
+
+
+// ------------------------------------------------------------------
+// Review of #181
+// ------------------------------------------------------------------
+
+/// Finding 1: a gauge not fully read never yields a "ready" card.
+#[test]
+fn test_no_bet_is_suggested_on_a_gauge_that_was_not_fully_read() {
+    let ops = profile_with(Some(operator_bets()));
+    let cases = [
+        BetDetection { status: "unavailable".to_string(), reason: Some("the gauge's stakes could not be read (the RPC did not answer)".to_string()), staked: None, ..detection_live() },
+        BetDetection { status: "partial".to_string(), reason: Some("1 staked NFT not read yet waits for a later cycle".to_string()), deferred: 1, ..detection_live() },
+        BetDetection { status: "partial".to_string(), reason: Some("a staked NFT's deposit could not be read this cycle".to_string()), unread: 1, ..detection_live() },
+        BetDetection { staked: None, ..detection_live() },
+    ];
+    for d in cases {
+        let v = card(&live_data(), &ops, &d);
+        assert_eq!(s(&v, "/status"), "gauge_unread", "{d:?}");
+        assert_eq!(v["shown"], json!(false));
+        assert_eq!(s(&v, "/tier"), "quiet");
+        assert!(s(&v, "/reason").contains("a bet may already be deposited"));
+    }
+    // Re-reads that only wait their turn do not block: each is already known and listed.
+    let v = card(&live_data(), &ops, &BetDetection { refresh_deferred: 3, ..detection_live() });
+    assert_eq!(s(&v, "/status"), "ready");
+}
+
+/// Finding 2: the events carry no deposit link, so a stale snapshot never prints one.
+#[test]
+fn test_the_top_of_page_text_never_prints_the_bet_link() {
+    let mut data = live_data();
+    attach_bet_suggestion(&mut data, &profile_with(Some(operator_bets())), &detection_live());
+    data.derived_metrics.events = Some(events_block(&data, None, false, t("2026-11-21T12:00:00Z")));
+    let v = serde_json::to_value(&data).unwrap();
+    for health in [Some("ok"), Some("stale"), Some("degraded"), None] {
+        let txt = crate::events_text::with_events("", &v, health);
+        assert!(txt.contains("WETH/NOCK BET"), "{txt}");
+        assert!(!txt.contains("app.aero.xyz"), "{health:?}: {txt}");
+        assert!(!txt.to_lowercase().contains("would sign: one deposit"), "{txt}");
+    }
+    // The MCP bet section withholds it from a stale snapshot.
+    let card_v = data.derived_metrics.bet_suggestion.clone().unwrap();
+    assert!(!text(&card_v, Some("stale")).contains("app.aero.xyz"));
+    assert!(text(&card_v, Some("ok")).contains("app.aero.xyz"));
+}
+
+/// Finding 8: one event id per status, so a fresh "ready" has its own `since`.
+#[test]
+fn test_each_bet_status_has_its_own_event_and_since() {
+    let ops = profile_with(Some(operator_bets()));
+    let mut short = live_data();
+    for w in short.wallet_balances.iter_mut().filter(|w| w.token_symbol == "ETH") {
+        w.amount = "0.010000".to_string();
+    }
+    attach_bet_suggestion(&mut short, &ops, &detection_live());
+    let before = events_block(&short, None, false, t("2026-11-20T00:00:00Z"));
+    let mut ready = live_data();
+    attach_bet_suggestion(&mut ready, &ops, &detection_live());
+    let after = events_block(&ready, Some(&before), true, t("2026-11-20T00:05:00Z"));
+    let id_of = |ev: &Value| ev.as_array().unwrap().iter().find(|e| e["kind"] == json!("bet_suggestion")).cloned().unwrap();
+    assert_eq!(id_of(&before)["id"], json!("bet_suggestion:WETH/NOCK:gas_short"));
+    let e = id_of(&after);
+    assert_eq!(e["id"], json!("bet_suggestion:WETH/NOCK:ready"));
+    assert_eq!(e["since"], json!("2026-11-20T00:05:00+00:00"));
+    // The same status carries its since while the cycles are continuous.
+    let again = events_block(&ready, Some(&after), true, t("2026-11-20T00:10:00Z"));
+    assert_eq!(id_of(&again)["since"], json!("2026-11-20T00:05:00+00:00"));
+}
+
+/// Finding 4: a pool with no in-range liquidity is still the bet pool: bets are found and
+/// counted, and only a new bet is not sized.
+#[tokio::test]
+async fn test_a_frozen_pool_still_finds_and_counts_bets_and_sizes_none() {
+    let scn = scenario("staked");
+    let mut a = pool_answers(&scn);
+    a.liquidity = Some(format!("{:064x}", 0));
+    let p = bet_pool_from_answers(POOL, 1, &a).expect("a frozen pool is still the bet pool");
+    assert_eq!(p.liquidity, 0);
+    let key = format!("eth_call|{POOL}|{V3_LIQUIDITY}|{}", s(&scn, "/block_hex"));
+    let url = node("staked", vec![(key, json!({ "result": format!("0x{:064x}", 0) }))]).await;
+    let store = PositionStore::mem();
+    let d = detect(&store, &url, &[]).await;
+    assert_eq!(d.status, "ok", "{d:?}");
+    assert_eq!(d.newly_tracked, vec!["aerodrome-cl:base:2914490".to_string()]);
+    let mut frozen = detection_live();
+    frozen.pool.as_mut().unwrap().liquidity = 0;
+    let v = card(&live_data(), &profile_with(Some(operator_bets())), &frozen);
+    assert_eq!(s(&v, "/status"), "pool_inactive");
+    assert_eq!(v["suggestion"], Value::Null);
+    assert_eq!(v["shown"], json!(false));
+}
+
+/// Finding 5: enough above the floor only as WETH and ETH together is its own honest state.
+#[test]
+fn test_a_split_eth_side_is_stated_as_it_is() {
+    let mut data = live_data();
+    for w in data.wallet_balances.iter_mut() {
+        match w.token_symbol.as_str() {
+            "ETH" => w.amount = "0.010000".to_string(),
+            "WETH" => w.amount = "0.008000".to_string(),
+            _ => {}
+        }
+    }
+    let v = card(&data, &profile_with(Some(operator_bets())), &detection_live());
+    assert_eq!(s(&v, "/status"), "gas_split");
+    assert_eq!(s(&v, "/gas/state"), "split");
+    assert_eq!(v["gas"]["short_by_eth"], Value::Null);
+    let t = s(&v, "/gas/text");
+    assert!(t.contains("Together they cover it, but the Aero app deposits WETH or native ETH, not both"), "{t}");
+    assert!(!t.to_lowercase().contains("wrap"), "no instruction: {t}");
+    assert!(s(&v, "/headline").contains("only as WETH and ETH together"));
+}
+
+/// Finding 6: with only a bet tracked the directive does not say "No LP positions tracked".
+#[test]
+fn test_the_lp_summary_names_the_bets() {
+    let mut raw = crate::tests::rebuild_fixture();
+    let mut bet = raw.positions.iter().find(|p| is_nock_pair(p)).unwrap().clone();
+    bet.position_id = "aerodrome-cl:base:2914490".to_string();
+    bet.token0 = token_info(WETH_BASE).unwrap();
+    bet.token1 = token_info(NOCK_BASE).unwrap();
+    bet.in_range = false;
+    bet.liquidity = 1;
+    raw.positions = vec![bet.clone()];
+    raw.bets.insert(bet.position_id.clone());
+    let (text, engine) = lp_positions_summary(&raw);
+    assert_eq!(text, "No NOCK LP positions tracked. +1 WETH/NOCK bet, measured only (0 in range, 1 cashed out).");
+    assert!(!engine);
+}
+
+/// Finding 3: more than the cap of decided stakes rotate from a stored cursor; a new one
+/// is read first and is never starved.
+#[tokio::test]
+async fn test_decided_stakes_rotate_and_a_new_one_is_read_first() {
+    let fakes: Vec<u64> = (1..=44).map(|i| 9_000_000 + i).collect();
+    let store = PositionStore::mem();
+    for id in &fakes {
+        store
+            .upsert_candidate(&CandidateRow {
+                wallet: WALLET.to_string(),
+                protocol: AERO_CL_PROTOCOL.to_string(),
+                network: TRACKED_NETWORK_BASE.to_string(),
+                nft_id: *id,
+                verdict: "eligible".to_string(),
+                choice: Some(CHOICE_DISMISSED.to_string()),
+                owned: true,
+                deposit_check: Some("its deposit was sent by 0x4598…e826, not by your wallet".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        store.set_choice(WALLET, AERO_CL_PROTOCOL, TRACKED_NETWORK_BASE, *id, Some(CHOICE_DISMISSED)).await.unwrap();
+    }
+    let scn = scenario("staked");
+    let mut all = fakes.clone();
+    all.push(2914490);
+    let words: String = all.iter().map(|i| format!("{i:064x}")).collect();
+    let key = format!("eth_call|{GAUGE}|{CL_GAUGE_STAKED_VALUES}{:0>64}|{}", &WALLET[2..], s(&scn, "/block_hex"));
+    let mut swaps = vec![(key, json!({ "result": format!("0x{:064x}{:064x}{words}", 32, all.len()) }))];
+    // The fake ids answer positions() with a revert, at once (not read: they wait their turn).
+    for id in &fakes {
+        let k = format!("eth_call|{AERO_CL_POSITION_MANAGER_BASE}|{V3_POSITIONS}{id:064x}|{}", s(&scn, "/block_hex"));
+        swaps.push((k, json!({ "error": { "code": 3, "message": "execution reverted: ID" } })));
+    }
+    let url = node("staked", swaps).await;
+    let d = detect(&store, &url, &[]).await;
+    // The new one is read first and tracked; 39 decided ones are re-read, 5 wait their turn.
+    assert_eq!(d.newly_tracked, vec!["aerodrome-cl:base:2914490".to_string()]);
+    assert_eq!(d.status, "ok", "{d:?}");
+    assert_eq!(d.deferred, 0);
+    assert!(d.refresh_deferred >= 5);
+    assert_eq!(store.scan_state(WALLET, AERO_CL_PROTOCOL, TRACKED_NETWORK_BASE).await.unwrap().refresh_cursor, 39);
+    assert_eq!(d.found.len(), 44);
+    assert!(d.found.iter().all(|f| f.dismissed));
+    // Next cycle: 40 of the 44, from the cursor, wrapping.
+    detect(&store, &url, &[]).await;
+    assert_eq!(store.scan_state(WALLET, AERO_CL_PROTOCOL, TRACKED_NETWORK_BASE).await.unwrap().refresh_cursor, (39 + 40) % 44);
 }

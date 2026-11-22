@@ -424,12 +424,15 @@ fn bet_events(data: &SnapshotData) -> Vec<Value> {
     let status = b.get("status").and_then(|v| v.as_str()).unwrap_or("unavailable");
     let tier = b.get("tier").and_then(|v| v.as_str()).unwrap_or("quiet");
     let headline = b.get("headline").cloned().unwrap_or(Value::Null);
-    let link = b.pointer("/suggestion/link/url").and_then(|v| v.as_str());
+    // One id per status (review of #181, finding 8): `since` is when this status was first
+    // stated, so a fresh "ready" never inherits the time of an older quiet status.
+    let id = format!("{BET_SUGGEST_ID}:{status}");
     if status == "ready" {
-        let amounts = b.pointer("/suggestion/link/amounts_to_enter").and_then(|v| v.as_str()).unwrap_or("");
-        let token = b.pointer("/suggestion/deposit_token").and_then(|v| v.as_str()).unwrap_or("WETH");
+        // No deposit link and no "would sign" in the event (review of #181, finding 2), as
+        // for the ladder suggestion: the card and the MCP bet section carry the link, and
+        // both withhold it from a snapshot that is not fresh.
         out.push(json!({
-            "id": BET_SUGGEST_ID,
+            "id": id,
             "kind": "bet_suggestion",
             "tier": "top",
             "title": "WETH/NOCK BET",
@@ -442,14 +445,14 @@ fn bet_events(data: &SnapshotData) -> Vec<Value> {
                 "tick_lower": b.pointer("/suggestion/tick_lower").cloned().unwrap_or(Value::Null),
                 "tick_upper": b.pointer("/suggestion/tick_upper").cloned().unwrap_or(Value::Null),
             },
-            "links": link.map(|u| vec![json!({ "label": "OPEN THE DEPOSIT ON APP.AERO.XYZ", "url": u })]).unwrap_or_default(),
-            "would_sign": format!("One deposit in the Aero app, staked in the gauge. {amounts} ({token} side as named)."),
+            "links": [],
+            "would_sign": Value::Null,
             "card": "bet_suggestion",
             "source": "derived_metrics.bet_suggestion",
         }));
     } else {
         out.push(json!({
-            "id": BET_SUGGEST_ID,
+            "id": id,
             "kind": "bet_suggestion",
             "tier": if tier == "top" { "top" } else { "quiet" },
             "title": "WETH/NOCK BET",

@@ -170,9 +170,8 @@ pub(crate) fn bet_pool_from_answers(configured: &str, block: i64, a: &BetPoolAns
     let fee_pips = word_u128(&need(&a.fee, "fee()")?).and_then(|f| u32::try_from(f).ok()).ok_or("the pool's fee() answer is not a fee")?;
     let (sqrt, tick) = decode_slipstream_slot0(&need(&a.slot0, "slot0()")?).map_err(|e| format!("the pool's slot0() answer could not be read ({e})"))?;
     let liquidity = word_u128(&need(&a.liquidity, "liquidity()")?).ok_or("the pool's liquidity() answer is not a number")?;
-    if liquidity == 0 {
-        return Err("it has no in-range liquidity, so its price is frozen".to_string());
-    }
+    // Zero in-range liquidity is not a refusal (review of #181, finding 4): the gauge is still
+    // read and bets are still found and counted; only a new bet's sizing needs a live price.
     Ok(BetPoolRead {
         pool,
         configured: configured.trim().to_string(),
@@ -326,8 +325,14 @@ pub(crate) struct BetDetection {
     pub(crate) staked: Option<Vec<u64>>,
     pub(crate) newly_tracked: Vec<String>,
     pub(crate) found: Vec<FoundBet>,
-    /// NFTs left for a later cycle by the cap or the time budget.
+    /// Staked NFTs not decided yet (no deposit read) left for a later cycle by the cap or the
+    /// time budget. Any makes the check `partial`: a bet may be among them.
     pub(crate) deferred: usize,
+    /// Undecided staked NFTs whose deposit could not be read this cycle (also `partial`).
+    pub(crate) unread: usize,
+    /// Decided ones (offered, set aside, refused) whose re-read waits its turn. They do not
+    /// make the check partial: each is already known and listed.
+    pub(crate) refresh_deferred: usize,
 }
 
 impl BetDetection {
@@ -528,19 +533,32 @@ async fn detect_bets_inner(inp: &BetDetectionInputs<'_>, pool: &str, wallet: &st
     let mut rows: HashMap<u64, CandidateRow> = candidates.into_iter().filter(|c| c.protocol == AERO_CL_PROTOCOL).map(|c| (c.nft_id, c)).collect();
     let soft_deadline = std::time::Instant::now() + std::time::Duration::from_secs(POSITION_SCAN_SOFT_SECONDS);
     let mut liquidity_read: HashMap<u64, u128> = HashMap::new();
-    let mut read_count = 0usize;
-    for nft_id in staked.iter().copied() {
-        if in_config.contains(&nft_id) || tracked_ids.contains(&nft_id) {
-            continue;
-        }
-        let spent = read_count >= POSITION_REFRESH_MAX_PER_CYCLE
-            || std::time::Instant::now() >= soft_deadline
-            || inp.read_budget.is_some_and(|k| r.reads >= k);
+    // What this cycle reads (review of #181, finding 3): every staked NFT not decided yet
+    // (no row, or its deposit not read) first, so a new bet is never starved; then the
+    // decided ones (offered, set aside, proof refused) in turn from the stored refresh
+    // cursor, as position_detect rotates its re-reads, inside the same 40-a-cycle cap.
+    let mut open: Vec<u64> = staked.iter().copied().filter(|id| !in_config.contains(id) && !tracked_ids.contains(id)).collect();
+    open.sort_unstable();
+    open.dedup();
+    let (undecided, decided): (Vec<u64>, Vec<u64>) = open.iter().partition(|id| rows.get(id).map_or(true, |r| r.deposit_check.is_none()));
+    let mut scan_state = inp.store.scan_state(wallet, AERO_CL_PROTOCOL, TRACKED_NETWORK_BASE).await.unwrap_or_default();
+    let take_new = undecided.len().min(POSITION_REFRESH_MAX_PER_CYCLE);
+    let (refresh, refresh_left) = refresh_batch(&decided, scan_state.refresh_cursor.max(0) as usize, POSITION_REFRESH_MAX_PER_CYCLE - take_new);
+    out.refresh_deferred = refresh_left;
+    out.deferred = undecided.len() - take_new;
+    let mut todo: Vec<(u64, bool)> = undecided[..take_new].iter().map(|id| (*id, true)).collect();
+    todo.extend(refresh.iter().map(|id| (*id, false)));
+    let mut refreshed = 0usize;
+    for (i, (nft_id, is_new)) in todo.iter().copied().enumerate() {
+        let spent = std::time::Instant::now() >= soft_deadline || inp.read_budget.is_some_and(|k| r.reads >= k);
         if spent {
-            out.deferred += 1;
-            continue;
+            // The rest wait: a new one makes the check partial, a re-read only waits.
+            let rest = &todo[i..];
+            out.deferred += rest.iter().filter(|(_, n)| *n).count();
+            out.refresh_deferred += rest.iter().filter(|(_, n)| !*n).count();
+            break;
         }
-        read_count += 1;
+        let unread = |out: &mut BetDetection| if is_new { out.deferred += 1 } else { out.refresh_deferred += 1 };
         let mut row = rows.remove(&nft_id).unwrap_or_else(|| CandidateRow {
             wallet: wallet.to_string(),
             protocol: AERO_CL_PROTOCOL.to_string(),
@@ -551,30 +569,26 @@ async fn detect_bets_inner(inp: &BetDetectionInputs<'_>, pool: &str, wallet: &st
         });
         row.owned = true;
         row.pool_id = Some(pool_read.pool.clone());
-        // 1. The NFT itself.
-        match r.call(AERO_CL_POSITION_MANAGER_BASE, &format!("{V3_POSITIONS}{nft_id:064x}")).await {
-            Ok(Some(hex)) => match decode_slipstream_positions_return(&hex) {
-                Ok(d) => {
-                    row.currency0 = Some(lc(&d.token0));
-                    row.currency1 = Some(lc(&d.token1));
-                    row.tick_spacing = Some(d.tick_spacing);
-                    row.tick_lower = Some(d.tick_lower);
-                    row.tick_upper = Some(d.tick_upper);
-                    row.has_liquidity = Some(d.liquidity > 0);
-                    liquidity_read.insert(nft_id, d.liquidity);
-                }
-                Err(_) => {
-                    out.deferred += 1;
-                    rows.insert(nft_id, row);
-                    continue;
-                }
-            },
-            _ => {
-                out.deferred += 1;
-                rows.insert(nft_id, row);
-                continue;
-            }
+        if !is_new {
+            refreshed += 1;
         }
+        // 1. The NFT itself.
+        let decoded = match r.call(AERO_CL_POSITION_MANAGER_BASE, &format!("{V3_POSITIONS}{nft_id:064x}")).await {
+            Ok(Some(hex)) => decode_slipstream_positions_return(&hex).ok(),
+            _ => None,
+        };
+        let Some(d) = decoded else {
+            unread(&mut out);
+            rows.insert(nft_id, row);
+            continue;
+        };
+        row.currency0 = Some(lc(&d.token0));
+        row.currency1 = Some(lc(&d.token1));
+        row.tick_spacing = Some(d.tick_spacing);
+        row.tick_lower = Some(d.tick_lower);
+        row.tick_upper = Some(d.tick_upper);
+        row.has_liquidity = Some(d.liquidity > 0);
+        liquidity_read.insert(nft_id, d.liquidity);
         // 2. The proof, read once: the chain's history does not change.
         if row.deposit_check.is_none() {
             match deposit_receipt(&mut r, &pool_read.gauge, wallet, nft_id).await {
@@ -595,10 +609,10 @@ async fn detect_bets_inner(inp: &BetDetectionInputs<'_>, pool: &str, wallet: &st
                         row.deposit_check = Some(why);
                     }
                 },
-                // Not read this cycle: tried again next cycle.
+                // Not read this cycle: tried again next cycle, and the check is partial.
                 Err(why) => {
                     tracing::info!("Bet detection: NFT #{nft_id}'s deposit could not be read this cycle: {why}");
-                    out.status = "partial".to_string();
+                    out.unread += 1;
                     out.reason = Some(format!("a staked NFT's deposit could not be read this cycle ({why}); it is read again next cycle"));
                 }
             }
@@ -606,9 +620,17 @@ async fn detect_bets_inner(inp: &BetDetectionInputs<'_>, pool: &str, wallet: &st
         store_candidate(inp.store, &row).await;
         rows.insert(nft_id, row);
     }
-    if out.deferred > 0 && out.status == "ok" {
+    if !decided.is_empty() {
+        scan_state.refresh_cursor = ((scan_state.refresh_cursor.max(0) as usize + refreshed) % decided.len()) as i64;
+        if let Err(e) = inp.store.save_scan_state(wallet, AERO_CL_PROTOCOL, TRACKED_NETWORK_BASE, &scan_state).await {
+            tracing::warn!("Bet detection: could not store the refresh cursor: {e}");
+        }
+    }
+    if out.deferred > 0 || out.unread > 0 {
         out.status = "partial".to_string();
-        out.reason = Some(format!("{} staked NFT{} wait{} for a later cycle", out.deferred, if out.deferred == 1 { "" } else { "s" }, if out.deferred == 1 { "s" } else { "" }));
+        if out.reason.is_none() {
+            out.reason = Some(format!("{} staked NFT{} not read yet wait{} for a later cycle", out.deferred, if out.deferred == 1 { "" } else { "s" }, if out.deferred == 1 { "s" } else { "" }));
+        }
     }
     // The decision for every staked NFT that is not counted.
     let mut ids: Vec<u64> = staked.iter().copied().filter(|id| !in_config.contains(id) && !tracked_ids.contains(id)).collect();

@@ -14,8 +14,12 @@ info:
       (measured)" with no target, appended last and only while a bet holds value.
     - DerivedMetrics.bet_suggestion (absent when operator_profile.nock_bets is not set):
       id "bet_suggestion:WETH/NOCK", tier (top | quiet), status (needs_setting | invalid
-      | pool_unavailable | unavailable | found_untracked | gas_short | nock_below_floor
-      | bet_in_range | nock_short | ready), shown (true only for ready), headline,
+      | pool_unavailable | pool_inactive (no in-range liquidity: nothing is sized, bets
+      are still found and counted) | unavailable | found_untracked | gas_short | gas_split
+      (enough above the floor only as WETH and ETH together; short_by_eth null) |
+      nock_below_floor | bet_in_range | gauge_unread (the wallet's stakes in the gauge were
+      not all read this cycle: never ready then) | nock_short | ready), shown (true only for
+      ready), headline,
       reason, missing[] and invalid[] (the settings named), settings (as written), pool
       {address, block, token0, token1, tick_spacing, fee_pips, fee_pct, gauge, tick,
       sqrt_price_x96, liquidity, nock_per_weth, usd_per_nock, label}: the bet pool read
@@ -32,18 +36,22 @@ info:
       (https://app.aero.xyz/deposit/8453-<pool>?range=custom&tickLow=A&tickHigh=B, with
       &native=true when the ETH side is paid in native ETH), host, native, prefilled,
       not_prefilled [amounts], amounts_to_enter, format_note}, range_text, outcomes[]};
-      gates[] {gate (settings | gas_floor | nock_floor | no_bet_in_range), status (pass |
-      fail), text}, in that order; gas {wallet_eth, wallet_weth, gas_floor_eth,
+      gates[] {gate (settings | gas_floor | nock_floor | no_bet_in_range | gauge_read),
+      status (pass | fail), text}, in that order; gas {state (covered | short | split |
+      unread), wallet_eth, wallet_weth, gas_floor_eth,
       above_floor_eth, needed_eth, short_by_eth, eth_usdc_ranges, eth_usdc_ranges_weth,
       deposit_token, text}: short of gas, the WETH that would have to come out of the
       ETH/USDC ranges first, as a measurement; nock {total_held, floor, wallet_nock,
       needed_nock, text}; floor_crossing {status, before, after, text} with the
       hypothetical bet (null while a bet is in range); detection {status, reason,
-      checked_at_block, staked_in_gauge, deferred, statement}; after_deposit,
+      checked_at_block, staked_in_gauge, deferred, unread, refresh_deferred, statement};
+      after_deposit,
       assumptions[], statement. Left out of the state hash.
-    - Events: "bet_suggestion:WETH/NOCK" is top while status is ready or
-      found_untracked, else one quiet line; each tracked bet adds a quiet line "bet:<id>"
-      (BET IN RANGE | BET CASHED OUT).
+    - Events: "bet_suggestion:WETH/NOCK:<status>" (one id per status, so `since` is when
+      that status was first stated) is top while status is ready or found_untracked, else
+      one quiet line; it carries no link and no would_sign (the card and the MCP bet
+      section carry the link and withhold it from a stale snapshot). Each tracked bet adds
+      a quiet line "bet:<id>" (BET IN RANGE | BET CASHED OUT).
 
     2.11.0 (ladder maintenance and calls to action as events, issue #169), additive:
     - DerivedMetrics.ladder_maintenance (absent without a tracked ladder): per tracked
