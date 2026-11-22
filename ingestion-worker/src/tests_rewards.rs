@@ -1201,7 +1201,8 @@ fn test_the_cycle_stamps_the_reward_where_it_stamps_unclaimed_aero() {
     // TickBracket.position_id (2.8.2, #152), the standing reserve (2.8.3, #162) and the
     // floor-crossing price (2.9.0, #165), the fee yield (2.10.0), and the ladder
     // maintenance and the events (2.11.0, #169).
-    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.11.0");
+    // The bets (2.12.0, #181).
+    assert_eq!(SNAPSHOT_SPEC_VERSION, "2.12.0");
 }
 
 // ------------------------------------------------------------------

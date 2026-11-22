@@ -78,12 +78,17 @@ pub(crate) fn is_nock_pair(p: &RawPosition) -> bool {
     is_nock_token(&p.token0) || is_nock_token(&p.token1)
 }
 
-/// NOCK LP (#167): a NOCK-pair position that is not a tracked ladder. Its consumers are the
-/// uniswap_lp target and the NOCK LP deviation row, the rebuild templates and exclusions,
-/// lp_now, the engine label and the HOLD label. A ladder is left out of all of them, the
-/// way the #151 gas ranges are.
+/// NOCK LP (#167): a NOCK-pair position that is not a tracked ladder and not a bet (#181).
+/// Its consumers are the uniswap_lp target and the NOCK LP deviation row, the rebuild
+/// templates and exclusions, lp_now, the engine label and the HOLD label. A ladder and a
+/// bet are left out of all of them, the way the #151 gas ranges are.
 pub(crate) fn is_nock_lp(raw: &RawOnChainData, p: &RawPosition) -> bool {
-    is_nock_pair(p) && !raw.ladders.contains_key(&p.position_id)
+    is_nock_pair(p) && !raw.ladders.contains_key(&p.position_id) && !raw.bets.contains(&p.position_id)
+}
+
+/// A position configured `role: bet` (#181).
+pub(crate) fn is_bet(raw: &RawOnChainData, p: &RawPosition) -> bool {
+    raw.bets.contains(&p.position_id)
 }
 
 /// A position configured `role: ladder` (#167).

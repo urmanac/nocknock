@@ -211,7 +211,7 @@ describe('Freshness Contract', () => {
     brackets.forEach((b: any, i: number) => expect(b.position_id).toBe(data.positions[i].position_id));
     expect(ag.tranche_1_nock).toBeUndefined();
     // Meta version: the current snapshot spec (specs/core/snapshot.yaml info.version).
-    expect(latestSnapshot!.meta.version).toBe('2.11.0');
+    expect(latestSnapshot!.meta.version).toBe('2.12.0');
   });
 
   it('2.9.0 floor_breach is stated, and at spot it is the Floor Health reading (#165)', () => {

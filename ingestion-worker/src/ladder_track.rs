@@ -27,7 +27,7 @@ use crate::*;
 
 /// The one `role` value (#167). Matching is exact and case-sensitive, like `protocol`.
 pub(crate) const LADDER_ROLE: &str = "ladder";
-pub(crate) const SUPPORTED_ROLES: &str = "ladder (or leave role unset)";
+pub(crate) const SUPPORTED_ROLES: &str = "ladder, bet (or leave role unset)";
 /// The rung vocabulary: a cap (the tick band containing spot, holding the LP NOCK budget),
 /// a near rung and a deep rung (operator decision, 2026-11-20).
 pub(crate) const LADDER_RUNGS: [&str; 3] = ["cap", "near", "deep"];
@@ -86,9 +86,13 @@ pub(crate) fn validate_role_config(c: &PositionConfig) -> Result<()> {
         ))
     };
     if let Some(r) = c.role.as_deref() {
-        if r != LADDER_ROLE {
+        if r != LADDER_ROLE && r != BET_ROLE {
             return fail(format!("has unknown role '{r}'. Supported: {SUPPORTED_ROLES}"));
         }
+    }
+    // A bet (#181): a WETH/NOCK Aero CL range, measured and never steered.
+    if is_bet_config(c) {
+        return validate_bet_role_config(c).or_else(&fail);
     }
     let ladder = is_ladder_config(c);
     if !ladder {

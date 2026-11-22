@@ -174,6 +174,7 @@ pub(crate) fn snapshot_positions(raw: &RawOnChainData) -> Vec<Position> {
         &raw.aero,
     );
     apply_ladder_roles(&mut positions, &raw.ladders);
+    apply_bet_roles(&mut positions, &raw.bets);
     // A position found on-chain and tracked from the database says so; a config entry
     // carries no source, so a snapshot without such a row keeps its bytes.
     for p in positions.iter_mut() {

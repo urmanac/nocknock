@@ -376,6 +376,7 @@ pub(super) fn example_profile() -> OperatorProfile {
         ladder_bottom_usd: None,
         ladder_rungs: None,
         ladder_maintenance: None,
+        nock_bets: None,
     }
 }
 

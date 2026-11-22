@@ -204,6 +204,9 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
     // reserve and the floor-crossing price; left out of the LP target and the rebuild.
     let mut ladder_usd = 0.0f64;
     let mut ladder_usdc = 0.0f64;
+    // Bets (#181): WETH/NOCK ranges that are not NOCK LP. Counted in every total and the
+    // floor-crossing price; left out of the LP target and the rebuild.
+    let mut bet_usd = 0.0f64;
     let mut lp_fee_nock = 0.0f64;
     let mut lp_fee_usd = 0.0f64;
     // ETH/WETH inside tracked LP: the LP part of the ETH pillar (issue #94).
@@ -224,6 +227,8 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
             nock_lp_usd += pos_usd;
         } else if ladder {
             ladder_usd += pos_usd;
+        } else if is_bet(raw, p) {
+            bet_usd += pos_usd;
         } else {
             gas_lp_usd += pos_usd;
         }
@@ -943,6 +948,17 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
                         status: "no_target".to_string(),
                     });
                 }
+                // Bets (#181): measured, no target, appended last and only when one holds value.
+                if bet_usd > 0.0 {
+                    let bet_weight = weight(bet_usd);
+                    rows.push(AllocationDeviation {
+                        bucket_name: BET_BUCKET_NAME.to_string(),
+                        target_weight_bps: 0,
+                        actual_weight_bps: bet_weight,
+                        deviation_bps: bet_weight,
+                        status: "no_target".to_string(),
+                    });
+                }
                 rows
             },
         },
@@ -981,6 +997,8 @@ pub(crate) fn compute_derived_metrics_with_fills(raw: &RawOnChainData, prev_hwm:
         ladder_maintenance: None,
         events: None,
         ladder_profile: None,
+        // Filled from the assembled snapshot (#181): bet_suggest::attach_bet_suggestion.
+        bet_suggestion: None,
         velocity_gas_sandbox: VelocityGasSandbox {
             contracts: fee_entries
                 .iter()

@@ -425,7 +425,7 @@ fn test_a_row_that_would_stall_the_cycle_is_quarantined_with_its_reason() {
     assert_eq!(refused(&|r| r.currency0 = WETH.to_string()), "it is tracked as a ladder but is a WETH/NOCK pair: a ladder is a USDC/NOCK range");
     assert_eq!(refused(&|r| { r.tick_lower = -887100; r.tick_upper = 887100; }), "it is tracked as a ladder but spans every price: a ladder is a concentrated range");
     assert!(refused(&|r| r.rung = Some("middle".to_string())).contains("unknown rung 'middle'"));
-    assert_eq!(refused(&|r| r.role = Some("hedge".to_string())), "Configuration error: position 'tracked-v4-7' has unknown role 'hedge'. Supported: ladder (or leave role unset). Nothing was read; correct `positions:` in config.yaml");
+    assert_eq!(refused(&|r| r.role = Some("hedge".to_string())), "Configuration error: position 'tracked-v4-7' has unknown role 'hedge'. Supported: ladder, bet (or leave role unset). Nothing was read; correct `positions:` in config.yaml");
     assert_eq!(refused(&|r| r.source = "deploy".to_string()), "its source 'deploy' is not one NockNock knows");
     assert!(refused(&|r| r.deposit_tx = Some("0x12".to_string())).contains("is not a transaction hash"));
     // A WETH/USDC range tracked as LP is fine: it is a measured gas-side range (#151).

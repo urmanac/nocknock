@@ -178,9 +178,14 @@ pub(crate) async fn mcp_http_handler(
                     // The ladder suggestion (#168) shows only while the snapshot is fresh.
                     // A position found on-chain and not counted (v0.9.0) is stated after it.
                     "get_shot_advice" => crate::position_detect_text::with_position_notice(
-                        &crate::ladder_suggest_text::with_ladder_suggestion(
-                            // Calls to action by tier and the ladder maintenance (#169).
-                            &crate::events_text::with_events(&format_shot_advice_text(&data_val), &data_val, Some(health)),
+                        // The WETH/NOCK bet card (#181), after the ladder suggestion.
+                        &crate::bet_suggest_text::with_bet_suggestion(
+                            &crate::ladder_suggest_text::with_ladder_suggestion(
+                                // Calls to action by tier and the ladder maintenance (#169).
+                                &crate::events_text::with_events(&format_shot_advice_text(&data_val), &data_val, Some(health)),
+                                &data_val,
+                                Some(health),
+                            ),
                             &data_val,
                             Some(health),
                         ),

@@ -111,6 +111,11 @@ use events::*;
 mod ladder_profile;
 use ladder_profile::*;
 mod events_text;
+mod bet_suggest;
+use bet_suggest::*;
+mod bet_suggest_text;
+mod bet_detect;
+use bet_detect::*;
 
 // ============================================================
 // Configuration
@@ -163,6 +168,37 @@ pub struct OperatorProfile {
     /// and the snapshot names the settings that turn it on. Unset = every rule off.
     #[serde(default)]
     pub ladder_maintenance: Option<LadderMaintenanceConfig>,
+    /// WETH/NOCK bets (#181, operator decisions 2026-11-21): a small two-sided range in one
+    /// Aero CL WETH/NOCK pool around the price, staked for AERO, suggested only while no
+    /// bet is in range. Every key is the operator's own and has no default; a missing or
+    /// invalid key is named on the card and nothing is sized. Unset = no bet card.
+    #[serde(default)]
+    pub nock_bets: Option<NockBetsConfig>,
+}
+
+/// `operator_profile.nock_bets` (#181). No key has a default: NockNock never fills one in.
+/// Validated in bet_suggest.rs; an invalid value is stated on the card, never a cycle failure.
+#[derive(Deserialize, Serialize, Debug, Clone, Default, PartialEq)]
+pub struct NockBetsConfig {
+    /// The Aero CL (Slipstream) WETH/NOCK pool the bets go in, by address. Checked every
+    /// cycle against the chain (its factory, position manager, tokens and gauge).
+    #[serde(default)]
+    pub pool: Option<String>,
+    /// The total value of one bet in USD, both sides at the pool's price. Above 0.
+    #[serde(default)]
+    pub bet_usd: Option<f64>,
+    /// How far each side of the range reaches from the pool's tick, in ticks; the ends are
+    /// rounded to the pool's tick spacing. Above 0. Set this or `width_pct`, not both.
+    #[serde(default)]
+    pub width_ticks: Option<i32>,
+    /// The same reach as a percent of the price (4 for the app's own +/-4% preset). Above 0
+    /// and below 100. Set this or `width_ticks`, not both.
+    #[serde(default)]
+    pub width_pct: Option<f64>,
+    /// ETH (wallet ETH plus WETH) kept for gas: only what is above it may fund a bet's ETH
+    /// side (OPERATOR_GUIDANCE section 12, amended 2026-11-21 for bets only). 0 or more.
+    #[serde(default)]
+    pub gas_floor_eth: Option<f64>,
 }
 
 /// `operator_profile.ladder_maintenance` (#169): the restraint gates of the ladder's
@@ -255,6 +291,7 @@ impl Default for OperatorProfile {
             ladder_bottom_usd: None,
             ladder_rungs: None,
             ladder_maintenance: None,
+            nock_bets: None,
         }
     }
 }
@@ -766,6 +803,9 @@ struct RawOnChainData {
     /// Live positions configured `role: ladder` (#167), keyed by position_id. Empty when
     /// none is: every reading then stays exactly what it was before #167.
     ladders: HashMap<String, LadderTag>,
+    /// Live positions configured `role: bet` (#181), by position_id. Empty when none is:
+    /// every reading then stays exactly what it was before #181.
+    bets: std::collections::HashSet<String>,
     /// The baseline read of each ladder's `deposit_tx`, keyed by position_id (#167). A
     /// ladder with no entry was not read (fixtures): it reads `no_baseline` only when its
     /// tag says no deposit_tx is set, otherwise `unverified`.
@@ -1160,6 +1200,14 @@ struct DerivedMetrics {
     /// the state hash.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ladder_profile: Option<serde_json::Value>,
+    /// The WETH/NOCK bet card (snapshot 2.12.0, issue #181): the bet pool read this cycle,
+    /// the bets tracked (`role: bet`) with their status and AERO, and, when the operator's
+    /// settings, the gas floor, the NOCK floor and "no bet in range" all allow it, one
+    /// suggested range with exact amounts and the Aero deposit link. Built by
+    /// `bet_suggest::attach_bet_suggestion`. Absent when `operator_profile.nock_bets` is not
+    /// set. Left out of the state hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bet_suggestion: Option<serde_json::Value>,
 }
 
 /// Fees per unit of liquidity measured on our own tracked ranges (2.10.0). One pool
@@ -1998,7 +2046,7 @@ struct LadderRungSetting {
 }
 
 /// Snapshot spec version the worker emits (specs/core/snapshot.yaml info.version).
-const SNAPSHOT_SPEC_VERSION: &str = "2.11.0";
+const SNAPSHOT_SPEC_VERSION: &str = "2.12.0";
 
 /// The gas (wallet ETH + WETH) and ETH pillar figures, each None when it cannot be
 /// measured: unread wallet balances or an unpriced ETH. Never a zero stand-in.
@@ -2599,3 +2647,5 @@ mod tests_position_detect;
 mod tests_ladder_maintenance;
 #[cfg(test)]
 mod tests_ladder_profile;
+#[cfg(test)]
+mod tests_bets;

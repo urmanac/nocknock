@@ -18,6 +18,7 @@ fn profile(floor: f64) -> OperatorProfile {
         ladder_bottom_usd: None,
         ladder_rungs: None,
         ladder_maintenance: None,
+        nock_bets: None,
     }
 }
 
