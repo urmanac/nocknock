@@ -16,10 +16,15 @@ export function isLadder(pos: { role?: string | null } | null | undefined): bool
   return pos?.role === 'ladder';
 }
 
-/** NOCK LP: a position with a NOCK leg that is not a ladder (the worker's `is_nock_lp`). */
+/** True for a WETH/NOCK bet (`role: bet`, #181). */
+export function isBet(pos: { role?: string | null } | null | undefined): boolean {
+  return pos?.role === 'bet';
+}
+
+/** NOCK LP: a position with a NOCK leg that is not a ladder or a bet (the worker's `is_nock_lp`). */
 export function isNockLp(pos: { role?: string | null; token0?: { symbol?: string } | null; token1?: { symbol?: string } | null } | null | undefined): boolean {
   const nockLeg = pos?.token0?.symbol === 'NOCK' || pos?.token1?.symbol === 'NOCK';
-  return nockLeg && !isLadder(pos);
+  return nockLeg && !isLadder(pos) && !isBet(pos);
 }
 
 /** The snapshot's ladder readings; empty for a snapshot that lists none. */

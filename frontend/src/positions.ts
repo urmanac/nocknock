@@ -9,7 +9,7 @@
  */
 
 /** Series colors for the per-position stacked chart. */
-import { isLadder, ladderStatus, ladderSummaryClause } from './ladderTrack';
+import { isBet, isLadder, ladderStatus, ladderSummaryClause } from './ladderTrack';
 import type { LadderReading } from './types/snapshot';
 
 export const POSITION_COLORS = ['#38bdf8', '#a855f7', '#f59e0b', '#ec4899', '#14b8a6', '#f97316'];
@@ -115,6 +115,8 @@ export function rangeStatus(
   // A ladder (#167) is badged by what it holds: above its range is normal, never "OUT OF RANGE".
   if (isLadder(p)) return ladderStatus(ladder);
   if (p.pool_active === false) return { label: '● STALE POOL', tone: 'stale' };
+  // A bet (#181) out of range counts as cashed out: a fact, not a warning.
+  if (isBet(p)) return p.in_range ? { label: '● BET IN RANGE', tone: 'good' } : { label: '● BET CASHED OUT', tone: 'neutral' };
   if (p.full_range) return { label: '● FULL RANGE', tone: 'good' };
   return p.in_range ? { label: '● IN RANGE', tone: 'good' } : { label: '● OUT OF RANGE', tone: 'warn' };
 }

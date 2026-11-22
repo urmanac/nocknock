@@ -1091,7 +1091,7 @@ export const TWO_RUNGS_MEASURED: LadderSimulation = {
     "snapshot_id": "00000000-0000-0000-0000-000000000000",
     "spot_source": "price-source pool sqrtPriceX96 (v4 USDC/NOCK 3.00% #3163450)",
     "spot_usd": "0.01294400",
-    "version": "2.11.0",
+    "version": "2.12.0",
     "worker_health": "ok"
   },
   "statement": "A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.",
@@ -4115,7 +4115,7 @@ export const THE_BOTTLE_CONFIGURED: LadderSimulation = {
     "snapshot_id": "00000000-0000-0000-0000-000000000000",
     "spot_source": "price-source pool sqrtPriceX96 (v4 USDC/NOCK 3.00% #3163450)",
     "spot_usd": "0.01294400",
-    "version": "2.11.0",
+    "version": "2.12.0",
     "worker_health": "ok"
   },
   "statement": "A what-if from the stored snapshot. NockNock reads nothing new, signs nothing, sends nothing, and does not choose the amounts.",

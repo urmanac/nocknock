@@ -71,7 +71,7 @@ export interface LadderMaintenance {
 }
 
 /** Cards that render their own top-of-page entry in full; the strip leaves them alone. */
-export const OWN_CARD_KINDS = ['ladder_suggestion', 'found_positions'];
+export const OWN_CARD_KINDS = ['ladder_suggestion', 'found_positions', 'bet_suggestion'];
 
 export function eventsOf(data: { derived_metrics?: { events?: SnapshotEvent[] | null } | null } | null | undefined): SnapshotEvent[] | null {
   const e = data?.derived_metrics?.events;
@@ -99,6 +99,7 @@ export const EVENT_CARDS = [
   'ladder_suggestion',
   'found_positions',
   'accumulation_plan',
+  'bet_suggestion',
 ] as const;
 
 /** The element id for an event's deep link ('#event-…' → 'event-…'). */

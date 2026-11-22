@@ -58,6 +58,8 @@ import { FoundQuietLine, LadderDeployedLine, ladderSuggestionAtTop } from './com
 import { foundNeedsAttention } from './foundPositions';
 import { eventsOf } from './events';
 import { ladderSuggestionOf } from './ladderSuggestion';
+import { BetQuietLine, BetSuggestionCard } from './components/BetSuggestionCard';
+import { betAtTop, betSuggestionOf } from './betSuggestion';
 import { FoundPositionsCard } from './components/FoundPositions';
 import { positionDetectionOf } from './foundPositions';
 import { priceSourceIsClosedText } from './closedPositions.ts';
@@ -137,6 +139,9 @@ function Dashboard() {
   // found positions with nothing to decide are quiet lines in the ladder section.
   const suggestion = ladderSuggestionOf(rawData);
   const suggestionAtTop = ladderSuggestionAtTop(suggestion);
+  // The WETH/NOCK bet (#181): at the top only while a bet is suggested or a found bet waits.
+  const bet = betSuggestionOf(rawData);
+  const betTop = betAtTop(bet);
   const detection = positionDetectionOf(rawData);
   const foundAtTop = !!detection && foundNeedsAttention(detection);
   const global = metrics?.global_status;
@@ -281,6 +286,11 @@ function Dashboard() {
             app this is where the new position appears. No input. */}
         {foundAtTop && <EventAnchors events={pageEvents} card="found_positions" />}
         {foundAtTop && <FoundPositionsCard detection={detection} onChanged={refetch} />}
+
+        {/* The WETH/NOCK bet (#181): a suggested bet, or a bet found in the gauge waiting
+            for one tap. Its quiet line is in the ladder section below. No input. */}
+        {betTop && <EventAnchors events={pageEvents} card="bet_suggestion" />}
+        {betTop && bet && <BetSuggestionCard bet={bet} syncStatus={freshness.syncStatus} onChanged={refetch} />}
 
         {/* Primary Dual-Goal Metrics Bar */}
         <div style={styles.globalStats}>
@@ -510,6 +520,8 @@ function Dashboard() {
         <FoundQuietLine detection={detection} onChanged={refetch} />
         <EventAnchors events={pageEvents} card="ladders" />
         <LaddersCard data={rawData} />
+        {!betTop && <EventAnchors events={pageEvents} card="bet_suggestion" />}
+        <BetQuietLine bet={bet} syncStatus={freshness.syncStatus} onChanged={refetch} />
       </section>
 
       {/* Storyboard Canvas — Real Charts (structural channel panel appears when band data exists) */}

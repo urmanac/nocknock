@@ -26,6 +26,8 @@ import { FoundQuietLine, LadderDeployedLine, ladderSuggestionAtTop } from './Qui
 import { foundNeedsAttention } from '../foundPositions';
 import { EventAnchors } from './EventAnchors';
 import { eventsOf } from '../events';
+import { BetLiteCard } from './BetSuggestionCard';
+import { betSuggestionOf } from '../betSuggestion';
 
 const card: React.CSSProperties = {
   background: '#161b22',
@@ -130,6 +132,13 @@ export function LiteStatusCard() {
           one-tap buttons, right under the ladder card. */}
       {snapshot && positionDetectionOf(snapshot.data) && foundNeedsAttention(positionDetectionOf(snapshot.data)!) ? (
         <FoundPositionsLiteCard detection={positionDetectionOf(snapshot.data)} onChanged={refetch} cardStyle={card} labelStyle={label} />
+      ) : null}
+      {/* The WETH/NOCK bet (#181): the full card while a bet is suggested or a found bet
+          waits for a tap; otherwise one quiet line. */}
+      {snapshot && betSuggestionOf(snapshot.data) ? (
+        <section style={{ ...card, minWidth: 0, overflowWrap: 'anywhere' }} data-testid="bet-lite-section">
+          <BetLiteCard bet={betSuggestionOf(snapshot.data)} syncStatus={now?.syncStatus ?? freshness.syncStatus} onChanged={refetch} />
+        </section>
       ) : null}
       {/* The ladder's shape and its quiet lines (#169): nothing to decide, so not at the top. */}
       {snapshot && (ladderProfileOf(snapshot.data) || !ladderSuggestionAtTop(ladderSuggestionOf(snapshot.data))) ? (
