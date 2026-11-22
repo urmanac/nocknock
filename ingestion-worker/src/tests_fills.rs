@@ -1219,6 +1219,8 @@ async fn test_fill_detection_sql_against_a_scratch_database() {
     let db = PgPool::connect(&url).await.expect("scratch database reachable");
     let name: String = sqlx::query("SELECT current_database() AS n").fetch_one(&db).await.unwrap().get("n");
     assert!(name.ends_with("_scratch"), "refusing to run against database {name:?}: its name must end in _scratch");
+    // Each test migrates its own database, so it passes alone and on an empty one.
+    sqlx::migrate!("./migrations").run(&db).await.expect("every migration applies");
 
     let wallet = WALLET.to_lowercase();
     let plan_id = "scratch-fill-detection";
@@ -1437,6 +1439,8 @@ async fn test_stored_price_lookup_against_a_scratch_database() {
     let db = PgPool::connect(&url).await.expect("scratch database reachable");
     let name: String = sqlx::query("SELECT current_database() AS n").fetch_one(&db).await.unwrap().get("n");
     assert!(name.ends_with("_scratch"), "refusing to run against database {name:?}: its name must end in _scratch");
+    // Each test migrates its own database, so it passes alone and on an empty one.
+    sqlx::migrate!("./migrations").run(&db).await.expect("every migration applies");
 
     // Far from any real price row: a day in 2001.
     let open_at = t("2001-03-04T03:00:00Z");
